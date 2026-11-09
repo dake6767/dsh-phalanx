@@ -4,17 +4,14 @@
     "tests/community-account-switching.e2e.ts",
     "tests/community-artifacts.e2e.ts",
     "tests/community-container-recovery.e2e.ts",
-    "tests/community-contributions.e2e.ts",
     "tests/community-entry-pages.e2e.ts",
     "tests/community-environment-reset.e2e.ts",
-    "tests/community-expert-lifecycle.e2e.ts",
-    "tests/community-expert-market.e2e.ts",
     "tests/community-expert-mcp.e2e.ts",
-    "tests/community-expert-model.e2e.ts",
     "tests/community-experts.e2e.ts",
     "tests/community-external-database-tls.e2e.ts",
     "tests/community-html-preview.e2e.ts",
     "tests/community-instance-resources.e2e.ts",
+    "tests/community-launch-visibility.e2e.ts",
     "tests/community-market-skills.e2e.ts",
     "tests/community-mcp-active.e2e.ts",
     "tests/community-mcp-browser-restart.e2e.ts",
@@ -60,10 +57,7 @@
     "tests/platform-execution-container.e2e.ts",
     "tests/plugin-access-container.e2e.ts",
     "tests/plugin-changes-container.e2e.ts",
-    "tests/plugin-contribution-access-container.e2e.ts",
     "tests/plugin-contribution-preparation-container.e2e.ts",
-    "tests/plugin-contribution-updates-container.e2e.ts",
-    "tests/plugin-contributions-container.e2e.ts",
     "tests/plugin-coordination-container.e2e.ts",
     "tests/plugin-library-container.e2e.ts",
     "tests/plugin-maintainer-local-copy-container.e2e.ts",
@@ -79,7 +73,7 @@
     "tests/usage-skills-container.e2e.ts",
     "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 100,
+  "regularCases": 93,
   "smoke": [
     "tests/installed-candidate.e2e.ts",
     "tests/community-user-storage.e2e.ts",
@@ -107,13 +101,9 @@
     "tests/community-account-switching.e2e.ts": 1,
     "tests/community-artifacts.e2e.ts": 1,
     "tests/community-container-recovery.e2e.ts": 1,
-    "tests/community-contributions.e2e.ts": 2,
     "tests/community-entry-pages.e2e.ts": 4,
     "tests/community-environment-reset.e2e.ts": 1,
-    "tests/community-expert-lifecycle.e2e.ts": 1,
-    "tests/community-expert-market.e2e.ts": 1,
     "tests/community-expert-mcp.e2e.ts": 1,
-    "tests/community-expert-model.e2e.ts": 1,
     "tests/community-experts.e2e.ts": 1,
     "tests/community-external-database-tls.e2e.ts": 1,
     "tests/community-html-preview.e2e.ts": 1,
@@ -163,10 +153,7 @@
     "tests/platform-execution-container.e2e.ts": 1,
     "tests/plugin-access-container.e2e.ts": 1,
     "tests/plugin-changes-container.e2e.ts": 1,
-    "tests/plugin-contribution-access-container.e2e.ts": 1,
     "tests/plugin-contribution-preparation-container.e2e.ts": 1,
-    "tests/plugin-contribution-updates-container.e2e.ts": 1,
-    "tests/plugin-contributions-container.e2e.ts": 1,
     "tests/plugin-coordination-container.e2e.ts": 1,
     "tests/plugin-library-container.e2e.ts": 3,
     "tests/plugin-maintainer-local-copy-container.e2e.ts": 1,
@@ -180,6 +167,49 @@
     "tests/usage-model-container.e2e.ts": 1,
     "tests/usage-records-container.e2e.ts": 1,
     "tests/usage-skills-container.e2e.ts": 1,
-    "tests/usage-web-tools-container.e2e.ts": 1
-  }
+    "tests/usage-web-tools-container.e2e.ts": 1,
+    "tests/community-launch-visibility.e2e.ts": 1
+  },
+  "hiddenCases": [
+    {
+      "file": "tests/community-expert-model.e2e.ts",
+      "title": "hidden in 0.1.32: starts new expert conversations with a chosen shared model, allows native changes and falls back when disabled",
+      "reason": "hidden in 0.1.32"
+    },
+    {
+      "file": "tests/community-expert-market.e2e.ts",
+      "title": "hidden in 0.1.32: publishes and summons experts with restart snapshots, immediate withdrawal and independent acquisition sources",
+      "reason": "hidden in 0.1.32"
+    },
+    {
+      "file": "tests/community-expert-lifecycle.e2e.ts",
+      "title": "hidden in 0.1.32: repairs partial experts, preserves restart semantics and history, restores summons after reset and previews deletion impact",
+      "reason": "hidden in 0.1.32"
+    },
+    {
+      "file": "tests/community-contributions.e2e.ts",
+      "title": "hidden in 0.1.32: requires foreground confirmation in standard before uploading and adopting a skill",
+      "reason": "hidden in 0.1.32"
+    },
+    {
+      "file": "tests/community-contributions.e2e.ts",
+      "title": "hidden in 0.1.32: requires foreground confirmation in minimal before uploading and adopting a skill",
+      "reason": "hidden in 0.1.32"
+    },
+    {
+      "file": "tests/plugin-contributions-container.e2e.ts",
+      "title": "hidden in 0.1.32: packs a local plugin in real DSH, privately prechecks it and adopts the independent platform copy with native detail status",
+      "reason": "hidden in 0.1.32"
+    },
+    {
+      "file": "tests/plugin-contribution-access-container.e2e.ts",
+      "title": "hidden in 0.1.32: rejects a hard-coded upstream then prefills one credential and authorizes a real DSH member without exposing it",
+      "reason": "hidden in 0.1.32"
+    },
+    {
+      "file": "tests/plugin-contribution-updates-container.e2e.ts",
+      "title": "hidden in 0.1.32: accepts a maintainer update, rejects another member, shows diffs and supports anonymous credit and ownership transfer",
+      "reason": "hidden in 0.1.32"
+    }
+  ]
 }

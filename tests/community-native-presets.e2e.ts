@@ -29,7 +29,44 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     throw new Error('Actual rootless installed Linux DSH is required')
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'native-presets-'))
+  let fetchProbeHits = 0,
+    mcpProbeCalls = 0
   const model = createServer(async (request, response) => {
+    if (request.url === '/fetch-policy-probe') {
+      fetchProbeHits++
+      response.end('UNEXPECTED_FETCH')
+      return
+    }
+    if (request.url?.startsWith('/mcp-policy-')) {
+      if (request.method !== 'POST') {
+        response.writeHead(request.method === 'DELETE' ? 204 : 405).end()
+        return
+      }
+      let raw = ''
+      for await (const chunk of request) raw += chunk
+      let body
+      try {
+        body = JSON.parse(raw)
+      } catch {
+        response.writeHead(400).end()
+        return
+      }
+      if (body.id === undefined) {
+        response.writeHead(202)
+        response.end()
+        return
+      }
+      if (body.method === 'tools/call') mcpProbeCalls++
+      const result =
+        body.method === 'initialize'
+          ? { protocolVersion: body.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'admission', version: '1' } }
+          : body.method === 'tools/list'
+            ? { tools: [{ name: 'probe', description: 'Admission probe', inputSchema: { type: 'object', properties: {} } }] }
+            : { content: [{ type: 'text', text: 'UNEXPECTED_OLD_MCP_CALL' }] }
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }))
+      return
+    }
     for await (const _chunk of request) void _chunk
     response.setHeader('content-type', 'text/event-stream')
     streamText(response, 'BUILTIN_HISTORY_RESPONSE')
@@ -42,13 +79,7 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     await once(model, 'listening')
     const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
     const overlay = join(root, 'observer.json')
-    await writeFile(
-      overlay,
-      JSON.stringify([
-        { id: 'tools', config: { mode: 'native' } },
-        { insert: [{ id: 'preset-observer', name: CONTAINER_HOME + '/preset-fixture/index.mjs' }] },
-      ]),
-    )
+    await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'preset-observer', name: CONTAINER_HOME + '/preset-fixture/index.mjs' }] }]))
     runtime = { ...runtimeSection(root, modelOrigin, runtimeSettings), patches: [overlay] }
     app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'native-preset-fixture-secret-at-least-32', runtime })
     const origin = await app.start()
@@ -133,10 +164,10 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     const workspaceId = adopted.workspace.workspaceId
     const create = (agentPreset?: string) =>
       remote<{ sessionId: string; agentPreset: string }>('session/create', { request: { workspaceId, ...(agentPreset ? { agentPreset } : {}) } })
-    const observe = async (operation: string, sessionId: string) => {
+    const observe = async (operation: string, sessionId: string, ptc = false) => {
       const response = await member.request.post(communityEntryUrl(origin, await cookieHeader(member, origin)) + 'preset-fixture', {
         headers: { origin },
-        data: { operation, sessionId },
+        data: { operation, sessionId, ptc, url: modelOrigin + '/fetch-policy-probe' },
       })
       expect(response.ok(), await response.text()).toBe(true)
       return response.json()
@@ -161,7 +192,7 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     const showSession = async (sessionId: string) => {
       const sidebar = page.getByRole('button', { name: 'Open sidebar', exact: true })
       if (await sidebar.isVisible()) await sidebar.click()
-      const group = page.getByRole('treeitem', { name: 'Default workspace', exact: true })
+      const group = page.locator('[role="treeitem"][data-row-key^="workspace:"]').filter({ has: page.getByText('Default workspace', { exact: true }) })
       if ((await group.getAttribute('aria-expanded')) === 'false') await group.click({ timeout: 1000 })
       const row = page.locator(`[data-row-key=${JSON.stringify('session:' + sessionId)}]`)
       // The row's action strip stops propagation; click the title to select this exact history.
@@ -182,8 +213,33 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     }
     for (const id of ['standard', 'ptc', 'minimal', 'cordis']) {
       expect((await roster()).find(row => row.id === id)?.broken).toBeUndefined()
-      expect((await create(id)).agentPreset).toBe(id)
+      const session = await create(id)
+      expect(session.agentPreset).toBe(id)
+      const catalog = await observe('catalog', session.sessionId)
+      expect(catalog.names).not.toContain('web_fetch')
+      if (id !== 'minimal') expect(catalog.names).toContain('web_search')
+      const probe = await observe('fetch-guard', session.sessionId, id === 'ptc')
+      expect(probe.attempted).toBe(false)
+      expect(JSON.stringify(probe.outcome)).toContain('Web fetch is unavailable in this deployment.')
+      expect(fetchProbeHits).toBe(0)
     }
+    const admission = await create('standard')
+    expect(await observe('writer-lock-resolve', admission.sessionId)).toEqual({ hmrReleasedBeforeWriter: true })
+    expect(await observe('cancel-resolve', admission.sessionId)).toEqual({ cancelledWhileBlocked: true, expectedReason: true })
+    const service = (endpoint: string) => ({ name: 'p-admission', description: 'Step admission fixture', url: modelOrigin + endpoint })
+    await api('mcp', { action: 'save', service: service('/mcp-policy-first') })
+    await api(`groups/${account.groupId}/mcp`, { names: ['p-admission'] })
+    expect((await observe('capture-tools', admission.sessionId)).names).toContain('mcp__p-admission__probe')
+    // A captured step cannot call a newly registered replacement with the same name.
+    await api('mcp', { action: 'save', service: service('/mcp-policy-replacement') })
+    expect((await observe('refresh-tools', admission.sessionId)).names).toContain('mcp__p-admission__probe')
+    expect(await observe('execute-captured', admission.sessionId)).toMatchObject({ isError: true, error: { info: { code: 'UNKNOWN_TOOL' } } })
+    expect(mcpProbeCalls).toBe(0)
+    expect((await observe('capture-tools', admission.sessionId)).names).toContain('mcp__p-admission__probe')
+    await api(`groups/${account.groupId}/mcp`, { names: [] })
+    expect((await observe('refresh-tools', admission.sessionId)).names).not.toContain('mcp__p-admission__probe')
+    expect(await observe('execute-captured', admission.sessionId)).toMatchObject({ isError: true, error: { info: { code: 'UNKNOWN_TOOL' } } })
+    expect(mcpProbeCalls).toBe(0)
     expect((await roster()).some(row => row.id === expertPreset)).toBe(true)
     const history = await create('cordis')
     await completeTurn(history.sessionId)
@@ -267,6 +323,9 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     expect((await describe()).value.selectedDefault).toBe(expertPreset)
     const expertSession = await create()
     expect(expertSession.agentPreset).toBe(expertPreset)
+    expect((await observe('catalog', expertSession.sessionId)).names).not.toContain('web_fetch')
+    expect((await observe('fetch-guard', expertSession.sessionId)).attempted).toBe(false)
+    expect(fetchProbeHits).toBe(0)
     expect(await observe('tool', expertSession.sessionId)).toMatchObject({
       isError: false,
       value: { exitCode: 0, stdout: { text: 'PRESET_EXPERT_TOOL_OK\n' } },

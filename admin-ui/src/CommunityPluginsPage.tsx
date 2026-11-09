@@ -1,3 +1,4 @@
+import { featureVisible } from '../../src/domain/release-visibility'
 import CommunityPluginAddDialog from './CommunityPluginAddDialog'
 import { pluginSourceLabel, pluginStageLabels as stageLabels, pluginVersionLabel } from './community-plugin-stage'
 import CommunitySuitesPage from './CommunitySuitesPage'
@@ -5,7 +6,6 @@ import { useSuiteOriginName } from './useSuiteOriginName'
 import CommunityPluginDependencies from './CommunityPluginDependencies'
 import CommunityLibraryMaintenance from './CommunityLibraryMaintenance'
 import CommunityContributions from './CommunityContributions'
-import { useContributionCount } from './useContributionCount'
 import CommunityPluginAccess from './CommunityPluginAccess'
 import CommunityPluginPublication from './CommunityPluginPublication'
 import CommunityPluginUpstreams from './CommunityPluginUpstreams'
@@ -28,7 +28,6 @@ import CommunitySelect from './CommunitySelect'
 export default function CommunityPluginsPage() {
   const { t, locale, errorText } = usePlatformLanguage()
   const [libraryTab, setLibraryTab] = useState(() => (new URLSearchParams(window.location.search).get('tab') === 'catalog' ? 'catalog' : 'plugins'))
-  const contributionCount = useContributionCount('plugins')
   const [plugins, setPlugins] = useState<readonly CommunityPluginView[]>()
   const originName = useSuiteOriginName(locale, plugins?.some(row => Boolean(row.suiteOrigin)) ?? false)
   const [publicationFilter, setPublicationFilter] = useState('all')
@@ -48,7 +47,7 @@ export default function CommunityPluginsPage() {
     else access()
   }
   const [selected, setSelected] = useState<string>()
-  const [detailTab, setDetailTab] = useState('access')
+  const [detailTab, setDetailTab] = useState('basic')
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState<unknown>()
   const [retrying, setRetrying] = useState<string>()
@@ -108,6 +107,12 @@ export default function CommunityPluginsPage() {
           : stageLabels[plugin.stage],
     )
   const failureText = (plugin: CommunityPluginView) => platformError(locale, { code: plugin.failureCode, error: '' })
+  const integrity = detail?.integrity ? (
+    <details className="plugin-integrity">
+      <summary>{t('Integrity (sha512)')}</summary>
+      <code>{detail.integrity}</code>
+    </details>
+  ) : null
   return (
     <div className="community-page">
       <section className="page-heading plugin-page-heading">
@@ -134,7 +139,7 @@ export default function CommunityPluginsPage() {
         </>
       ) : null}
       <Tabs
-        className="skill-library-tabs"
+        className="skill-library-tabs library-workspace-tabs"
         selectedKey={libraryTab}
         onSelectionChange={key => {
           setLibraryTab(String(key))
@@ -148,15 +153,12 @@ export default function CommunityPluginsPage() {
               {t('Plugins')}
               <Tabs.Indicator />
             </Tabs.Tab>
-            <Tabs.Tab id="contributions">
-              {t('Member contributions')}
-              {contributionCount > 0 ? (
-                <Chip size="sm" variant="soft" aria-hidden="true">
-                  {contributionCount}
-                </Chip>
-              ) : null}
-              <Tabs.Indicator />
-            </Tabs.Tab>
+            {featureVisible('contributions') ? (
+              <Tabs.Tab id="contributions">
+                {t('Member contributions')}
+                <Tabs.Indicator />
+              </Tabs.Tab>
+            ) : null}
             <Tabs.Tab id="catalog">
               {t('Plugin catalog')}
               <Tabs.Indicator />
@@ -213,22 +215,17 @@ export default function CommunityPluginsPage() {
                 </Card.Footer>
               </Card>
             ) : (
-              <div className="plugin-card-grid">
+              <div className="plugin-card-grid library-compact-grid">
                 {visiblePlugins.map(plugin => (
                   <Card key={plugin.packageName} className="plugin-library-card">
                     <Card.Header>
-                      <div className="plugin-card-top">
-                        <span className="plugin-card-icon" aria-hidden="true">
-                          <CommunityIcon name="plugins" size={20} />
-                        </span>
-                        {plugin.published ? (
-                          <Chip size="sm" variant="soft" color="success">
-                            {t('Published')}
-                          </Chip>
-                        ) : null}
+                      <div className="library-card-heading">
+                        <Card.Title>{plugin.title}</Card.Title>
+                        <CommunityIcon name="chevron" size={14} />
                       </div>
-                      <Card.Title>{plugin.title}</Card.Title>
-                      {plugin.title !== plugin.packageName ? <span className="plugin-package-name">{plugin.packageName}</span> : null}
+                      <p className="plugin-summary-meta">
+                        <span>{pluginSourceLabel(plugin, t)}</span> · <span>{pluginVersionLabel(plugin.version, plugin.sourceCommit)}</span>
+                      </p>
                       {plugin.suiteOrigin ? (
                         <Chip size="sm" variant="soft" color="accent">
                           {t('From “{name}”', { name: originName(plugin.suiteOrigin) })}
@@ -237,70 +234,45 @@ export default function CommunityPluginsPage() {
                       {plugin.description ? <Card.Description>{plugin.description}</Card.Description> : null}
                     </Card.Header>
                     <Card.Content>
-                      <dl className="plugin-card-metadata">
-                        <div>
-                          <dt>{t('Source')}</dt>
-                          <dd className="break-all">{pluginSourceLabel(plugin, t)}</dd>
-                        </div>
-                        <div>
-                          <dt>{t('Version')}</dt>
-                          <dd>{pluginVersionLabel(plugin.version, plugin.sourceCommit)}</dd>
-                        </div>
-                      </dl>
-                      <p>{t(plugin.accessConfigured ? 'Access configured' : 'Upstreams and access settings are not configured')}</p>
                       {plugin.publicationPaused ? <p className="plugin-card-error">{t('Publication paused until a compatible version is selected.')}</p> : null}
                       {plugin.invalidAccessEntries?.length ? (
                         <p className="plugin-card-error">{t('Missing entry IDs: {ids}', { ids: plugin.invalidAccessEntries.join(', ') })}</p>
                       ) : null}
-                      <div className="plugin-card-status" role="status">
-                        <span
-                          className={
-                            plugin.incompatible || plugin.stage === 'failed'
-                              ? 'plugin-stage is-failed'
-                              : plugin.stage === 'available'
-                                ? 'plugin-stage is-available'
-                                : 'plugin-stage is-preparing'
-                          }
-                        >
-                          <span aria-hidden="true" />
-                          {stageText(plugin)}
-                        </span>
-                      </div>
                       {plugin.checking?.length ? <p className="plugin-card-hint">{t('Checking capabilities…')}</p> : null}
                       {plugin.failures?.length ? (
                         <p className="plugin-card-error">{t('Load failed for {count} members.', { count: plugin.failures.length })}</p>
                       ) : null}
                       {plugin.failureCode ? <p className="plugin-card-error">{failureText(plugin)}</p> : null}
                     </Card.Content>
-                    <Card.Footer>
-                      <span className="plugin-details-label" aria-hidden="true">
-                        {t('Plugin details')}
-                        <CommunityIcon name="chevron" size={14} />
+                    <Card.Footer className="plugin-card-status" role="status">
+                      <span
+                        className={
+                          plugin.incompatible || plugin.stage === 'failed'
+                            ? 'plugin-stage is-failed'
+                            : plugin.stage === 'available'
+                              ? 'plugin-stage is-available'
+                              : 'plugin-stage is-preparing'
+                        }
+                      >
+                        <span aria-hidden="true" />
+                        {stageText(plugin)}
                       </span>
-                      <Button
-                        variant="tertiary"
-                        size="sm"
-                        onPress={() => {
-                          setDetailTab('access')
-                          setSelected(plugin.packageName)
-                        }}
-                        aria-label={t('View plugin {name}', { name: plugin.packageName })}
-                        className="plugin-details-action"
-                      />
-                      {plugin.stage === 'failed' ? (
-                        <Button
-                          className="relative z-10"
-                          size="sm"
-                          variant="secondary"
-                          isDisabled={retrying !== undefined}
-                          onPress={() => {
-                            void retry(plugin)
-                          }}
-                        >
-                          {t('Retry precheck')}
-                        </Button>
+                      {plugin.published ? (
+                        <Chip size="sm" variant="soft" color="success">
+                          {t('Published')}
+                        </Chip>
                       ) : null}
                     </Card.Footer>
+                    <Button
+                      variant="tertiary"
+                      size="sm"
+                      onPress={() => {
+                        setDetailTab('basic')
+                        setSelected(plugin.packageName)
+                      }}
+                      aria-label={t('View plugin {name}', { name: plugin.packageName })}
+                      className="plugin-details-action"
+                    />
                   </Card>
                 ))}
               </div>
@@ -311,9 +283,11 @@ export default function CommunityPluginsPage() {
             </div>
           </section>
         </Tabs.Panel>
-        <Tabs.Panel id="contributions">
-          <CommunityContributions kind="plugin" onChanged={refresh} />
-        </Tabs.Panel>
+        {featureVisible('contributions') ? (
+          <Tabs.Panel id="contributions">
+            <CommunityContributions kind="plugin" onChanged={refresh} />
+          </Tabs.Panel>
+        ) : null}
         <Tabs.Panel id="catalog">
           <CommunitySuitesPage category="plugin" />
         </Tabs.Panel>
@@ -337,15 +311,7 @@ export default function CommunityPluginsPage() {
         />
       ) : null}
       {detail ? (
-        <CommunityDialog
-          drawer
-          drawerClassName="plugin-drawer"
-          eyebrow={t('Plugin details')}
-          title={detail.title}
-          closeLabel={t('Close plugin details')}
-          onClose={closeDetails}
-        >
-          <p className="drawer-description">{detail.description}</p>
+        <CommunityDialog drawer drawerClassName="plugin-drawer" title={detail.title} closeLabel={t('Close plugin details')} onClose={closeDetails}>
           <div className="drawer-identity plugin-identity">
             <span className="plugin-card-icon" aria-hidden="true">
               <CommunityIcon name="plugins" size={22} />
@@ -364,15 +330,9 @@ export default function CommunityPluginsPage() {
               <span role="status">{stageText(detail)}</span>
             </Chip>
           </div>
+          {detail.description ? <p className="plugin-summary-description">{detail.description}</p> : null}
           <div className="plugin-detail-sections">
             {detail.checking?.length ? <CommunityMessage status="default" title={t('Checking capabilities…')} /> : null}
-            {detail.failures?.map(failure => (
-              <CommunityMessage
-                key={failure.username}
-                status="danger"
-                title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}
-              />
-            ))}
             {detail.failureCode ? <CommunityMessage role="alert" status="danger" title={failureText(detail)} /> : null}
             {detail.stage === 'failed' ? (
               <div>
@@ -386,6 +346,18 @@ export default function CommunityPluginsPage() {
                   {t('Retry precheck')}
                 </Button>
               </div>
+            ) : null}
+            {detail.failures?.length ? (
+              <details className="plugin-member-diagnostics">
+                <summary>{t('Load failed for {count} members.', { count: detail.failures.length })}</summary>
+                <ul>
+                  {detail.failures.map(failure => (
+                    <li key={failure.username}>
+                      <strong>{failure.username}</strong> · {platformError(locale, { code: failure.code, error: '' })}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             ) : null}
             <Tabs className="plugin-detail-tabs" selectedKey={detailTab} onSelectionChange={key => setDetailTab(String(key))} variant="secondary">
               <Tabs.ListContainer>
@@ -404,7 +376,7 @@ export default function CommunityPluginsPage() {
                   </Tabs.Tab>
                 </Tabs.List>
               </Tabs.ListContainer>
-              <Tabs.Panel id="dependencies" shouldForceMount>
+              <Tabs.Panel id="dependencies" className="plugin-settings-panel" shouldForceMount>
                 <CommunityPluginDependencies
                   key={detail.packageName}
                   detail={detail}
@@ -414,22 +386,19 @@ export default function CommunityPluginsPage() {
                   }}
                 />
               </Tabs.Panel>
-              <Tabs.Panel id="access" shouldForceMount>
-                <section className="plugin-detail-section" aria-label={t('Access settings')}>
-                  <h2>{t('Access settings')}</h2>
-                  <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName} onChanged={refresh} />
-                  <CommunityPluginAccess
-                    key={detail.packageName + '-access'}
-                    packageName={detail.packageName}
-                    onChanged={refresh}
-                    onSaveFailed={() => setDetailTab('access')}
-                    onCloseGuard={guard => {
-                      accessCloseGuard.current = guard
-                    }}
-                  />
-                </section>
+              <Tabs.Panel id="access" className="plugin-settings-panel" shouldForceMount>
+                <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName} onChanged={refresh} />
+                <CommunityPluginAccess
+                  key={detail.packageName + '-access'}
+                  packageName={detail.packageName}
+                  onChanged={refresh}
+                  onSaveFailed={() => setDetailTab('access')}
+                  onCloseGuard={guard => {
+                    accessCloseGuard.current = guard
+                  }}
+                />
               </Tabs.Panel>
-              <Tabs.Panel id="basic" shouldForceMount>
+              <Tabs.Panel id="basic" className="plugin-settings-panel" shouldForceMount>
                 <section className="plugin-detail-section" aria-label={t('Publication')}>
                   <div className="plugin-section-heading">
                     <h2>{t('Publication')}</h2>
@@ -441,19 +410,13 @@ export default function CommunityPluginsPage() {
                   {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
                   <CommunityPluginPublication plugin={detail} onChanged={refresh} />
                 </section>
-                {!detail.suiteOrigin ? (
-                  <CommunityLibraryMaintenance
-                    kind="plugin"
-                    name={detail.packageName}
-                    provenance={detail.provenance}
-                    revision={detail.maintenanceRevision ?? ''}
-                    onChanged={refresh}
-                  />
-                ) : null}
                 {detail.suiteOrigin ? (
-                  <p>
-                    {t('From “{name}”', { name: originName(detail.suiteOrigin) })} · <a href="/admin/plugins?tab=catalog">{t('Plugin catalog')}</a>
-                  </p>
+                  <>
+                    <p className="plugin-catalog-origin">
+                      {t('From “{name}”', { name: originName(detail.suiteOrigin) })} · <a href="/admin/plugins?tab=catalog">{t('Plugin catalog')}</a>
+                    </p>
+                    {integrity}
+                  </>
                 ) : (
                   <CommunityPluginChanges
                     plugin={detail}
@@ -461,14 +424,17 @@ export default function CommunityPluginsPage() {
                       if (removed) setSelected(undefined)
                       refresh()
                     }}
-                  />
+                  >
+                    <CommunityLibraryMaintenance
+                      kind="plugin"
+                      name={detail.packageName}
+                      provenance={detail.provenance}
+                      revision={detail.maintenanceRevision ?? ''}
+                      onChanged={refresh}
+                    />
+                    {integrity}
+                  </CommunityPluginChanges>
                 )}
-                {detail.integrity ? (
-                  <details className="plugin-integrity">
-                    <summary>{t('Integrity (sha512)')}</summary>
-                    <code>{detail.integrity}</code>
-                  </details>
-                ) : null}
               </Tabs.Panel>
             </Tabs>
           </div>

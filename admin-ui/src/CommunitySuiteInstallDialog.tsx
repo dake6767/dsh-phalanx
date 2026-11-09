@@ -73,7 +73,6 @@ export default function CommunitySuiteInstallDialog({
   return (
     <CommunityDialog
       title={entry.title[locale]}
-      eyebrow={t('Install preview')}
       busy={busy}
       onClose={onClose}
       footer={

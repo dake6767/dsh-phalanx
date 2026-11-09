@@ -61,11 +61,8 @@ describe('community account lifecycle through real DSH', () => {
     return socket
   }
   const perform = async (admin: Page, label: string, password?: string) => {
-    if (label.startsWith('Disable ') || label.startsWith('Enable ')) await admin.getByRole('button', { name: label, exact: true }).click()
-    else {
-      await admin.getByRole('button', { name: `More actions for ${label.includes('other') ? 'other' : 'member'}`, exact: true }).click()
-      await admin.getByRole('menuitem', { name: label, exact: true }).click()
-    }
+    await admin.getByRole('button', { name: `More actions for ${label.includes('other') ? 'other' : 'member'}`, exact: true }).click()
+    await admin.getByRole('menuitem', { name: label, exact: true }).click()
     const dialog = admin.getByRole('dialog').filter({ has: admin.getByRole('button', { name: 'Confirm action', exact: true }) })
     await dialog.waitFor()
     if (password !== undefined) await dialog.getByLabel('New password').fill(password)

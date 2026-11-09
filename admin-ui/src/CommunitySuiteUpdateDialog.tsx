@@ -117,7 +117,6 @@ export default function CommunitySuiteUpdateDialog({
   return (
     <CommunityDialog
       title={entry.title[locale]}
-      eyebrow={t('Update preview')}
       busy={busy}
       onClose={onClose}
       footer={

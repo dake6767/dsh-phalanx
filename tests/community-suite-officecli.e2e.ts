@@ -118,7 +118,7 @@ it('installs a suite through the wizard with grants and publication, then uninst
     const dependency = await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=suite-cli')).json()
     expect(dependency).toMatchObject({ source: 'suite-catalog', stage: 'ready', current: { commands: ['suite-cli'] } })
     await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click()
-    await page.locator('.plugin-library-card').filter({ hasText: 'one' }).getByText('From “Fixture suite”', { exact: true }).waitFor()
+    await page.locator('.plugin-library-card').filter({ hasText: 'fixture-suite' }).getByText('From “Fixture suite”', { exact: true }).waitFor()
     await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click()
     await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
     await card.getByRole('button', { name: 'Uninstall', exact: true }).click()

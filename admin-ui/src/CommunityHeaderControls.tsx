@@ -43,7 +43,7 @@ const glyph = (path: string) => (
   </svg>
 )
 
-/** Top bar preferences: a segmented light/dark/system pill and a language menu. */
+/** Top bar preferences: a segmented light/dark/system control and a language menu. */
 export default function CommunityHeaderControls() {
   const { t, preference, setPreference } = usePlatformLanguage()
   const [appearance, setAppearance] = useState<Appearance>(() => window.dshPhalanxAppearance?.get() ?? 'system')

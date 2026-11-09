@@ -163,7 +163,7 @@ it('manages dependencies in the administration shell, showing preparation checks
     await expect.poll(() => ready.getByLabel('Full preparation and check log').inputValue()).toContain('check-output')
     await ready.getByRole('tab', { name: 'Definition and references', exact: true }).click()
     expect(await ready.getByRole('button', { name: 'Delete dependency', exact: true }).isDisabled()).toBe(true)
-    await ready.getByText('MCP service · p-example', { exact: true }).waitFor()
+    await ready.getByRole('listitem').filter({ hasText: 'p-example' }).filter({ hasText: 'MCP service' }).waitFor()
     await ready.getByText('Managed by the MCP catalog. Definition is read-only.', { exact: true }).waitFor()
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
       await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'runtime-dependency-desktop.png'), fullPage: true, animations: 'disabled' })

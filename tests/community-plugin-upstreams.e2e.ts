@@ -82,6 +82,9 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
       'Runtime dependencies',
       'Access settings',
     ])
+    // Details open on basic settings; access settings is one tab away.
+    expect(await page.getByRole('tab', { name: 'Basic settings', exact: true }).getAttribute('aria-selected')).toBe('true')
+    await page.getByRole('tab', { name: 'Access settings', exact: true }).click()
     await page.getByRole('button', { name: 'Add upstream', exact: true }).click()
     expect(await page.getByRole('dialog', { name: 'Add upstream', exact: true }).evaluate(element => element.clientWidth)).toBe(720)
     await page.getByLabel('Platform credential', { exact: true }).fill('fictional-write-only-key')
@@ -214,7 +217,7 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
     await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
     await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).waitFor({ state: 'detached' })
     await page.getByRole('button', { name: '查看插件 plugin', exact: true }).click()
-    await page.getByLabel('条目配置 YAML', { exact: true }).waitFor()
+    await page.getByRole('button', { name: '取消发布', exact: true }).waitFor()
     await page.setViewportSize({ width: 390, height: 844 })
     const mobileDrawer = page.getByRole('dialog', { name: 'Shared plugin', exact: true })
     expect(await mobileDrawer.evaluate(element => element.clientWidth)).toBe(390)

@@ -1,4 +1,5 @@
 export const en = {
+  'Distribution paused': 'Distribution paused',
   'Required commands': 'Required commands',
   'Matching dependencies are selected automatically. Review installation instructions and prepare missing commands before adoption.':
     'Matching dependencies are selected automatically. Review installation instructions and prepare missing commands before adoption.',
@@ -152,6 +153,7 @@ export const en = {
   'Skill files': 'Skill files',
 }
 export const zhCN = {
+  'Distribution paused': '已暂停分发',
   'Required commands': '所需命令',
   'Matching dependencies are selected automatically. Review installation instructions and prepare missing commands before adoption.':
     '已自动选择匹配的运行依赖。请检查安装说明，在采纳前准备缺少的命令。',

@@ -1,5 +1,7 @@
 export const en = {
   'Skill pack': 'Skill pack',
+  'View skills': 'View skills',
+  'View skills in {name}': 'View skills in {name}',
   'Expand skills': 'Expand skills',
   'Collapse skills': 'Collapse skills',
   'Expand skill pack {name}': 'Expand skill pack {name}',
@@ -26,6 +28,7 @@ export const en = {
   'Move {name} up': 'Move {name} up',
   'Move {name} down': 'Move {name} down',
   'Orchestration instructions (optional)': 'Orchestration instructions (optional)',
+  'Orchestration instructions': 'Orchestration instructions',
   'Instructions become an additional skill named after this pack. The name must be unique.':
     'Instructions become an additional skill named after this pack. The name must be unique.',
   'Remove skill pack': 'Remove skill pack',
@@ -44,6 +47,8 @@ export const en = {
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
   'Skill pack': '技能包',
+  'View skills': '查看技能',
+  'View skills in {name}': '查看 {name} 中的技能',
   'Expand skills': '展开技能',
   'Collapse skills': '收起技能',
   'Expand skill pack {name}': '展开技能包 {name}',
@@ -68,6 +73,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Move {name} up': '上移 {name}',
   'Move {name} down': '下移 {name}',
   'Orchestration instructions (optional)': '串联说明（可选）',
+  'Orchestration instructions': '串联说明',
   'Instructions become an additional skill named after this pack. The name must be unique.':
     '串联说明会作为与技能包同名的额外技能分发，名称不可与其他技能重复。',
   'Remove skill pack': '删除技能包',

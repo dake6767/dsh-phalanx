@@ -71,52 +71,39 @@ export default function CommunitySkillPacks() {
           </Card.Header>
         </Card>
       ) : (
-        <div className="plugin-card-grid">
+        <div className="plugin-card-grid library-compact-grid">
           {data.packs.map(pack => (
             <Card key={pack.name} className="plugin-library-card">
               <Card.Header>
-                <div className="plugin-card-top">
-                  <span className="plugin-card-icon">
-                    <CommunityIcon name="skills" size={20} />
-                  </span>
-                  {pack.published ? (
-                    <Chip variant="soft" size="sm" color="success">
-                      {t('Published')}
-                    </Chip>
-                  ) : null}
+                <div className="library-card-heading">
+                  <Card.Title>{pack.name}</Card.Title>
+                  <CommunityIcon name="chevron" size={14} />
+                </div>
+                <p className="plugin-summary-meta">{pack.empty ? t('Empty pack — hidden from members') : t('{count} skills', { count: pack.skills.length })}</p>
+                <Card.Description>{pack.description}</Card.Description>
+              </Card.Header>
+              {pack.conflict ? <CommunityMessage status="warning" title={t('Conflicts with a bundled runtime skill. Distribution is paused.')} /> : null}
+              {pack.published || pack.suiteOrigin ? (
+                <Card.Footer className="plugin-card-status">
                   {pack.suiteOrigin ? (
                     <Chip variant="soft" size="sm" color="accent">
                       {t('From “{name}”', { name: originName(pack.suiteOrigin) })}
                     </Chip>
                   ) : null}
-                </div>
-                <Card.Title>{pack.name}</Card.Title>
-                <Card.Description>{pack.description}</Card.Description>
-              </Card.Header>
-              <Card.Content>
-                <p>{pack.empty ? t('Empty pack — hidden from members') : t('{count} skills', { count: pack.skills.length })}</p>
-                <div className="flex flex-wrap gap-2">
-                  {pack.skills.map(name => (
-                    <Chip key={name} size="sm" variant="soft">
-                      {name}
+                  {pack.published ? (
+                    <Chip variant="soft" size="sm" color="success">
+                      {t('Published')}
                     </Chip>
-                  ))}
-                </div>
-                {pack.conflict ? <CommunityMessage status="warning" title={t('Conflicts with a bundled runtime skill. Distribution is paused.')} /> : null}
-              </Card.Content>
-              <Card.Footer>
-                <span className="plugin-details-label" aria-hidden="true">
-                  {t('Skill pack details')}
-                  <CommunityIcon name="chevron" size={14} />
-                </span>
-                <Button
-                  variant="tertiary"
-                  size="sm"
-                  className="plugin-details-action"
-                  aria-label={t('View skill pack {name}', { name: pack.name })}
-                  onPress={() => setSelected(pack.name)}
-                />
-              </Card.Footer>
+                  ) : null}
+                </Card.Footer>
+              ) : null}
+              <Button
+                variant="tertiary"
+                size="sm"
+                className="plugin-details-action"
+                aria-label={t('View skill pack {name}', { name: pack.name })}
+                onPress={() => setSelected(pack.name)}
+              />
             </Card>
           ))}
         </div>

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, it, vi } from 'vitest'
 import { contributionGuide, contributionToolModule } from '../src/dsh/contribution-tool.js'
+import { platformPluginInclude } from '../src/dsh/community-platform-plugin.js'
 import { prepareCommunityPlatformPlugin } from '../src/adapters/community-platform-plugin.js'
 
 it('loads the shipped tool, identifies registry installation and sends only exact identity after foreground confirmation', async () => {
@@ -28,6 +29,7 @@ it('loads the shipped tool, identifies registry installation and sends only exac
     await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: 'team-plugin', version: '1.2.3', dsh: { bundle: { patch: './patch.yml' } } }))
     await writeFile(join(pkg, 'patch.yml'), '- id: team\n  name: team-plugin')
     await prepareCommunityPlatformPlugin(root, false)
+    expect(JSON.parse(platformPluginInclude(join(root, 'platform-plugin'))).some((row: { id: string }) => row.id === 'phalanx-contribution-tools')).toBe(false)
     const plugin = await import(pathToFileURL(join(root, 'platform-plugin/contributions.mjs')).href)
     plugin.apply({
       skills: { register: () => {} },

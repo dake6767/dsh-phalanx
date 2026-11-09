@@ -250,7 +250,8 @@ it('unions published summons by member space with grants, clears unpublished sum
 
 it('selects enabled shared models and resolves a current owned expert for a new conversation without exposing credentials', async () => {
   let state: ExpertState = { revision: 0, experts: [], grants: {}, selections: {} },
-    enabled = true
+    enabled = true,
+    reasoning = true
   const accounts = ['admin', 'member'].map(username => ({
     username,
     spaceId: username,
@@ -291,7 +292,7 @@ it('selects enabled shared models and resolves a current owned expert for a new 
     },
     undefined,
     undefined,
-    () => (enabled ? [{ providerId: 'provider-a', name: 'expert-model', id: 'opaque-model', label: 'Provider A / expert-model' }] : []),
+    () => (enabled ? [{ providerId: 'provider-a', name: 'expert-model', id: 'opaque-model', label: 'Provider A / expert-model', reasoning }] : []),
   )
   const admin = { username: 'admin', spaceId: 'admin', sessionEpoch: 0 },
     member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
@@ -303,13 +304,25 @@ it('selects enabled shared models and resolves a current owned expert for a new 
     skills: [],
     skillPacks: [],
     model: { providerId: 'provider-a', name: 'expert-model' },
+    reasoningEffort: 'high',
   }
   await experts.save(admin, input, await experts.revision())
   expect((await experts.list(admin)).experts[0]).toMatchObject({ model: input.model, modelLabel: 'Provider A / expert-model', modelUnavailable: false })
   await expect(experts.start(member, 'commerce')).rejects.toThrow('This expert is not available.')
   await experts.grant(admin, 'members', ['commerce'], await experts.revision())
-  expect(await experts.start(member, 'commerce')).toEqual({ expertId: 'commerce', model: { providerId: 'provider-a', id: 'opaque-model' } })
+  expect(await experts.start(member, 'commerce')).toEqual({
+    expertId: 'commerce',
+    model: { providerId: 'provider-a', id: 'opaque-model' },
+    reasoningEffort: 'high',
+  })
   await expect(experts.start({ ...member, sessionEpoch: 1 }, 'commerce')).rejects.toThrow('Sign in is required')
+  reasoning = false
+  expect((await experts.list(admin)).experts[0]).toMatchObject({ reasoningUnavailable: true, reasoningEffort: 'high' })
+  expect(await experts.start(member, 'commerce')).toEqual({ expertId: 'commerce', model: { providerId: 'provider-a', id: 'opaque-model' } })
+  await experts.save(admin, { ...input, description: 'Retain saved effort' }, await experts.revision(), 'commerce')
+  await expect(experts.save(admin, { ...input, reasoningEffort: 'low' }, await experts.revision(), 'commerce')).rejects.toMatchObject({
+    code: 'expert-invalid',
+  })
   enabled = false
   expect((await experts.list(admin)).models).toEqual([])
   expect((await experts.list(admin)).experts[0]).toMatchObject({ model: input.model, modelUnavailable: true })
@@ -320,7 +333,7 @@ it('selects enabled shared models and resolves a current owned expert for a new 
   })
   await experts.save(admin, { ...input, description: 'Updated' }, await experts.revision(), 'commerce')
   expect((await experts.list(admin)).experts[0]?.modelUnavailable).toBe(true)
-  await experts.save(admin, { ...input, model: null }, await experts.revision(), 'commerce')
+  await experts.save(admin, { ...input, model: null, reasoningEffort: null }, await experts.revision(), 'commerce')
   expect((await experts.list(admin)).experts[0]?.modelUnavailable).toBe(false)
 })
 

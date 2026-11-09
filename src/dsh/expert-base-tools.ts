@@ -1,4 +1,4 @@
-// Public standard preset configuration for DSH b830ec950faba0a46dda564be3e2d854afed94f1.
+// Public standard preset configuration for DSH 66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db.
 // Keep the complete list aligned whenever the supported DSH revision changes.
 const entries: readonly Record<string, unknown>[] = [
   {
@@ -36,6 +36,9 @@ const entries: readonly Record<string, unknown>[] = [
   {
     id: 'tool-fs',
     name: '@deepseek-ai/dsh-tool-fs',
+    config: {
+      applyPatch: false,
+    },
   },
   {
     id: 'tool-fs-search',
@@ -81,7 +84,7 @@ const entries: readonly Record<string, unknown>[] = [
         name: '@deepseek-ai/dsh-plan-mode',
         config: {
           section:
-            'You are in plan mode. Stay in plan mode until the user approves your plan through exit_plan_mode or switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user\'s conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.\n\nExplore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.\n\nThe tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.\n\nResolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.\n\nMake the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.\n\nWhen ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.\n',
+            'You are in plan mode. Stay in plan mode until the user approves your plan through exit_plan_mode or switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user\'s conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.\n\nExplore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.\n\nTools can be unavailable in plan mode. These plan-mode rules also override any available tool description or guidance that suggests mutation. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.\n\nResolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.\n\nMake the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.\n\nWhen ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.\n',
         },
       },
     ],
@@ -127,16 +130,13 @@ const entries: readonly Record<string, unknown>[] = [
         name: '@deepseek-ai/dsh-tool-subagent-control',
       },
       {
-        id: 'tool-subagent-list-agents',
-        name: '@deepseek-ai/dsh-tool-subagent-control/list-agents',
-      },
-      {
         id: 'tool-subagent',
         name: '@deepseek-ai/dsh-tool-subagent',
         config: {
           provider: 'spawn',
           toolName: 'subagent',
-          modelSelectionSettings: true,
+          modelSelection: true,
+          modelDiscovery: true,
         },
       },
       {
@@ -175,7 +175,7 @@ const entries: readonly Record<string, unknown>[] = [
     id: 'tool-web',
     name: '@deepseek-ai/dsh-tool-web',
     config: {
-      fetch: true,
+      fetch: false,
       searchTimeoutMs: 60000,
     },
   },

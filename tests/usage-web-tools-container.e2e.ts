@@ -18,16 +18,20 @@ import { signInCommunity } from './fixtures/community-native-browser.js'
 import type { CommunityUsageRecords } from '../src/domain/admin-contract.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 
-it('shows native search and fetch usage across installed restarts', async () => {
+it('retains native search usage across installed restarts and rejects unavailable fetch', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'usage-web-tools-')),
     completed = new Set<string>()
-  let status = 200
+  let status = 200,
+    fetchCalls = 0
+  const failedTools = new Set<string>()
   const model = createServer(async (request, response) => {
     let raw = ''
     for await (const chunk of request) raw += chunk
     const body = JSON.parse(raw),
       marker = latestHumanText(body)
+    expect((body.tools ?? []).map((tool: { name: string }) => tool.name)).not.toContain('web_fetch')
+    if (hasToolResult(body, marker, true)) failedTools.add(marker)
     response.setHeader('content-type', 'text/event-stream')
     if (marker.startsWith('USE_WEB_')) {
       if (!hasToolResult(body, marker, false) && !hasToolResult(body, marker, true)) {
@@ -46,6 +50,7 @@ it('shows native search and fetch usage across installed restarts', async () => 
   })
   const upstream = createServer(async (request, response) => {
     for await (const chunk of request) void chunk
+    if (request.url?.endsWith('/fetch')) fetchCalls++
     response.writeHead(status, { 'content-type': 'application/json' })
     response.end(
       JSON.stringify(
@@ -62,7 +67,7 @@ it('shows native search and fetch usage across installed restarts', async () => 
   const address = (server: typeof model) => `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const runtime = runtimeSection(join(root, 'platform'), address(model), runtimeSettings)
   const overlay = join(root, 'native-tools.json')
-  await writeFile(overlay, JSON.stringify([{ id: 'tools', config: { mode: 'native' } }]))
+  await writeFile(overlay, JSON.stringify([]))
   runtime.patches.push(overlay)
   const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'usage-web-tools-installed-fixture-secret', runtime }
   const options = { testOnlyWebToolsUpstreamBaseUrl: address(upstream) + '/v1/tools' }
@@ -147,28 +152,24 @@ it('shows native search and fetch usage across installed restarts', async () => 
     }
     await prompt('USE_WEB_SEARCH')
     await prompt('USE_WEB_FETCH')
+    expect(failedTools.has('USE_WEB_FETCH')).toBe(true)
+    expect(fetchCalls).toBe(0)
     status = 429
     await prompt('USE_WEB_LIMITED')
     const records = (await api('usage-records')) as CommunityUsageRecords
-    expect(records.total).toBe(3)
+    expect(records.total).toBe(2)
     expect(records.items.filter(row => row.capability.kind === 'web-tools')).toMatchObject([
       { username: 'member', groupId: account.groupId, capability: { operation: 'search' }, outcome: 'failed', httpStatus: 429 },
-      { capability: { operation: 'fetch' }, outcome: 'succeeded', httpStatus: 200 },
       { capability: { operation: 'search' }, outcome: 'succeeded', httpStatus: 200 },
     ])
     expect(JSON.stringify(records)).not.toMatch(/PRIVATE_|fictional-|Bearer/)
-    await admin.goto(origin + '/admin/usage-records')
-    const grid = admin.getByRole('grid', { name: 'Tool usage records', exact: true })
-    await grid.getByText('Web tools', { exact: true }).first().waitFor()
-    await admin.getByLabel('Filter by capability', { exact: true }).fill('web-tools')
-    await admin.getByLabel('Filter by operation', { exact: true }).fill('fetch')
-    await admin.getByRole('button', { name: 'Apply filters', exact: true }).click()
-    await expect.poll(() => grid.getByRole('row').count()).toBe(2)
+    // hidden in 0.1.32: preserve capability/operation filtering through the API.
+    expect((await api('usage-records?capability=web-tools&operation=search')).items).toEqual(records.items)
     await app.stop()
     app = injectedCandidateApplication(config, options)
     origin = await app.start()
     const reopened = (await api('usage-records')) as CommunityUsageRecords
-    expect(reopened.total).toBe(3)
+    expect(reopened.total).toBe(2)
     expect(await api('usage-settings')).toEqual({ retentionDays: 180 })
     expect(reopened.items).toEqual(records.items)
     await expect(stat(join(runtime.dataRoot, 'mcp/audit.json'))).rejects.toMatchObject({ code: 'ENOENT' })

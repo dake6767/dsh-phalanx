@@ -1,4 +1,5 @@
 import type { HostPreparationCache } from './host-preparation-cache.js'
+import { memberToolsModule } from '../dsh/member-tools.js'
 import { skillUsagePlugin } from '../dsh/skill-usage.js'
 import { executionShellEnvironment } from '../dsh/execution-shell-env.js'
 import { contributionToolModule } from '../dsh/contribution-tool.js'
@@ -94,6 +95,7 @@ export async function prepareCommunityPlatformPlugin(
 
 function platformFiles(mounted: string) {
   return [
+    ['tools.mjs', memberToolsModule],
     ['skill-usage.mjs', skillUsagePlugin],
     ['execution-shell-env.mjs', executionShellEnvironment],
     ['contributions.mjs', contributionToolModule],

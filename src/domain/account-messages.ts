@@ -100,6 +100,7 @@ export const en = {
   'The instance will stop. Its DSH configuration and user plugins will be backed up privately, then reset to platform defaults. Projects, chats and other personal files stay in the same user space. An instance will be created if needed.':
     'The instance will stop. Its DSH configuration and user plugins will be backed up privately, then reset to platform defaults. Projects, chats and other personal files stay in the same user space. An instance will be created if needed.',
   'I understand that running tasks will be interrupted.': 'I understand that running tasks will be interrupted.',
+  'Account profile': 'Account profile',
 } as const
 export const zhCN = {
   'Stop the platform service and the target container, then follow {path}. Backups are retained until the deployer removes them explicitly.':
@@ -201,4 +202,5 @@ export const zhCN = {
   'The instance will stop. Its DSH configuration and user plugins will be backed up privately, then reset to platform defaults. Projects, chats and other personal files stay in the same user space. An instance will be created if needed.':
     '用户实例将停止。平台会先私密备份 DSH 配置和用户插件，再将它们重置为平台默认配置。项目、聊天记录和其他个人文件仍保留在原用户空间中。必要时会创建用户实例。',
   'I understand that running tasks will be interrupted.': '我已了解，正在运行的任务将中断。',
+  'Account profile': '账号资料',
 } satisfies Record<keyof typeof en, string>

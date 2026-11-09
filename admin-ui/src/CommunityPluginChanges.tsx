@@ -1,4 +1,5 @@
-import { useId, useRef, useState } from 'react'
+import { featureVisible } from '../../src/domain/release-visibility'
+import { type ReactNode, useId, useRef, useState } from 'react'
 import { platformError } from '../../src/domain/platform-copy'
 import { Button } from '@heroui/react/button'
 import type { CommunityPluginImpact, CommunityPluginUpdateCheck, CommunityPluginView } from '../../src/domain/admin-contract'
@@ -7,10 +8,19 @@ import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
 import CommunityField from './CommunityField'
 import CommunityMessage from './CommunityMessage'
+import { CommunityLibraryVersionHistory } from './CommunityLibraryMaintenance'
 import CommunityPluginUploadDialog from './CommunityPluginUploadDialog'
 import { useDraftGuard } from './useDraftGuard'
 
-export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: CommunityPluginView; onChanged: (removed?: boolean) => void }) {
+export default function CommunityPluginChanges({
+  plugin,
+  onChanged,
+  children,
+}: {
+  plugin: CommunityPluginView
+  onChanged: (removed?: boolean) => void
+  children?: ReactNode
+}) {
   const { t, locale, errorText } = usePlatformLanguage()
   const [version, setVersion] = useState(false)
   const [upload, setUpload] = useState(false)
@@ -160,7 +170,9 @@ export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: 
               : 'The current version stays active until you select a checked replacement.',
           )}
         </p>
+        <CommunityLibraryVersionHistory provenance={plugin.provenance} />
       </section>
+      {children}
       <section className="plugin-detail-section plugin-removal" aria-label={t('Remove from library')}>
         <h2>{t('Remove from library')}</h2>
         <p>{t('Removal revokes controlled grants and shared-key selections. Installed member copies are kept.')}</p>
@@ -217,7 +229,7 @@ export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: 
             </>
           }
         >
-          {confirmation.action === 'remove' && confirmation.impact.experts.length ? (
+          {featureVisible('experts') && confirmation.action === 'remove' && confirmation.impact.experts.length ? (
             <p>{t('Will be removed from experts: {names}', { names: confirmation.impact.experts.map(row => row.name).join(', ') })}</p>
           ) : null}
           <p>{t('This affects {groups} groups and {members} members.', { groups: confirmation.impact.groups, members: confirmation.impact.members })}</p>

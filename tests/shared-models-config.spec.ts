@@ -122,6 +122,32 @@ describe('per-provider DSH catalog', () => {
     expect(adapter['phalanx-00112233445566778899aabbccddeeff']!.api).toBe('openai-responses')
   })
 
+  it('retains DeepSeek wire compatibility behind an opaque model gateway without affecting other suppliers', () => {
+    const compatibility = (baseUrl: string, apiFormat: SharedModelState['providers'][number]['apiFormat'] = 'openai-completions') => {
+      const provider = state().providers[0]!
+      const supplied = { ...state(), providers: [{ ...provider, baseUrl, apiFormat, models: [{ ...provider.models[0]!, reasoning: true }] }] }
+      const catalog = JSON.parse(managedModelCatalog(supplied, 'en'))
+      const route = catalog[0].config.providers[sharedModelProviderKey(provider.id)]
+      expect(JSON.stringify(route)).not.toContain(baseUrl)
+      expect(JSON.stringify(route)).not.toContain(provider.apiKey)
+      return route.compat
+    }
+    const expected = {
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      maxTokensField: 'max_tokens',
+      requiresReasoningContentOnAssistantMessages: true,
+      thinkingFormat: 'deepseek',
+    }
+    expect(compatibility('https://api.deepseek.com')).toEqual(expected)
+    expect(compatibility('https://api.deepseek.com/v1')).toEqual(expected)
+    expect(compatibility('https://api.deepseek.com/anthropic', 'anthropic-messages')).toBeUndefined()
+    expect(compatibility('https://api.deepseek.com/v1', 'openai-responses')).toBeUndefined()
+    expect(compatibility('https://api.openai.com/v1')).toBeUndefined()
+    expect(compatibility('https://api.deepseek.com.example.test/v1')).toBeUndefined()
+    expect(compatibility('https://models.example.test/api.deepseek.com')).toBeUndefined()
+  })
+
   it('keeps the Anthropic Messages protocol on the explanation provider', () => {
     const catalog = JSON.parse(managedModelCatalog({ revision: 0, providers: [], defaultModelId: null }, 'en')) as Array<{
       id: string
@@ -233,8 +259,8 @@ describe('known model input table', () => {
     } as unknown as SharedModelState
     const normalized = normalizeSharedModelState(legacy)
     expect(normalized.providers[0]!.models).toEqual([
-      { id: 'flash', name: 'deepseek-flash', enabled: true, input: 'text+image' },
-      { id: 'custom', name: 'custom-chat', enabled: true, input: 'text' },
+      { id: 'flash', name: 'deepseek-flash', enabled: true, input: 'text+image', reasoning: false },
+      { id: 'custom', name: 'custom-chat', enabled: true, input: 'text', reasoning: false },
     ])
     expect(normalizeSharedModelState(normalized)).toEqual(normalized)
   })
@@ -256,5 +282,21 @@ describe('known model input table', () => {
       defaultModelId: 'flash',
     } as unknown as SharedModelState
     expect(normalizeSharedModelState(corrupt).providers[0]!.models[0]!.input).toBe('text')
+  })
+})
+
+describe('shared model reasoning capability', () => {
+  it('declares only opted-in model efforts and leaves platform defaults unset', () => {
+    const source = state()
+    const enabled = {
+      ...source,
+      providers: source.providers.map(provider => ({ ...provider, models: provider.models.map(model => ({ ...model, reasoning: model.id === 'flash' })) })),
+    }
+    const catalog = JSON.parse(managedModelCatalog(enabled))
+    const models = catalog[0].config.providers['phalanx-61626364313233343536373839303132'].models
+    expect(models[0].reasoningEfforts).toEqual({ off: null, low: 'low', medium: 'medium', high: 'high' })
+    expect(models[1].reasoningEfforts ?? false).toBe(false)
+    expect(publicSharedModels(enabled)[0]).toHaveProperty('reasoningEfforts', { off: null, low: 'low', medium: 'medium', high: 'high' })
+    expect(catalog[1].config).toEqual({ provider: 'phalanx-61626364313233343536373839303132', model: 'flash' })
   })
 })

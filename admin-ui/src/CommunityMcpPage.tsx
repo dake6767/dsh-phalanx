@@ -1,9 +1,10 @@
+import { featureVisible } from '../../src/domain/release-visibility'
 import { Tabs } from '@heroui/react/tabs'
 import CommunityMcpCatalog from './CommunityMcpCatalog'
 import CommunityMcpUpdate from './CommunityMcpUpdate'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
-import { Table } from '@heroui/react/table'
+import { Card } from '@heroui/react/card'
 import type { CommunityMcpSettings, CommunityMcpRemovalImpact } from '../../src/domain/admin-contract'
 import { communityMcp, communityMcpRemovalImpact, retryCommunityMcp, updateCommunityMcp } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
@@ -89,12 +90,12 @@ export default function CommunityMcpPage() {
   }
   return (
     <div className="community-page">
-      <section className="page-heading">
+      <section className="page-heading plugin-page-heading">
         <div>
           <h1>{t('MCP library')}</h1>
           <p>{t('Manage remote tools and grant them to member groups.')}</p>
         </div>
-        <div className="account-actions">
+        <div className="plugin-page-actions">
           <Button variant="secondary" onPress={() => setImporting(true)}>
             {t('Import MCP JSON')}
           </Button>
@@ -106,7 +107,7 @@ export default function CommunityMcpPage() {
       </section>
       {error !== undefined && !removing ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
       {notice ? <CommunityMessage role="status" status="success" title={t(notice)} /> : null}
-      <Tabs className="skill-library-tabs" selectedKey={libraryTab} onSelectionChange={key => setLibraryTab(String(key))}>
+      <Tabs className="skill-library-tabs library-workspace-tabs" selectedKey={libraryTab} onSelectionChange={key => setLibraryTab(String(key))}>
         <Tabs.ListContainer>
           <Tabs.List aria-label={t('MCP library')}>
             <Tabs.Tab id="services">
@@ -120,7 +121,7 @@ export default function CommunityMcpPage() {
           </Tabs.List>
         </Tabs.ListContainer>
         <Tabs.Panel id="services">
-          <section className="panel group-panel" aria-label={t('MCP services')}>
+          <section className="panel plugin-library-panel" aria-label={t('MCP services')}>
             <div className="panel-top">
               <div>
                 <div className="panel-title-row">
@@ -137,94 +138,88 @@ export default function CommunityMcpPage() {
             ) : rows.length === 0 ? (
               <p className="table-empty">{t('No MCP services yet')}</p>
             ) : (
-              <Table variant="secondary" className="group-table">
-                <Table.ScrollContainer>
-                  <Table.Content className="accounts-table" aria-label={t('MCP services')}>
-                    <Table.Header>
-                      <Table.Column isRowHeader>{t('MCP service name')}</Table.Column>
-                      <Table.Column>{t('Description')}</Table.Column>
-                      <Table.Column>{t('Actions')}</Table.Column>
-                    </Table.Header>
-                    <Table.Body>
-                      {rows.map(row => (
-                        <Table.Row id={row.name} key={row.name}>
-                          <Table.Cell>
-                            <strong>{row.name}</strong>
-                            {row.catalog ? (
-                              <p role="status">
-                                {t(
-                                  row.catalog.status === 'preparing'
-                                    ? 'Preparing dependencies…'
-                                    : row.catalog.status === 'testing'
-                                      ? 'Testing imported service…'
-                                      : row.catalog.status === 'ready'
-                                        ? 'Import ready'
-                                        : 'Import failed',
-                                )}
-                              </p>
-                            ) : null}
-                            {row.catalogUpdate ? (
-                              <p role="status">
-                                {t(
-                                  row.catalogUpdate.status === 'applied'
-                                    ? 'Catalog update applied'
-                                    : row.catalogUpdate.status === 'failed'
-                                      ? 'Catalog update failed. Current service retained.'
-                                      : row.catalogUpdate.status === 'preparing'
-                                        ? 'Preparing catalog update…'
-                                        : 'Testing catalog update…',
-                                )}
-                              </p>
-                            ) : null}
-                          </Table.Cell>
-                          <Table.Cell>{row.description || '—'}</Table.Cell>
-                          <Table.Cell>
-                            <div className="account-actions">
-                              {row.availableCatalogVersion ? (
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  isDisabled={row.catalogUpdate?.status === 'preparing' || row.catalogUpdate?.status === 'testing'}
-                                  onPress={() => setUpdating(row)}
-                                >
-                                  {t('Review catalog update')}
-                                </Button>
-                              ) : null}
-                              {row.catalog?.status === 'failed' ? (
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onPress={() => {
-                                    void retryCommunityMcp(row.name).then(setRows).catch(setError)
-                                  }}
-                                >
-                                  {t('Retry import')}
-                                </Button>
-                              ) : null}
-                              <Button size="sm" variant="secondary" onPress={() => setEditing(row)}>
-                                <CommunityIcon name="edit" size={14} />
-                                {t('Edit')}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="tertiary"
-                                onPress={() => {
-                                  setError(undefined)
-                                  void reviewRemoval(row.name)
-                                }}
-                              >
-                                {t('Remove')}
-                              </Button>
-                            </div>
-                          </Table.Cell>
-                        </Table.Row>
-                      ))}
-                    </Table.Body>
-                  </Table.Content>
-                </Table.ScrollContainer>
-              </Table>
+              <div className="plugin-card-grid library-compact-grid">
+                {rows.map(row => (
+                  <Card key={row.name} className="plugin-library-card mcp-service-card">
+                    <Card.Header>
+                      <div className="library-card-heading">
+                        <Card.Title>{row.name}</Card.Title>
+                        <CommunityIcon name="chevron" size={14} />
+                      </div>
+                      {row.description ? <Card.Description>{row.description}</Card.Description> : null}
+                    </Card.Header>
+                    {row.catalog || row.catalogUpdate ? (
+                      <Card.Content>
+                        {row.catalog ? (
+                          <p role="status">
+                            {t(
+                              row.catalog.status === 'preparing'
+                                ? 'Preparing dependencies…'
+                                : row.catalog.status === 'testing'
+                                  ? 'Testing imported service…'
+                                  : row.catalog.status === 'ready'
+                                    ? 'Import ready'
+                                    : 'Import failed',
+                            )}
+                          </p>
+                        ) : null}
+                        {row.catalogUpdate ? (
+                          <p role="status">
+                            {t(
+                              row.catalogUpdate.status === 'applied'
+                                ? 'Catalog update applied'
+                                : row.catalogUpdate.status === 'failed'
+                                  ? 'Catalog update failed. Current service retained.'
+                                  : row.catalogUpdate.status === 'preparing'
+                                    ? 'Preparing catalog update…'
+                                    : 'Testing catalog update…',
+                            )}
+                          </p>
+                        ) : null}
+                      </Card.Content>
+                    ) : null}
+                    <Card.Footer className="plugin-card-status">
+                      {row.availableCatalogVersion ? (
+                        <Button
+                          className="relative z-10"
+                          size="sm"
+                          variant="secondary"
+                          isDisabled={row.catalogUpdate?.status === 'preparing' || row.catalogUpdate?.status === 'testing'}
+                          onPress={() => setUpdating(row)}
+                        >
+                          {t('Review catalog update')}
+                        </Button>
+                      ) : null}
+                      {row.catalog?.status === 'failed' ? (
+                        <Button
+                          className="relative z-10"
+                          size="sm"
+                          variant="secondary"
+                          onPress={() => {
+                            void retryCommunityMcp(row.name).then(setRows).catch(setError)
+                          }}
+                        >
+                          {t('Retry import')}
+                        </Button>
+                      ) : null}
+                      <Button
+                        className="relative z-10 ms-auto"
+                        size="sm"
+                        variant="tertiary"
+                        onPress={() => {
+                          setError(undefined)
+                          void reviewRemoval(row.name)
+                        }}
+                      >
+                        {t('Remove')}
+                      </Button>
+                    </Card.Footer>
+                    <Button size="sm" variant="tertiary" className="plugin-details-action" aria-label={t('Edit')} onPress={() => setEditing(row)} />
+                  </Card>
+                ))}
+              </div>
             )}
-            <div className="panel-footer group-list-note">
+            <div className="panel-footer plugin-library-note">
               <CommunityIcon name="shield" size={16} />
               <span>{t('MCP changes take effect immediately. Tools update on the next agent request.')}</span>
             </div>
@@ -293,7 +288,9 @@ export default function CommunityMcpPage() {
             </>
           }
         >
-          {removing.experts.length ? <p>{t('Will be removed from experts: {names}', { names: removing.experts.map(row => row.name).join(', ') })}</p> : null}
+          {featureVisible('experts') && removing.experts.length ? (
+            <p>{t('Will be removed from experts: {names}', { names: removing.experts.map(row => row.name).join(', ') })}</p>
+          ) : null}
           <p>{t('Remove {name}? Its grants and access will end immediately.', { name: removing.name })}</p>
           {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
         </CommunityDialog>

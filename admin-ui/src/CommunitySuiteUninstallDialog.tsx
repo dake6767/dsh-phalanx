@@ -1,3 +1,4 @@
+import { featureVisible } from '../../src/domain/release-visibility'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Checkbox } from '@heroui/react/checkbox'
@@ -59,7 +60,6 @@ export default function CommunitySuiteUninstallDialog({
   return (
     <CommunityDialog
       title={entry.title[locale]}
-      eyebrow={t('Uninstall preview')}
       busy={busy}
       onClose={onClose}
       footer={
@@ -85,7 +85,9 @@ export default function CommunitySuiteUninstallDialog({
       ) : (
         <>
           <p>{t('This will remove:')}</p>
-          {preview.experts.length ? <p>{t('Will be removed from experts: {names}', { names: preview.experts.map(row => row.name).join(', ') })}</p> : null}
+          {featureVisible('experts') && preview.experts.length ? (
+            <p>{t('Will be removed from experts: {names}', { names: preview.experts.map(row => row.name).join(', ') })}</p>
+          ) : null}
           <ul>
             {preview.removes.length ? (
               preview.removes.map(item => (

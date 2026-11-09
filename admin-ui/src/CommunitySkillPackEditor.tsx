@@ -1,3 +1,4 @@
+import { featureVisible } from '../../src/domain/release-visibility'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Checkbox } from '@heroui/react/checkbox'
@@ -94,8 +95,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
     <>
       <CommunityDialog
         drawer
-        drawerClassName="plugin-drawer"
-        eyebrow={t('Skill pack details')}
+        drawerClassName="plugin-drawer library-form-drawer"
         title={name || t('Create skill pack')}
         closeLabel={t('Close skill pack details')}
         busy={busy}
@@ -229,7 +229,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
             </>
           }
         >
-          {(deleteSkills ? detail.removal.expertsWithSkills : detail.removal.experts).length ? (
+          {featureVisible('experts') && (deleteSkills ? detail.removal.expertsWithSkills : detail.removal.experts).length ? (
             <p>
               {t('Will be removed from experts: {names}', {
                 names: (deleteSkills ? detail.removal.expertsWithSkills : detail.removal.experts).map(row => row.name).join(', '),

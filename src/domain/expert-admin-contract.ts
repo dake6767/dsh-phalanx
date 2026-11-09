@@ -14,6 +14,7 @@ export interface CommunityExpertMarket {
     readonly mcp: readonly string[]
     readonly partial: boolean
     readonly checking?: boolean
+    readonly reasoningUnavailable?: boolean
     readonly modelLabel: string | null
     readonly status: 'granted' | 'summoned' | 'available'
   }[]

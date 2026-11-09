@@ -234,7 +234,13 @@ it.skipIf(!runtimeSettings.containerImage)(
         await waitJob(requestId)
         expect((await data()).plugins[0]?.job?.status, JSON.stringify((await data()).plugins[0]?.job)).toBe('succeeded')
         if ((await data()).pending) await restart()
-        await expect.poll(async () => (await bundles()).find(row => row.name === packageName)?.installed).toBe(true)
+        // A restart and re-sign-in may precede this read; use the phase budget, not Vitest's 1s default.
+        await expect
+          .poll(async () => (await bundles()).find(row => row.name === packageName)?.installed, {
+            timeout: phaseTimeoutMs,
+            message: `native bundle ${packageName} installed after job ${requestId}`,
+          })
+          .toBe(true)
       }
       await openMarket()
       mark('first-native-install')

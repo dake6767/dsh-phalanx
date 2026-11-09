@@ -97,9 +97,8 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
-import { AsyncLocalStorage } from 'node:async_hooks'
 export const name = 'phalanx-mcp-watch'
-export const inject = ['loader', 'hmr', 'systemPrompt', 'profileContext']
+export const inject = ['loader', 'hmr', 'profileContext']
 export async function apply(ctx, config) {
   // Resolve through the CLI and web app dependency graphs in source and installed runtimes.
   const require = createRequire(process.argv[1])
@@ -113,7 +112,6 @@ export async function apply(ctx, config) {
   const marker = ' phalanx-mcp-yield:'
   const identity = (id, module) => marker + JSON.stringify([id, module])
   const flatten = rows => rows.flatMap(row => [row, ...(row.group && Array.isArray(row.config) ? flatten(row.config) : [])])
-  const rebuilding = new AsyncLocalStorage()
   let applied, retryConfiguration
   let failedIds = new Set()
   const refresh = async () => {
@@ -194,14 +192,26 @@ export async function apply(ctx, config) {
   }
   ctx.on('app-boot/config-reload', () => { applied = retryConfiguration = undefined })
   await ctx.hmr.watchConfig(config.path, refresh)
-  ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
-    if (rebuilding.getStore()) return next()
-    const deadline = Date.now() + 30000
-    while (!await ctx.hmr.runExclusive(refresh)) {
-      if (Date.now() >= deadline) throw new Error('MCP configuration is busy; retry this turn')
-      await delay(20)
+  ctx.on('phalanx/before-tools-resolve', async (context) => {
+    const signal = AbortSignal.any([context.signal, AbortSignal.timeout(30000)])
+    signal.throwIfAborted()
+    const wait = async (task) => {
+      let abort
+      try {
+        return await Promise.race([task, new Promise((_, reject) => {
+          abort = () => reject(signal.reason)
+          signal.addEventListener('abort', abort, { once: true })
+          if (signal.aborted) abort()
+        })])
+      } finally { signal.removeEventListener('abort', abort) }
     }
-    return rebuilding.run(true, () => ctx.systemPrompt.assemble(context))
-  })
+    while (!await wait(ctx.hmr.runExclusive(async () => {
+      signal.throwIfAborted()
+      return refresh()
+    }))) {
+      await delay(20, undefined, { signal })
+    }
+    signal.throwIfAborted()
+  }, { global: true })
 }
 `

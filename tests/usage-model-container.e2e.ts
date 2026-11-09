@@ -156,18 +156,19 @@ it('shows native shared-model totals and ends an installed local 402 refusal wit
     await expect.poll(async () => ((await api('usage-models')) as CommunityModelUsage).items[0]?.requests).toBe(2)
     const totals = (await api('usage-models')) as CommunityModelUsage
     expect(totals.items).toEqual([
-      { username: 'member', modelId, requests: 2, unknownRequests: 0, deniedRequests: 0, tokens: { input: 20, output: 24, cacheRead: 4, cacheWrite: 6 } },
+      {
+        username: 'member',
+        modelId,
+        requests: 2,
+        unknownRequests: 0,
+        deniedRequests: 0,
+        tokens: { input: 20, output: 24, cacheRead: 4, cacheWrite: 6, reasoning: null },
+      },
     ])
     expect((await api('usage-records')).total).toBe(0)
     expect(JSON.stringify(totals)).not.toMatch(/COUNT_MODEL_USAGE_PRIVATE|fictional-|MODEL_USAGE_READY/)
-    await admin.goto(origin + '/admin/usage-records')
-    await admin.getByRole('tab', { name: 'Model usage', exact: true }).click()
-    const grid = admin.getByRole('grid', { name: 'Model token totals', exact: true })
-    await grid.getByText('Usage fixture / usage-model', { exact: true }).waitFor()
-    for (const label of ['Input tokens', 'Output tokens', 'Cache read tokens', 'Cache write tokens', 'Unknown requests'])
-      await grid.getByRole('columnheader', { name: label, exact: true }).waitFor()
-    await admin.getByRole('button', { name: 'Last 7 days (UTC)', exact: true }).click()
-    await grid.getByText('Usage fixture / usage-model', { exact: true }).waitFor()
+    // hidden in 0.1.32: model totals remain available through the administrator API.
+    expect((await api('usage-models?from=' + (Math.floor(Date.now() / 3600000) * 3600000 - 7 * 86400000))).items).toEqual(totals.items)
     await app.stop()
     await member.close()
     app = injectedCandidateApplication(config, { testOnlyDenyUsage: true })
@@ -184,7 +185,7 @@ it('shows native shared-model totals and ends an installed local 402 refusal wit
     expect(calls).toEqual({ main: 1, title: 1 })
     await expect.poll(async () => ((await api('usage-models')) as CommunityModelUsage).items[0]?.deniedRequests).toBeGreaterThanOrEqual(1)
     const after = (await api('usage-models')) as CommunityModelUsage
-    expect(after.items[0]).toMatchObject({ unknownRequests: 0, tokens: { input: 20, output: 24, cacheRead: 4, cacheWrite: 6 } })
+    expect(after.items[0]).toMatchObject({ unknownRequests: 0, tokens: { input: 20, output: 24, cacheRead: 4, cacheWrite: 6, reasoning: null } })
     expect((await api('usage-records')).total).toBe(0)
   } catch (error) {
     failure = error

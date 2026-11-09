@@ -32,10 +32,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       secretId = randomUUID(),
       runtime = runtimeSection(root, 'https://example.test', runtimeSettings)
     const overlay = join(root, 'shell-observer.json')
-    await writeFile(
-      overlay,
-      JSON.stringify([{ id: 'tools', config: { mode: 'native' } }, { insert: [{ id: 'execution-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]),
-    )
+    await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'execution-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]))
     let browser: Browser | undefined
     const app = candidateApplication({
       listen: { host: '127.0.0.1', port: 0 },
@@ -319,16 +316,10 @@ sys.exit(7)
       const page = await browser.newPage({ locale: 'en' })
       page.setDefaultTimeout(30000)
       await signInCommunity(page, origin, 'admin', 'password', true)
-      await page.goto(origin + '/admin/usage-records')
-      await page.getByLabel('Filter by member', { exact: true }).fill('member')
-      await page.getByLabel('Filter by capability', { exact: true }).fill('skill:news')
-      await page.getByLabel('Filter by operation', { exact: true }).fill('news-cli')
-      await page.getByRole('button', { name: 'Apply filters', exact: true }).click()
-      const grid = page.getByRole('grid', { name: 'Tool usage records', exact: true })
-      for (const name of ['Duration', 'First argument', 'Exit code', 'Failure reason']) await grid.getByRole('columnheader', { name, exact: true }).waitFor()
-      await grid.getByText('native', { exact: true }).waitFor()
-      await grid.getByText('Command blocked', { exact: true }).waitFor()
-      expect(await page.getByRole('link', { name: 'Platform execution records', exact: true }).count()).toBe(0)
+      // hidden in 0.1.32: audit filtering is still available to the administrator.
+      const filtered = await api('usage-records?username=member&capability=skill:news&operation=news-cli')
+      expect(filtered.items.some((row: { outcome: string }) => row.outcome === 'denied')).toBe(true)
+      expect(filtered.items.some((row: { capability: { firstArgument?: string } }) => row.capability.firstArgument === 'native')).toBe(true)
       const deniedTrial = await api('execution/trial', { owner: 'skill:news', line: 'news-cli trial' })
       expect(deniedTrial).toMatchObject({ exitCode: 125, stderr: expect.stringContaining('DSH_PHALANX_EXECUTION[unauthorized]') })
       const adminGroup = (await api('groups')).find((row: { kind: string }) => row.kind === 'admin')

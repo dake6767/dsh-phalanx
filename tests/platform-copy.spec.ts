@@ -15,7 +15,7 @@ it('emits localized first paint and escapes user-visible error text independentl
   const html = communityLoginPage('<img onerror=attack()>', 'zh-CN', 'zh-CN')
   expect(html).toContain('<html lang="zh-CN">')
   expect(html).toContain('<h1>登录 dsh-phalanx</h1>')
-  expect(html).toContain('value="zh-CN" selected')
+  expect(html).toContain('data-language-choice="zh-CN" aria-checked="true"')
   expect(html).toContain('&lt;img onerror=attack()&gt;')
   expect(html).not.toContain('/admin/assets/')
 })

@@ -5,6 +5,27 @@ import { createServer } from 'node:http'
 import { setTimeout } from 'node:timers'
 import { WebSocketServer } from 'ws'
 
+// Minimal official composed-configuration response for control-plane tests.
+if (process.argv.includes('--dump-config')) {
+  process.stdout.write(
+    JSON.stringify([
+      { id: 'tools', config: {} },
+      { id: 'phalanx-platform-layer', config: { path: 'plugins.yml' } },
+      {
+        id: 'preset-cordis',
+        config: {
+          id: 'cordis',
+          plugins: [
+            { id: 'tool-plugin-manager', name: '@deepseek-ai/dsh-plugin-manager/tools' },
+            { id: 'tool-plugin-market', name: '@deepseek-ai/dsh-plugin-market/tools' },
+          ],
+        },
+      },
+    ]),
+  )
+  process.exit(0)
+}
+
 const token = `fixture-launch-token-${randomBytes(8).toString('hex')}`
 const sessionOwner = process.env.HOME ?? String(process.pid)
 const session = `fixture-session-${createHash('sha256').update(sessionOwner).digest('hex').slice(0, 16)}`

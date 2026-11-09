@@ -34,7 +34,7 @@ function showForm(html, credential) {
  let tested = false, busy = false;
  function update() {
   const remote = kind.value === 'external';
-  kind.disabled = busy; external.hidden = !remote; external.disabled = !remote || busy;
+  kind.disabled = busy; external.hidden = !remote; external.disabled = !remote || busy; const hint = form.querySelector('[data-kind="builtin"]'); if (hint) hint.hidden = remote;
   test.hidden = !remote; test.disabled = !remote || busy; next.disabled = busy || remote && !tested;
  }
  function changed() { tested = false; status.textContent = ''; update(); }

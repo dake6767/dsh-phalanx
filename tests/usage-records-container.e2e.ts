@@ -69,7 +69,7 @@ it.skipIf(!runtimeSettings.containerImage)(
     const address = (server: typeof model) => `http://127.0.0.1:${(server.address() as { port: number }).port}`
     const runtime = runtimeSection(join(root, 'platform'), address(model), runtimeSettings)
     const overlay = join(root, 'native-tools.json')
-    await writeFile(overlay, JSON.stringify([{ id: 'tools', config: { mode: 'native' } }]))
+    await writeFile(overlay, JSON.stringify([]))
     runtime.patches.push(overlay)
     const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'usage-records-installed-fixture-secret', runtime }
     let app = candidateApplication(config)
@@ -201,28 +201,21 @@ it.skipIf(!runtimeSettings.containerImage)(
       expect(JSON.stringify(records)).not.toMatch(/PRIVATE_UPSTREAM_OUTPUT|fictional-model-key|Bearer/)
       expect(JSON.stringify(records).includes(secret)).toBe(false)
       expect((await member.request.get(origin + '/admin/api/usage-records')).status()).toBe(403)
-      await admin.getByRole('link', { name: 'Usage records', exact: true }).click()
-      const table = admin.getByRole('grid', { name: 'Tool usage records', exact: true })
-      await table.getByText('Usage denied', { exact: true }).waitFor()
-      await admin.getByLabel('Filter by member', { exact: true }).fill('member')
-      await admin.getByLabel('Filter by capability', { exact: true }).fill(expertFixturePackage)
-      await admin.getByLabel('Filter by operation', { exact: true }).fill('search')
-      await admin.getByLabel('Filter by result', { exact: true }).click()
-      await admin.getByRole('option', { name: 'Usage succeeded', exact: true }).click()
-      await admin.getByLabel('From (local time)', { exact: true }).fill(new Date(records.items.at(-1)!.startedAt - 1000).toISOString())
-      await admin.getByLabel('Until (exclusive, local time)', { exact: true }).fill(new Date(records.items[0]!.startedAt + 1000).toISOString())
-      await admin.getByRole('button', { name: 'Apply filters', exact: true }).click()
-      await expect.poll(() => table.getByRole('row').count()).toBe(2)
-      await table.getByText('Usage succeeded', { exact: true }).waitFor()
-      await admin.getByLabel('Filter by group', { exact: true }).click()
-      await admin.getByRole('option', { name: 'New usage group', exact: true }).click()
-      await admin.getByRole('button', { name: 'Apply filters', exact: true }).click()
-      await table.getByText('No usage records match these filters.', { exact: true }).waitFor()
-      await admin.getByRole('link', { name: 'System settings', exact: true }).click()
-      await expect.poll(() => admin.getByLabel('Retention days', { exact: true }).inputValue()).toBe('180')
-      await admin.getByLabel('Retention days', { exact: true }).fill('7')
-      await admin.getByRole('region', { name: 'Usage record retention', exact: true }).getByRole('button', { name: 'Save changes', exact: true }).click()
-      await expect.poll(async () => (await api('usage-settings')).retentionDays).toBe(7)
+      // hidden in 0.1.32: retain filtering and retention coverage through the same API.
+      const filters = new URLSearchParams({
+        username: 'member',
+        capability: expertFixturePackage,
+        operation: 'search',
+        outcome: 'succeeded',
+        from: String(records.items.at(-1)!.startedAt - 1000),
+        until: String(records.items[0]!.startedAt + 1000),
+      })
+      expect((await api('usage-records?' + filters)).items).toEqual([records.items.at(-1)])
+      filters.set('groupId', newGroup.id)
+      expect((await api('usage-records?' + filters)).total).toBe(0)
+      expect((await api('usage-settings')).retentionDays).toBe(180)
+      await api('usage-settings', { retentionDays: 7 })
+      expect((await api('usage-settings')).retentionDays).toBe(7)
       await app.stop()
       app = candidateApplication(config)
       origin = await app.start()
@@ -233,14 +226,10 @@ it.skipIf(!runtimeSettings.containerImage)(
       await admin.waitForURL(origin + '/admin')
       expect((await api('usage-settings')).retentionDays).toBe(7)
       expect((await api('usage-records')).total).toBe(3)
-      await admin.getByRole('button', { name: 'Edit member', exact: true }).click()
-      await admin.getByRole('dialog').getByRole('link', { name: 'View usage records', exact: true }).click()
-      await admin.waitForURL(origin + '/admin/usage-records?username=member')
-      expect(await admin.getByLabel('Filter by member', { exact: true }).inputValue()).toBe('member')
-      await admin.getByRole('button', { name: /^Platform language:/u }).click()
-      await admin.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
-      await admin.getByRole('heading', { name: '使用记录', exact: true }).waitFor()
-      expect((await admin.request.get(origin + '/admin/usage-records')).status()).toBe(200)
+      expect((await api('usage-records?username=member')).total).toBe(3)
+      const hidden = await admin.request.get(origin + '/admin/usage-records', { maxRedirects: 0 })
+      expect(hidden.status()).toBe(302)
+      expect(hidden.headers().location).toBe('/admin')
     } catch (error) {
       failure = error
     } finally {

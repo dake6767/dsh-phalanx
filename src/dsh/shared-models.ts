@@ -1,4 +1,4 @@
-import { enabledSharedModels, type SharedModelState } from '../domain/shared-models.js'
+import { enabledSharedModels, type SharedModelState, type SharedProvider } from '../domain/shared-models.js'
 import type { PlatformLocale } from '../domain/platform-language.js'
 import { join } from 'node:path'
 
@@ -120,11 +120,23 @@ function defaultSelection(state: SharedModelState): { provider: string; model: s
   return state.defaultModelId === null ? { ...unconfiguredModelSelection } : sharedModelSelection(state, state.defaultModelId)
 }
 
+// Opaque gateway routes hide the upstream identity pi-ai normally uses to infer these switches.
+const deepseekCompletionsCompatibility = {
+  supportsStore: false,
+  supportsDeveloperRole: false,
+  maxTokensField: 'max_tokens',
+  requiresReasoningContentOnAssistantMessages: true,
+  thinkingFormat: 'deepseek',
+} as const
+
 /** One DSH provider per enabled supplier; the group title is the supplier name and entries carry the model name only. */
 export function managedProviderEntries(
   state: SharedModelState,
   locale: PlatformLocale,
-): Record<string, { displayName: string; api: string; apiKeyEnv: string; models: ReturnType<typeof publicSharedModels> }> {
+): Record<
+  string,
+  { displayName: string; api: string; apiKeyEnv: string; models: ReturnType<typeof publicSharedModels>; compat?: typeof deepseekCompletionsCompatibility }
+> {
   const enabled = state.providers.filter(provider => provider.enabled && provider.apiKey.length > 0 && provider.models.some(model => model.enabled))
   // An enabled supplier without any enabled model leaves nothing selectable; keep the explanation route.
   if (enabled.length === 0)
@@ -142,10 +154,11 @@ export function managedProviderEntries(
       {
         displayName: provider.name,
         api: provider.apiFormat,
+        ...(provider.apiFormat === 'openai-completions' && new URL(provider.baseUrl).hostname === 'api.deepseek.com'
+          ? { compat: deepseekCompletionsCompatibility }
+          : {}),
         apiKeyEnv: 'DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN',
-        models: provider.models
-          .filter(model => model.enabled)
-          .map(model => ({ id: model.id, name: model.name, input: model.input === 'text+image' ? ['text', 'image'] : ['text'] })),
+        models: provider.models.filter(model => model.enabled).map(modelDeclaration),
       },
     ]),
   )
@@ -153,11 +166,17 @@ export function managedProviderEntries(
 
 /** The selectable model entries across every enabled supplier, or the localized explanation entry when none exists. */
 export function publicSharedModels(state: SharedModelState, locale: PlatformLocale = 'en') {
-  const models = enabledSharedModels(state).map(({ model }) => ({
+  const models = enabledSharedModels(state).map(({ model }) => modelDeclaration(model))
+  // A selectable explanation route lets native first use reach the explicit gateway failure.
+  return models.length === 0 ? [{ id: 'unconfigured', name: locale === 'zh-CN' ? '共享模型未配置' : 'Shared models not configured', input: ['text'] }] : models
+}
+
+/** Model capability only; the member or upstream owns the selected/default effort. */
+function modelDeclaration(model: SharedProvider['models'][number]) {
+  return {
     id: model.id,
     name: model.name,
     input: model.input === 'text+image' ? ['text', 'image'] : ['text'],
-  }))
-  // A selectable explanation route lets native first use reach the explicit gateway failure.
-  return models.length === 0 ? [{ id: 'unconfigured', name: locale === 'zh-CN' ? '共享模型未配置' : 'Shared models not configured', input: ['text'] }] : models
+    ...(model.reasoning ? { reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high' } } : {}),
+  }
 }

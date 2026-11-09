@@ -45,6 +45,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
         missing: await this.missing(expert),
         modelLabel: this.model(expert)?.label ?? null,
         modelUnavailable: Boolean(expert.model && !this.model(expert)),
+        ...(expert.reasoningEffort && !this.model(expert)?.reasoning ? { reasoningUnavailable: true } : {}),
         failures: accounts.flatMap(account => {
           const status = this.runtime?.status(account.username)
           const failure =
@@ -103,6 +104,14 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
       !(previous?.model?.providerId === model.providerId && previous.model.name === model.name)
     )
       throw new BusinessRuleError('invalid', 'Select an enabled shared model.', 'expert-invalid')
+    const reasoningEffort = input.reasoningEffort === undefined ? previous?.reasoningEffort : input.reasoningEffort
+    const selectedModel = this.modelLibrary().find(row => row.providerId === model?.providerId && row.name === model.name)
+    if (
+      reasoningEffort &&
+      !selectedModel?.reasoning &&
+      !(previous?.reasoningEffort === reasoningEffort && previous.model?.providerId === model?.providerId && previous.model?.name === model?.name)
+    )
+      throw new BusinessRuleError('invalid', 'Select a model that supports reasoning.', 'expert-invalid')
     const expert: Expert = {
       ...previous,
       ...input,
@@ -112,6 +121,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
       plugins: input.plugins ?? previous?.plugins ?? [],
       mcp: input.mcp ?? previous?.mcp ?? [],
       model,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
       examples: input.examples ?? previous?.examples ?? [],
     }
     await this.fresh(revision)
@@ -179,6 +189,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
             plugins: row.plugins,
             mcp: row.mcp,
             modelLabel: this.model(row)?.label ?? null,
+            ...(row.reasoningEffort && !this.model(row)?.reasoning ? { reasoningUnavailable: true } : {}),
             partial:
               (await this.missing(row)).length > 0 ||
               Boolean(
@@ -219,7 +230,11 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     if (status?.state !== 'ready' || !this.currentPreset(status.instance, expert))
       throw new BusinessRuleError('conflict', 'Restart your instance to apply expert changes.', 'expert-restart-required')
     const model = this.model(expert)
-    return { expertId: expert.id, model: model === undefined ? null : { providerId: model.providerId, id: model.id } }
+    return {
+      expertId: expert.id,
+      model: model === undefined ? null : { providerId: model.providerId, id: model.id },
+      ...(expert.reasoningEffort && model?.reasoning ? { reasoningEffort: expert.reasoningEffort } : {}),
+    }
   }
   private checking(status: ReturnType<CommunityRuntimePort['status']> | undefined, expert: Expert): boolean {
     return Boolean(

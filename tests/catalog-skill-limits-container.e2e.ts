@@ -66,10 +66,7 @@ it('imports a catalog skill near the file and size limits, distributes it and di
     ])
     vi.stubEnv('HTTPS_PROXY', git.proxy)
     vi.stubEnv('GIT_SSL_CAINFO', git.caFile)
-    await writeFile(
-      overlay,
-      JSON.stringify([{ id: 'tools', config: { mode: 'native' } }, { insert: [{ id: 'skills-observer', name: '/dsh-phalanx/home/skills-observer.mjs' }] }]),
-    )
+    await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'skills-observer', name: '/dsh-phalanx/home/skills-observer.mjs' }] }]))
     app = compiled.createCommunityApplication(
       withTestDatabase({
         downloadSources: catalog.downloadSources,

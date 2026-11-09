@@ -61,6 +61,8 @@ export interface ModelTokenUsage {
   readonly output: number | null
   readonly cacheRead: number | null
   readonly cacheWrite: number | null
+  /** Output subset; absent legacy observations and unreported counters remain unknown. */
+  readonly reasoning?: number | null
 }
 export interface UsageModelBucket extends UsageMember {
   readonly modelId: string

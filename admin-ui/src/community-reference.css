@@ -41,4 +41,65 @@
 .skill-library-tabs > .tabs__list-container .tabs__list { width: max-content; }
 .skill-library-tabs > .tabs__list-container .tabs__tab { flex: none; width: auto; white-space: nowrap; padding-inline: 20px; }
 
-.skill-catalog-tabs > .tabs__list-container .tabs__tab { padding-inline: 6px; }
+.library-compact-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+}
+.library-compact-grid .plugin-library-card {
+  padding: 12px;
+  gap: 8px;
+}
+.library-compact-grid .card__header { gap: 2px; }
+.library-compact-grid .card__description { margin-top: 0; }
+.library-card-heading, .library-compact-grid .plugin-card-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.library-card-heading svg { flex: none; color: var(--muted); }
+.plugin-summary-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.library-compact-grid .plugin-card-status { margin-top: auto; min-height: 24px; flex-wrap: wrap; }
+.library-workspace-tabs > .tabs__panel { padding-inline: 0; }
+.library-workspace-tabs > .tabs__list-container {
+  --library-tabs-radius: calc(var(--radius) * 2.5);
+  --library-tabs-inset: 4px;
+  border-radius: var(--library-tabs-radius);
+}
+.library-workspace-tabs > .tabs__list-container .tabs__list { padding: var(--library-tabs-inset); }
+.library-workspace-tabs :is(.tabs__tab, .tabs__indicator) {
+  border-radius: calc(var(--library-tabs-radius) - var(--library-tabs-inset));
+}
+
+@media (max-width: 600px) {
+  .library-workspace-tabs > .tabs__list-container .tabs__list {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .library-workspace-tabs > .tabs__list-container .tabs__tab {
+    flex: 1 1 auto;
+    padding-inline: 10px;
+    white-space: normal;
+  }
+}
+.expert-card-icon { margin-inline-end: 6px; }
+.expert-editor .plugin-detail-section .button { justify-self: start; }
+.catalog-entry-facts { display: grid; gap: 6px; margin: 10px 0 0; font-size: 12px; }
+.catalog-entry-facts > div { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; }
+.catalog-entry-facts dt { white-space: nowrap; }
+.catalog-entry-facts dt { color: var(--muted); }
+.catalog-entry-facts dd { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; color: var(--foreground); overflow-wrap: anywhere; }
+.plugin-detail-section .catalog-entry-facts { margin: 0; font-size: 13px; }
+.plugin-detail-section .catalog-entry-facts > div { grid-template-columns: 120px minmax(0, 1fr); }
+.catalog-entry-card .plugin-card-error { margin: 8px 0 0; font-size: 12px; }
+.catalog-entry-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.panel-filter-actions { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
+.panel-filter-actions .panel-filter { margin-left: 0; }
+@media (max-width: 760px) { .panel-filter-actions { width: 100%; margin-left: 0; } .panel-filter-actions .panel-filter { flex: 1 1 auto; } }
+/* Card actions sit beside 20px chips; keep them compact so the footer reads as one line. */
+.plugin-library-card .card__footer .button:not(.plugin-details-action) { height: 26px; min-width: 0; padding: 0 10px; border-radius: calc(var(--radius) * 2); font-size: 12px; font-weight: 500; gap: 4px; }
+.plugin-library-card .card__footer .button:not(.plugin-details-action) svg { width: 14px; height: 14px; }
+.catalog-entry-actions { gap: 4px; }
+/* Status never truncates; when it and the actions do not fit, the actions drop to a right-aligned second row. */
+.catalog-entry-card .card__footer.plugin-card-status { flex-wrap: wrap; row-gap: 8px; }
+.catalog-entry-card .plugin-card-status > .chip { flex: none; }
+.catalog-entry-actions { flex: none; flex-wrap: nowrap; margin-left: auto; }

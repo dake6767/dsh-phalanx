@@ -12,6 +12,8 @@ export const en = {
   'Confirmed by {username}': 'Confirmed by {username}',
   'Offline backup not confirmed': 'Offline backup not confirmed',
   'I have backed up the master key offline': 'I have backed up the master key offline',
+  Overview: 'Overview',
+  'Resources and limits': 'Resources and limits',
 }
 export const zhCN: Record<keyof typeof en, string> = {
   'Platform database and master key': '平台数据库与主密钥',
@@ -27,4 +29,6 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Confirmed by {username}': '由 {username} 确认',
   'Offline backup not confirmed': '尚未确认离线备份',
   'I have backed up the master key offline': '我已离线备份主密钥',
+  Overview: '概览',
+  'Resources and limits': '资源与限制',
 }

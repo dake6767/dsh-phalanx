@@ -65,10 +65,7 @@ export async function openOfficeSession<Input extends Pick<OfficeFactsInput, 'ro
   // Only this owned observation envelope outlives the broker's unchanged 120-second limit.
   assert([...observer.matchAll(/AbortSignal.timeout\(20000\)/gu)].length === 1, 'Regular observer timeout template changed')
   const overlay = join(input.root, 'observer.json')
-  await writeFile(
-    overlay,
-    JSON.stringify([{ id: 'tools', config: { mode: 'native' } }, { insert: [{ id: 'office-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]),
-  )
+  await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'office-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]))
   const base = runtimeSection(root, 'https://example.test', runtimeSettings)
   const runtime = { ...base, environment: { ...base.environment, TMPDIR: '/tmp' }, patches: [overlay] }
   const inventory = process.env.DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES

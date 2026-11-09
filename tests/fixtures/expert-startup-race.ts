@@ -42,6 +42,15 @@ export async function expertStartupRace(page: Page) {
     if (route.request().failure()) return
     await route.fulfill({ response })
   })
+  await page.route('**/api/phalanx.expert-conversation', async route => {
+    const response = await route.fetch()
+    const result = (await response.json()) as { sessionId?: string }
+    await route.fulfill({ response })
+    if (response.ok() && result.sessionId) {
+      expertSession = result.sessionId
+      releaseInitialization.resolve()
+    }
+  })
   await page.route('**/api/session/create', async route => {
     const request = route.request().postDataJSON().payload.args.request as { agentPreset?: string; sessionId?: string }
     const response = await route.fetch()

@@ -25,12 +25,15 @@ import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
 import CommunityMessage from './CommunityMessage'
 import CommunityField from './CommunityField'
+import CommunitySelect from './CommunitySelect'
+import CommunityIcon from './CommunityIcon'
 import CommunitySkillContent from './CommunitySkillContent'
 
 export default function CommunityContributions({ onChanged, kind = 'skill' }: { onChanged: () => void; kind?: 'skill' | 'plugin' }) {
   const { t, locale, errorText } = usePlatformLanguage()
   const [data, setData] = useState<CommunityContributionsView>(),
-    [error, setError] = useState<unknown>()
+    [error, setError] = useState<unknown>(),
+    [statusFilter, setStatusFilter] = useState('all')
   const [selected, setSelected] = useState<string>(),
     [reason, setReason] = useState(''),
     [busy, setBusy] = useState(false),
@@ -177,6 +180,8 @@ export default function CommunityContributions({ onChanged, kind = 'skill' }: { 
   }
   const status = (value: string) =>
     t(value === 'pending' ? 'Pending contribution' : value === 'adopted' ? 'Adopted' : value === 'declined' ? 'Not adopted' : 'Withdrawn')
+  const statusTone = (value: string) => (value === 'pending' ? 'accent' : value === 'adopted' ? 'success' : 'default')
+  const shown = data?.contributions.filter(row => statusFilter === 'all' || row.status === statusFilter) ?? []
   const date = (value: number) => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(value)
   return (
     <section className="panel plugin-library-panel" aria-label={t('Member contributions')}>
@@ -184,51 +189,82 @@ export default function CommunityContributions({ onChanged, kind = 'skill' }: { 
         <div>
           <div className="panel-title-row">
             <h2>{t('Member contributions')}</h2>
-            <span className="panel-item-count">{data?.contributions.filter(row => row.status === 'pending').length ?? '—'}</span>
+            <span className="panel-item-count">
+              {t('{count} pending', { count: data?.contributions.filter(row => row.status === 'pending').length ?? '—' })}
+            </span>
           </div>
           <p>{t('Review contributions before adding them to the library.')}</p>
         </div>
-        <Button variant="secondary" onPress={refresh}>
-          {t('Reload')}
-        </Button>
+        <div className="panel-filter-actions">
+          <CommunitySelect
+            className="panel-filter"
+            hideLabel
+            label={t('Filter by contribution status')}
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { id: 'all', label: t('All contributions') },
+              { id: 'pending', label: t('Pending contribution') },
+              { id: 'adopted', label: t('Adopted') },
+              { id: 'declined', label: t('Not adopted') },
+              { id: 'withdrawn', label: t('Withdrawn') },
+            ]}
+          />
+          <Button variant="secondary" onPress={refresh}>
+            {t('Reload')}
+          </Button>
+        </div>
       </div>
       {error !== undefined && !detail ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
       {!data ? (
-        <p role="status">{t('Loading…')}</p>
-      ) : !data.contributions.length ? (
-        <p className="empty-state">{t('No contributions yet')}</p>
+        <p className="table-empty" role="status">
+          {t('Loading…')}
+        </p>
+      ) : !shown.length ? (
+        <Card className="plugin-library-empty" variant="transparent">
+          <Card.Header>
+            <Card.Title>{t('No contributions yet')}</Card.Title>
+          </Card.Header>
+        </Card>
       ) : (
-        <div className="plugin-card-grid">
-          {data.contributions.map(row => (
+        <div className="plugin-card-grid library-compact-grid">
+          {shown.map(row => (
             <Card key={row.id} className="plugin-library-card">
               <Card.Header>
-                <div className="plugin-card-top">
-                  <Chip size="sm" variant="soft">
-                    {status(row.status)}
-                  </Chip>
+                <div className="library-card-heading">
+                  <Card.Title>{row.name}</Card.Title>
+                  <CommunityIcon name="chevron" size={14} />
                 </div>
-                <Card.Title>{row.name}</Card.Title>
-                <Card.Description>{row.declaration.purpose}</Card.Description>
-              </Card.Header>
-              <Card.Content>
-                <p>
+                <p className="plugin-summary-meta">
                   {row.contributor.username} · {date(row.submittedAt)}
                 </p>
-              </Card.Content>
-              <Card.Footer>
-                <Button
-                  variant="secondary"
-                  onPress={() => {
-                    setReview(undefined)
-                    setStep('review')
-                    setReason('')
-                    setError(undefined)
-                    setSelected(row.id)
-                  }}
-                >
-                  {t('Review contribution')}
-                </Button>
+                <Card.Description>{row.declaration.purpose}</Card.Description>
+              </Card.Header>
+              <Card.Footer className="plugin-card-status">
+                <div className="flex flex-wrap gap-2">
+                  <Chip size="sm" variant="soft" color={statusTone(row.status)}>
+                    {status(row.status)}
+                  </Chip>
+                  {row.findings?.length ? (
+                    <Chip size="sm" variant="soft" color="warning">
+                      {t('{count} findings', { count: row.findings.length })}
+                    </Chip>
+                  ) : null}
+                </div>
               </Card.Footer>
+              <Button
+                variant="tertiary"
+                size="sm"
+                className="plugin-details-action"
+                aria-label={t('Review contribution')}
+                onPress={() => {
+                  setReview(undefined)
+                  setStep('review')
+                  setReason('')
+                  setError(undefined)
+                  setSelected(row.id)
+                }}
+              />
             </Card>
           ))}
         </div>
@@ -237,7 +273,6 @@ export default function CommunityContributions({ onChanged, kind = 'skill' }: { 
         <CommunityDialog
           drawer
           drawerClassName="plugin-drawer"
-          eyebrow={t('Member contributions')}
           title={detail.name}
           busy={busy}
           onClose={close}

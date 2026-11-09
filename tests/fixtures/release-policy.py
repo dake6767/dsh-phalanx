@@ -26,7 +26,17 @@ for source in [{**baseline,'targetVersion':'0.1.23'},target]:
 # Same-runtime upgrades need no new transition; a different source revision must
 # still be explicitly admitted by protocol 3.
 assert policy['compatibility']['protocol']==3
-assert policy['compatibility']['sourceDshRevisions']==[baseline['dshRevision']]
+def version_tuple(value):return tuple(map(int,value.split('.')))
+source_range=policy['compatibility']['source']
+formal_revisions={}
+for path in Path('releases/acceptance').glob('*.json'):
+    if len(path.stem.split('.'))!=3 or not all(part.isdecimal() for part in path.stem.split('.')):continue
+    accepted=json.loads(path.read_text())
+    if (accepted.get('status')=='accepted' and
+        version_tuple(source_range['min'])<=version_tuple(path.stem)<version_tuple(source_range['maxExclusive'])):
+        formal_revisions[path.stem]=accepted['dshRevision']
+assert set(policy['compatibility']['sourceDshRevisions'])==set(formal_revisions.values())
+assert len(policy['compatibility']['sourceDshRevisions'])==len(set(formal_revisions.values()))
 if baseline['dshRevision'] != revision:
     assert baseline['dshRevision'] in policy['compatibility'].get('sourceDshRevisions',[])
 undeclared={**baseline,'dshRevision':'e'*40}

@@ -19,7 +19,7 @@ export default function CommunityLibraryMaintenance({
   revision: string
   onChanged: () => void
 }) {
-  const { t, locale, errorText } = usePlatformLanguage()
+  const { t, errorText } = usePlatformLanguage()
   const [username, setUsername] = useState(provenance?.maintainer?.username ?? ''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState<unknown>()
@@ -63,6 +63,14 @@ export default function CommunityLibraryMaintenance({
         </Button>
       </div>
       {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
+    </section>
+  )
+}
+
+export function CommunityLibraryVersionHistory({ provenance }: { provenance?: LibraryProvenance }) {
+  const { t, locale } = usePlatformLanguage()
+  return (
+    <>
       <h3>{t('Version history')}</h3>
       {!provenance?.versions.length ? (
         <p>{t('No version records')}</p>
@@ -80,6 +88,6 @@ export default function CommunityLibraryMaintenance({
           ))}
         </ul>
       )}
-    </section>
+    </>
   )
 }

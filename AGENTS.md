@@ -35,6 +35,7 @@ version narration against this map as well.
 | [Architecture](docs/architecture.md) | Contributors, agents | Layers, seam owners, ten laws, runtime guarantees, current key decisions, update transaction | Schema history, superseded alternatives |
 | [Contributing](CONTRIBUTING.md) | Contributors, maintainers | Development, real DSH verification, general CI/candidate/promotion contract | Per-version chapters |
 | AGENTS.md | Agents | Engineering rules and this documentation map | Product operating instructions |
+| [Admin UI design](admin-ui/DESIGN.md) | Contributors, agents changing UI | Visual direction, tokens' roles, layout, reusable components, sample pages, UI don'ts for the admin app and entry pages | Product behavior, engineering rules |
 | `releases/notes/` and `releases/acceptance/` | Users, release maintainers | Version changes, one-time upgrade steps, executed acceptance evidence | General reference duplicated from the owners above |
 
 If new content does not fit an existing owner, propose the document change to the

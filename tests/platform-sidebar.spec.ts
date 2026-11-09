@@ -17,9 +17,9 @@ it('registers the account and App Center through official slots without a servic
     document: { createElement: () => ({ dataset: {}, remove() {} }), head: { appendChild() {} } },
     console,
   })
-  plugin.apply({
+  const context = {
     effect: (run: () => unknown) => run(),
-    inject: () => {},
+    inject: (_names: string[], apply: (context: object) => unknown): unknown => apply(context),
     locale: { register: () => () => {}, bind: () => () => '', subscribe: () => () => {}, getSnapshot: () => ({ active: 'en' }) },
     slots: {
       inject: (_name: string, register: () => unknown) => register(),
@@ -28,12 +28,15 @@ it('registers the account and App Center through official slots without a servic
         return () => {}
       },
     },
-  })
-  expect(entries.filter(entry => entry.name === 'sidebar.footer.action').map(entry => entry.id)).toEqual(['phalanx-platform-account'])
+  }
+  plugin.apply(context)
+  expect(entries).toContainEqual(expect.objectContaining({ name: 'settings.launcher', priority: -10 }))
+  expect(entries.some(entry => entry.name === 'sidebar.footer.action')).toBe(false)
   expect(entries).toContainEqual(expect.objectContaining({ name: 'sidebar.panellist', id: 'phalanx-market' }))
+  expect(entries.filter(entry => entry.name.startsWith('plugins.detail.'))).toEqual([])
 })
 
-it('opens a plugin contribution draft through the injected navigation context and an existing default workspace', async () => {
+it.skip('hidden in 0.1.32: opens a plugin contribution draft through the injected navigation context and an existing default workspace', async () => {
   type Element = { props: { onClick?: () => void }; children: Element[] }
   let plugin!: { apply(context: object): void }, action!: (props: object) => Element
   const started: object[] = []

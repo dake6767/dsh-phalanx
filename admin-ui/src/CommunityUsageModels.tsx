@@ -86,7 +86,7 @@ export default function CommunityUsageModels({ revision }: { revision: number })
   }
   return (
     <>
-      <p className="muted">
+      <p className="muted usage-tab-note">
         {t(
           'Known token totals are shown separately from unknown requests. Missing counters remain unknown. All ranges use UTC hours, based on when each request started.',
         )}
@@ -100,12 +100,11 @@ export default function CommunityUsageModels({ revision }: { revision: number })
             apply()
           }}
         >
-          <CommunityField label={t('Filter by member')} value={username} onChange={setUsername} variant="secondary" />
+          <CommunityField label={t('Filter by member')} value={username} onChange={setUsername} />
           <CommunitySelect
             label={t('Filter by group')}
             value={groupId || 'all'}
             onChange={value => setGroupId(value === 'all' ? '' : value)}
-            variant="secondary"
             options={[
               { id: 'all', label: t('All groups') },
               ...groups.map(group => ({ id: group.id, label: communityGroupLabel(group, t) })),
@@ -117,36 +116,30 @@ export default function CommunityUsageModels({ revision }: { revision: number })
             label={t('Filter by model')}
             value={modelId || 'all'}
             onChange={value => setModelId(value === 'all' ? '' : value)}
-            variant="secondary"
             options={[
               { id: 'all', label: t('All models') },
               ...[...labels].map(([id, label]) => ({ id, label })),
               ...[...new Set(data?.items.map(row => row.modelId) ?? [])].filter(id => !labels.has(id)).map(id => ({ id, label: id })),
             ]}
           />
-          <CommunityField
-            label={t('From (UTC hour)')}
-            value={from}
-            onChange={setFrom}
-            description={t('For example 2026-01-01T00:00. Hours only.')}
-            variant="secondary"
-          />
+          <CommunityField label={t('From (UTC hour)')} value={from} onChange={setFrom} description={t('For example 2026-01-01T00:00. Hours only.')} />
           <CommunityField
             label={t('Until (exclusive, UTC hour)')}
             value={until}
             onChange={setUntil}
             description={t('For example 2026-01-01T00:00. Hours only.')}
-            variant="secondary"
           />
-          <Button type="submit" variant="secondary">
-            {t('Apply filters')}
-          </Button>
-          <Button variant="secondary" onPress={() => preset(1)}>
-            {t('Today (UTC)')}
-          </Button>
-          <Button variant="secondary" onPress={() => preset(7)}>
-            {t('Last 7 days (UTC)')}
-          </Button>
+          <div className="usage-filter-actions">
+            <Button type="button" variant="tertiary" onPress={() => preset(1)}>
+              {t('Today (UTC)')}
+            </Button>
+            <Button type="button" variant="tertiary" onPress={() => preset(7)}>
+              {t('Last 7 days (UTC)')}
+            </Button>
+            <Button type="submit" variant="secondary">
+              {t('Apply filters')}
+            </Button>
+          </div>
         </form>
       </section>
       {data && (
@@ -162,7 +155,7 @@ export default function CommunityUsageModels({ revision }: { revision: number })
             <section className="panel" key={key}>
               <h2>{t(label)}</h2>
               <dl>
-                {data.summaries[key].map(row => (
+                {data.summaries[key].slice(0, 5).map(row => (
                   <div key={row.key}>
                     <dt>{key === 'groups' ? groupLabel(row.key) : key === 'capabilities' ? (labels.get(row.key) ?? row.key) : row.key || '—'}</dt>
                     <dd>{row.count.toLocaleString(locale)}</dd>
@@ -187,6 +180,7 @@ export default function CommunityUsageModels({ revision }: { revision: number })
                   <Table.Column>{t('Requests')}</Table.Column>
                   <Table.Column>{t('Input tokens')}</Table.Column>
                   <Table.Column>{t('Output tokens')}</Table.Column>
+                  <Table.Column>{t('Reasoning tokens (included in output)')}</Table.Column>
                   <Table.Column>{t('Cache read tokens')}</Table.Column>
                   <Table.Column>{t('Cache write tokens')}</Table.Column>
                   <Table.Column>{t('Unknown requests')}</Table.Column>
@@ -198,7 +192,7 @@ export default function CommunityUsageModels({ revision }: { revision: number })
                       <Table.Cell>{row.username}</Table.Cell>
                       <Table.Cell>{labels.get(row.modelId) ?? row.modelId}</Table.Cell>
                       <Table.Cell>{row.requests.toLocaleString(locale)}</Table.Cell>
-                      {[row.tokens.input, row.tokens.output, row.tokens.cacheRead, row.tokens.cacheWrite].map((value, index) => (
+                      {[row.tokens.input, row.tokens.output, row.tokens.reasoning ?? null, row.tokens.cacheRead, row.tokens.cacheWrite].map((value, index) => (
                         <Table.Cell key={index}>{value === null ? '—' : value.toLocaleString(locale)}</Table.Cell>
                       ))}
                       <Table.Cell>{row.unknownRequests.toLocaleString(locale)}</Table.Cell>

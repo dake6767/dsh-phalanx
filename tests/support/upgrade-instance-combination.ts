@@ -190,6 +190,7 @@ os.replace(temporary,p)`)
       expect(member.url()).toBe(bookmark)
       await admin.goto(origin + '/admin')
       await admin.getByRole('link', { name: 'System settings', exact: true }).click()
+      await admin.getByRole('tab', { name: 'Resources and limits', exact: true }).click()
       const form = admin.getByRole('region', { name: 'Member instances', exact: true })
       // Ordinary deployment values; extreme limits belong to the cgroup T2 cases, not cold installed startup.
       await form.getByLabel('CPU (cores)', { exact: true }).fill('2')

@@ -10,6 +10,7 @@ import { communityRuntimeDependencies, changeRuntimeDependency, communitySuites 
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityIcon from './CommunityIcon'
 import CommunityDialog from './CommunityDialog'
+import CommunityGrantSection from './CommunityGrantSection'
 import CommunityMessage from './CommunityMessage'
 import CommunitySelect from './CommunitySelect'
 import CommunityRuntimeDependencyForm, { DependencyCommandField } from './CommunityRuntimeDependencyForm'
@@ -175,54 +176,37 @@ export default function CommunityRuntimeDependencies() {
             </Card.Header>
           </Card>
         ) : (
-          <div className="plugin-card-grid">
+          <div className="plugin-card-grid library-compact-grid">
             {visible.map(row => (
               <Card key={row.name} className="plugin-library-card">
                 <Card.Header>
-                  <div className="plugin-card-top">
-                    <span className="plugin-card-icon" aria-hidden="true">
-                      <CommunityIcon name="plugins" size={20} />
-                    </span>
-                    <Chip size="sm" variant="soft" color={stageColor(row)}>
-                      {stage(row)}
-                    </Chip>
+                  <div className="library-card-heading">
+                    <Card.Title>{row.name}</Card.Title>
+                    <CommunityIcon name="chevron" size={14} />
                   </div>
-                  <Card.Title>{row.name}</Card.Title>
+                  <p className="plugin-summary-meta">
+                    {sourceLabel(row)} · {row.current ? size(row.current.bytes) : '—'} · {t('{count} references', { count: row.references.length })}
+                  </p>
                 </Card.Header>
                 <Card.Content>
-                  <dl className="plugin-card-metadata">
-                    <div>
-                      <dt>{t('Source')}</dt>
-                      <dd>{sourceLabel(row)}</dd>
-                    </div>
-                    <div>
-                      <dt>{t('Storage')}</dt>
-                      <dd>{row.current ? size(row.current.bytes) : '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>{t('References')}</dt>
-                      <dd>{row.references.length}</dd>
-                    </div>
-                  </dl>
                   {!row.isolated ? <p className="plugin-card-error">{t('Not isolated · development only')}</p> : null}
                   {row.stage === 'failed' && row.current ? <p>{t('Previous usable version remains available.')}</p> : null}
                 </Card.Content>
-                <Card.Footer>
-                  <span className="plugin-details-label" aria-hidden="true">
-                    {t('Dependency details')}
-                    <CommunityIcon name="chevron" size={14} />
-                  </span>
-                  <Button
-                    variant="tertiary"
-                    size="sm"
-                    aria-label={t('View dependency {name}', { name: row.name })}
-                    className="plugin-details-action"
-                    onPress={() => {
-                      setTab('preparation')
-                      setSelected(row.name)
-                    }}
-                  />
+                <Card.Footer className="plugin-card-status">
+                  <Chip size="sm" variant="soft" color={stageColor(row)}>
+                    {stage(row)}
+                  </Chip>
                 </Card.Footer>
+                <Button
+                  variant="tertiary"
+                  size="sm"
+                  aria-label={t('View dependency {name}', { name: row.name })}
+                  className="plugin-details-action"
+                  onPress={() => {
+                    setTab('preparation')
+                    setSelected(row.name)
+                  }}
+                />
               </Card>
             ))}
           </div>
@@ -248,7 +232,6 @@ export default function CommunityRuntimeDependencies() {
         <CommunityDialog
           drawer
           drawerClassName="plugin-drawer"
-          eyebrow={t('Dependency details')}
           title={detail.name}
           closeLabel={t('Close dependency details')}
           busy={busy}
@@ -256,12 +239,11 @@ export default function CommunityRuntimeDependencies() {
         >
           <div className="drawer-identity plugin-identity">
             <span className="plugin-card-icon" aria-hidden="true">
-              <CommunityIcon name="plugins" size={22} />
+              <CommunityIcon name="package" size={22} />
             </span>
             <div>
-              <strong>{detail.name}</strong>
               <span>
-                {sourceLabel(detail)} · {detail.current ? size(detail.current.bytes) : '—'}
+                {sourceLabel(detail)} · {detail.current ? size(detail.current.bytes) : '—'} · {t('{count} references', { count: detail.references.length })}
               </span>
             </div>
             <Chip size="sm" variant="soft" color={stageColor(detail)}>
@@ -291,44 +273,58 @@ export default function CommunityRuntimeDependencies() {
                 </Tabs.Tab>
               </Tabs.List>
             </Tabs.ListContainer>
-            <Tabs.Panel id="preparation">
-              <section className="plugin-detail-section page-stack">
-                <Button
-                  variant="secondary"
-                  isDisabled={busy || detail.stage === 'preparing' || detail.stage === 'validating'}
-                  onPress={() => {
-                    void change('prepare')
-                  }}
-                >
-                  {t(detail.stage === 'failed' ? 'Retry preparation' : 'Prepare again')}
-                </Button>
-                {detail.checks.length ? (
-                  <dl className="plugin-card-metadata">
-                    {detail.checks.map((check, index) => (
-                      <div key={index}>
-                        <dt>{t(checks[check.kind])}</dt>
-                        <dd>
-                          {t(check.passed ? 'Passed' : 'Failed')}
-                          {check.detail ? ` · ${check.detail}` : ''}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                ) : null}
-                <DependencyCommandField label={t('Full preparation and check log')} value={detail.log} readOnly rows={16} />
-              </section>
-            </Tabs.Panel>
-            <Tabs.Panel id="definition">
-              <section className="plugin-detail-section page-stack">
-                {detail.source !== 'mcp-catalog' && detail.source !== 'suite-catalog' ? (
+            <Tabs.Panel id="preparation" className="plugin-settings-panel">
+              <CommunityGrantSection
+                title={t('Preparation and checks')}
+                action={
                   <Button
+                    size="sm"
                     variant="secondary"
                     isDisabled={busy || detail.stage === 'preparing' || detail.stage === 'validating'}
-                    onPress={() => setEditing(true)}
+                    onPress={() => {
+                      void change('prepare')
+                    }}
                   >
-                    {t('Edit runtime dependency')}
+                    {t(detail.stage === 'failed' ? 'Retry preparation' : 'Prepare again')}
                   </Button>
+                }
+              >
+                {detail.checks.length ? (
+                  <ul className="grant-rows dependency-checks">
+                    {detail.checks.map((check, index) => (
+                      <li key={index}>
+                        <div className="grant-row-main">
+                          <div className="grant-row-title">
+                            <strong>{t(checks[check.kind])}</strong>
+                          </div>
+                          {check.detail ? <p>{check.detail}</p> : null}
+                        </div>
+                        <Chip size="sm" variant="soft" color={check.passed ? 'success' : 'danger'}>
+                          {t(check.passed ? 'Passed' : 'Failed')}
+                        </Chip>
+                      </li>
+                    ))}
+                  </ul>
                 ) : null}
+                <DependencyCommandField label={t('Full preparation and check log')} value={detail.log} readOnly rows={12} />
+              </CommunityGrantSection>
+            </Tabs.Panel>
+            <Tabs.Panel id="definition" className="plugin-settings-panel">
+              <CommunityGrantSection
+                title={t('Definition')}
+                action={
+                  detail.source !== 'mcp-catalog' && detail.source !== 'suite-catalog' ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      isDisabled={busy || detail.stage === 'preparing' || detail.stage === 'validating'}
+                      onPress={() => setEditing(true)}
+                    >
+                      {t('Edit runtime dependency')}
+                    </Button>
+                  ) : undefined
+                }
+              >
                 <p>
                   {t('Dependency category')}:{' '}
                   {t(detail.type === 'python-library' ? 'Python libraries' : detail.type === 'resource' ? 'Resource files' : 'Commands')}
@@ -339,27 +335,31 @@ export default function CommunityRuntimeDependencies() {
                 <DependencyCommandField label={t('Prepare command')} value={detail.prepareCommand} readOnly rows={6} />
                 <DependencyCommandField label={t('PATH directories')} value={detail.pathDirectories.join('\n')} readOnly rows={2} />
                 <DependencyCommandField label={t('Check command')} value={detail.checkCommand ?? ''} readOnly rows={2} />
-                <h2>{t('References')}</h2>
+              </CommunityGrantSection>
+              <CommunityGrantSection title={t('References')}>
                 {detail.references.length ? (
-                  <>
-                    <p>{t('Remove these references before deleting the dependency.')}</p>
-                    <ul>
-                      {detail.references.map(reference => (
-                        <li key={reference.kind + ':' + reference.name}>
-                          {t(
-                            ({ skill: 'Skill', execution: 'Platform execution', mcp: 'MCP service', plugin: 'Plugin' } as Record<string, PlatformMessageKey>)[
-                              reference.kind
-                            ]!,
-                          )}{' '}
-                          · {reference.name}
-                        </li>
-                      ))}
-                    </ul>
-                  </>
+                  <ul className="grant-rows">
+                    {detail.references.map(reference => (
+                      <li key={reference.kind + ':' + reference.name}>
+                        <div className="grant-row-main">
+                          <div className="grant-row-title">
+                            <strong>{reference.name}</strong>
+                          </div>
+                          <p>
+                            {t(
+                              ({ skill: 'Skill', execution: 'Platform execution', mcp: 'MCP service', plugin: 'Plugin' } as Record<string, PlatformMessageKey>)[
+                                reference.kind
+                              ]!,
+                            )}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 ) : (
-                  <p>{t('No resource references this dependency.')}</p>
+                  <p className="grant-rows-empty">{t('No resource references this dependency.')}</p>
                 )}
-              </section>
+              </CommunityGrantSection>
             </Tabs.Panel>
           </Tabs>
           {standalone(detail.name) ? (
@@ -387,18 +387,17 @@ export default function CommunityRuntimeDependencies() {
               </Button>
             </div>
           ) : null}
-          <div className="plugin-detail-section">
-            {detail.references.length && tab !== 'definition' ? (
-              <p>
-                {t('Remove these references before deleting the dependency.')} {detail.references.map(reference => reference.name).join(', ')}
-              </p>
-            ) : null}
-            {detail.source !== 'suite-catalog' ? (
-              <Button variant="danger" isDisabled={busy || detail.references.length > 0} onPress={() => setRemoving(true)}>
-                {t('Delete dependency')}
-              </Button>
-            ) : null}
-          </div>
+          {detail.source !== 'suite-catalog' ? (
+            <section className="plugin-detail-section plugin-removal" aria-label={t('Delete dependency')}>
+              <div className="plugin-section-heading">
+                <h2>{t('Delete dependency')}</h2>
+                <Button size="sm" variant="danger" isDisabled={busy || detail.references.length > 0} onPress={() => setRemoving(true)}>
+                  {t('Delete dependency')}
+                </Button>
+              </div>
+              {detail.references.length ? <p className="section-note">{t('Remove these references before deleting the dependency.')}</p> : null}
+            </section>
+          ) : null}
         </CommunityDialog>
       ) : null}
       {uninstalling ? (

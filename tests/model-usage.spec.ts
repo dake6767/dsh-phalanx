@@ -138,7 +138,7 @@ it('forwards a Messages response unchanged and aggregates only usage under the p
         requests: 1,
         unknownRequests: 0,
         deniedRequests: 0,
-        tokens: { input: 10, output: 12, cacheRead: 2, cacheWrite: 3 },
+        tokens: { input: 10, output: 12, cacheRead: 2, cacheWrite: 3, reasoning: null },
       },
     ])
     expect(view.summaries.groups).toEqual([{ key: 'before', count: 1 }])
@@ -189,11 +189,11 @@ it('forwards a Messages response unchanged and aggregates only usage under the p
         requests: 1,
         unknownRequests: 0,
         deniedRequests: 0,
-        tokens: { input: 10, output: 12, cacheRead: 2, cacheWrite: 3 },
+        tokens: { input: 10, output: 12, cacheRead: 2, cacheWrite: 3, reasoning: null },
       },
     ])
     expect((await query('?from=3600000&until=7200000')).items).toEqual([])
-    expect((await query('')).items[0]).toMatchObject({ requests: 2, tokens: { input: 20, output: 24, cacheRead: 4, cacheWrite: 6 } })
+    expect((await query('')).items[0]).toMatchObject({ requests: 2, tokens: { input: 20, output: 24, cacheRead: 4, cacheWrite: 6, reasoning: null } })
     allowed = false
     const denied = await fetch(origin + MODEL_GATEWAY_PATH, {
       method: 'POST',
@@ -211,7 +211,7 @@ it('forwards a Messages response unchanged and aggregates only usage under the p
       requests: 3,
       unknownRequests: 0,
       deniedRequests: 1,
-      tokens: { input: 20, output: 24, cacheRead: 4, cacheWrite: 6 },
+      tokens: { input: 20, output: 24, cacheRead: 4, cacheWrite: 6, reasoning: null },
     })
     allowed = true
     disabled = true
@@ -243,7 +243,7 @@ it('forwards a Messages response unchanged and aggregates only usage under the p
     const separate = (await query('')).items
     expect(separate.map((row: { modelId: string }) => row.modelId)).toEqual(['model-one', 'model-two'])
     expect(separate[0]).toMatchObject({ requests: 4, deniedRequests: 2 })
-    expect(separate[1]).toMatchObject({ requests: 1, tokens: { input: 10, output: 12, cacheRead: 2, cacheWrite: 3 } })
+    expect(separate[1]).toMatchObject({ requests: 1, tokens: { input: 10, output: 12, cacheRead: 2, cacheWrite: 3, reasoning: null } })
   } finally {
     release()
     for (const server of servers) {
@@ -270,8 +270,8 @@ it('preserves forwarded bytes and known counters through malformed, bounded, fai
       ).port
     }`
   }
-  const known = { input: 10, output: 1, cacheRead: 2, cacheWrite: 3 },
-    absent = { input: null, output: null, cacheRead: null, cacheWrite: null }
+  const known = { input: 10, output: 1, cacheRead: 2, cacheWrite: 3, reasoning: null },
+    absent = { input: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null }
   const start =
     'data: {"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":2,"cache_creation_input_tokens":3}}}\n\n'
   const cases = [
@@ -302,7 +302,7 @@ it('preserves forwarded bytes and known counters through malformed, bounded, fai
       id: 'missing-counter',
       type: 'application/json',
       body: '{"type":"message","usage":{"input_tokens":10,"output_tokens":12,"cache_read_input_tokens":null}}',
-      tokens: { input: 10, output: 12, cacheRead: null, cacheWrite: null },
+      tokens: { input: 10, output: 12, cacheRead: null, cacheWrite: null, reasoning: null },
       unknown: 1,
     },
     { id: 'upstream-error', type: 'application/json', body: 'PRIVATE_OUTPUT', tokens: absent, unknown: 1 },
@@ -400,5 +400,42 @@ it('preserves forwarded bytes and known counters through malformed, bounded, fai
     }
     store.close()
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+import { modelUsageObserver } from '../src/dsh/model-usage.js'
+
+it('observes reasoning as an output subset for all protocol JSON and SSE without fabricating absent counters', () => {
+  for (const protocol of ['anthropic-messages', 'openai-completions', 'openai-responses'] as const) {
+    for (const stream of [false, true]) {
+      for (const reasoning of [0, 7, undefined, 'bad', -1]) {
+        const details = protocol === 'anthropic-messages' ? { thinking_tokens: reasoning } : { reasoning_tokens: reasoning }
+        const usage =
+          protocol === 'anthropic-messages'
+            ? { input_tokens: 10, output_tokens: 12, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens_details: details }
+            : protocol === 'openai-completions'
+              ? {
+                  prompt_tokens: 10,
+                  completion_tokens: 12,
+                  prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+                  completion_tokens_details: details,
+                }
+              : { input_tokens: 10, output_tokens: 12, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, output_tokens_details: details }
+        const payload =
+          protocol === 'anthropic-messages'
+            ? stream
+              ? { type: 'message_delta', usage }
+              : { type: 'message', usage }
+            : protocol === 'openai-responses' && stream
+              ? { type: 'response.completed', response: { usage } }
+              : { usage }
+        const observer = modelUsageObserver(protocol, stream ? 'text/event-stream' : 'application/json')
+        const text = stream ? 'data: ' + JSON.stringify(payload) + '\n\n' : JSON.stringify(payload)
+        for (const byte of new TextEncoder().encode(text)) observer.observe(new Uint8Array([byte]))
+        const result = observer.finish()
+        expect(result.tokens).toMatchObject({ input: 10, output: 12, reasoning: typeof reasoning === 'number' && reasoning >= 0 ? reasoning : null })
+        if (reasoning === 'bad' || reasoning === -1) expect(result.usageUnknown).toBe(true)
+      }
+    }
   }
 })

@@ -32,11 +32,7 @@ it.skipIf(!runtimeSettings.containerImage)(
     const overlay = join(root, 'observer.json')
     await writeFile(
       overlay,
-      JSON.stringify([
-        { id: 'tools', config: { mode: 'native' } },
-        { id: 'session-log-deepseek', disabled: true },
-        { insert: [{ id: 'skills-observer', name: '/dsh-phalanx/home/skills-observer.mjs' }] },
-      ]),
+      JSON.stringify([{ id: 'session-log-deepseek', disabled: true }, { insert: [{ id: 'skills-observer', name: '/dsh-phalanx/home/skills-observer.mjs' }] }]),
     )
     const model = await startCommunityModel(),
       runtime = { ...runtimeSection(root, model.origin, runtimeSettings), patches: [overlay] }

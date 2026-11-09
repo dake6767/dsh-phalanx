@@ -33,9 +33,9 @@ export default function CommunityPluginUpstreams({ packageName, onChanged }: { p
     return () => controller.abort()
   }, [packageName])
   return (
-    <section className="plugin-upstreams" aria-label={t('Plugin upstreams')}>
+    <section className="plugin-detail-section" aria-label={t('Plugin upstreams')}>
       <div className="plugin-section-heading">
-        <h3>{t('Plugin upstreams')}</h3>
+        <h2>{t('Plugin upstreams')}</h2>
         <Button size="sm" variant="secondary" isDisabled={rows === undefined} onPress={() => setEditing(null)}>
           {t('Add upstream')}
         </Button>

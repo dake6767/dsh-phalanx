@@ -7,8 +7,10 @@ export interface ExpertModelReference {
 export interface ExpertModelChoice extends ExpertModelReference {
   readonly id: string
   readonly label: string
+  readonly reasoning?: boolean
 }
 export interface ExpertInput {
+  readonly reasoningEffort?: string | null
   readonly model?: ExpertModelReference | null
   readonly name: string
   readonly description: string
@@ -45,6 +47,7 @@ export interface ExpertView extends Expert {
   readonly missing: readonly string[]
   readonly modelLabel: string | null
   readonly modelUnavailable: boolean
+  readonly reasoningUnavailable?: boolean
   readonly failures: readonly { readonly username: string; readonly entries: readonly string[] }[]
 }
 export function assertExpertInput(input: ExpertInput): void {
@@ -81,6 +84,7 @@ export function assertExpertInput(input: ExpertInput): void {
       (!Array.isArray(input.examples) ||
         ![0, 2, 3].includes(input.examples.length) ||
         input.examples.some(example => typeof example !== 'string' || !example.trim() || example.length > 1000))) ||
+    (input.reasoningEffort != null && !['off', 'low', 'medium', 'high'].includes(input.reasoningEffort)) ||
     !names(input.skills) ||
     !names(input.skillPacks) ||
     (input.plugins !== undefined &&

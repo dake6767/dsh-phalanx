@@ -123,3 +123,29 @@ it('defaults only a new model from the known model table and preserves a stored 
     }),
   ).rejects.toThrow(expect.objectContaining({ code: 'model-input-invalid', params: undefined }))
 })
+
+it('defaults reasoning off, validates opt-in and preserves it for older clients', async () => {
+  const { service, provider } = bench()
+  const first = await service.execute(actor, { revision: 0, action: 'save-provider', provider })
+  const saved = first.providers[0]!
+  expect(saved.models[0]!.reasoning).toBe(false)
+  const second = await service.execute(actor, {
+    revision: 1,
+    action: 'save-provider',
+    provider: { ...provider, id: saved.id, models: saved.models.map(model => ({ ...model, reasoning: true })) },
+  })
+  expect(second.providers[0]!.models[0]!.reasoning).toBe(true)
+  const third = await service.execute(actor, {
+    revision: 2,
+    action: 'save-provider',
+    provider: { ...provider, id: saved.id, models: saved.models.map(({ id, name, enabled }) => ({ id, name, enabled })) },
+  })
+  expect(third.providers[0]!.models[0]!.reasoning).toBe(true)
+  await expect(
+    service.execute(actor, {
+      revision: 3,
+      action: 'save-provider',
+      provider: { ...provider, id: saved.id, models: [{ ...saved.models[0]!, reasoning: 'true' as never }] },
+    }),
+  ).rejects.toThrow(expect.objectContaining({ code: 'model-reasoning-invalid' }))
+})

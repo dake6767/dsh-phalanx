@@ -45,7 +45,7 @@ class PlatformLockContract(unittest.TestCase):
         relay=ast.literal_eval(re.search(r"const leaseRelay =\s*('.*')",source).group(1))
         fifo=self.data/'release';os.mkfifo(fifo)
         lock=self.data/'install.lock';fd=os.open(lock,os.O_RDWR|os.O_CREAT,0o600);fcntl.flock(fd,fcntl.LOCK_EX)
-        tool="import os,signal,sys; channel=os.open(sys.argv[1],os.O_RDWR); signal.signal(signal.SIGTERM,lambda *_:print('abort-received',flush=True)); print('ready',flush=True); os.read(channel,1)"
+        tool="import os,signal,sys; channel=os.open(sys.argv[1],os.O_RDWR); signal.signal(signal.SIGTERM,lambda *_:os.write(1,b'abort-received\\n')); print('ready',flush=True); os.read(channel,1)"
         holder=subprocess.Popen([sys.executable,'-c',relay,str(fd),sys.executable,'-c',tool,str(fifo)],pass_fds=(fd,),stdout=subprocess.PIPE,text=True)
         os.close(fd)
         release=os.open(fifo,os.O_RDWR)

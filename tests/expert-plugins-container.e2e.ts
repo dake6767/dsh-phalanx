@@ -82,10 +82,7 @@ it.skipIf(!runtimeSettings.containerImage)(
     const runtime = { ...runtimeSection(join(root, 'platform'), address(model), runtimeSettings), environment: { FAIL_EXPERT: '1' } }
     const home = join(effectiveUserDataRoot(runtime), 'member/home'),
       overlay = join(root, 'observer.json')
-    await writeFile(
-      overlay,
-      JSON.stringify([{ id: 'tools', config: { mode: 'native' } }, { insert: [{ id: 'expert-test-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]),
-    )
+    await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'expert-test-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]))
     runtime.patches.push(overlay)
     const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'expert-plugins-installed-fixture-secret', runtime })
     const browser = await chromium.launch({ headless: true })
@@ -159,18 +156,20 @@ it.skipIf(!runtimeSettings.containerImage)(
         },
       })
       await api('mcp', { action: 'save', service: { name: 'p-failed', description: 'Unavailable combined MCP', url: address(mcp) + '/failed' } })
-      await admin.getByRole('link', { name: 'Expert library', exact: true }).click()
-      await admin.getByRole('button', { name: 'Create expert', exact: true }).click()
-      await admin.getByLabel('Expert name', { exact: true }).fill('Plugin expert')
-      await admin.getByLabel('Expert description', { exact: true }).fill('Isolated plugins')
-      await admin.getByLabel('Expert persona', { exact: true }).fill('Use the expert plugin.')
-      expect(await admin.getByRole('checkbox', { name: '@example/expert-core', exact: true }).isDisabled()).toBe(true)
-      await admin.getByText('Unavailable plugins and plugins that change core entries cannot be included in an expert.', { exact: true }).waitFor()
-      for (const name of packages.filter(name => name !== '@example/expert-core'))
-        await admin.getByRole('dialog').getByText(name, { exact: true }).first().click()
-      for (const name of ['p-fixture', 'p-failed']) await admin.getByRole('dialog').getByText(name, { exact: true }).first().click()
-      await admin.getByRole('button', { name: 'Save expert', exact: true }).click()
-      await admin.getByRole('button', { name: 'Edit expert Plugin expert', exact: true }).waitFor()
+      // hidden in 0.1.32: retain plugin isolation and preparation via administrator APIs.
+      await api('experts', {
+        revision: (await api('experts')).revision,
+        expert: {
+          name: 'Plugin expert',
+          description: 'Isolated plugins',
+          icon: '',
+          persona: 'Use the expert plugin.',
+          skills: [],
+          skillPacks: [],
+          plugins: packages.filter(name => name !== '@example/expert-core'),
+          mcp: ['p-fixture', 'p-failed'],
+        },
+      })
       let library = await api('experts')
       const first = library.experts[0],
         preset = 'phalanx-expert-' + first.id
@@ -315,9 +314,7 @@ it.skipIf(!runtimeSettings.containerImage)(
         expect(row.missing).not.toContain('plugin:' + expertFixturePackage)
         expect(row.failures).toEqual([])
       }
-      await admin.reload()
-      await admin.getByRole('button', { name: 'Edit expert Plugin expert', exact: true }).waitFor()
-      expect(await admin.getByText('plugin:' + expertFixturePackage, { exact: true }).count()).toBe(0)
+      expect((await api('experts')).experts.flatMap((row: { missing: string[] }) => row.missing)).not.toContain('plugin:' + expertFixturePackage)
       await restart()
       const survivingRoster = await rpc.remoteRpc<{ presets: { id: string; broken?: string }[] }>(origin, cookie, 'agentPresets/list', {})
       for (const expert of [first, second]) expect(survivingRoster.presets.find(row => row.id === 'phalanx-expert-' + expert.id)?.broken).toBeUndefined()

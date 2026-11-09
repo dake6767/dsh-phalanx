@@ -88,6 +88,8 @@ export const en = {
   'Save changes before publishing.': 'Save changes before publishing.',
 
   'Test connection': 'Test connection',
+  'Connection test': 'Connection test',
+  'Request configuration': 'Request configuration',
   'Access settings': 'Access settings',
   'MCP tools': 'MCP tools',
   'Query parameters': 'Query parameters',
@@ -213,6 +215,8 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Save changes before publishing.': '上架前请先保存变更。',
 
   'Test connection': '测试连接',
+  'Connection test': '连接测试',
+  'Request configuration': '请求配置',
   'Access settings': '接入配置',
   'MCP tools': 'MCP 工具',
   'Query parameters': '查询参数',

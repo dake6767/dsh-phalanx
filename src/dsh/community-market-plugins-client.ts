@@ -1,3 +1,4 @@
+import { featureVisible } from '../domain/release-visibility.js'
 /** The panel observes accepted background work; closing it never cancels installation. */
 export const nativePluginsTab = `
 function PluginsPanel(){
@@ -22,11 +23,11 @@ function PluginsPanel(){
   return h('li',{key:plugin.packageName,className:'phalanx-market-row'},
    h('span',{className:'phalanx-market-icon','aria-hidden':true},h(IconPluginPinwheelOutlineRegular,{size:24})),
    h('div',{className:'phalanx-market-main'},h('div',{className:'phalanx-market-title'},h('h3',null,plugin.title),h(Tag,{tone:'quiet'},text('Version')+' '+plugin.version),plugin.status==='managed'?h(Tag,{tone:'quiet'},text('Platform controlled, cannot uninstall')):null,plugin.sharedCredential?h(Tag,{tone:'quiet'},text('Platform shared KEY')):null),
-    h('p',{className:'phalanx-market-description'},plugin.description||plugin.packageName),plugin.contribution?h('p',{className:'phalanx-market-description'},text(plugin.contribution.anonymous?'Contributed anonymously':'Contributed by {name}',{name:plugin.contribution.name})):null,
+    h('p',{className:'phalanx-market-description'},plugin.description||plugin.packageName),${featureVisible('contributions')}&&plugin.contribution?h('p',{className:'phalanx-market-description'},text(plugin.contribution.anonymous?'Contributed anonymously':'Contributed by {name}',{name:plugin.contribution.name})):null,
     h('p',{className:'phalanx-market-status'},text(plugin.status==='native'?'Installed on the native plugin page':plugin.status==='install'?'Not installed':'Installed')),
     running?h('div',{role:'status'},h('p',{className:'phalanx-market-status'},text(phase)),h('progress',{'aria-label':text(phase)})):null,
     failed?h(MarketFailure,{error:plugin.job.failure,locale}):null),
-   h(Button,{variant:plugin.status==='managed'||plugin.status==='native'?'ghost':'outline',size:'sm',className:'phalanx-market-action',disabled:busy!==undefined||running||plugin.status==='managed'||plugin.status==='native',onClick:()=>void install(plugin.packageName,removable?'uninstall':'install')},text(running?(removing?'Removing…':'Installing…'):busy===plugin.packageName?'Saving…':plugin.status==='managed'||plugin.status==='native'?'Installed':failed&&removable&&removing?'Retry uninstall':failed&&!removable&&!removing?'Retry installation':removable?'Uninstall':'Install'))
+   h(Button,{variant:'outline',size:'sm',className:'phalanx-market-action',disabled:busy!==undefined||running||plugin.status==='managed'||plugin.status==='native',onClick:()=>void install(plugin.packageName,removable?'uninstall':'install')},text(running?(removing?'Removing…':'Installing…'):busy===plugin.packageName?'Saving…':plugin.status==='managed'||plugin.status==='native'?'Installed':failed&&removable&&removing?'Retry uninstall':failed&&!removable&&!removing?'Retry installation':removable?'Uninstall':'Install'))
   );
  }
  return h('div',{className:'phalanx-market-tab-content'},

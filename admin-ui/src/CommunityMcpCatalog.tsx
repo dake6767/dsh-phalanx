@@ -11,6 +11,9 @@ import CommunityIcon from './CommunityIcon'
 import CommunityMessage from './CommunityMessage'
 import { communityRequestId } from './community-request-id'
 
+const locationKey = (location: CommunityMcpCatalogEntry['location']) =>
+  location === 'remote' ? 'Remote service' : location === 'shared' ? 'Shared run' : 'Member container run'
+
 export default function CommunityMcpCatalog({
   rows,
   onImported,
@@ -62,45 +65,36 @@ export default function CommunityMcpCatalog({
           {t('Loading…')}
         </p>
       ) : (
-        <div className="plugin-card-grid">
+        <div className="plugin-card-grid library-compact-grid">
           {entries.map(entry => {
             const count = rows?.filter(row => row.catalog?.id === entry.id).length ?? entry.imported
             return (
-              <Card key={entry.id} className="plugin-library-card">
+              <Card key={entry.id} className="plugin-library-card mcp-catalog-card">
                 <Card.Header>
-                  <div className="plugin-card-top">
-                    <span className="plugin-card-icon" aria-hidden="true">
-                      <CommunityIcon name="plugins" size={20} />
-                    </span>
-                    <Chip size="sm" variant="soft">
-                      {t(entry.location === 'remote' ? 'Remote service' : entry.location === 'shared' ? 'Shared run' : 'Member container run')}
-                    </Chip>
+                  <div className="library-card-heading">
+                    <Card.Title>{entry.title[locale]}</Card.Title>
+                    <CommunityIcon name="chevron" size={14} />
                   </div>
-                  <Card.Title>{entry.title[locale]}</Card.Title>
+                  <p className="plugin-summary-meta">
+                    {t(locationKey(entry.location))} · v{entry.version}
+                  </p>
                   <Card.Description>{entry.description[locale]}</Card.Description>
                 </Card.Header>
-                <Card.Content>
-                  <p>{t('Catalog version {version}', { version: entry.version })}</p>
-                  <p>{entry.credentialLabel?.[locale] ?? t('No credential required')}</p>
+                <Card.Footer className="plugin-card-status">
+                  <span className="mcp-catalog-credential">{entry.credentialLabel?.[locale] ?? t('No credential required')}</span>
                   {count ? (
-                    <Chip size="sm" variant="soft">
+                    <Chip size="sm" variant="soft" color="success">
                       {t('{count} imported services', { count })}
                     </Chip>
                   ) : null}
-                </Card.Content>
-                <Card.Footer>
-                  <span className="plugin-details-label" aria-hidden="true">
-                    {t('Service details')}
-                    <CommunityIcon name="chevron" size={14} />
-                  </span>
-                  <Button
-                    className="plugin-details-action"
-                    variant="tertiary"
-                    size="sm"
-                    aria-label={t('View MCP service {name}', { name: entry.title[locale] })}
-                    onPress={() => setSelected(entry)}
-                  />
                 </Card.Footer>
+                <Button
+                  className="plugin-details-action"
+                  variant="tertiary"
+                  size="sm"
+                  aria-label={t('View MCP service {name}', { name: entry.title[locale] })}
+                  onPress={() => setSelected(entry)}
+                />
               </Card>
             )
           })}
@@ -159,8 +153,8 @@ function CatalogImport({
   return (
     <CommunityDialog
       drawer
+      drawerClassName="plugin-drawer library-form-drawer mcp-service-drawer"
       title={entry.title[locale]}
-      eyebrow={t('MCP catalog')}
       busy={busy}
       onClose={onClose}
       footer={
@@ -174,45 +168,61 @@ function CatalogImport({
         </>
       }
     >
-      <p>{entry.description[locale]}</p>
-      <p>{t('Catalog version {version}', { version: entry.version })}</p>
-      <p>{t('Connection settings are maintained by the platform.')}</p>
-      <a href={entry.documentation} target="_blank" rel="noreferrer">
-        {t('Service documentation')}
-      </a>
+      <p className="plugin-summary-description">{entry.description[locale]}</p>
       {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
       <form
         id={id}
-        className="upstream-editor"
+        className="plugin-settings-panel mcp-catalog-import"
         onSubmit={event => {
           event.preventDefault()
           void submit()
         }}
       >
-        <CommunityField
-          label={t('MCP service name')}
-          value={name}
-          onChange={setName}
-          required
-          disabled={busy}
-          autoFocus
-          pattern="p-[A-Za-z0-9_-]{1,30}"
-          description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}
-        />
-        {entry.credentialLabel ? (
+        <section className="plugin-detail-section" aria-label={t('Service details')}>
+          <div className="plugin-section-heading">
+            <h2>{t('Service details')}</h2>
+            <a href={entry.documentation} target="_blank" rel="noreferrer">
+              {t('Service documentation')}
+            </a>
+          </div>
+          <div className="plugin-section-heading">
+            <p>{t('Catalog version {version}', { version: entry.version })}</p>
+            <Chip size="sm" variant="soft">
+              {t(locationKey(entry.location))}
+            </Chip>
+          </div>
+          <p className="mcp-section-note">{t('Connection settings are maintained by the platform.')}</p>
+        </section>
+        <section className="plugin-detail-section" aria-label={t('Access settings')}>
+          <h2>{t('Access settings')}</h2>
           <CommunityField
-            label={entry.credentialLabel[locale]}
-            value={credential}
-            onChange={setCredential}
-            type="password"
-            autoComplete="new-password"
+            label={t('MCP service name')}
+            value={name}
+            onChange={setName}
             required
             disabled={busy}
+            autoFocus
+            pattern="p-[A-Za-z0-9_-]{1,30}"
+            description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}
           />
-        ) : (
-          <p>{t('No credential required')}</p>
-        )}
-        <p>{t('Adding a service does not grant access or publish it.')}</p>
+          {entry.credentialLabel ? (
+            <CommunityField
+              label={entry.credentialLabel[locale]}
+              value={credential}
+              onChange={setCredential}
+              type="password"
+              autoComplete="new-password"
+              required
+              disabled={busy}
+            />
+          ) : (
+            <p className="mcp-section-note">{t('No credential required')}</p>
+          )}
+        </section>
+        <p className="mcp-catalog-import-note">
+          <CommunityIcon name="shield" size={16} />
+          <span>{t('Adding a service does not grant access or publish it.')}</span>
+        </p>
       </form>
     </CommunityDialog>
   )

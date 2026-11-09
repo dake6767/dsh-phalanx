@@ -187,6 +187,7 @@ export type CommunityErrorCode =
   | 'provider-not-found'
   | 'model-default-required'
   | 'model-input-invalid'
+  | 'model-reasoning-invalid'
   | 'provider-protocol-invalid'
   | 'provider-invalid'
   | 'method-not-allowed'

@@ -138,7 +138,7 @@ it('shows library empty, preparing, failed and available states with retry, deta
       timeout: 30000,
     })
     .toBe('ready')
-  // The card-wide details target must include its title, while retry stays independently clickable.
+  // The card-wide details target must include its title.
   const titleBox = (await page.getByRole('heading', { name: 'Useful sidebar', exact: true }).boundingBox())!
   await page.mouse.click(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2)
   await page.getByRole('dialog', { name: 'Useful sidebar', exact: true }).waitFor()
@@ -191,13 +191,12 @@ it('shows library empty, preparing, failed and available states with retry, deta
   await upload('private-fixture')
   await page.getByRole('status').getByText('Precheck failed', { exact: true }).waitFor()
   await page.setViewportSize({ width: 320, height: 844 })
-  const failedCard = page.locator('.plugin-library-card').filter({ has: page.getByRole('button', { name: 'View plugin @example/private', exact: true }) })
-  const detailsLabel = (await failedCard.getByText('Plugin details', { exact: true }).boundingBox())!
-  const retryCardButton = (await failedCard.getByRole('button', { name: 'Retry precheck', exact: true }).boundingBox())!
-  expect(detailsLabel.y + detailsLabel.height <= retryCardButton.y || detailsLabel.x + detailsLabel.width <= retryCardButton.x).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.getByRole('button', { name: 'View plugin @example/private', exact: true }).click()
+  const failureDetails = page.getByRole('dialog')
+  await failureDetails.getByRole('button', { name: 'Retry precheck', exact: true }).click()
+  await failureDetails.getByRole('button', { name: 'Close plugin details', exact: true }).click()
   await page.setViewportSize({ width: 1280, height: 720 })
-  await failedCard.getByRole('button', { name: 'Retry precheck', exact: true }).click()
   await expect
     .poll(
       async () =>

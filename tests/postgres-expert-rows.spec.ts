@@ -27,6 +27,7 @@ const expert: Expert = {
   plugins: [],
   mcp: [],
   model: null,
+  reasoningEffort: 'high',
 }
 
 it('reopens expert definitions from ordinary database rows without a JSON backend and refuses a stale editor', async () => {
@@ -45,7 +46,7 @@ it('reopens expert definitions from ordinary database rows without a JSON backen
     rows = new PostgresExpertRows(database)
     expect(await rows.list()).toMatchObject([
       { id: 'other', name: 'Other writer' },
-      { id: 'writer', name: 'Edited writer', revision: 2 },
+      { id: 'writer', name: 'Edited writer', revision: 2, reasoningEffort: 'high' },
     ])
     await expect(stat(join(root, 'experts', 'library.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally {

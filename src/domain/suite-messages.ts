@@ -53,6 +53,8 @@ export const en = {
   'Close catalog entry details': 'Close catalog entry details',
   'Installation record': 'Installation record',
   'Task log': 'Task log',
+  Detach: 'Detach',
+  Package: 'Package',
   'Install preview': 'Install preview',
   'This entry will install:': 'This entry will install:',
   'Preparation uses your configured download sources and verifies every download.':
@@ -205,6 +207,8 @@ export const zhCN = {
   'Close catalog entry details': '关闭广场条目详情',
   'Installation record': '安装记录',
   'Task log': '任务日志',
+  Detach: '脱离',
+  Package: '软件包',
   'Install preview': '安装预览',
   'This entry will install:': '将安装：',
   'Preparation uses your configured download sources and verifies every download.': '准备过程使用已配置的下载源，并校验每一次下载。',

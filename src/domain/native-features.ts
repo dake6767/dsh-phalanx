@@ -21,8 +21,8 @@ const terminal: NativeFeatureDefinition = {
   section: { id: 'plugins-terminal', name: { en: 'Plugins and terminal', 'zh-CN': '插件与终端' } },
   name: { en: 'Manual terminal access', 'zh-CN': '手动打开终端' },
   description: {
-    en: 'Hides the terminal sidebar and blocks manual terminal creation. Agent commands and platform execution stay available.',
-    'zh-CN': '取消后隐藏终端侧栏并拒绝手动打开终端；Agent 执行命令和平台代执行不受影响。',
+    en: 'When off: hides the terminal sidebar and blocks manual terminals. Agent commands and platform execution stay available.',
+    'zh-CN': '取消后：隐藏终端侧栏，不能手动打开终端。Agent 执行命令和平台代执行不受影响。',
   },
   constraints: [],
   seam: { en: 'Native user terminal controls and sidebar entries', 'zh-CN': '原生用户终端控制与侧栏入口' },
@@ -34,8 +34,8 @@ const pluginInstall: NativeFeatureDefinition = {
   section: terminal.section,
   name: { en: 'Add plugins', 'zh-CN': '自行添加插件' },
   description: {
-    en: 'Allows native plugin installation and first-time optional bundle enablement. Platform App Center installations stay available.',
-    'zh-CN': '允许从原生插件页安装插件和首次启用官方可选包；平台应用中心安装不受影响。',
+    en: 'When off: members cannot install plugins or first enable optional bundles from the native plugin page. Platform App Center installs stay available.',
+    'zh-CN': '取消后：成员不能从原生插件页安装插件或首次启用官方可选包。平台应用中心安装不受影响。',
   },
   constraints: [],
   seam: { en: 'Native plugin manager and Creator installation tools', 'zh-CN': '原生插件管理与创造模式安装工具' },
@@ -54,8 +54,8 @@ const builtinPresets: readonly NativeFeatureDefinition[] = BUILTIN_NATIVE_PRESET
   section: { id: 'builtin-presets', name: { en: 'DSH built-in Agent presets', 'zh-CN': 'DSH 内置 Agent 预设' } },
   name: presetNames[id],
   description: {
-    en: `Allows the native ${presetNames[id].en} preset. Disabled presets cannot create new sessions or resume their sessions after restart.`,
-    'zh-CN': `允许使用原生${presetNames[id]['zh-CN']}预设；取消后不能用它新建会话，重启后对应旧会话也需重新开启该预设才能恢复。`,
+    en: `When off: new sessions cannot use the ${presetNames[id].en} preset, and its existing sessions cannot resume after a restart.`,
+    'zh-CN': `取消后：不能用${presetNames[id]['zh-CN']}预设新建会话，重启后它的旧会话也无法恢复，重新开启后可恢复。`,
   },
   constraints: [{ kind: 'at-least-one', group: 'builtin-presets' }],
   seam: { en: 'Native Agent preset declarations and default selection', 'zh-CN': '原生 Agent 预设声明与默认选择' },

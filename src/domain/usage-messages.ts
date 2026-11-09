@@ -33,6 +33,7 @@ export const en = {
   Requests: 'Requests',
   'Input tokens': 'Input tokens',
   'Output tokens': 'Output tokens',
+  'Reasoning tokens (included in output)': 'Reasoning tokens (included in output)',
   'Cache read tokens': 'Cache read tokens',
   'Cache write tokens': 'Cache write tokens',
   'Unknown requests': 'Unknown requests',
@@ -104,6 +105,8 @@ export const en = {
   'Expired usage records are removed automatically. The default is 180 days.': 'Expired usage records are removed automatically. The default is 180 days.',
   'Retention days': 'Retention days',
   'Choose 1 to 3650 days. Shortening retention removes older records.': 'Choose 1 to 3650 days. Shortening retention removes older records.',
+  'More filters': 'More filters',
+  'Fewer filters': 'Fewer filters',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
   'Self-reported usage': '自报使用',
@@ -139,6 +142,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   Requests: '请求数',
   'Input tokens': '输入 token',
   'Output tokens': '输出 token',
+  'Reasoning tokens (included in output)': '思考 token（已含在输出中）',
   'Cache read tokens': '缓存读 token',
   'Cache write tokens': '缓存写 token',
   'Unknown requests': '用量未知请求',
@@ -210,6 +214,8 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Expired usage records are removed automatically. The default is 180 days.': '过期使用记录会自动清理，默认保留 180 天。',
   'Retention days': '保留天数',
   'Choose 1 to 3650 days. Shortening retention removes older records.': '可设为 1 至 3650 天；缩短保留期会删除更早的记录。',
+  'More filters': '更多筛选',
+  'Fewer filters': '收起筛选',
 }
 
 export const usageReasonLabels: Record<NonNullable<UsageResult['reason']>, keyof typeof en> = {

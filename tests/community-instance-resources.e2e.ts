@@ -77,6 +77,7 @@ it('applies defaults and overrides to real member cgroups, restores unlimited li
   // Limits are ceilings, not reservations: overcommit must warn without blocking this idle instance.
   const startupMemoryMiB = Math.ceil(initialSettings.host.memoryMiB) + 1024
   await admin.getByRole('link', { name: 'System settings', exact: true }).click()
+  await admin.getByRole('tab', { name: 'Resources and limits', exact: true }).click()
   const defaults = admin.getByRole('region', { name: 'Member instances', exact: true })
   await defaults.getByLabel('CPU (cores)', { exact: true }).fill('0.5')
   await defaults.getByLabel('Memory (MiB)', { exact: true }).fill(String(startupMemoryMiB))
@@ -165,6 +166,7 @@ it('applies defaults and overrides to real member cgroups, restores unlimited li
   expect(currentCarrier()).toBe(first)
   await admin.getByRole('row').filter({ hasText: 'member' }).getByText('Limits pending', { exact: true }).waitFor()
   await admin.getByRole('link', { name: 'System settings', exact: true }).click()
+  await admin.getByRole('tab', { name: 'Resources and limits', exact: true }).click()
   await defaults.getByRole('button', { name: 'Apply to running instances (1)', exact: true }).click()
   let confirmation = admin.getByRole('dialog', { name: 'Apply resource limits?', exact: true })
   bounded(0.5, startupMemoryMiB, 256)

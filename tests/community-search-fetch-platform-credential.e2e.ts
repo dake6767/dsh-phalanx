@@ -137,7 +137,7 @@ async function startToolModel() {
           return
         }
         if (!tool('web_fetch')) {
-          finish('PLATFORM_TOOL_MISSING')
+          finish('PLATFORM_FETCH_UNAVAILABLE')
           return
         }
         streamToolCall(response, 'platform-web-fetch', 'web_fetch', { url: 'https://example.test/page' })
@@ -317,7 +317,11 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   expect(JSON.stringify(selection)).toContain('deepseek-search-api')
   expect(JSON.stringify(selection)).not.toContain(PLATFORM_KEY)
 
-  await page.getByRole('button', { name: 'New session', exact: true }).first().click()
+  await page
+    .getByRole('button', { name: 'New session', exact: true })
+    .filter({ hasNot: page.locator('[data-copy-version]') })
+    .first()
+    .click()
   await page.locator('[data-composer-input]').waitFor()
   // Search reaches the platform gateway and the upstream receives the platform key, never the member token.
   const memberHome = join(effectiveUserDataRoot({ dataRoot: root }), 'alice', 'home')
@@ -346,10 +350,9 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   expect(searchCall!.authorization).toBe(`Bearer ${PLATFORM_KEY}`)
   expect(searchCall!.authorization).not.toContain(memberToken)
   expect(searchCall!.body).toMatchObject({ query: 'fixture query', need_content: false })
-  await ask('PLATFORM_WEB_FETCH_TASK: fetch the fixture.', 'PLATFORM_FETCH_CONFIRMED')
+  await ask('PLATFORM_WEB_FETCH_TASK: fetch the fixture.', 'PLATFORM_FETCH_UNAVAILABLE')
   const fetchCall = retrieval.calls.find(call => call.path === '/v1/tools/fetch')
-  expect(fetchCall?.authorization).toBe(`Bearer ${PLATFORM_KEY}`)
-  expect(fetchCall?.body).toEqual({ url: 'https://example.test/page' })
+  expect(fetchCall).toBeUndefined()
   expect(retrieval.calls.every(call => call.authorization === `Bearer ${PLATFORM_KEY}`)).toBe(true)
   expect(retrieval.calls.every(call => !call.authorization.includes(memberToken!))).toBe(true)
 
@@ -399,7 +402,11 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   await page.getByLabel('API key', { exact: true }).fill('member-typed-fake-key')
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), { timeout: 20_000 }).toBe(true)
-  await page.getByRole('button', { name: 'New session', exact: true }).first().click()
+  await page
+    .getByRole('button', { name: 'New session', exact: true })
+    .filter({ hasNot: page.locator('[data-copy-version]') })
+    .first()
+    .click()
   const fakeComposer = page.locator('[data-composer-input]')
   await fakeComposer.waitFor()
   await fakeComposer.fill('PLATFORM_WEB_FAKE_KEY_TASK: search with a typed key.')

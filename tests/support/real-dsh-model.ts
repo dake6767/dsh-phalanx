@@ -37,6 +37,21 @@ export function hasToolResult(body: unknown, toolUseId: string, failed: boolean)
   )
 }
 
+/** Retain failed tool diagnostics without recording request headers or successful result payloads. */
+export function failedToolResults(body: unknown, protectedValues: readonly string[]): string[] {
+  const messages = isRecord(body) && Array.isArray(body.messages) ? body.messages : []
+  return messages.flatMap(message => {
+    if (!isRecord(message) || !Array.isArray(message.content)) return []
+    return message.content
+      .filter(block => isRecord(block) && block.type === 'tool_result' && block.is_error === true)
+      .map(block => {
+        let text = JSON.stringify(block.content) ?? ''
+        for (const value of protectedValues) if (value) text = text.split(value).join('[redacted]')
+        return text
+      })
+  })
+}
+
 function sseEvent(event: Record<string, unknown>): string {
   return `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`
 }

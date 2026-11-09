@@ -31,11 +31,7 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)(
     const overlay = join(root, 'skills-fixture.json')
     await writeFile(
       overlay,
-      JSON.stringify([
-        { id: 'tools', config: { mode: 'native' } },
-        { id: 'session-log-deepseek', disabled: true },
-        { insert: [{ id: 'skills-observer', name: join(mountedHome, 'skills-observer.mjs') }] },
-      ]),
+      JSON.stringify([{ id: 'session-log-deepseek', disabled: true }, { insert: [{ id: 'skills-observer', name: join(mountedHome, 'skills-observer.mjs') }] }]),
     )
     const runtime = { ...runtimeSection(dataRoot, 'https://example.test', runtimeSettings), patches: [overlay] }
     let startupFailure: unknown

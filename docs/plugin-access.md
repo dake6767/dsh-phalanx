@@ -94,7 +94,7 @@ by this plugin; multiple placeholders and appended relative paths are supported.
 Dependency placeholders are accepted only in environment variables. Remove their
 references from templates before removing a declaration.
 
-Controlled, self-selected, preinstalled and expert plugins receive their dependencies.
+Controlled, self-selected and preinstalled plugins receive their dependencies.
 Native copies receive literal and dependency environment values at startup; a whole row
 containing `{access-token}` or `{upstream:name}` is excluded. These values do not modify
 the member profile. Reserved variables such as HOME, PATH and PYTHONPATH remain protected.
@@ -103,12 +103,13 @@ After a dependency update succeeds, the next instance preparation uses its new v
 Running instances keep their original paths and show a restart requirement. A failed
 preparation keeps the previous usable version.
 
-## DeepSeek Search/Fetch
+## DeepSeek Search
 
-The built-in DSH web-search plugin offers **DeepSeek Search/Fetch API**. It is off
+The built-in DSH web-search plugin offers **DeepSeek Search API**. It is off
 by default; members can enable it in the plugin settings. **The platform already
 injects access; no API Key is needed.** The upstream API Key control remains visible;
 leave it empty. A manually entered key overrides platform access and returns 401.
+The platform disables `web_fetch`; member tool catalogs do not offer page fetching.
 
 The platform uses an enabled shared DeepSeek provider whose base URL host is
 `api.deepseek.com`, preferring the default model's provider, then the first
@@ -116,7 +117,6 @@ eligible provider. Its credential is attached only by the platform gateway and
 never enters member space. A provider on another host does not supply this
 credential. Without an eligible shared credential, the plugin reports that an
 administrator must configure it. Members should not supply a key themselves.
-Administrators can review Search/Fetch calls in [Usage records](install.md#usage-records). The gateway records the operation, outcome and duration, without query text, fetched URLs or response content.
 
 ## Connection examples
 
@@ -399,81 +399,7 @@ configuration, and send its key in request headers. Forwarding is generic, witho
 plugin-specific adapters.
 
 The platform does not enforce outbound routing, lock member settings, manage self-installed
-plugins or rewrite response URLs. Gateway records cover platform upstream calls and remote/shared MCP tool calls; local plugin tools and member-container MCP are excluded from self-reports. See [Usage records](install.md#usage-records). Members can change their own access settings. Direct third-party calls require their own keys. Authorized
-members can call platform upstreams with member tokens; permission to use a credential
-does not grant permission to read its value.
-
-## Member plugin contributions
-
-Members can ask their agent to inspect a plugin and use `submit_contribution`
-with `kind: "plugin"`. An installed registry package contributes its name and
-exact version; a local directory is packed into a TGZ inside the member instance
-(limit 50 MB). The confirmation card shows the source, package identity, file
-list and excluded private files. Upload starts only after the member clicks
-**Submit**.
-
-The platform keeps the package private while checking its manifest, registry
-only dependencies and offline activation in an isolated container. An invalid
-bundle patch or failed activation is rejected. The member's native plugin detail
-page provides **Contribute to platform**, which opens a new conversation with an
-editable inspection request, and shows the latest contribution status, time,
-reason and pending withdrawal action.
-
-Administrators use **Plugin library → Member contributions** to inspect the
-purpose, file list, `package.json` and bundle patch. Adoption requires a fresh
-impact confirmation and creates an independent platform copy. New plugins are
-not published or granted automatically. Pending contributions across skills and
-plugins share the limit of 20 per member; submitting the same plugin name again
-replaces that member's pending copy.
-
-Include a `plugin` declaration with `upstreams` (name, address, header templates,
-optional test request), `environment` (name, whether secret, purpose and where to
-apply), and `entriesYaml`. Declare references with `{upstream:name}` and
-`{access-token}`; never include an actual credential. Entry IDs must exist in the
-bundle patch. The same access rules as administrator settings reject reserved or
-duplicate environment names, unsupported YAML and unknown entries or upstreams.
-
-An upstream without a configuration reference is rejected with advice to make
-its address configurable. A `directReason` explains a deliberate direct public
-connection and retains a warning instead. Install scripts are ignored; unexpected
-external domains, large packages and possible credentials require the member to
-review and explicitly retain the warnings. Private keys and high-confidence
-credentials, including plaintext tokens in the bundle patch, are rejected.
-Remove secrets, use a platform upstream, and submit the corrected package.
-
-Adoption has three steps: inspect files and findings; review the prefilled upstreams
-and access settings and enter the platform credential; then choose optional group
-grants or publication. The upstream test uses the draft without saving it and masks
-credential values echoed by the provider. Publication with credentials requires
-explicit confirmation that all members may use them. Existing settings and
-write-only credentials remain; only new declaration fields are added to the draft,
-and removed fields are marked for administrator review. Final confirmation applies
-these choices. If concurrent administrator changes prevent an access setting or
-publication, adoption completes with a warning and leaves that choice for repair.
-
-New contributed entries assign the contributor as maintainer. An existing entry
-without a maintainer stays unowned unless the administrator selects **Assign
-contributor as maintainer** during adoption. Only the current maintainer may
-submit an update; a different or recreated account is rejected with the
-maintainer's name. Plugin updates require an exact SemVer greater than the
-selected version; increasing the patch number is enough for a small change.
-Pending copies may be resubmitted with the same version.
-
-Review shows added, changed and deleted package files and the old/new declaration.
-Existing credentials and access values stay in place; only new fields are
-prefilled. Removed fields are marked and retained until an administrator chooses
-to clear them. Each accepted version records its contributor, time and member or
-administrator source. **Basic settings → Maintainer** transfers or clears ownership.
-Administrator replacements retain the maintainer. Platform App Center and native
-plugin details show the contribution credit; adoption can make it anonymous.
-
-To test a native plugin before publication, uninstall the platform-delivered version
-on the native plugin page, then install your own version and configure it there.
-For read-only plugins only, an authorized maintainer with a same-name local installation
-can enable **Use my local copy** in the native plugin detail's contribution section. Restart the
-instance to let the local copy load; switch it off and restart to restore the
-platform copy. Group grants and other members are unchanged. The local copy
-receives no platform environment or entry settings and cannot use the platform
-upstream credential, including after switching off until the platform copy has
-actually loaded on restart. Configure separate development credentials locally
-if needed, and keep them outside the files submitted for review.
+plugins or rewrite response URLs. Members can change their own access settings.
+Direct third-party calls require their own keys. Authorized members can call platform
+upstreams with member tokens; permission to use a credential does not grant
+permission to read its value.

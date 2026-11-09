@@ -1,8 +1,11 @@
+import type { ReactNode } from 'react'
 import { Button } from '@heroui/react/button'
+import { Chip } from '@heroui/react/chip'
 import type { CommunityMcpInput, CommunityMcpSettings, CommunityMcpTemplate } from '../../src/domain/admin-contract'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityField from './CommunityField'
 import CommunityMessage from './CommunityMessage'
+import CommunityIcon from './CommunityIcon'
 
 type TemplateRow = CommunityMcpTemplate & { readonly retainedArgument?: NonNullable<CommunityMcpInput['retainedArguments']>[number] }
 export function TemplateFields({
@@ -29,10 +32,15 @@ export function TemplateFields({
   } as const
   const copy = labels[kind]
   return (
-    <section className="page-stack">
-      <h3>{t(copy[0])}</h3>
+    <section className="mcp-template-fields">
+      <div className="plugin-section-heading">
+        <h3>{t(copy[0])}</h3>
+        <Button size="sm" variant="secondary" isDisabled={busy || rows.length >= 32} onPress={() => onChange([...rows, { name: '', value: '' }])}>
+          {t(copy[4])}
+        </Button>
+      </div>
       {rows.map((row, index) => (
-        <div className="plugin-environment-row upstream-header-row" key={index}>
+        <div className={`plugin-environment-row upstream-header-row${kind === 'args' ? ' mcp-argument-row' : ''}`} key={index}>
           {kind !== 'args' ? (
             <CommunityField
               label={t(copy[1])}
@@ -56,38 +64,44 @@ export function TemplateFields({
             disabled={busy}
             onChange={value => onChange(rows.map((item, i) => (i === index ? { ...item, value } : item)))}
           />
-          <Button variant="tertiary" isDisabled={busy} onPress={() => onChange(rows.filter((_, i) => i !== index))}>
-            {t(copy[3])}
+          <Button variant="tertiary" isIconOnly aria-label={t(copy[3])} isDisabled={busy} onPress={() => onChange(rows.filter((_, i) => i !== index))}>
+            <CommunityIcon name="close" size={16} />
           </Button>
         </div>
       ))}
-      <Button variant="secondary" isDisabled={busy || rows.length >= 32} onPress={() => onChange([...rows, { name: '', value: '' }])}>
-        {t(copy[4])}
-      </Button>
     </section>
   )
 }
 
 export function McpPreparation({ settings }: { settings?: CommunityMcpSettings }) {
-  const { t } = usePlatformLanguage(),
+  const { t, locale } = usePlatformLanguage(),
     preparation = settings?.preparation
   if (!preparation) return null
   return (
     <>
       {preparation.isolated === false ? <CommunityMessage role="status" status="warning" title={t('Shared run is not isolated. Development only.')} /> : null}
-      <CommunityMessage
-        role="status"
-        status={preparation.stage === 'failed' ? 'danger' : preparation.stage === 'ready' ? 'success' : 'accent'}
-        title={t(preparation.stage === 'failed' ? 'Preparation failed' : preparation.stage === 'ready' ? 'Dependencies ready' : 'Preparing dependencies…')}
-      >
-        <time dateTime={new Date(preparation.updatedAt).toISOString()}>{new Date(preparation.updatedAt).toLocaleString()}</time>
-      </CommunityMessage>
+      <div className="mcp-preparation-status" role="status">
+        <Chip size="sm" variant="soft" color={preparation.stage === 'failed' ? 'danger' : preparation.stage === 'ready' ? 'success' : 'accent'}>
+          {t(preparation.stage === 'failed' ? 'Preparation failed' : preparation.stage === 'ready' ? 'Dependencies ready' : 'Preparing dependencies…')}
+        </Chip>
+        <time dateTime={new Date(preparation.updatedAt).toISOString()}>{new Date(preparation.updatedAt).toLocaleString(locale)}</time>
+      </div>
       {preparation.log ? (
-        <details>
+        <details className="mcp-preparation-log">
           <summary>{t('Preparation log')}</summary>
           <pre className="plugin-preparation-log">{preparation.log}</pre>
         </details>
       ) : null}
     </>
+  )
+}
+
+/** Unnamed on purpose: fields inside reuse the heading text as their label. */
+export function McpEditorSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="plugin-detail-section">
+      <h2>{title}</h2>
+      {children}
+    </section>
   )
 }

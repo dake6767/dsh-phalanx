@@ -1,3 +1,4 @@
+import { featureVisible } from '../../src/domain/release-visibility'
 import { useMemberInstanceResources } from './useMemberInstanceResources'
 import CommunityMemberInstanceResources from './CommunityMemberInstanceResources'
 import type { CommunityGroupView } from '../../src/domain/admin-contract'
@@ -11,6 +12,7 @@ import type { CommunityAccountView } from '../../src/domain/admin-contract'
 import { actOnCommunityAccount, createCommunityAccount, communityAccounts, CommunityApiRequestError } from './community-api'
 import CommunityDialog from './CommunityDialog'
 import CommunityField from './CommunityField'
+import CommunityGrantSection from './CommunityGrantSection'
 import { useDraftGuard } from './useDraftGuard'
 import CommunityMessage from './CommunityMessage'
 export default function CommunityAccountDrawer({
@@ -94,7 +96,7 @@ export default function CommunityAccountDrawer({
         title={creating ? t('Create a member') : t('Edit account: {username}', { username: account.username })}
         busy={busy}
         drawer
-        eyebrow={t('ACCOUNT DETAILS')}
+        drawerClassName="plugin-drawer library-form-drawer account-edit-drawer"
         onClose={() => guard.request(onClose)}
         footer={
           <>
@@ -107,14 +109,12 @@ export default function CommunityAccountDrawer({
           </>
         }
       >
-        <p className="drawer-description">{creating ? t('Share the username and temporary password privately.') : t('Change the contact email and group.')}</p>
         {!creating && (
           <div className="drawer-identity">
             <Avatar variant="soft" color={(['accent', 'success', 'warning', 'danger'] as const)[account.username.charCodeAt(0) % 4]} aria-hidden="true">
               <Avatar.Fallback>{account.username.slice(0, 1).toUpperCase()}</Avatar.Fallback>
             </Avatar>
             <div>
-              <strong>{account.username}</strong>
               <span>{account.admin ? t('Administrator') : t('Member')}</span>
             </div>
             <span className={`account-state ${account.disabled ? 'is-disabled' : 'is-enabled'}`}>
@@ -131,50 +131,61 @@ export default function CommunityAccountDrawer({
             event.preventDefault()
             void save()
           }}
-          className="account-form"
+          className="account-form plugin-settings-panel"
         >
-          <CommunityField
-            label={t('Username')}
-            value={username}
-            onChange={setUsername}
-            readOnly={!creating}
-            disabled={busy}
-            required
-            autoFocus={creating}
-            pattern="[a-z0-9][a-z0-9_-]{0,63}"
-          />
-          <CommunityField
-            label={t('Email')}
-            value={email}
-            onChange={setEmail}
-            type="email"
-            disabled={busy}
-            required={creating || account.email !== ''}
-            autoFocus={!creating}
-          />
-          <CommunitySelect
-            label={t('Group')}
-            value={groupId}
-            onChange={setGroupId}
-            disabled={busy || (!creating && account.admin)}
-            options={groups
-              .filter(group => (!creating && account.admin ? group.kind === 'admin' : group.kind === 'ordinary'))
-              .map(group => ({ id: group.id, label: communityGroupLabel(group, t) }))}
-          />
-          {creating ? (
+          <CommunityGrantSection
+            title={t('Account profile')}
+            description={creating ? t('Share the username and temporary password privately.') : t('Change the contact email and group.')}
+          >
             <CommunityField
-              label={t('Temporary password')}
-              value={password}
-              onChange={setPassword}
-              type="password"
-              autoComplete="new-password"
+              label={t('Username')}
+              value={username}
+              onChange={setUsername}
+              readOnly={!creating}
               disabled={busy}
               required
+              autoFocus={creating}
+              pattern="[a-z0-9][a-z0-9_-]{0,63}"
             />
-          ) : (
-            <section className="drawer-space">
-              <a href={`/admin/usage-records?username=${encodeURIComponent(account.username)}`}>{t('View usage records')}</a>
-              <h3>{t('User space')}</h3>
+            <CommunityField
+              label={t('Email')}
+              value={email}
+              onChange={setEmail}
+              type="email"
+              disabled={busy}
+              required={creating || account.email !== ''}
+              autoFocus={!creating}
+            />
+            <CommunitySelect
+              label={t('Group')}
+              value={groupId}
+              onChange={setGroupId}
+              disabled={busy || (!creating && account.admin)}
+              options={groups
+                .filter(group => (!creating && account.admin ? group.kind === 'admin' : group.kind === 'ordinary'))
+                .map(group => ({ id: group.id, label: communityGroupLabel(group, t) }))}
+            />
+            {creating ? (
+              <CommunityField
+                label={t('Temporary password')}
+                value={password}
+                onChange={setPassword}
+                type="password"
+                autoComplete="new-password"
+                disabled={busy}
+                required
+              />
+            ) : null}
+          </CommunityGrantSection>
+          {creating ? null : (
+            <CommunityGrantSection
+              title={t('User space')}
+              action={
+                featureVisible('usage') ? (
+                  <a href={`/admin/usage-records?username=${encodeURIComponent(account.username)}`}>{t('View usage records')}</a>
+                ) : undefined
+              }
+            >
               <dl className="account-details">
                 <dt>{t('Space ID')}</dt>
                 <dd className="space-id">{account.spaceId}</dd>
@@ -199,7 +210,7 @@ export default function CommunityAccountDrawer({
                   </>
                 )}
               </dl>
-            </section>
+            </CommunityGrantSection>
           )}
         </form>
         {!creating && <CommunityMemberInstanceResources resources={resources} disabled={busy} onReload={() => guard.request(resources.reload)} />}

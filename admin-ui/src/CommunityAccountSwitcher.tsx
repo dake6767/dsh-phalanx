@@ -10,6 +10,7 @@ import type { SignedInAccountView } from '../../src/domain/admin-contract'
 import { usePlatformLanguage } from './CommunityLanguage'
 import { communitySignedInAccounts, removeCommunitySignedInAccount } from './community-api'
 import CommunityMessage from './CommunityMessage'
+import CommunityIcon from './CommunityIcon'
 
 function AccountRow({ account, busy, onRemove }: { account: SignedInAccountView; busy: boolean; onRemove: (marker: string) => void }) {
   const { t } = usePlatformLanguage()
@@ -21,51 +22,48 @@ function AccountRow({ account, busy, onRemove }: { account: SignedInAccountView;
         : account.status === 'unavailable'
           ? 'Unavailable'
           : undefined
+  const meta = [account.admin ? t('Administrator') : t('Member'), ...(status && account.status !== 'current' ? [t(status)] : [])].join(' · ')
   const identity = (
     <>
-      <Avatar size="sm" aria-hidden="true">
+      <Avatar size="sm" color={account.status === 'current' ? 'accent' : 'default'} variant="soft" aria-hidden="true">
         <Avatar.Fallback>{account.username.slice(0, 1).toUpperCase()}</Avatar.Fallback>
       </Avatar>
-      <span className="truncate">{account.username}</span>
+      <span className="account-switch-name">
+        <strong>{account.username}</strong>
+        <small className={account.status === 'reauthentication-required' ? 'is-warning' : undefined}>{meta}</small>
+      </span>
+      {account.status === 'current' ? (
+        <Chip size="sm" variant="soft" color="accent">
+          {t('Current account')}
+        </Chip>
+      ) : null}
     </>
   )
   const choose = () =>
     location.assign(account.status === 'reauthentication-required' ? `/login?username=${encodeURIComponent(account.username)}` : account.admin ? '/admin' : '/')
   return (
-    <li className="flex items-center gap-2">
-      <div className="min-w-0 flex-1">
-        {account.status === 'available' ? (
-          <form action="/account/switch" method="post">
-            <input type="hidden" name="marker" value={account.marker} />
-            <Button type="submit" variant="tertiary" className="w-full min-w-0 justify-start" aria-label={account.username} isDisabled={busy}>
-              {identity}
-            </Button>
-          </form>
-        ) : (
-          <Button
-            variant="tertiary"
-            className="w-full min-w-0 justify-start"
-            aria-label={account.username}
-            isDisabled={busy || account.status === 'unavailable'}
-            onPress={choose}
-          >
+    <li className={`account-switch-row${account.status === 'unavailable' ? ' is-unavailable' : ''}`}>
+      {account.status === 'available' ? (
+        <form action="/account/switch" method="post" className="account-switch-main">
+          <input type="hidden" name="marker" value={account.marker} />
+          <button type="submit" className="account-switch-choice" aria-label={account.username} disabled={busy}>
             {identity}
-          </Button>
-        )}
-      </div>
-      {account.admin ? (
-        <Chip size="sm" variant="soft">
-          {t('Administrator')}
-        </Chip>
-      ) : null}
-      {status ? (
-        <Chip size="sm" variant={account.status === 'current' ? 'primary' : 'soft'}>
-          {t(status)}
-        </Chip>
-      ) : null}
+          </button>
+        </form>
+      ) : (
+        <button
+          type="button"
+          className="account-switch-choice account-switch-main"
+          aria-label={account.username}
+          disabled={busy || account.status === 'unavailable'}
+          onClick={choose}
+        >
+          {identity}
+        </button>
+      )}
       {account.status === 'unavailable' ? (
         <Tooltip>
-          <Button size="sm" variant="tertiary" isDisabled={busy} onPress={() => onRemove(account.marker)}>
+          <Button size="sm" variant="ghost" isDisabled={busy} onPress={() => onRemove(account.marker)}>
             {t('Remove')}
           </Button>
           <Tooltip.Content>{t('Remove from this browser')}</Tooltip.Content>
@@ -73,8 +71,8 @@ function AccountRow({ account, busy, onRemove }: { account: SignedInAccountView;
       ) : (
         <Dropdown>
           <Tooltip>
-            <Button size="sm" isIconOnly variant="tertiary" aria-label={t('More actions')} isDisabled={busy}>
-              ⋯
+            <Button size="sm" isIconOnly variant="ghost" aria-label={t('More actions')} isDisabled={busy}>
+              <CommunityIcon name="more" size={16} />
             </Button>
             <Tooltip.Content>{t('Remove from this browser')}</Tooltip.Content>
           </Tooltip>
@@ -135,17 +133,17 @@ export default function CommunityAccountSwitcher({ onClose }: { onClose: () => v
           if (!open) onClose()
         }}
       >
-        <Modal.Container scroll="inside" size="lg">
+        <Modal.Container scroll="inside" size="md">
           <Modal.Dialog aria-label={t('Switch accounts')}>
             <Modal.CloseTrigger aria-label={t('Close account switcher')} />
             <Modal.Header>
               <Modal.Heading>{t('Switch accounts')}</Modal.Heading>
             </Modal.Header>
             <Modal.Body>
-              <p>{t('Accounts you signed in to on this browser.')}</p>
+              <p className="account-switch-note">{t('Accounts you signed in to on this browser.')}</p>
               {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
               {accounts ? (
-                <ul className="flex flex-col gap-2" aria-label={t('Switch accounts')}>
+                <ul className="account-switch-list" aria-label={t('Switch accounts')}>
                   {accounts.map(account => (
                     <AccountRow
                       key={account.marker}
@@ -162,14 +160,15 @@ export default function CommunityAccountSwitcher({ onClose }: { onClose: () => v
               ) : null}
             </Modal.Body>
             <Modal.Footer>
-              <Button variant="secondary" isDisabled={busy} onPress={() => location.assign('/login?other=1')}>
-                {t('Add account')}
-              </Button>
-              <form action="/account/signed-in/remove-all" method="post">
-                <Button type="submit" variant="tertiary" isDisabled={busy}>
+              <form action="/account/signed-in/remove-all" method="post" className="mr-auto">
+                <Button type="submit" variant="ghost" isDisabled={busy}>
                   {t('Sign out of all accounts')}
                 </Button>
               </form>
+              <Button variant="secondary" isDisabled={busy} onPress={() => location.assign('/login?other=1')}>
+                <CommunityIcon name="plus" size={16} />
+                {t('Add account')}
+              </Button>
             </Modal.Footer>
           </Modal.Dialog>
         </Modal.Container>

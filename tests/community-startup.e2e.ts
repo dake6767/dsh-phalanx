@@ -12,6 +12,7 @@ import { ACCOUNT_EVENT_COOKIE } from '../src/domain/platform-account-sync.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
+import { openCommunitySidebar } from './fixtures/community-native-browser.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { openTestAccounts } from './support/community-application.js'
 import { communityEntryUrl } from './support/community-space.js'
@@ -106,6 +107,7 @@ it('enters one native carrier from concurrent bookmarked overlays and re-enters 
   await Promise.all(
     pages.map(async page => {
       await page.locator('#root').waitFor({ state: 'attached', timeout: 60_000 })
+      await openCommunitySidebar(page)
       await page.getByRole('button', { name: /^Platform account:/u }).waitFor()
       expect(page.url()).toBe(bookmark)
     }),
@@ -119,6 +121,7 @@ it('enters one native carrier from concurrent bookmarked overlays and re-enters 
   await returned.locator('[data-platform-startup]').waitFor()
   expect(returned.url()).toBe(bookmark)
   await returned.locator('#root').waitFor({ state: 'attached', timeout: 300_000 })
+  await openCommunitySidebar(returned)
   await returned.getByRole('button', { name: /^Platform account:/u }).waitFor()
   expect(returned.url()).toBe(bookmark)
   const next = carriers()

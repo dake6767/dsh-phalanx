@@ -26,7 +26,7 @@ export function accountChoiceRow(locale: PlatformLocale, account: SignedInAccoun
   const trailing =
     account.status === 'unavailable'
       ? removeForm
-      : `<details class="account-more"><summary aria-label="${t('More actions')}" title="${t('More actions')}">⋯</summary><div>${removeForm}</div></details>`
+      : `<details class="account-more"><summary aria-label="${t('More actions')}" title="${t('More actions')}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg></summary><div role="menu">${removeForm}</div></details>`
   return `<li class="account-item${account.status === 'unavailable' ? ' unavailable' : ''}">${main}${trailing}</li>`
 }
 
@@ -59,9 +59,9 @@ export function communityBootstrapPage(error?: string, locale: PlatformLocale = 
   const t = (key: Parameters<typeof platformText>[1]) => platformText(locale, key)
   return platformPage(
     t('Create the first administrator'),
-    `<h1>${t('Create the first administrator')}</h1>${pageError(error)}<p id="instructions">${t('Open the initialization link printed by the installer to create your administrator account.')}</p><section id="bootstrap-content"></section>`,
+    `<p class="entry-eyebrow">${t('FIRST-TIME SETUP')}</p><h1>${t('Create the first administrator')}</h1>${pageError(error)}<p id="instructions">${t('Open the initialization link printed by the installer to create your administrator account.')}</p><section id="bootstrap-content"></section>`,
     communityBootstrapScript(locale),
-    undefined,
+    { className: 'login-page setup-page', introduction: loginIntroduction(locale) },
     locale,
     preference,
   )
@@ -72,9 +72,9 @@ export function communityBootstrapClosedPage(locale: PlatformLocale = 'en', pref
   const t = (key: Parameters<typeof platformText>[1]) => platformText(locale, key)
   return platformPage(
     t('Initialization unavailable'),
-    `<h1>${t('Initialization unavailable')}</h1><p>${t('The initialization endpoint is closed.')}</p><a href="/login">${t('Sign in')}</a>`,
+    `<p class="entry-eyebrow">${t('FIRST-TIME SETUP')}</p><h1>${t('Initialization unavailable')}</h1><p>${t('The initialization endpoint is closed.')}</p><a class="setup-link" href="/login">${t('Sign in')} <span aria-hidden="true">→</span></a>`,
     '',
-    undefined,
+    { className: 'login-page', introduction: loginIntroduction(locale) },
     locale,
     preference,
   )
@@ -84,5 +84,5 @@ export const COMMUNITY_BOOTSTRAP_CLOSED_PAGE = communityBootstrapClosedPage()
 /** Account creation is shown after the database selection has been committed and activated. */
 export function communityAdministratorForm(locale: PlatformLocale): string {
   const t = (key: Parameters<typeof platformText>[1]) => platformText(locale, key)
-  return `<p>${t('Choose your administrator username and password.')}</p><form method="post" action="/bootstrap"><input name="credential" type="hidden"><label>${t('Username')}<input name="username" autocomplete="username" required autofocus></label><label>${t('Password')}<input name="password" type="password" autocomplete="new-password" required></label><button type="submit">${t('Create administrator')}</button></form>`
+  return `<div class="setup-step" data-step="2">${t('Step {current} of {total}').replace('{current}', '2').replace('{total}', '2')}</div><h2>${t('Administrator account')}</h2><p class="setup-lead">${t('Choose your administrator username and password.')} ${t('This account manages members, groups and shared tools.')}</p><form method="post" action="/bootstrap" class="setup-form"><input name="credential" type="hidden"><label>${t('Username')}<input name="username" autocomplete="username" required autofocus></label><label>${t('Password')}<input name="password" type="password" autocomplete="new-password" required></label><div class="setup-actions"><button type="submit">${t('Create administrator')} <span aria-hidden="true">→</span></button></div></form>`
 }

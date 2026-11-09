@@ -60,7 +60,6 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
   await writeFile(
     overlay,
     JSON.stringify([
-      { id: 'tools', config: { mode: 'native' } },
       { insert: [{ id: 'expert-observer', name: runtime.container ? '/dsh-phalanx/home/expert-observer.mjs' : join(home, 'expert-observer.mjs') }] },
     ]),
   )
@@ -151,16 +150,18 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
     const rpc = createBrowserDshRpc(member.context()),
       cookie = await cookieHeader(member.context(), origin)
     const roster = () => rpc.remoteRpc<{ presets: { id: string; name?: string; broken?: string }[] }>(origin, cookie, 'agentPresets/list', {})
-    await admin.getByRole('link', { name: 'Expert library', exact: true }).click()
-    await admin.getByRole('button', { name: 'Create expert', exact: true }).click()
-    await admin.getByLabel('Expert name', { exact: true }).fill('Commerce expert')
-    await admin.getByLabel('Expert description', { exact: true }).fill('Marketing workflow')
-    await admin.getByLabel('Expert persona', { exact: true }).fill('EXPERT_MARKETING_PERSONA')
-    await admin.getByRole('dialog').getByText('expert-research', { exact: true }).first().click()
-    await admin.getByRole('dialog').getByText('shared-reference', { exact: true }).first().click()
-    await admin.getByRole('dialog').getByText('marketing', { exact: true }).first().click()
-    await admin.getByRole('button', { name: 'Save expert', exact: true }).click()
-    await admin.getByRole('button', { name: 'Edit expert Commerce expert', exact: true }).waitFor()
+    // hidden in 0.1.32: preserve isolated runtime coverage through administrator APIs.
+    await api('experts', {
+      revision: (await api('experts')).revision,
+      expert: {
+        name: 'Commerce expert',
+        description: 'Marketing workflow',
+        icon: '',
+        persona: 'EXPERT_MARKETING_PERSONA',
+        skills: ['expert-research', 'shared-reference'],
+        skillPacks: ['marketing'],
+      },
+    })
     const library = await api('experts'),
       expert = library.experts[0],
       preset = `phalanx-expert-${expert.id}`
@@ -171,11 +172,7 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
     const groups = await api('groups'),
       admins = groups.find((row: { kind: string }) => row.kind === 'admin')
     expect((await api(`groups/${admins.id}/experts`)).experts[0].granted).toBe(false)
-    await admin.getByRole('link', { name: 'Group management', exact: true }).click()
-    await admin.getByRole('row').filter({ hasText: 'Ordinary group' }).getByRole('button', { name: 'Details', exact: true }).click()
-    await admin.getByRole('tab', { name: 'Expert grants', exact: true }).click()
-    await admin.getByRole('dialog').getByText('Commerce expert', { exact: true }).first().click()
-    await admin.getByRole('button', { name: 'Save grants', exact: true }).click()
+    await api(groupPath, { names: [expert.id], revision: (await api(groupPath)).revision, confirmed: true })
     await expect.poll(async () => (await api(groupPath)).experts[0].granted).toBe(true)
     expect((await roster()).presets.some(row => row.id === preset)).toBe(false)
     expect((await member.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
@@ -239,28 +236,8 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
       .poll(async () => (await api('experts')).experts.flatMap((row: { checking?: readonly string[] }) => row.checking ?? []), { timeout: 30000 })
       .toEqual([])
     expect((await api('experts')).experts[0].failures).toEqual([])
-    await admin.getByRole('button', { name: 'Close group details', exact: true }).first().click()
-    await admin.getByRole('link', { name: 'Expert library', exact: true }).click()
-    await admin.getByRole('button', { name: /Platform language/ }).click()
-    await admin.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
-    await admin.getByRole('button', { name: '编辑专家 Commerce expert', exact: true }).click()
-    expect(await admin.getByLabel('人设说明', { exact: true }).inputValue()).toBe('EXPERT_MARKETING_PERSONA')
-    await admin.setViewportSize({ width: 390, height: 844 })
-    const drawer = admin.getByRole('dialog', { name: '编辑专家', exact: true })
-    await expect
-      .poll(() =>
-        drawer.evaluate(element => {
-          const rect = element.getBoundingClientRect()
-          return element.scrollWidth <= element.clientWidth && rect.left >= -1 && rect.right <= innerWidth + 1
-        }),
-      )
-      .toBe(true)
-    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-    if (evidence) {
-      await mkdir(evidence, { recursive: true })
-      await admin.screenshot({ path: join(evidence, 'expert-editor-zh-mobile.png') })
-    }
-    await admin.getByRole('button', { name: '关闭专家详情', exact: true }).click()
+    // hidden in 0.1.32: expert editor locale/mobile assertions are paused; definition remains persisted.
+    expect((await api('experts')).experts[0].persona).toBe('EXPERT_MARKETING_PERSONA')
     const definition = await member.request.post(communityEntryUrl(origin, cookie) + 'skills-fixture', {
       headers: { origin },
       data: { operation: 'get', sessionId: expertSession, name: 'expert-research' },

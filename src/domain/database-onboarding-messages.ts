@@ -19,6 +19,14 @@ export const en = {
   'Upload CA certificate': 'Upload CA certificate',
   'Test connection': 'Test connection',
   Continue: 'Continue',
+  'FIRST-TIME SETUP': 'FIRST-TIME SETUP',
+  'Step {current} of {total}': 'Step {current} of {total}',
+  'Choose where the platform stores accounts, groups and settings.': 'Choose where the platform stores accounts, groups and settings.',
+  'The built-in database runs beside the platform and needs no setup.': 'The built-in database runs beside the platform and needs no setup.',
+  'Connect to a PostgreSQL 14+ database you manage. Test the connection before continuing.':
+    'Connect to a PostgreSQL 14+ database you manage. Test the connection before continuing.',
+  'Administrator account': 'Administrator account',
+  'This account manages members, groups and shared tools.': 'This account manages members, groups and shared tools.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
   'Database connectivity': '数据库连通性',
@@ -41,4 +49,11 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Upload CA certificate': '上传 CA 证书',
   'Test connection': '测试连接',
   Continue: '继续',
+  'FIRST-TIME SETUP': '首次设置',
+  'Step {current} of {total}': '第 {current} 步，共 {total} 步',
+  'Choose where the platform stores accounts, groups and settings.': '选择平台保存账户、分组和设置的位置。',
+  'The built-in database runs beside the platform and needs no setup.': '内置数据库随平台一起运行，无需额外配置。',
+  'Connect to a PostgreSQL 14+ database you manage. Test the connection before continuing.': '连接你自己管理的 PostgreSQL 14 或更高版本，测试通过后才能继续。',
+  'Administrator account': '管理员账户',
+  'This account manages members, groups and shared tools.': '这个账户用于管理成员、分组和共享工具。',
 }

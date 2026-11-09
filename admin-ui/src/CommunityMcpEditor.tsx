@@ -4,6 +4,7 @@ import { Button } from '@heroui/react/button'
 import { Tabs } from '@heroui/react/tabs'
 import { Checkbox } from '@heroui/react/checkbox'
 import { Chip } from '@heroui/react/chip'
+import { Label } from '@heroui/react/label'
 import type { CommunityMcpInput, CommunityMcpSettings } from '../../src/domain/admin-contract'
 import { communityMcp, retryCommunityMcp, testCommunityMcp, updateCommunityMcp } from './community-api'
 import { CommunityCopyError, usePlatformLanguage } from './CommunityLanguage'
@@ -14,7 +15,8 @@ import CommunitySelect from './CommunitySelect'
 import type { McpImportDraft } from '../../src/domain/mcp-import'
 import CommunityMessage from './CommunityMessage'
 import { useDraftGuard } from './useDraftGuard'
-import { TemplateFields, McpPreparation } from './CommunityMcpFields'
+import { TemplateFields, McpPreparation, McpEditorSection } from './CommunityMcpFields'
+
 const inputOf = (value?: CommunityMcpSettings): CommunityMcpInput =>
   value ? mcpWriteInput(value) : { run: null, required: false, name: 'p-', description: '', url: '', headers: [], query: [], disabledTools: [] }
 export default function McpEditor({
@@ -191,7 +193,7 @@ export default function McpEditor({
     <>
       <CommunityDialog
         drawer={value !== 'new'}
-        eyebrow={t('MCP library')}
+        drawerClassName="plugin-drawer library-form-drawer mcp-service-drawer"
         title={t(value === 'new' ? 'Add MCP service' : 'Edit MCP service')}
         busy={busy}
         onClose={() => guard.request(onClose)}
@@ -236,89 +238,143 @@ export default function McpEditor({
                 </Tabs.Tab>
               </Tabs.List>
             </Tabs.ListContainer>
-            <Tabs.Panel id="basic" shouldForceMount data-editor-tab="basic">
-              <CommunityField
-                label={t('MCP service name')}
-                value={draft.name}
-                onChange={name => setDraft({ ...draft, name })}
-                required
-                disabled={busy}
-                autoFocus
-                pattern="p-[A-Za-z0-9_-]{1,30}"
-                description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}
-              />
-              {!settings?.catalog ? (
-                <>
+            <Tabs.Panel id="basic" className="plugin-settings-panel mcp-editor-panel" shouldForceMount data-editor-tab="basic">
+              <McpEditorSection title={t('Basic information')}>
+                <CommunityField
+                  label={t('MCP service name')}
+                  value={draft.name}
+                  onChange={name => setDraft({ ...draft, name })}
+                  required
+                  disabled={busy}
+                  autoFocus
+                  pattern="p-[A-Za-z0-9_-]{1,30}"
+                  description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}
+                />
+                {!settings?.catalog ? (
                   <CommunityField
                     label={t('Description')}
                     value={draft.description}
                     onChange={description => setDraft({ ...draft, description })}
                     disabled={busy}
                   />
-                  <CommunitySelect
-                    label={t('Run location')}
-                    value={draft.run?.location ?? 'remote'}
-                    options={[
-                      { id: 'remote', label: t('Remote service') },
-                      { id: 'shared', label: t('Shared run') },
-                      { id: 'member', label: t('Member container run') },
-                      { id: 'independent', label: t('Independent member run (unavailable)'), disabled: true },
-                    ]}
-                    disabled={busy}
-                    onChange={location =>
-                      setDraft({
-                        ...draft,
-                        ...(location === 'remote' ? { retainedArguments: [] } : {}),
-                        run:
-                          location === 'remote'
-                            ? null
-                            : {
-                                location: location as 'shared' | 'member',
-                                command: draft.run?.command ?? '',
-                                args: draft.run?.args ?? [],
-                                env: draft.run?.env ?? [],
-                                runtimeDependencies: draft.run?.runtimeDependencies ?? [],
-                              },
-                      })
-                    }
-                  />
-                  <p>{t('Independent member run is not available. Services needing both platform credentials and member files are unsupported.')}</p>
-                  {draft.run ? (
-                    <>
+                ) : null}
+              </McpEditorSection>
+              <McpEditorSection title={t('Run location')}>
+                {!settings?.catalog ? (
+                  <>
+                    <CommunitySelect
+                      label={t('Run location')}
+                      value={draft.run?.location ?? 'remote'}
+                      options={[
+                        { id: 'remote', label: t('Remote service') },
+                        { id: 'shared', label: t('Shared run') },
+                        { id: 'member', label: t('Member container run') },
+                        { id: 'independent', label: t('Independent member run (unavailable)'), disabled: true },
+                      ]}
+                      disabled={busy}
+                      onChange={location =>
+                        setDraft({
+                          ...draft,
+                          ...(location === 'remote' ? { retainedArguments: [] } : {}),
+                          run:
+                            location === 'remote'
+                              ? null
+                              : {
+                                  location: location as 'shared' | 'member',
+                                  command: draft.run?.command ?? '',
+                                  args: draft.run?.args ?? [],
+                                  env: draft.run?.env ?? [],
+                                  runtimeDependencies: draft.run?.runtimeDependencies ?? [],
+                                },
+                        })
+                      }
+                    />
+                    <p>{t('Independent member run is not available. Services needing both platform credentials and member files are unsupported.')}</p>
+                    {draft.run ? (
+                      <>
+                        <CommunityField
+                          label={t('MCP command')}
+                          value={draft.run.command}
+                          placeholder={settings?.protectedFields.command?.configured ? `••••${settings.protectedFields.command.last4}` : undefined}
+                          required={!settings?.protectedFields.command?.configured}
+                          disabled={busy}
+                          onChange={command => setDraft({ ...draft, run: { ...draft.run!, command } })}
+                        />
+                        <TemplateFields
+                          kind="args"
+                          protectedArguments={settings?.protectedFields}
+                          rows={draft.run.args.map((value, index) => ({
+                            name: '',
+                            value,
+                            retainedArgument: draft.retainedArguments?.find(ref => ref.index === index),
+                          }))}
+                          busy={busy}
+                          onChange={args =>
+                            setDraft({
+                              ...draft,
+                              run: { ...draft.run!, args: args.map(row => row.value) },
+                              retainedArguments: args.flatMap((row, index) => (row.retainedArgument && !row.value ? [{ ...row.retainedArgument, index }] : [])),
+                            })
+                          }
+                        />
+                        <TemplateFields
+                          kind="env"
+                          summaries={settings?.run?.env}
+                          rows={draft.run.env}
+                          busy={busy}
+                          onChange={env => setDraft({ ...draft, run: { ...draft.run!, env } })}
+                        />
+                        {draft.run.location === 'shared' ? (
+                          <p>
+                            {t(
+                              'Shared run keeps platform credentials outside member spaces. Each member uses an isolated process with read-only dependencies.',
+                            )}
+                          </p>
+                        ) : null}
+                        {draft.run.location === 'member' ? (
+                          <p>
+                            {t(
+                              'Prepared dependencies are shared read-only. Use {dependencies} in arguments to refer to their directory. Tool filtering is for usability, not a security boundary.',
+                            )}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : (
                       <CommunityField
-                        label={t('MCP command')}
-                        value={draft.run.command}
-                        placeholder={settings?.protectedFields.command?.configured ? `••••${settings.protectedFields.command.last4}` : undefined}
-                        required={!settings?.protectedFields.command?.configured}
+                        label={t('Remote MCP address')}
+                        value={draft.url}
+                        placeholder={settings?.protectedFields.url?.configured ? `••••${settings.protectedFields.url.last4}` : undefined}
+                        onChange={url => setDraft({ ...draft, url })}
+                        type="url"
+                        required={!settings?.protectedFields.url?.configured}
                         disabled={busy}
-                        onChange={command => setDraft({ ...draft, run: { ...draft.run!, command } })}
                       />
-                      <TemplateFields
-                        kind="args"
-                        protectedArguments={settings?.protectedFields}
-                        rows={draft.run.args.map((value, index) => ({
-                          name: '',
-                          value,
-                          retainedArgument: draft.retainedArguments?.find(ref => ref.index === index),
-                        }))}
-                        busy={busy}
-                        onChange={args =>
-                          setDraft({
-                            ...draft,
-                            run: { ...draft.run!, args: args.map(row => row.value) },
-                            retainedArguments: args.flatMap((row, index) => (row.retainedArgument && !row.value ? [{ ...row.retainedArgument, index }] : [])),
-                          })
-                        }
-                      />
-                      <TemplateFields
-                        kind="env"
-                        summaries={settings?.run?.env}
-                        rows={draft.run.env}
-                        busy={busy}
-                        onChange={env => setDraft({ ...draft, run: { ...draft.run!, env } })}
-                      />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="plugin-section-heading">
+                      <p>{t('Catalog version {version}', { version: settings.catalog.version })}</p>
+                      <Chip size="sm" variant="soft">
+                        {t(draft.run?.location === 'shared' ? 'Shared run' : draft.run?.location === 'member' ? 'Member container run' : 'Remote service')}
+                      </Chip>
+                    </div>
+                    <p className="mcp-section-note">{t('Connection settings are maintained by the platform.')}</p>
+                  </>
+                )}
+              </McpEditorSection>
+              {draft.run || (settings?.catalog && settings.preparation) ? (
+                <McpEditorSection title={t('Runtime dependencies')}>
+                  {settings?.catalog ? (
+                    <>
+                      {draft.run ? <CommunityDependencyPicker hideLabel readOnly value={draft.run.runtimeDependencies ?? []} onChange={() => {}} /> : null}
+                      <McpPreparation settings={settings} />
+                    </>
+                  ) : (
+                    <>
                       <CommunityDependencyPicker
-                        value={draft.run.runtimeDependencies ?? []}
+                        hideLabel
+                        value={draft.run?.runtimeDependencies ?? []}
                         disabled={busy}
                         onChange={runtimeDependencies => setDraft({ ...draft, run: { ...draft.run!, runtimeDependencies } })}
                       />
@@ -335,231 +391,205 @@ export default function McpEditor({
                           {t('Prepare again')}
                         </Button>
                       ) : null}
-                      {draft.run.location === 'shared' ? (
-                        <p>
-                          {t('Shared run keeps platform credentials outside member spaces. Each member uses an isolated process with read-only dependencies.')}
-                        </p>
-                      ) : null}
-                      {draft.run.location === 'member' ? (
-                        <p>
-                          {t(
-                            'Prepared dependencies are shared read-only. Use {dependencies} in arguments to refer to their directory. Tool filtering is for usability, not a security boundary.',
-                          )}
-                        </p>
-                      ) : null}
                     </>
-                  ) : (
-                    <CommunityField
-                      label={t('Remote MCP address')}
-                      value={draft.url}
-                      placeholder={settings?.protectedFields.url?.configured ? `••••${settings.protectedFields.url.last4}` : undefined}
-                      onChange={url => setDraft({ ...draft, url })}
-                      type="url"
-                      required={!settings?.protectedFields.url?.configured}
-                      disabled={busy}
-                    />
                   )}
-                </>
-              ) : (
-                <>
-                  <p>{t('Connection settings are maintained by the platform.')}</p>
-                  <p>{t('Catalog version {version}', { version: settings.catalog.version })}</p>
-                  <p>{t(draft.run?.location === 'shared' ? 'Shared run' : draft.run?.location === 'member' ? 'Member container run' : 'Remote service')}</p>
-                  {draft.run ? <CommunityDependencyPicker value={draft.run.runtimeDependencies ?? []} disabled onChange={() => {}} /> : null}
-                  <McpPreparation settings={settings} />
-                </>
-              )}
-              <Checkbox isSelected={draft.required ?? false} isDisabled={busy} onChange={required => setDraft({ ...draft, required })}>
-                <Checkbox.Content>
-                  <Checkbox.Control>
-                    <Checkbox.Indicator />
-                  </Checkbox.Control>
-                  {t('Required MCP service')}
-                </Checkbox.Content>
-              </Checkbox>
-              <p>{t('Members with a grant cannot disable a required service, including administrators.')}</p>
-              {settings ? (
-                <>
-                  <p role="status">{t(settings.published ? 'MCP service is published.' : 'MCP service is not published.')}</p>
-                  <Button
-                    variant="secondary"
-                    isDisabled={busy || dirty || (!settings.published && settings.testStatus !== 'passed')}
-                    onPress={() => {
-                      void publish()
-                    }}
-                  >
-                    {t(settings.published ? 'Unpublish MCP service' : 'Publish MCP service')}
-                  </Button>
-                  {dirty ? <p>{t('Save changes before publishing.')}</p> : null}
-                </>
+                </McpEditorSection>
               ) : null}
-            </Tabs.Panel>
-            <Tabs.Panel id="access" shouldForceMount data-editor-tab="access">
-              <p className="upstream-editor-description">{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
-              {settings?.catalog?.id !== '12306' ? (
-                <>
-                  <Chip size="sm" variant="soft">
-                    {t(settings?.credentialConfigured ? 'Credential configured' : 'Credential not configured')}
-                    {settings?.credential.last4 ? ` ••••${settings.credential.last4}` : ''}
-                  </Chip>
-                  <CommunityField
-                    label={t('Platform credential')}
-                    type="password"
-                    value={credential}
-                    onChange={next => {
-                      setCredential(next)
-                      setClearCredential(false)
-                    }}
-                    disabled={busy}
-                    autoComplete="new-password"
-                    description={t(
-                      settings?.credentialConfigured ? 'Leave blank to keep the saved credential.' : 'Enter the credential used by this upstream.',
-                    )}
-                  />
-                  {settings?.credentialConfigured ? (
+              <McpEditorSection title={t('Publication')}>
+                <Checkbox isSelected={draft.required ?? false} isDisabled={busy} onChange={required => setDraft({ ...draft, required })}>
+                  <Checkbox.Content>
+                    <Checkbox.Control>
+                      <Checkbox.Indicator />
+                    </Checkbox.Control>
+                    {t('Required MCP service')}
+                  </Checkbox.Content>
+                </Checkbox>
+                <p>{t('Members with a grant cannot disable a required service, including administrators.')}</p>
+                {settings ? (
+                  <>
+                    <p role="status">{t(settings.published ? 'MCP service is published.' : 'MCP service is not published.')}</p>
                     <Button
                       variant="secondary"
-                      isDisabled={busy}
+                      isDisabled={busy || dirty || (!settings.published && settings.testStatus !== 'passed')}
                       onPress={() => {
-                        setClearCredential(!clearCredential)
-                        setCredential('')
+                        void publish()
                       }}
                     >
-                      {t(clearCredential ? 'Keep saved credential' : 'Clear saved credential')}
+                      {t(settings.published ? 'Unpublish MCP service' : 'Publish MCP service')}
                     </Button>
-                  ) : null}
-                  {clearCredential ? <p role="status">{t('The credential will be cleared when you save.')}</p> : null}
-                  {Array.from(new Set([...(settings?.credentialNames ?? []), ...Object.keys(credentials)])).map(name => (
-                    <div key={name}>
-                      <CommunityField
-                        key={name}
-                        label={t('Platform credential {name}', { name })}
-                        type="password"
-                        value={credentials[name] ?? ''}
-                        disabled={busy}
-                        onChange={value => {
-                          setCredentials({ ...credentials, [name]: value })
-                          setDraft({ ...draft, removeCredentials: draft.removeCredentials?.filter(row => row !== name) })
-                        }}
-                        placeholder={settings?.credentials[name]?.configured ? `••••${settings.credentials[name].last4}` : undefined}
-                        description={t('Leave blank to keep the saved credential.')}
-                      />
+                    {dirty ? <p>{t('Save changes before publishing.')}</p> : null}
+                  </>
+                ) : null}
+              </McpEditorSection>
+            </Tabs.Panel>
+            <Tabs.Panel id="access" className="plugin-settings-panel mcp-editor-panel" shouldForceMount data-editor-tab="access">
+              <McpEditorSection title={t('Platform credential')}>
+                <p className="upstream-editor-description">{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
+                {settings?.catalog?.id !== '12306' ? (
+                  <>
+                    <Chip size="sm" variant="soft">
+                      {t(settings?.credentialConfigured ? 'Credential configured' : 'Credential not configured')}
+                      {settings?.credential.last4 ? ` ••••${settings.credential.last4}` : ''}
+                    </Chip>
+                    <CommunityField
+                      label={t('Platform credential')}
+                      type="password"
+                      value={credential}
+                      onChange={next => {
+                        setCredential(next)
+                        setClearCredential(false)
+                      }}
+                      disabled={busy}
+                      autoComplete="new-password"
+                      description={t(
+                        settings?.credentialConfigured ? 'Leave blank to keep the saved credential.' : 'Enter the credential used by this upstream.',
+                      )}
+                    />
+                    {settings?.credentialConfigured ? (
                       <Button
                         variant="secondary"
                         isDisabled={busy}
                         onPress={() => {
-                          setCredentials({ ...credentials, [name]: '' })
-                          setDraft({
-                            ...draft,
-                            removeCredentials: draft.removeCredentials?.includes(name)
-                              ? draft.removeCredentials.filter(row => row !== name)
-                              : [...(draft.removeCredentials ?? []), name],
-                          })
+                          setClearCredential(!clearCredential)
+                          setCredential('')
                         }}
                       >
-                        {t(draft.removeCredentials?.includes(name) ? 'Keep saved credential' : 'Clear saved credential')}
+                        {t(clearCredential ? 'Keep saved credential' : 'Clear saved credential')}
                       </Button>
-                    </div>
-                  ))}
-                </>
-              ) : (
-                <p>{t('No credential required')}</p>
-              )}
-              {draft.run?.location === 'member' ? (
-                <p>{t('Member container run cannot use platform credentials. Clear credentials and their templates first.')}</p>
-              ) : null}
-              {!settings?.catalog ? (
-                <>
+                    ) : null}
+                    {clearCredential ? <p role="status">{t('The credential will be cleared when you save.')}</p> : null}
+                    {Array.from(new Set([...(settings?.credentialNames ?? []), ...Object.keys(credentials)])).map(name => (
+                      <div key={name}>
+                        <CommunityField
+                          key={name}
+                          label={t('Platform credential {name}', { name })}
+                          type="password"
+                          value={credentials[name] ?? ''}
+                          disabled={busy}
+                          onChange={value => {
+                            setCredentials({ ...credentials, [name]: value })
+                            setDraft({ ...draft, removeCredentials: draft.removeCredentials?.filter(row => row !== name) })
+                          }}
+                          placeholder={settings?.credentials[name]?.configured ? `••••${settings.credentials[name].last4}` : undefined}
+                          description={t('Leave blank to keep the saved credential.')}
+                        />
+                        <Button
+                          variant="secondary"
+                          isDisabled={busy}
+                          onPress={() => {
+                            setCredentials({ ...credentials, [name]: '' })
+                            setDraft({
+                              ...draft,
+                              removeCredentials: draft.removeCredentials?.includes(name)
+                                ? draft.removeCredentials.filter(row => row !== name)
+                                : [...(draft.removeCredentials ?? []), name],
+                            })
+                          }}
+                        >
+                          {t(draft.removeCredentials?.includes(name) ? 'Keep saved credential' : 'Clear saved credential')}
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <p>{t('No credential required')}</p>
+                )}
+                {draft.run?.location === 'member' ? (
+                  <p>{t('Member container run cannot use platform credentials. Clear credentials and their templates first.')}</p>
+                ) : null}
+              </McpEditorSection>
+              {!settings?.catalog && !draft.run ? (
+                <McpEditorSection title={t('Request configuration')}>
                   <p>{t('Use {credential} for the saved secret. Fixed values replace member headers.')}</p>
-                  {!draft.run ? (
-                    <>
-                      <TemplateFields
-                        kind="headers"
-                        summaries={settings?.headers}
-                        rows={draft.headers ?? []}
-                        busy={busy}
-                        onChange={headers => setDraft({ ...draft, headers })}
-                      />
-                      <TemplateFields
-                        kind="query"
-                        summaries={settings?.query}
-                        rows={draft.query ?? []}
-                        busy={busy}
-                        onChange={query => setDraft({ ...draft, query })}
-                      />
-                    </>
-                  ) : null}
-                </>
+                  <TemplateFields
+                    kind="headers"
+                    summaries={settings?.headers}
+                    rows={draft.headers ?? []}
+                    busy={busy}
+                    onChange={headers => setDraft({ ...draft, headers })}
+                  />
+                  <TemplateFields
+                    kind="query"
+                    summaries={settings?.query}
+                    rows={draft.query ?? []}
+                    busy={busy}
+                    onChange={query => setDraft({ ...draft, query })}
+                  />
+                </McpEditorSection>
               ) : null}
             </Tabs.Panel>
-            <Tabs.Panel id="tools" shouldForceMount data-editor-tab="tools">
-              <p>
-                {t(
-                  draft.run?.location === 'member'
-                    ? 'Testing starts your member instance and discovers tools through its prepared stdio process. It does not enable your MCP service.'
-                    : 'Testing saves your changes and discovers tools through the platform gateway. It does not enable administrator tools.',
-                )}
-              </p>
-              <Button
-                variant="secondary"
-                isDisabled={
-                  busy ||
-                  settings?.catalog?.status === 'testing' ||
-                  settings?.catalog?.status === 'preparing' ||
-                  !valid ||
-                  (Boolean(draft.run) && (dirty || settings?.preparation?.stage !== 'ready'))
-                }
-                onPress={() => {
-                  void save(true)
-                }}
-              >
-                {t(busy ? 'Testing connection…' : 'Test connection')}
-              </Button>
-              {settings?.catalog?.status === 'preparing' ? <CommunityMessage role="status" status="accent" title={t('Preparing dependencies…')} /> : null}
-              {settings?.catalog?.status === 'testing' ? <CommunityMessage role="status" status="accent" title={t('Testing imported service…')} /> : null}
-              {settings ? (
-                <CommunityMessage
-                  role="status"
-                  status={settings.testStatus === 'failed' ? 'danger' : settings.testStatus === 'passed' ? 'success' : 'warning'}
-                  title={t(
-                    settings.testStatus === 'passed'
-                      ? 'MCP connection passed.'
-                      : settings.testStatus === 'failed'
-                        ? 'MCP connection failed. Saved settings cannot be published.'
-                        : 'MCP connection has not been tested.',
+            <Tabs.Panel id="tools" className="plugin-settings-panel mcp-editor-panel" shouldForceMount data-editor-tab="tools">
+              <McpEditorSection title={t('Connection test')}>
+                <p>
+                  {t(
+                    draft.run?.location === 'member'
+                      ? 'Testing starts your member instance and discovers tools through its prepared stdio process. It does not enable your MCP service.'
+                      : 'Testing saves your changes and discovers tools through the platform gateway. It does not enable administrator tools.',
                   )}
-                />
-              ) : null}
-              <p>{t('Checked tools are disabled for members. Newly discovered tools remain available.')}</p>
-              <div className="group-grants-list">
-                {settings?.tools.map(tool => (
-                  <div className="group-grant-item" key={tool.name}>
-                    <Checkbox
-                      isSelected={draft.disabledTools?.includes(tool.name) ?? false}
-                      isDisabled={busy}
-                      onChange={checked =>
-                        setDraft({
-                          ...draft,
-                          disabledTools: checked ? [...(draft.disabledTools ?? []), tool.name] : draft.disabledTools?.filter(name => name !== tool.name),
-                        })
-                      }
-                    >
-                      <Checkbox.Content>
-                        <Checkbox.Control>
-                          <Checkbox.Indicator />
-                        </Checkbox.Control>
-                        {tool.name}
-                      </Checkbox.Content>
-                    </Checkbox>
-                    {tool.isNew ? (
-                      <Chip size="sm" variant="soft">
-                        {t('New tool')}
-                      </Chip>
-                    ) : null}
-                    <p className="text-sm text-muted">{tool.description}</p>
-                  </div>
-                ))}
-              </div>
+                </p>
+                <Button
+                  variant="secondary"
+                  isDisabled={
+                    busy ||
+                    settings?.catalog?.status === 'testing' ||
+                    settings?.catalog?.status === 'preparing' ||
+                    !valid ||
+                    (Boolean(draft.run) && (dirty || settings?.preparation?.stage !== 'ready'))
+                  }
+                  onPress={() => {
+                    void save(true)
+                  }}
+                >
+                  {t(busy ? 'Testing connection…' : 'Test connection')}
+                </Button>
+                {settings?.catalog?.status === 'preparing' ? <CommunityMessage role="status" status="accent" title={t('Preparing dependencies…')} /> : null}
+                {settings?.catalog?.status === 'testing' ? <CommunityMessage role="status" status="accent" title={t('Testing imported service…')} /> : null}
+                {settings ? (
+                  <CommunityMessage
+                    role="status"
+                    status={settings.testStatus === 'failed' ? 'danger' : settings.testStatus === 'passed' ? 'success' : 'warning'}
+                    title={t(
+                      settings.testStatus === 'passed'
+                        ? 'MCP connection passed.'
+                        : settings.testStatus === 'failed'
+                          ? 'MCP connection failed. Saved settings cannot be published.'
+                          : 'MCP connection has not been tested.',
+                    )}
+                  />
+                ) : null}
+              </McpEditorSection>
+              <McpEditorSection title={t('MCP tools')}>
+                <p>{t('Checked tools are disabled for members. Newly discovered tools remain available.')}</p>
+                <div className="group-grants-list">
+                  {settings?.tools.map(tool => (
+                    <div className="group-grant-item mcp-tool-item" key={tool.name}>
+                      <Checkbox
+                        isSelected={draft.disabledTools?.includes(tool.name) ?? false}
+                        isDisabled={busy}
+                        onChange={checked =>
+                          setDraft({
+                            ...draft,
+                            disabledTools: checked ? [...(draft.disabledTools ?? []), tool.name] : draft.disabledTools?.filter(name => name !== tool.name),
+                          })
+                        }
+                      >
+                        <Checkbox.Content>
+                          <Checkbox.Control>
+                            <Checkbox.Indicator />
+                          </Checkbox.Control>
+                          <Label className="mcp-tool-name">{tool.name}</Label>
+                        </Checkbox.Content>
+                      </Checkbox>
+                      {tool.isNew ? (
+                        <Chip size="sm" variant="soft">
+                          {t('New tool')}
+                        </Chip>
+                      ) : null}
+                      {tool.description ? <p>{tool.description}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              </McpEditorSection>
             </Tabs.Panel>
           </Tabs>
         </form>

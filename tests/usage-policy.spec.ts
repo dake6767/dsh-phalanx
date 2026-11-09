@@ -203,7 +203,7 @@ it('fixes model hour and group at start, retains partial usage and distinguishes
   const attempt = policy.begin(member, { kind: 'model', id: 'model', operation: 'messages' })
   member.groupId = 'after'
   now = 3600001
-  await attempt.finish({ outcome: 'failed', tokens: { input: 10, output: null, cacheRead: 2, cacheWrite: 3 }, usageUnknown: true })
+  await attempt.finish({ outcome: 'failed', tokens: { input: 10, output: null, cacheRead: 2, cacheWrite: 3, reasoning: null }, usageUnknown: true })
   await attempt.finish({ outcome: 'succeeded' })
   const denied = new UsagePolicy(records, { now: () => now }, { get: async () => undefined }, { allow: () => false })
   await denied.begin(member, { kind: 'model', id: 'model', operation: 'messages' }).finish({ outcome: 'denied' })
@@ -216,7 +216,7 @@ it('fixes model hour and group at start, retains partial usage and distinguishes
       requests: 1,
       unknownRequests: 1,
       deniedRequests: 0,
-      tokens: { input: 10, output: null, cacheRead: 2, cacheWrite: 3 },
+      tokens: { input: 10, output: null, cacheRead: 2, cacheWrite: 3, reasoning: null },
     },
     {
       username: 'member',
@@ -226,7 +226,7 @@ it('fixes model hour and group at start, retains partial usage and distinguishes
       requests: 1,
       unknownRequests: 0,
       deniedRequests: 1,
-      tokens: { input: null, output: null, cacheRead: null, cacheWrite: null },
+      tokens: { input: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null },
     },
   ])
   expect(tools).toEqual([])

@@ -11,6 +11,8 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
+import type { CommunityMcpSettings } from '../src/domain/mcp-admin-contract.js'
+import { mcpWriteInput } from '../src/domain/mcp-service.js'
 import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
@@ -174,13 +176,38 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     }
     expect((await post('mcp', { action: 'save', service: { ...input, credential: 'fictional-rejected-secret' } })).status).toBe(400)
     await save(input)
-    const library = async () =>
-      (await (await fetch(origin + '/admin/api/mcp', { headers: { cookie: admin } })).json()) as {
-        name: string
-        preparation?: { stage: string; log: string }
-        testStatus: string
-        tools: { name: string }[]
-      }[]
+    const library = async () => (await (await fetch(origin + '/admin/api/mcp', { headers: { cookie: admin } })).json()) as CommunityMcpSettings[]
+    const checkedMcpResponse = async (operation: string, name: string, response: Response, testStatus?: string) => {
+      const body: unknown = await response
+        .clone()
+        .json()
+        .catch(() => null)
+      const fields = body && typeof body === 'object' ? (body as { code?: unknown; testStatus?: unknown }) : undefined
+      if (response.status === 200 && (testStatus === undefined || fields?.testStatus === testStatus)) return response
+      // Keep only contract fields: response bodies and library settings can contain credentials.
+      const code = typeof fields?.code === 'string' && /^[a-z0-9-]{1,100}$/u.test(fields.code) ? fields.code : 'unavailable'
+      const snapshots = await Promise.allSettled([
+        fetch(origin + '/admin/api/mcp', { headers: { cookie: admin } }),
+        fetch(origin + '/market/api/mcp', { headers: { cookie: member } }),
+      ])
+      const state = await Promise.all(
+        snapshots.map(async (result, index) => {
+          if (result.status === 'rejected') return { view: index === 0 ? 'library' : 'market', status: 'unavailable' }
+          const snapshot: unknown = await result.value.json().catch(() => null)
+          const row = Array.isArray(snapshot) ? snapshot.find(item => item?.name === name) : undefined
+          return {
+            view: index === 0 ? 'library' : 'market',
+            status: result.value.status,
+            found: row !== undefined,
+            generation: typeof row?.generation === 'number' ? row.generation : undefined,
+            preparation: ['pending', 'preparing', 'ready', 'failed'].includes(row?.preparation?.stage) ? row.preparation.stage : undefined,
+            testStatus: ['untested', 'testing', 'passed', 'failed'].includes(row?.testStatus) ? row.testStatus : undefined,
+            enabled: typeof row?.enabled === 'boolean' ? row.enabled : undefined,
+          }
+        }),
+      )
+      throw Error(JSON.stringify({ operation, name, status: response.status, code, state }))
+    }
     await expect
       .poll(
         async () => {
@@ -203,7 +230,7 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     })
     await page.goto(origin + '/admin')
     await page.getByRole('link', { name: 'MCP library', exact: true }).click()
-    await page.getByRole('row').filter({ hasText: input.name }).getByRole('button', { name: 'Edit', exact: true }).click()
+    await page.locator('.mcp-service-card').filter({ hasText: input.name }).getByRole('button', { name: 'Edit', exact: true }).click()
     await page.getByText('Dependencies ready', { exact: true }).waitFor()
     await page.getByText('Preparation log', { exact: true }).click()
     expect(await page.getByRole('button', { name: 'Prepare again', exact: true }).isEnabled()).toBe(true)
@@ -253,19 +280,29 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     const snapshot = (await Promise.all(snapshots.map(name => readFile(join(workspace, name), 'utf8')))).join('\n')
     expect(snapshot).toContain('MEMBER_WORKSPACE_FIXTURE')
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-member-page.yml'), snapshot)
-    expect(await prompt('CALL_WRITE')).toMatchObject({ success: true, failed: false })
+    const written = await prompt('CALL_WRITE')
+    expect(written).toMatchObject({ success: true, failed: false })
     expect((await readFile(join(workspace, 'member-output.png'))).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-    await save({ ...input, disabledTools: ['browser_navigate'] })
-    expect((await prompt('FILTERED')).tools).not.toContain('mcp__p-browser__browser_navigate')
-    expect(
-      (
-        await fetch(origin + '/market/api/mcp', {
-          method: 'POST',
-          headers: { cookie: member, origin, 'content-type': 'application/json' },
-          body: JSON.stringify({ name: input.name, action: 'disable' }),
-        })
-      ).status,
-    ).toBe(200)
+    // Edit the saved draft: replaying the initial prepareCommand starts a second preparation.
+    expect(discovery.run?.prepareCommand).toBeUndefined()
+    expect(discovery.run?.runtimeDependencies?.length).toBeGreaterThan(0)
+    await save({ ...mcpWriteInput(discovery), disabledTools: ['browser_navigate'] })
+    const filtered = (await library()).find(row => row.name === input.name)!
+    expect(filtered.preparation).toEqual(discovery.preparation)
+    expect(filtered.run?.runtimeDependencies).toEqual(discovery.run?.runtimeDependencies)
+    expect(filtered.testStatus).toBe('passed')
+    expect((await prompt('FILTERED')).tools.filter(name => name.startsWith('mcp__p-browser__')).sort()).toEqual(
+      written.tools.filter(name => name.startsWith('mcp__p-browser__') && name !== 'mcp__p-browser__browser_navigate').sort(),
+    )
+    await checkedMcpResponse(
+      'disable-mcp',
+      input.name,
+      await fetch(origin + '/market/api/mcp', {
+        method: 'POST',
+        headers: { cookie: member, origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ name: input.name, action: 'disable' }),
+      }),
+    )
     expect((await prompt('DISABLED')).tools.some(name => name.startsWith('mcp__p-browser__'))).toBe(false)
     const after = JSON.parse(await execFileText('podman', ['inspect', carrier]))[0]
     expect(after.Id).toBe(before.Id)
@@ -288,7 +325,7 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     }
     await save(cleanupInput)
     await expect.poll(async () => (await library()).find(row => row.name === 'p-cleanup')?.preparation?.stage, { timeout: 30000 }).toBe('ready')
-    expect((await (await post('mcp/test', { name: 'p-cleanup' })).json()).testStatus).toBe('passed')
+    await checkedMcpResponse('test-mcp', 'p-cleanup', await post('mcp/test', { name: 'p-cleanup' }), 'passed')
     const diagnosticPid = (await readFile(join(effectiveUserDataRoot(runtime), 'admin/workspace/diagnostic.pid'), 'utf8')).trim()
     expect(/^[0-9]+$/.test(diagnosticPid)).toBe(true)
     const adminCarrier = carriers.find((row: { Id: string }) => row.Id !== before.Id).Id

@@ -86,6 +86,8 @@ export class SharedModelAdministration {
         throw invalid()
       if (model.input !== undefined && !isModelInput(model.input))
         throw new BusinessRuleError('invalid', 'Model input must be text or text+image.', 'model-input-invalid')
+      if (model.reasoning !== undefined && typeof model.reasoning !== 'boolean')
+        throw new BusinessRuleError('invalid', 'Model reasoning must be enabled or disabled.', 'model-reasoning-invalid')
       seen.add(model.name)
       const prior = existing?.models.find(row => (model.id === undefined ? row.name === model.name : row.id === model.id))
       if (model.id !== undefined && prior === undefined) throw invalid()
@@ -93,7 +95,13 @@ export class SharedModelAdministration {
       if (ids.has(id)) throw invalid()
       ids.add(id)
       // A stored row keeps its administrator-declared input; only a new row takes the known-model default.
-      return { id, name: model.name, enabled: model.enabled, input: model.input ?? prior?.input ?? knownModelInput(model.name) }
+      return {
+        id,
+        name: model.name,
+        enabled: model.enabled,
+        input: model.input ?? prior?.input ?? knownModelInput(model.name),
+        reasoning: model.reasoning ?? prior?.reasoning ?? false,
+      }
     })
     return {
       id: existing?.id ?? this.store.newId(),

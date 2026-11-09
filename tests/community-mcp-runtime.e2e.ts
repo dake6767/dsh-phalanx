@@ -17,7 +17,7 @@ import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
-import { hasToolResult, latestHumanText, streamText, streamToolCall } from './support/real-dsh-model.js'
+import { failedToolResults, hasToolResult, latestHumanText, streamText, streamToolCall } from './support/real-dsh-model.js'
 import { createRealDshRpc } from './support/real-dsh-rpc.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 import { readUsageRecords } from './support/usage-records.js'
@@ -25,14 +25,19 @@ import { readUsageRecords } from './support/usage-records.js'
 it('calls context7 through granted platform MCP and removes it on the next request in the same Linux DSH session', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'mcp-runtime-'))
-  const observations: { marker: string; tools: string[]; result: boolean }[] = []
+  const observations: { marker: string; tools: string[]; result: boolean; errors: string[] }[] = []
   const model = createServer(async (req, res) => {
     let text = ''
     for await (const chunk of req) text += chunk
     const body = JSON.parse(text) as { tools?: { name: string }[] },
       marker = latestHumanText(body)
     const result = hasToolResult(body, marker === 'CALL_CREDENTIAL' ? 'credential-call' : 'mcp-call', false)
-    observations.push({ marker, tools: (body.tools ?? []).map(tool => tool.name), result })
+    observations.push({
+      marker,
+      tools: (body.tools ?? []).map(tool => tool.name),
+      result,
+      errors: failedToolResults(body, ['fictional-platform-mcp-key', 'fictional-secondary-{credential}', 'fictional-fixture-key']),
+    })
     res.setHeader('content-type', 'text/event-stream')
     if (marker === 'CALL_CONTEXT7' && !result)
       streamToolCall(res, 'mcp-call', 'mcp__p-context7__resolve-library-id', { libraryName: 'React', query: 'React useState hook documentation' })
@@ -258,10 +263,10 @@ it('calls context7 through granted platform MCP and removes it on the next reque
     const usagePage = await browser.newPage({ locale: 'en' })
     usagePage.setDefaultTimeout(30000)
     await signInCommunity(usagePage, origin, 'admin', 'password', true)
-    await usagePage.goto(origin + '/admin/usage-records')
-    const usageGrid = usagePage.getByRole('grid', { name: 'Tool usage records', exact: true })
-    await usageGrid.getByText('replacement_echo', { exact: true }).waitFor()
-    await usageGrid.getByText('Usage denied', { exact: true }).waitFor()
+    // hidden in 0.1.32: verify recorded outcomes without the records page.
+    const retainedUsage = await (await usagePage.request.get(origin + '/admin/api/usage-records')).json()
+    expect(retainedUsage.items.some((row: { capability: { operation: string } }) => row.capability.operation === 'replacement_echo')).toBe(true)
+    expect(retainedUsage.items.some((row: { outcome: string }) => row.outcome === 'denied')).toBe(true)
     // A failed platform client must retry unchanged configuration without remounting its healthy sibling.
     expect(
       (await post('mcp', { action: 'save', service: { name: 'p-retry', description: 'Temporary unavailable fixture', url: replacementOrigin + '/retry' } }))

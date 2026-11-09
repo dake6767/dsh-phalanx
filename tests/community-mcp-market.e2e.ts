@@ -10,7 +10,7 @@ import { expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
-import { signInCommunity } from './fixtures/community-native-browser.js'
+import { openCommunitySidebar, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
@@ -145,6 +145,7 @@ it('toggles granted and published MCP through the native app center and preserve
       return observations.find(row => row.marker === marker)!.tools.filter(name => name.startsWith('mcp__'))
     }
     const open = async () => {
+      await openCommunitySidebar(page)
       await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
       await page.getByRole('tab', { name: 'MCP services', exact: true }).click()
     }

@@ -249,7 +249,8 @@ async function uninstall(page: Page, card: ReturnType<Page['locator']>, expert?:
   await card.getByRole('button', { name: 'Uninstall', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Team suite' })
   await dialog.getByText('Delegated execution · team-cli').waitFor()
-  if (expert) await dialog.getByText(`Will be removed from experts: ${expert}`, { exact: true }).waitFor()
+  // hidden in 0.1.32: uninstall still removes references without showing expert names.
+  if (expert) expect(await dialog.getByText(`Will be removed from experts: ${expert}`, { exact: true }).count()).toBe(0)
   await dialog.getByRole('button', { name: 'Confirm uninstall', exact: true }).click()
   await card.getByText('Not installed', { exact: true }).waitFor()
 }

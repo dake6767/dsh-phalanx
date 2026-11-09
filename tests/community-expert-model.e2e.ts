@@ -16,10 +16,10 @@ import { runtimeSettings } from './support/real-dsh-kit.js'
 import { streamText } from './support/real-dsh-model.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 
-it('starts new expert conversations with a chosen shared model, allows native changes and falls back when disabled', async () => {
+it.skip('hidden in 0.1.32: starts new expert conversations with a chosen shared model, allows native changes and falls back when disabled', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await realpath(await mkdtemp(join(tmpdir(), 'community-expert-model-')))
-  const captured = new Map<string, { model: string; context: string }>()
+  const captured = new Map<string, { model: string; context: string; thinking?: { type: string; budget_tokens?: number } }>()
   const model = createServer(async (request, response) => {
     let text = ''
     for await (const chunk of request) text += chunk
@@ -34,7 +34,7 @@ it('starts new expert conversations with a chosen shared model, allows native ch
             : message.content.filter(part => part.type === 'text').map(part => part.text ?? ''),
       )
       .findLast((text: string) => /^EXPERT_[A-Z_]+$/u.test(text))
-    if (body.tools?.length && marker) captured.set(marker, { model: body.model, context: text })
+    if (body.tools?.length && marker) captured.set(marker, { model: body.model, context: text, thinking: body.thinking })
     response.setHeader('content-type', 'text/event-stream')
     streamText(response, 'EXPERT_MODEL_READY')
   })
@@ -74,7 +74,7 @@ it('starts new expert conversations with a chosen shared model, allows native ch
       enabled: true,
       models: [
         { name: 'default-model', enabled: true },
-        { name: 'expert-model', enabled: true },
+        { name: 'expert-model', enabled: true, reasoning: true },
       ],
     }
     const settings = await api('models', { revision: (await api('models')).revision, action: 'save-provider', provider })
@@ -89,11 +89,13 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     await admin.getByLabel('Expert persona', { exact: true }).fill('EXPERT_MODEL_PERSONA')
     await admin.getByRole('button', { name: /Expert model/u }).click()
     await admin.getByRole('option', { name: 'Fixture / expert-model', exact: true }).click()
+    await admin.getByRole('button', { name: /Expert reasoning effort/u }).click()
+    await admin.getByRole('option', { name: 'high', exact: true }).click()
     await admin.getByRole('button', { name: 'Save expert', exact: true }).click()
     await admin
-      .locator('article')
-      .filter({ has: admin.getByRole('heading', { name: 'Commerce expert', exact: true }) })
-      .getByText('Fixture / expert-model', { exact: true })
+      .locator('.plugin-library-card')
+      .filter({ has: admin.getByRole('button', { name: 'Edit expert Commerce expert', exact: true }) })
+      .getByText(/^Fixture \/ expert-model · /u)
       .waitFor()
     const library = await api('experts'),
       expert = library.experts[0]
@@ -147,9 +149,15 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     expect(startup.initializationAborted()).toBe(true)
     expect(startup.defaultReuses()).toEqual([])
     const firstSession = await session()
-    await member.getByRole('button', { name: /current expert-model$/u }).waitFor()
+    await member.getByRole('button', { name: /current expert-model(?:,|$)/u }).waitFor()
     await prompt('EXPERT_START', 'expert-model')
-    await member.getByRole('button', { name: /current expert-model$/u }).click()
+    expect(captured.get('EXPERT_START')!.thinking).toMatchObject({ type: 'enabled', budget_tokens: 16384 })
+    await member.getByRole('button', { name: /current expert-model(?:,|$)/u }).click()
+    await member.getByRole('menuitem', { name: /^Effort/u }).click()
+    await member.getByRole('menuitemradio', { name: /^Low$/iu }).click()
+    await prompt('EXPERT_EFFORT_CHANGED', 'expert-model')
+    expect(captured.get('EXPERT_EFFORT_CHANGED')!.thinking).toMatchObject({ type: 'enabled', budget_tokens: 2048 })
+    await member.getByRole('button', { name: /current expert-model(?:,|$)/u }).click()
     await member.getByRole('menuitem', { name: /^Model/u }).click()
     await member.getByRole('menuitemradio', { name: 'default-model', exact: true }).click()
     await prompt('EXPERT_CHANGED', 'default-model')
@@ -160,7 +168,7 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     await prompt('EXPERT_SECOND_START', 'expert-model')
     await startCommunitySession(member)
     // New Session can reuse a blank with its previous model; establish the selection this switch must preserve.
-    await member.getByRole('button', { name: /current expert-model$/u }).click()
+    await member.getByRole('button', { name: /current expert-model(?:,|$)/u }).click()
     await member.getByRole('menuitem', { name: /^Model/u }).click()
     await member.getByRole('menuitemradio', { name: 'default-model', exact: true }).click()
     await member.getByRole('button', { name: /current default-model$/u }).waitFor()
@@ -168,6 +176,38 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     await member.getByRole('menuitem', { name: /Commerce expert/u }).click()
     await member.getByRole('button', { name: /current default-model$/u }).waitFor()
     await prompt('EXPERT_NATIVE_MODE', 'default-model')
+    const capability = await api('models')
+    await api('models', {
+      revision: capability.revision,
+      action: 'save-provider',
+      provider: {
+        ...provider,
+        id: savedProvider.id,
+        models: savedProvider.models.map((row: { id: string; name: string }) => ({ ...row, enabled: true, reasoning: false })),
+      },
+    })
+    await admin.reload()
+    await admin.getByText('Reasoning unavailable', { exact: true }).waitFor()
+    await start()
+    await member.getByRole('button', { name: /current expert-model(?:,|$)/u }).click()
+    await expect.poll(() => member.getByRole('menuitem', { name: /^Effort/u }).count(), { timeout: 30000 }).toBe(0)
+    await member.keyboard.press('Escape')
+    await prompt('EXPERT_REASONING_DISABLED', 'expert-model')
+    expect(captured.get('EXPERT_REASONING_DISABLED')!.thinking?.type).not.toBe('enabled')
+    const restore = await api('models')
+    await api('models', {
+      revision: restore.revision,
+      action: 'save-provider',
+      provider: {
+        ...provider,
+        id: savedProvider.id,
+        models: savedProvider.models.map((row: { id: string; name: string }) => ({ ...row, enabled: true, reasoning: row.name === 'expert-model' })),
+      },
+    })
+    await start()
+    await member.getByRole('button', { name: /current expert-model(?:,|$)/u }).click()
+    await member.getByRole('menuitem', { name: /^Effort/u }).waitFor()
+    await member.keyboard.press('Escape')
     const current = await api('models')
     await api('models', {
       revision: current.revision,
@@ -179,7 +219,10 @@ it('starts new expert conversations with a chosen shared model, allows native ch
       },
     })
     await admin.reload()
+    await admin.getByText('Model unavailable', { exact: true }).waitFor()
+    await admin.getByRole('button', { name: 'Edit expert Commerce expert', exact: true }).click()
     await admin.getByText('Expert model is unavailable. New conversations use the host default.', { exact: true }).waitFor()
+    await admin.getByRole('button', { name: 'Cancel', exact: true }).click()
     await start()
     await member.getByRole('button', { name: /current default-model$/u }).waitFor()
     await prompt('EXPERT_DISABLED_MODEL', 'default-model')

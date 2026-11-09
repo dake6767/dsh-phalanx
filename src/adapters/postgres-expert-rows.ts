@@ -11,7 +11,7 @@ interface ExpertRow {
   revision: string
   row_revision: string
   published: boolean
-  definition: Pick<Expert, 'name' | 'description' | 'icon' | 'persona' | 'examples'>
+  definition: Pick<Expert, 'name' | 'description' | 'icon' | 'persona' | 'examples' | 'reasoningEffort'>
   skills: readonly string[]
   skillPacks: readonly string[]
   plugins: readonly string[]
@@ -53,8 +53,14 @@ export class PostgresExpertRows implements ExpertRowsPort {
   async save(expert: Expert, expectedRevision = expert.rowRevision ?? 'none'): Promise<void> {
     assertExpertInput(expert)
     if (!Number.isSafeInteger(expert.revision) || expert.revision < 1 || typeof expert.published !== 'boolean') throw Error('Invalid expert record')
-    const { name, description, icon, persona, examples } = expert
-    const values = [expert.id, expert.revision, randomUUID(), expert.published, JSON.stringify({ name, description, icon, persona, examples })]
+    const { name, description, icon, persona, examples, reasoningEffort } = expert
+    const values = [
+      expert.id,
+      expert.revision,
+      randomUUID(),
+      expert.published,
+      JSON.stringify({ name, description, icon, persona, examples, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }),
+    ]
     await repositoryTransaction(this.connection, async sql => {
       await lockExpertParents(sql, [expert])
       const saved = await sql.query(

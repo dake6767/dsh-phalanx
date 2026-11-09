@@ -28,7 +28,7 @@ function fixture() {
   const controller = new AbortController()
   const services = {
     signal: controller.signal,
-    sessions: { list: sessions, create: vi.fn(async () => 'expert-session') },
+    sessions: { list: sessions, create: vi.fn<(input: { workspaceId: string; agentPreset: string }) => Promise<string>>(async () => 'expert-session') },
     workspaces: { list: workspaces, initializeDefault: vi.fn() },
     remote: { session: { selectModel: vi.fn(async () => ({ ok: true })) } },
     layout: { beginNavigation: vi.fn(() => new AbortController().signal) },
@@ -37,8 +37,17 @@ function fixture() {
   // Execute the shipped browser module against public native service fakes.
   const launch: (input: typeof services, plan: object, failureText: string) => Promise<void> = new Function(
     'ctx',
+    'marketRequest',
+    'document',
     `${nativeExpertsTab}; return launchExpertConversation;`,
-  )({ inject: () => {} })
+  )(
+    { inject: () => {} },
+    async (_url: string, options: { body: string }) => {
+      const plan = JSON.parse(options.body)
+      return { sessionId: await services.sessions.create({ workspaceId: plan.workspaceId, agentPreset: plan.agentPreset }) }
+    },
+    { baseURI: 'https://example.test/s/member/' },
+  )
   return { services, sessions, workspaces, controller, launch }
 }
 
@@ -53,7 +62,7 @@ it('waits for both native catalogs before publishing a fresh expert blank to sta
   world.workspaces.ready()
   await launched
   expect(world.services.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'workspace', agentPreset: plan.agentPreset })
-  expect(world.services.remote.session.selectModel).toHaveBeenCalledExactlyOnceWith({ sessionId: 'expert-session', ...plan.model })
+  expect(world.services.remote.session.selectModel).not.toHaveBeenCalled()
   expect(world.services.uiWorkspace.openSession).toHaveBeenCalledExactlyOnceWith('expert-session')
   expect(world.sessions.listeners() + world.workspaces.listeners()).toBe(0)
 })

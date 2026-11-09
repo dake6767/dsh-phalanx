@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect } from 'vitest'
 import { formalUpgradeScope } from '../../scripts/validation/formal-baseline.mjs'
-import type { CommunitySkillView, CommunityUsageRecords } from '../../src/domain/admin-contract.js'
+import type { CommunitySkillView, CommunityUsageRecords, CommunityModelUsage } from '../../src/domain/admin-contract.js'
 import { downloadSourcePresets } from '../../src/domain/download-source.js'
 import {
   openCommunitySession,
@@ -22,6 +22,7 @@ import {
 import { acceptanceProgress } from './acceptance-progress.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
 import { assertRetainedUpgradeAfter } from './installed-retained-after.js'
+import { seedPausedUpgradeState } from './installed-retained-paused.js'
 import { configureRetainedUpgrade } from './installed-retained-configure.js'
 import {
   publishRetainedPlugins,
@@ -107,7 +108,7 @@ export async function runInstalledUpgrade({
       host: (await remote('cat /etc/machine-id')).trim(),
       baseline: baseline.commit,
       transport,
-      scenario: 'formal-upgrade-with-retained-contributions-v6',
+      scenario: 'formal-upgrade-with-paused-data-v7',
       database: JSON.stringify(database?.identity ?? { kind: 'builtin' }),
       retainedFixtures: retainedFixtureIdentity,
       retainedCatalogSha256,
@@ -121,6 +122,7 @@ export async function runInstalledUpgrade({
       'retained-catalog',
       'retained-plugin-library',
       'retained-plugin-access',
+      'retained-paused-data',
       'retained-state',
       'before',
       'original-download-sources',
@@ -152,6 +154,7 @@ export async function runInstalledUpgrade({
     upstream,
     calls,
     pluginCalls,
+    expertReplies,
     state: upstreamState,
   } = await createRetainedUpgradeUpstream({ address, catalogBytes: retainedCatalog.bytes, progress })
   const browser = await chromium.launch({ headless: true }),
@@ -258,6 +261,7 @@ export async function runInstalledUpgrade({
       await publishRetainedPlugins(retainedApi)
       return { managedAndNativeConfigured: true }
     })
+    const beforePaused = await progress.step('retained-paused-data', () => seedPausedUpgradeState({ ...retainedApi, remote, expertReplies }))
     const {
       beforeAccounts,
       beforeLibrary,
@@ -271,7 +275,6 @@ export async function runInstalledUpgrade({
       beforeAdministratorSkills,
       beforeContributions,
     } = await progress.step('retained-state', async () => {
-      const grantPath = `groups/${groupId}/skills`
       const beforePacks = await get('skill-packs'),
         beforePackSelections = await (await member.request.get(origin + '/market/api/skill-packs')).json()
       for (const source of ['managed', 'selected'])
@@ -282,12 +285,9 @@ export async function runInstalledUpgrade({
         })
       const beforeDependencies = await get('runtime-dependencies'),
         beforeSkills = (await get('skills')) as readonly CommunitySkillView[],
-        beforeSkillGrants = await get(grantPath)
+        beforeSkillGrants = await get(`groups/${groupId}/skills`)
       const administratorGroup = (await get('groups')).find((row: { kind: string }) => row.kind === 'admin')
-      const administratorSkills = await get(`groups/${administratorGroup.id}/skills`)
-      const beforeAdministratorSkills = administratorSkills.skills
-        .filter((row: { granted: boolean }) => row.granted)
-        .map((row: { name: string }) => row.name) as string[]
+      const beforeAdministratorSkills = await get(`groups/${administratorGroup.id}/skills`)
       const beforeAccounts = await get('accounts'),
         beforeLibrary = await get('mcp'),
         beforeGrants = await get(`groups/${groupId}/mcp`)
@@ -346,6 +346,7 @@ export async function runInstalledUpgrade({
     const history = async () => ({
       execution: (await get('usage-records?username=admin&capability=skill%3Aretained-skill&operation=retained')) as CommunityUsageRecords,
       mcp: (await get('usage-records?username=member&capability=p-selected&operation=echo')) as CommunityUsageRecords,
+      models: (await get('usage-models')) as CommunityModelUsage,
     })
     const { originalPid, beforeCalls, beforeExposed, beforeUsage, beforeUsageSettings, beforeLimits } = await progress.step('before', async () => {
       await signInCommunity(member, origin, 'member', 'password')
@@ -371,8 +372,7 @@ export async function runInstalledUpgrade({
         expect(absentResources.status()).toBe(404)
         expect(await absentResources.json()).toMatchObject({ code: 'not-found' })
       }
-      const baselineKernel = await instances.kernel()
-      instances.assertBaselineLimits(baselineKernel, deploymentInputs)
+      instances.assertBaselineLimits(await instances.kernel(), deploymentInputs)
       const beforeLimits = (await get('execution/settings')).limits
 
       await remote(
@@ -384,7 +384,7 @@ export async function runInstalledUpgrade({
       const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
       const originalPid = (await remote(pidCommand)).trim()
       expect(Number(originalPid)).toBeGreaterThan(0)
-      return { originalPid, beforeCalls: { ...calls }, beforeExposed: upstreamState.exposed, beforeUsage, beforeUsageSettings, beforeLimits, baselineKernel }
+      return { originalPid, beforeCalls: { ...calls }, beforeExposed: upstreamState.exposed, beforeUsage, beforeUsageSettings, beforeLimits }
     })
     let expectedPid = originalPid
     Object.assign(calls, beforeCalls)
@@ -692,6 +692,8 @@ export async function runInstalledUpgrade({
         retainedApi,
         retainedCatalog,
         beforeContributions,
+        beforePaused,
+        expertReplies,
         beforeAccounts,
         beforeLibrary,
         beforeSelection,

@@ -4,7 +4,7 @@ import { parse } from 'yaml'
 const source = process.argv[2]
 if (!source) throw new Error('Usage: node scripts/generate-bundled-skills.mjs <official-runtime-checkout>')
 const revision = JSON.parse(readFileSync(new URL('../runtime-versions.json', import.meta.url), 'utf8')).dsh.revision
-const git = (...args) => execFileSync('git', ['-C', source, ...args], { encoding: 'utf8' })
+const git = (...args) => execFileSync('git', ['-C', source, ...args], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
 const paths = git('ls-tree', '-r', '--name-only', revision)
   .split('\n')
   .filter(path => /^packages\/[^/]+\/[^/]+\/(skills|assets)\/[^/]+\/SKILL\.md$/u.test(path))

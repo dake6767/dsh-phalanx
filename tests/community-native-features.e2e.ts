@@ -30,10 +30,7 @@ it('applies group terminal choices only on restart, preserves agent and platform
   let previous: Awaited<ReturnType<typeof nativeFeaturePredecessor>> | undefined
   let browser: Browser | undefined
   try {
-    await writeFile(
-      overlay,
-      JSON.stringify([{ id: 'tools', config: { mode: 'native' } }, { insert: [{ id: 'skills-observer', name: '/dsh-phalanx/home/skills-observer.mjs' }] }]),
-    )
+    await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'skills-observer', name: '/dsh-phalanx/home/skills-observer.mjs' }] }]))
     previous = await nativeFeaturePredecessor(root)
     const accounts = previous.accounts
     await accounts.createFirstAdmin({ username: 'admin', password: 'password', email: '' })
@@ -221,9 +218,10 @@ it('applies group terminal choices only on restart, preserves agent and platform
     await selectCommunityWorkspace(peer, peerPage, origin, CONTAINER_HOME + '/Documents/deepseek-harness/default-workspace', true)
     await runCommunityTerminal(peerPage, "printf 'PEER_TERMINAL_%s\\n' OK", 'PEER_TERMINAL_OK')
     await select('admin', ['terminal'])
-    await adminPage.getByRole('link', { name: 'Open DSH', exact: true }).click()
-    await adminPage.waitForURL(url => /^\/app\/[^/]+\/$/u.test(url.pathname))
-    await adminPage.getByRole('button', { name: /^Platform account:/u }).waitFor()
+    const [adminDsh] = await Promise.all([admin.waitForEvent('page'), adminPage.getByRole('link', { name: 'Open admin’s DSH', exact: true }).click()])
+    await adminDsh.waitForURL(url => /^\/app\/[^/]+\/$/u.test(url.pathname))
+    await adminDsh.getByRole('button', { name: /^Platform account:/u }).waitFor()
+    await adminDsh.close()
     await terminal(admin, false)
     const memberAccount = (await api('accounts')).items.find((account: { username: string }) => account.username === 'member')
     await api('accounts/member/actions', { action: 'set-email', email: memberAccount.email, groupId: other.id })

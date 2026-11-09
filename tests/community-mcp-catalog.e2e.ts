@@ -92,7 +92,7 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     await page.getByLabel('MCP service name', { exact: true }).fill('p-map')
     await page.getByLabel('Amap Web Service Key', { exact: true }).fill('fixture-key')
     await page.getByRole('button', { name: 'Import MCP service', exact: true }).click()
-    const row = page.getByRole('row').filter({ hasText: 'p-map' })
+    const row = page.locator('.mcp-service-card').filter({ hasText: 'p-map' })
     await row.getByText('Import failed', { exact: true }).waitFor()
     await page.reload()
     await row.getByText('Import failed', { exact: true }).waitFor()

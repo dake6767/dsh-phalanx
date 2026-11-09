@@ -243,6 +243,12 @@ images before model admission. New rows use the same known-model defaults; saved
 unchanged. This switch declares upstream capability; it cannot add image support
 to an upstream model that lacks it.
 
+**Supports reasoning** is off by default for every model, including existing models.
+Enable it only for an upstream that supports reasoning. DSH then offers Off, Low,
+Medium and High in the conversation's model picker; turning it off removes the
+Effort control. The member or provider chooses the default. The platform passes
+reasoning fields through without choosing a default effort.
+
 
 Configure provider credentials in administration after signup. The platform generates
 its session signing key and stores both kinds of secrets encrypted in PostgreSQL;
@@ -301,7 +307,7 @@ Use **Skills → Skill catalog** and **Plugins → Plugin catalog** for reviewed
 
 Each account belongs to one group. New ordinary accounts enter the default group;
 existing ordinary accounts join it during migration. Administrators belong to a
-protected group with explicit plugin, skill, MCP and expert configuration, like ordinary groups. Library management permissions come from the account role and do not depend on these grants. Assigning or revoking
+protected group with explicit plugin, skill, MCP configuration, like ordinary groups. Library management permissions come from the account role and do not depend on these grants. Assigning or revoking
 an administrator role changes group membership in the same operation. Change the
 default group in Group management; groups with members and the default group cannot
 be deleted. Manage member membership and filter by group in Account management.
@@ -345,8 +351,7 @@ archive.
 
 Plugins added before the library recorded sources are removed by the upgrade that
 introduces source records, together with their grants, member selections, plugin
-settings and expert references. Add and configure them again and review experts
-that referenced them after upgrading. Catalog entries that
+settings and dependent references. Add and configure them again after upgrading. Catalog entries that
 installed such a plugin keep their other items and show the plugin as detached;
 uninstall the entry to remove the rest. Member files, accounts and other settings
 are kept, and members' already installed copies are not removed.
@@ -366,7 +371,7 @@ The **Plugins** tab in group details has two lists:
   that member has not received before. A package cannot be in both lists for one group.
 
 Neither list is an installation allowlist: members retain native installation and
-terminal access. A native copy yields to existing selected or expert read-only access;
+terminal access. A native copy yields to existing selected read-only access;
 preinstallation still installs it once and records success. The read-only copy takes
 priority until that eligibility ends and the instance restarts. Explicitly disabled
 member bundles remain disabled. Preinstalled native copies receive no platform credential.
@@ -447,7 +452,7 @@ files, and warns about common secret filenames/content patterns without showing
 matched values. These checks do not certify code or detect every secret.
 
 Manual uploads and ordinary Git imports limit each skill to 20 MiB and a
-multi-skill intake to 100 MiB. Member contribution limits stay the same.
+multi-skill intake to 100 MiB.
 Skills installed or updated from the signed catalog have separate limits:
 16384 files and 128 MiB for the repository, with at most 64 MiB per skill.
 A catalog entry that exceeds these limits shows a specific catalog limit error.
@@ -475,14 +480,14 @@ files. Group grants and published member selections work for whole packs; effect
 access is the union of direct and pack access, with managed access taking priority.
 An orchestration skill appears only while the pack has an available child.
 
-The skill library, group grants, expert settings and member skill choices show packs
+The skill library, group grants and member skill choices show packs
 as expandable entries. Packed skills remain inside their packs unless a direct
 group grant or member selection also keeps them at the top level. If a member
 cannot see any parent pack, an otherwise visible skill retains its individual
 entry. Hidden packs and their other children are not disclosed. Expanding a visible
 pack shows its children; individual installation and full skill details retain
 their existing publication and direct-grant requirements. Selecting or granting a
-whole pack still makes all its available children usable. Existing group and expert
+whole pack still makes all its available children usable. Existing group
 choices are preserved.
 
 Multi-skill import lets you select an orchestration document; a document declaring
@@ -562,20 +567,6 @@ python3 scripts/example.py
 Replace the variable name, resource path and arguments with those required by the
 skill. When the administrator enables [platform execution](skill-execution.md),
 configured commands use platform credentials without requiring a personal copy.
-
-## Usage records
-
-Administrators open **Usage records** from the management navigation, or follow **Usage records** in a member's details to filter by that member. Members' DSH interface and platform capability guide do not change.
-
-- **Tool usage** lists plugin upstream calls, remote or shared MCP `tools/call`, platform execution and Search/Fetch gateway calls. Filter by time, member, group, capability and outcome; summaries show member, group, capability and UTC day. Rows retain the starting group, capability, result and duration, with HTTP status, tool error or exit code where available. Execution also retains its first argument. Other arguments, request bodies, stdin, output and credentials are excluded.
-- **Model usage** totals input, output, cache read and cache write tokens for shared models across their configured protocols (Anthropic Messages, OpenAI Chat Completions and OpenAI Responses) by member and model. Today, the last seven days and custom ranges use UTC; custom boundaries are whole hours and the end is exclusive. Requests belong to the hour and group in which they started. Title generation also uses the shared model and counts as a request. Incomplete usage preserves known counters and shows unknown requests separately; a missing counter is not zero. Each protocol's input count excludes cache read and cache write. The two OpenAI protocols report a total input that includes cache tokens, so a missing cache counter also leaves their derived input unknown; the Anthropic Messages upstream reports non-cached input directly. Refused requests have a separate count. Personal models are excluded.
-- **Self-reported usage** shows platform skill loads by member, skill and UTC day, including managed, selected and expert-provided skills. A personal same-name override does not count. Identity and current ownership are checked, but instances can overreport or underreport: the platform cannot verify these counts. Reports use the platform's receipt date, omit expert/provider attribution, and are discarded on failure without interrupting a session. Use the daily view for reference, not enforcement.
-
-Local plugin tools and member-container MCP are outside self-report coverage. Plugin upstreams and remote/shared MCP retain their gateway records. Direct outbound proxy traffic, personal credentials and member-installed or configured content are excluded.
-
-In **System settings → Usage record retention**, choose 1–3650 days; the default is 180. Shortening retention removes expired data. Aggregated hours and days are removed only when the whole bucket has expired. Deleting an account does not erase retained records early. Usage facts are stored in PostgreSQL and follow the consistent platform database backup.
-
-MCP and execution usage is recorded directly in PostgreSQL; legacy JSON and SQLite files are not imported.
 
 ## Separate user storage
 
@@ -1121,69 +1112,5 @@ on stdout and sends progress to stderr. A failure reports its cause, next step
 and diagnostic path. These display changes do not alter confirmation, supported
 upgrade recovery or the selected release identity.
 
-## Member skill contributions
 
-Members can ask their agent to submit a skill directory to the platform. The
-platform tool shows the purpose, file list and excluded local credential files;
-the member must select **Submit** before any upload. Cancel leaves the platform
-unchanged. Sub-agents must return to the main conversation for this confirmation.
-
-**Platform App Center → Skills → My contributions** shows status and allows
-withdrawal while pending. Each member can have up to 20 pending contributions;
-resubmitting the same skill replaces that member's pending copy.
-
-Administrators review **Skill library → Member contributions**, including the
-contributor, purpose, files and rendered instructions. **Adopt contribution**
-creates an independent library copy without automatically publishing it or granting
-it to ordinary groups. **Do not adopt** can include a reason visible to the member.
-Withdrawn and declined records expire after 30 days. Account deletion removes
-pending contributions while adopted library copies remain.
-
-A skill declaration contains `purpose`, optional `requiredCommands` and an optional `execution` section:
-
-```json
-{
-  "purpose": "Search team documents",
-  "requiredCommands": [{ "name": "search-cli", "purpose": "Search documents", "installation": "Install a reviewed pinned CLI into $RD_OUT/bin." }],
-  "execution": {
-    "commands": [{ "command": "search-cli", "blocked": ["configure"] }],
-    "variables": [{ "name": "SEARCH_KEY", "purpose": "Authenticate requests", "application": "Request a key from the provider dashboard" }]
-  }
-}
-```
-
-Declarations contain names and instructions, never credential values. The tool
-checks credentials before uploading, and the platform repeats the checks on both
-the archive and declaration. Private keys and high-confidence credential
-assignments are rejected. Findings return a code, severity, file and advice;
-matched values are hidden. For warnings, the agent asks whether to modify the
-skill. Submitting unchanged requires an explicit `retainWarnings` choice and a
-new member confirmation. The original archive remains immutable; contribution
-and library previews hide detected values.
-
-The administrator adopts through **Review → Configuration → Distribution**.
-Configuration matches required commands to ready runtime dependencies; for missing
-commands, review and prepare a dependency there before adoption. Declared delegated
-commands and secret variable names are prefilled separately. Existing secrets are
-retained when left blank. Publishing and ordinary-group grants are optional and use
-the usual impact checks. Old declaration `execution.prepare` fields are ignored.
-See [required command configuration](skill-execution.md#contributed-skills-and-required-commands).
-
-A new contributed skill assigns its contributor as maintainer. Only that current
-account can submit same-name updates. Existing skills without a maintainer remain
-unowned by default; adoption can assign the contributor explicitly. Skills use
-content differences instead of version numbers. Review shows added, changed and
-deleted files and declaration changes. Existing delegated commands, variable values
-and write-only credentials are retained, with new items prefilled and removed items
-marked for review. Updates highlight changed command requirements. Existing migrated preparation
-that depends on changed skill contents still requires administrator approval. **Skill details → Version management** can transfer
-or clear ownership. Administrator imports retain the maintainer and record an
-administrator version. Platform App Center shows contribution credit; adoption
-can choose anonymous credit.
-
-## Experts
-
-Administrators assemble and distribute working modes in the expert library. Members
-summon them in the Platform App Center and restart before starting an expert
-conversation. See [Experts](experts.md) for setup, model selection, access boundaries
-and conversation lifecycle.
+<span id="usage-records"></span>

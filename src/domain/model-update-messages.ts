@@ -100,6 +100,8 @@ export const en = {
   'Model identifier {index}': 'Model identifier {index}',
   'Model {index} enabled': 'Model {index} enabled',
   'Supports images': 'Supports images',
+  'Supports reasoning': 'Supports reasoning',
+  'Model {index} supports reasoning': 'Model {index} supports reasoning',
   'Model {index} supports images': 'Model {index} supports images',
   'Remove model {index}': 'Remove model {index}',
   Remove: 'Remove',
@@ -176,6 +178,7 @@ export const en = {
   Starting: 'Starting',
   'Running {command}': 'Running {command}',
   'See update diagnostics for the current step.': 'See update diagnostics for the current step.',
+  Connection: 'Connection',
 } as const
 export const zhCN = {
   'Open recovery instructions': '查看恢复指引',
@@ -277,6 +280,8 @@ export const zhCN = {
   'Model identifier {index}': '模型标识 {index}',
   'Model {index} enabled': '启用模型 {index}',
   'Supports images': '支持图片',
+  'Supports reasoning': '支持推理',
+  'Model {index} supports reasoning': '模型 {index} 支持推理',
   'Model {index} supports images': '模型 {index} 支持图片',
   'Remove model {index}': '移除模型 {index}',
   Remove: '移除',
@@ -351,4 +356,5 @@ export const zhCN = {
   Starting: '正在开始',
   'Running {command}': '正在执行 {command}',
   'See update diagnostics for the current step.': '请在升级诊断中查看当前步骤。',
+  Connection: '连接',
 } satisfies Record<keyof typeof en, string>

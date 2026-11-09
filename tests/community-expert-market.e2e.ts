@@ -24,8 +24,14 @@ import { runtimeSettings } from './support/real-dsh-kit.js'
 import { hasToolResult, latestHumanText, streamText, streamToolCall } from './support/real-dsh-model.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
+const pickExpertEntries = async (page: import('playwright').Page, label: 'Add skills' | 'Add plugins' | 'Add MCP services', names: readonly string[]) => {
+  await page.getByRole('dialog').getByRole('button', { name: label, exact: true }).click()
+  const picker = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Confirm selection', exact: true }) })
+  for (const name of names) await picker.getByText(name, { exact: true }).first().click()
+  await picker.getByRole('button', { name: 'Confirm selection', exact: true }).click()
+}
 
-it('publishes and summons experts with restart snapshots, immediate withdrawal and independent acquisition sources', async () => {
+it.skip('hidden in 0.1.32: publishes and summons experts with restart snapshots, immediate withdrawal and independent acquisition sources', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await realpath(await mkdtemp(join(tmpdir(), 'community-expert-market-'))),
     secret = randomUUID()
@@ -60,7 +66,6 @@ it('publishes and summons experts with restart snapshots, immediate withdrawal a
   await writeFile(
     overlay,
     JSON.stringify([
-      { id: 'tools', config: { mode: 'native' } },
       { insert: [{ id: 'expert-observer', name: runtime.container ? '/dsh-phalanx/home/expert-observer.mjs' : join(home, 'expert-observer.mjs') }] },
     ]),
   )
@@ -157,9 +162,9 @@ it('publishes and summons experts with restart snapshots, immediate withdrawal a
     await admin.getByLabel('Expert description', { exact: true }).fill('Marketing workflow')
     await admin.getByLabel('Expert persona', { exact: true }).fill('EXPERT_MARKETING_PERSONA')
     await admin.getByLabel('Example tasks (optional, 2–3 lines)', { exact: true }).fill('Plan a launch\nReview a campaign')
-    await admin.getByRole('dialog').getByText('expert-research', { exact: true }).first().click()
+    await pickExpertEntries(admin, 'Add skills', ['expert-research'])
     await admin.getByRole('button', { name: 'Save expert', exact: true }).click()
-    await admin.getByRole('button', { name: 'Publish expert Commerce expert', exact: true }).waitFor()
+    await admin.getByRole('button', { name: 'Edit expert Commerce expert', exact: true }).waitFor()
     const created = await api('experts')
     expect(
       (
@@ -185,9 +190,12 @@ it('publishes and summons experts with restart snapshots, immediate withdrawal a
     await admin
       .getByText('Members granted this expert can use all its entries and platform credentials, including entries not granted separately.', { exact: true })
       .waitFor()
+    await admin.getByRole('button', { name: 'Edit expert Commerce expert', exact: true }).click()
     await admin.getByRole('button', { name: 'Publish expert Commerce expert', exact: true }).click()
     await admin.getByRole('button', { name: 'Unpublish expert Commerce expert', exact: true }).waitFor()
+    await admin.getByRole('button', { name: 'Cancel', exact: true }).click()
     await member.getByRole('button', { name: 'Reload experts', exact: true }).click()
+    await member.getByText('Included entries', { exact: true }).click()
     await member.getByText('Plan a launch', { exact: true }).waitFor()
     await member
       .getByText(

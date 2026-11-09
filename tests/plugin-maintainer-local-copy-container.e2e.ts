@@ -202,17 +202,12 @@ it.skipIf(!runtimeSettings.containerImage)(
         body: JSON.stringify({ packageName: coordinationPackage, enabled: true }),
       })
       expect(denied.status).toBe(403)
-      const open = async () => {
-        await page.getByRole('button', { name: 'Plugins', exact: true }).click()
-        await page
-          .getByRole('button', { name: new RegExp(coordinationPackage.replace('/', '\\/')) })
-          .first()
-          .click()
-        await page.getByRole('switch', { name: 'Use my local copy', exact: true }).waitFor()
+      // hidden in 0.1.32: keep the maintainer isolation contract through its API.
+      const setLocal = async (enabled: boolean) => {
+        const result = await memberRequest('/market/api/plugins/local-copy', { packageName: coordinationPackage, enabled })
+        expect(result.ok, await result.text()).toBe(true)
       }
-      await open()
-      expect(await page.getByRole('region', { name: 'Plugin contribution', exact: true }).innerText()).toContain('no platform credentials')
-      await page.getByRole('switch', { name: 'Use my local copy', exact: true }).click()
+      await setLocal(true)
       await expect.poll(async () => (await (await memberRequest(details)).json()).localCopy).toEqual({ enabled: true, application: 'restart-required' })
       expect((await (await adminRequest(endpoint)).json()).pendingMembers).toEqual(['member'])
       await checkOther()
@@ -233,10 +228,10 @@ it.skipIf(!runtimeSettings.containerImage)(
       expect(deniedGateway.trim()).toBe('403')
       expect((await (await adminRequest(endpoint)).json()).pendingMembers).toEqual([])
       await checkOther()
-      await open()
+      // hidden in 0.1.32: contribution panel is paused.
       const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
       if (evidence) await page.screenshot({ path: join(evidence, 'maintainer-local-copy.png'), fullPage: true, animations: 'disabled' })
-      await page.getByRole('switch', { name: 'Use my local copy', exact: true }).click()
+      await setLocal(false)
       await expect.poll(async () => (await (await memberRequest(details)).json()).localCopy).toEqual({ enabled: false, application: 'restart-required' })
       expect(
         (
@@ -251,9 +246,9 @@ it.skipIf(!runtimeSettings.containerImage)(
       await checkSidebar(true)
       await checkOther()
       expect(await hasConfiguration()).toContain('HAS_PLATFORM_CONFIG')
-      await open()
+      // hidden in 0.1.32: contribution panel is paused.
       if (evidence) await page.screenshot({ path: join(evidence, 'maintainer-platform-copy.png'), fullPage: true, animations: 'disabled' })
-      await page.getByRole('switch', { name: 'Use my local copy', exact: true }).click()
+      await setLocal(true)
       await expect.poll(async () => (await (await memberRequest(details)).json()).localCopy?.enabled).toBe(true)
       expect(
         (await adminRequest(endpoint, { action: 'save', packages: [], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision }))
@@ -280,13 +275,16 @@ it.skipIf(!runtimeSettings.containerImage)(
       expect(await hasConfiguration()).toContain('NO_PLATFORM_CONFIG')
       await assertPluginDirectories()
       await page.getByRole('button', { name: 'Plugins', exact: true }).click()
-      const loadedDetails = page.waitForResponse(response => response.url().includes('/market/api/plugins/contribution?') && response.status() === 200)
+      // hidden in 0.1.32: retain contribution detail data through its API while the panel is paused.
+      const loadedDetails = memberRequest(details)
       await page
         .getByRole('button', { name: new RegExp(coordinationPackage.replace('/', '\\/')) })
         .first()
         .click()
-      await loadedDetails
-      await page.getByRole('button', { name: 'Contribute to platform', exact: true }).waitFor()
+      const contributionResponse = await loadedDetails
+      expect(contributionResponse.status).toBe(200)
+      expect(await contributionResponse.json()).toMatchObject({ canMaintain: true })
+      expect(await page.getByRole('button', { name: 'Contribute to platform', exact: true }).count()).toBe(0)
       expect(await page.getByRole('switch', { name: 'Use my local copy', exact: true }).count()).toBe(0)
       await assertPluginDirectories()
     } catch (error) {

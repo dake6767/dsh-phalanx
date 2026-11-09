@@ -21,7 +21,7 @@ import { runtimeSettings } from './support/real-dsh-kit.js'
 import { hasToolResult, latestHumanText, streamText, streamToolCall } from './support/real-dsh-model.js'
 import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 
-it.each(['standard', 'minimal'])('requires foreground confirmation in %s before uploading and adopting a skill', async preset => {
+it.skip.each(['standard', 'minimal'])('hidden in 0.1.32: requires foreground confirmation in %s before uploading and adopting a skill', async preset => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'contributions-native-'))
   let credentialFindings = ''
@@ -194,7 +194,11 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
       if (preset === 'standard') {
         await admin.getByRole('button', { name: 'Finish adoption', exact: true }).click()
         await member.getByText('CONTRIBUTION_TURN_COMPLETE', { exact: true }).last().waitFor()
-        await member.getByRole('button', { name: 'New session', exact: true }).first().click()
+        await member
+          .getByRole('button', { name: 'New session', exact: true })
+          .filter({ hasNot: member.locator('[data-copy-version]') })
+          .first()
+          .click()
         await writeFile(join(skill, 'CHANGELOG.md'), 'Update the contributed skill')
         await writeFile(join(skill, 'search.js'), '#!/usr/bin/env node\nconsole.log(process.env.CONTRIBUTION_KEY ? "UPDATED_CREDENTIAL_USED" : "MISSING");\n')
         await composer.fill('UPDATE_SKILL: Submit the updated team-guide.')

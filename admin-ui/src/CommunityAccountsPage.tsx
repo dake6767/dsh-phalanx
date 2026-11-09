@@ -210,7 +210,7 @@ export default function CommunityAccountsPage({ session }: { session?: Community
               <table className="table__content accounts-table">
                 <thead className="table__header">
                   <tr>
-                    {(['Account', 'Role', 'Group', 'Account status', 'Instance status', 'Actions'] as const).map(column => (
+                    {(['Account', 'Group', 'Account status', 'Instance status', 'Actions'] as const).map(column => (
                       <th key={column} className="table__column">
                         {t(column)}
                       </th>
@@ -228,15 +228,17 @@ export default function CommunityAccountsPage({ session }: { session?: Community
                               <Avatar.Fallback>{account.username.slice(0, 1).toUpperCase()}</Avatar.Fallback>
                             </Avatar>
                             <div>
-                              <strong>{account.username}</strong>
+                              <div className="person-name">
+                                <strong>{account.username}</strong>
+                                {account.admin ? (
+                                  <Chip size="sm" variant="soft" color="accent">
+                                    {t('Admin')}
+                                  </Chip>
+                                ) : null}
+                              </div>
                               <span>{account.email || t('No email')}</span>
                             </div>
                           </div>
-                        </td>
-                        <td className="table__cell">
-                          <Chip size="sm" variant="soft" color={account.admin ? 'accent' : 'default'}>
-                            {account.admin ? t('Admin') : t('Member')}
-                          </Chip>
                         </td>
                         <td className="table__cell">{groupLabels.get(account.groupId) ?? '—'}</td>
                         <td className="table__cell">
@@ -267,15 +269,6 @@ export default function CommunityAccountsPage({ session }: { session?: Community
                               <CommunityIcon name="edit" size={14} />
                               {t('Edit')}
                             </Button>
-                            <Button
-                              variant="tertiary"
-                              size="sm"
-                              isDisabled={busy || lastAdmin}
-                              aria-label={t(account.disabled ? 'Enable {username}' : 'Disable {username}', { username: account.username })}
-                              onPress={() => choose(account, { action: 'set-disabled', disabled: !account.disabled })}
-                            >
-                              {account.disabled ? t('Enable') : t('Disable')}
-                            </Button>
                             <Dropdown>
                               <Button size="sm" variant="ghost" isDisabled={busy} aria-label={t('More actions for {username}', { username: account.username })}>
                                 <CommunityIcon name="more" size={16} />
@@ -284,7 +277,8 @@ export default function CommunityAccountsPage({ session }: { session?: Community
                                 <Dropdown.Menu
                                   aria-label={t('Actions for {username}', { username: account.username })}
                                   onAction={key => {
-                                    if (key === 'password') choose(account, { action: 'reset-password', password: '' })
+                                    if (key === 'disabled') choose(account, { action: 'set-disabled', disabled: !account.disabled })
+                                    else if (key === 'password') choose(account, { action: 'reset-password', password: '' })
                                     else if (key === 'role') choose(account, { action: 'set-admin', admin: !account.admin })
                                     else if (key === 'delete') choose(account, { action: 'delete' })
                                     else if (key === 'environment') {
@@ -295,6 +289,13 @@ export default function CommunityAccountsPage({ session }: { session?: Community
                                     }
                                   }}
                                 >
+                                  <Dropdown.Item
+                                    id="disabled"
+                                    isDisabled={lastAdmin}
+                                    textValue={t(account.disabled ? 'Enable {username}' : 'Disable {username}', { username: account.username })}
+                                  >
+                                    <Label>{t(account.disabled ? 'Enable {username}' : 'Disable {username}', { username: account.username })}</Label>
+                                  </Dropdown.Item>
                                   <Dropdown.Item id="password" textValue={t('Reset password for {username}', { username: account.username })}>
                                     <Label>{t('Reset password for {username}', { username: account.username })}</Label>
                                   </Dropdown.Item>

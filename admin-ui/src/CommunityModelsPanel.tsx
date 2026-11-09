@@ -13,12 +13,13 @@ import type {
 import { communityProviderProtocols, isProviderProtocol, knownModelInput } from '../../src/domain/shared-models'
 import { CommunityApiRequestError, communityModels, updateCommunityModels } from './community-api'
 import CommunityField from './CommunityField'
+import CommunityGrantSection from './CommunityGrantSection'
 import CommunitySelect from './CommunitySelect'
 import CommunityDialog from './CommunityDialog'
 import { useDraftGuard } from './useDraftGuard'
 import CommunityMessage from './CommunityMessage'
 import CommunityIcon from './CommunityIcon'
-type ModelDraft = { id?: string; row: string; name: string; enabled: boolean; input: CommunityModelInput }
+type ModelDraft = { id?: string; row: string; name: string; enabled: boolean; input: CommunityModelInput; reasoning: boolean }
 type ProviderDraft = {
   id?: string
   name: string
@@ -52,7 +53,7 @@ const baseUrlCopy: Record<CommunityProviderProtocol, { label: PlatformMessageKey
 // View-local row keys only; persistent model IDs are assigned by the server.
 let nextDraftRow = 0
 function newModelDraft(): ModelDraft {
-  return { row: `draft:${nextDraftRow++}`, name: '', enabled: true, input: 'text' }
+  return { row: `draft:${nextDraftRow++}`, name: '', enabled: true, input: 'text', reasoning: false }
 }
 function draftOf(provider?: CommunityProviderView): ProviderDraft {
   return {
@@ -62,7 +63,7 @@ function draftOf(provider?: CommunityProviderView): ProviderDraft {
     apiFormat: provider?.apiFormat ?? 'anthropic-messages',
     apiKey: '',
     enabled: provider?.enabled ?? true,
-    models: provider ? provider.models.map(model => ({ ...model, row: `saved:${model.id}` })) : [newModelDraft()],
+    models: provider ? provider.models.map(model => ({ ...model, reasoning: model.reasoning === true, row: `saved:${model.id}` })) : [newModelDraft()],
   }
 }
 function configured(settings: CommunityModelSettings) {
@@ -167,7 +168,7 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
         action: 'save-provider',
         provider: {
           ...draft,
-          models: draft.models.map(({ id, name, enabled, input }) => ({ ...(id ? { id } : {}), name, enabled, input })),
+          models: draft.models.map(({ id, name, enabled, input, reasoning }) => ({ ...(id ? { id } : {}), name, enabled, input, reasoning })),
         },
       },
       'Provider saved.',
@@ -296,10 +297,11 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
                         if (draft?.id !== provider.id) guard.request(() => select(provider))
                       }}
                     >
-                      <span>
-                        {provider.name}
+                      <span className="provider-choice-body">
+                        <strong>{provider.name}</strong>
                         <small>{t('{count} models · {status}', { count: provider.models.length, status: t(provider.enabled ? 'Enabled' : 'Disabled') })}</small>
                       </span>
+                      <span className={`provider-choice-dot ${provider.enabled ? 'is-on' : ''}`} aria-hidden="true" />
                     </Button>
                   ))
                 )}
@@ -318,123 +320,145 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
                   <h2>{draft.id ? t('Provider configuration') : t('Add provider')}</h2>
                   {dirty ? <span className="badge">{t('Unsaved changes')}</span> : null}
                 </div>
-                <div className="settings-panel-body provider-form-fields">
-                  <CommunityField
-                    inputRef={providerName}
-                    label={t('Provider name')}
-                    value={draft.name}
-                    onChange={name => update({ name })}
-                    required
-                    disabled={busy}
-                  />
-                  <CommunitySelect
-                    label={t('Protocol')}
-                    value={draft.apiFormat}
-                    options={communityProviderProtocols.map(id => ({ id, label: t(protocolCopy[id]) }))}
-                    onChange={apiFormat => {
-                      if (isProviderProtocol(apiFormat)) update({ apiFormat })
-                    }}
-                    disabled={busy}
-                  />
-                  <CommunityField
-                    label={t(baseUrlCopy[draft.apiFormat].label)}
-                    type="url"
-                    value={draft.baseUrl}
-                    onChange={baseUrl => update({ baseUrl })}
-                    required
-                    disabled={busy}
-                    description={t(baseUrlCopy[draft.apiFormat].description)}
-                  />
-                  <CommunityField
-                    label={t('API key')}
-                    type="password"
-                    autoComplete="new-password"
-                    value={draft.apiKey}
-                    onChange={apiKey => update({ apiKey })}
-                    required={!storedKey?.configured}
-                    disabled={busy}
-                    description={
-                      !draft.id
-                        ? undefined
-                        : !storedKey?.configured
-                          ? t('No key configured.')
-                          : storedKey.last4
-                            ? t('Key configured (ending in {suffix}). Leave blank to keep it.', { suffix: storedKey.last4 })
-                            : t('Key configured. Leave blank to keep it.')
+                <div className="settings-panel-body provider-form-fields plugin-settings-panel">
+                  <CommunityGrantSection
+                    title={t('Connection')}
+                    action={
+                      <Switch isSelected={draft.enabled} onChange={enabled => update({ enabled })} isDisabled={busy}>
+                        <Switch.Content>
+                          <Switch.Control>
+                            <Switch.Thumb />
+                          </Switch.Control>
+                          {t('Provider enabled')}
+                        </Switch.Content>
+                      </Switch>
                     }
-                  />
-                  <Switch isSelected={draft.enabled} onChange={enabled => update({ enabled })} isDisabled={busy}>
-                    <Switch.Content>
-                      <Switch.Control>
-                        <Switch.Thumb />
-                      </Switch.Control>
-                      {t('Provider enabled')}
-                    </Switch.Content>
-                  </Switch>
-                  <div className="panel-heading">
-                    <h3>{t('Models')}</h3>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      isDisabled={busy}
-                      onPress={() => update({ models: [...draft.models, newModelDraft()] })}
-                    >
-                      {t('Add model')}
-                    </Button>
-                  </div>
-                  {!draft.models.length ? (
-                    <p>{t('Add at least one model before saving.')}</p>
-                  ) : (
-                    draft.models.map((model, index) => (
-                      <div className="model-draft-row" key={model.row}>
-                        <CommunityField
-                          label={t('Model identifier {index}', { index: index + 1 })}
-                          value={model.name}
-                          onChange={name => onModelNameChange(model, name)}
-                          required
-                          disabled={busy}
-                        />
-                        <Switch
-                          aria-label={t('Model {index} enabled', { index: index + 1 })}
-                          isSelected={model.enabled}
-                          onChange={enabled => update({ models: draft.models.map(row => (row.row === model.row ? { ...row, enabled } : row)) })}
-                          isDisabled={busy}
-                        >
-                          <Switch.Content>
-                            <Switch.Control>
-                              <Switch.Thumb />
-                            </Switch.Control>
-                            {t('Enabled')}
-                          </Switch.Content>
-                        </Switch>
-                        <Switch
-                          aria-label={t('Model {index} supports images', { index: index + 1 })}
-                          isSelected={model.input === 'text+image'}
-                          onChange={selected => onModelImagesChange(model, selected ? 'text+image' : 'text')}
-                          isDisabled={busy}
-                        >
-                          <Switch.Content>
-                            <Switch.Control>
-                              <Switch.Thumb />
-                            </Switch.Control>
-                            {t('Supports images')}
-                          </Switch.Content>
-                        </Switch>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="tertiary"
-                          aria-label={t('Remove model {index}', { index: index + 1 })}
-                          isDisabled={busy}
-                          onPress={() => removeModel(model)}
-                        >
-                          {t('Remove')}
-                        </Button>
-                      </div>
-                    ))
-                  )}
-                  <div className="dialog-actions">
+                  >
+                    <CommunityField
+                      inputRef={providerName}
+                      label={t('Provider name')}
+                      value={draft.name}
+                      onChange={name => update({ name })}
+                      required
+                      disabled={busy}
+                    />
+                    <CommunitySelect
+                      label={t('Protocol')}
+                      value={draft.apiFormat}
+                      options={communityProviderProtocols.map(id => ({ id, label: t(protocolCopy[id]) }))}
+                      onChange={apiFormat => {
+                        if (isProviderProtocol(apiFormat)) update({ apiFormat })
+                      }}
+                      disabled={busy}
+                    />
+                    <CommunityField
+                      label={t(baseUrlCopy[draft.apiFormat].label)}
+                      type="url"
+                      value={draft.baseUrl}
+                      onChange={baseUrl => update({ baseUrl })}
+                      required
+                      disabled={busy}
+                      description={t(baseUrlCopy[draft.apiFormat].description)}
+                    />
+                    <CommunityField
+                      label={t('API key')}
+                      type="password"
+                      autoComplete="new-password"
+                      value={draft.apiKey}
+                      onChange={apiKey => update({ apiKey })}
+                      required={!storedKey?.configured}
+                      disabled={busy}
+                      description={
+                        !draft.id
+                          ? undefined
+                          : !storedKey?.configured
+                            ? t('No key configured.')
+                            : storedKey.last4
+                              ? t('Key configured (ending in {suffix}). Leave blank to keep it.', { suffix: storedKey.last4 })
+                              : t('Key configured. Leave blank to keep it.')
+                      }
+                    />
+                  </CommunityGrantSection>
+                  <CommunityGrantSection
+                    title={t('Models')}
+                    action={
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        isDisabled={busy}
+                        onPress={() => update({ models: [...draft.models, newModelDraft()] })}
+                      >
+                        {t('Add model')}
+                      </Button>
+                    }
+                  >
+                    {!draft.models.length ? (
+                      <p className="grant-rows-empty">{t('Add at least one model before saving.')}</p>
+                    ) : (
+                      draft.models.map((model, index) => (
+                        <div className="model-draft-row" key={model.row}>
+                          <CommunityField
+                            label={t('Model identifier {index}', { index: index + 1 })}
+                            value={model.name}
+                            onChange={name => onModelNameChange(model, name)}
+                            required
+                            disabled={busy}
+                          />
+                          <Switch
+                            aria-label={t('Model {index} enabled', { index: index + 1 })}
+                            isSelected={model.enabled}
+                            onChange={enabled => update({ models: draft.models.map(row => (row.row === model.row ? { ...row, enabled } : row)) })}
+                            isDisabled={busy}
+                          >
+                            <Switch.Content>
+                              <Switch.Control>
+                                <Switch.Thumb />
+                              </Switch.Control>
+                              {t('Enabled')}
+                            </Switch.Content>
+                          </Switch>
+                          <Switch
+                            aria-label={t('Model {index} supports images', { index: index + 1 })}
+                            isSelected={model.input === 'text+image'}
+                            onChange={selected => onModelImagesChange(model, selected ? 'text+image' : 'text')}
+                            isDisabled={busy}
+                          >
+                            <Switch.Content>
+                              <Switch.Control>
+                                <Switch.Thumb />
+                              </Switch.Control>
+                              {t('Supports images')}
+                            </Switch.Content>
+                          </Switch>
+                          <Switch
+                            aria-label={t('Model {index} supports reasoning', { index: index + 1 })}
+                            isSelected={model.reasoning}
+                            onChange={reasoning => update({ models: draft.models.map(row => (row.row === model.row ? { ...row, reasoning } : row)) })}
+                            isDisabled={busy}
+                          >
+                            <Switch.Content>
+                              <Switch.Control>
+                                <Switch.Thumb />
+                              </Switch.Control>
+                              {t('Supports reasoning')}
+                            </Switch.Content>
+                          </Switch>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="tertiary"
+                            aria-label={t('Remove model {index}', { index: index + 1 })}
+                            isDisabled={busy}
+                            onPress={() => removeModel(model)}
+                          >
+                            {t('Remove')}
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </CommunityGrantSection>
+                  <div className="dialog-actions provider-form-actions">
                     {draft.id ? (
                       <Button
                         type="button"

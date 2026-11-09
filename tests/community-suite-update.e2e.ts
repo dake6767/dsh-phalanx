@@ -113,10 +113,7 @@ it('offers an update after a platform upgrade, previews the differences and swit
     secondCatalog = await legacySuiteCatalogFixture([suite('2', second, ['chat-send', 'chat-read'], tool('v2'), ['CHAT_TOKEN', 'CHAT_REGION'])])
     app = start(secondCatalog, port)
     origin = await app.start()
-    await page.goto(origin + '/login')
-    await page.getByLabel('Username', { exact: true }).fill('admin')
-    await page.getByLabel('Password', { exact: true }).fill('password')
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await page.goto(origin + '/admin')
     await page.waitForURL(origin + '/admin')
     expect(
       ((await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json()) as CommunityRuntimeDependencyView[]).find(

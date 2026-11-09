@@ -122,7 +122,11 @@ it('keeps shared model selections and an installed network plugin usable across 
     return { context, page, username, closedSockets }
   }
   const newSession = async (world: Awaited<ReturnType<typeof enter>>) => {
-    await world.page.getByRole('button', { name: 'New session', exact: true }).first().click()
+    await world.page
+      .getByRole('button', { name: 'New session', exact: true })
+      .filter({ hasNot: world.page.locator('[data-copy-version]') })
+      .first()
+      .click()
     await world.page.getByText('Into the Unknown', { exact: true }).waitFor()
     if (world.username === 'bob') {
       await selectPersonalModel(world.page)

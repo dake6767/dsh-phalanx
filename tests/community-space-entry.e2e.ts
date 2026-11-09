@@ -104,7 +104,8 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
   }
   app = candidateApplication(config)
   const accounts = await openTestAccounts(root)
-  await accounts.createFirstAdmin({ username: 'fixtureadmin', email: '', password: 'password' })
+  const adminUsername = 'workspace-administrator-www-west'
+  await accounts.createFirstAdmin({ username: adminUsername, email: '', password: 'password' })
   try {
     for (const username of ['alice', 'bob']) await accounts.create({ username, email: `${username}@example.test`, password: 'password' })
   } finally {
@@ -295,11 +296,20 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
   expect((await alice.context.request.get(bob.entry)).status()).toBe(403)
   await otherTab.getByText('This browser switched to account alice.', { exact: true }).waitFor()
   await otherTab.close()
-  const workspace = alice.page.getByRole('treeitem', { name: 'Default workspace', exact: true })
-  if ((await workspace.getAttribute('aria-expanded')) === 'false') await workspace.click()
+  const workspace = alice.page
+    .locator('[role="treeitem"][data-row-key^="workspace:"]')
+    .filter({ has: alice.page.getByText('Default workspace', { exact: true }) })
   const titled = alice.page.getByRole('treeitem').filter({ has: alice.page.getByText('COMMUNITY_TITLE', { exact: true }) })
-  // Session titles arrive after the model's title turn; the tree may re-render while it loads.
-  await expect.poll(() => titled.count(), { timeout: 60_000 }).toBeGreaterThan(0)
+  // Account navigation reloads native expansion state while the session list settles.
+  await expect
+    .poll(
+      async () => {
+        if ((await workspace.getAttribute('aria-expanded')) === 'false') await workspace.click()
+        return titled.count()
+      },
+      { timeout: 60_000 },
+    )
+    .toBeGreaterThan(0)
   await titled.last().click({ timeout: 60_000 })
   await alice.page.getByText('COMMUNITY_', { exact: true }).waitFor()
   model.release()
@@ -311,7 +321,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
   dialog = await openSwitcher()
   await dialog.getByRole('button', { name: 'Add account', exact: true }).click()
   await alice.page.waitForURL(`${origin}/login?other=1`)
-  await alice.page.getByLabel('Username', { exact: true }).fill('fixtureadmin')
+  await alice.page.getByLabel('Username', { exact: true }).fill(adminUsername)
   await alice.page.getByLabel('Password', { exact: true }).fill('password')
   await alice.page.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
   await alice.page.waitForURL(`${origin}/admin`)
@@ -319,7 +329,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
   expect(await alice.page.locator('html').getAttribute('data-theme')).toBe('dark')
   expect(await alice.page.locator('html').getAttribute('data-appearance')).toBe('dark')
   const managementDialog = alice.page.getByRole('dialog', { name: 'Switch accounts', exact: true })
-  await managementDialog.getByRole('listitem').filter({ hasText: 'fixtureadmin' }).getByText('Current account', { exact: true }).waitFor()
+  await managementDialog.getByRole('listitem').filter({ hasText: adminUsername }).getByText('Current account', { exact: true }).waitFor()
   await managementDialog.getByRole('button', { name: 'alice', exact: true }).click({ noWaitAfter: true })
   await alice.page.waitForURL(alice.entry)
   await alice.page.getByRole('button', { name: 'Platform account: alice', exact: true }).waitFor()
@@ -354,7 +364,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
   await alice.page.getByRole('button', { name: 'Platform account: alice', exact: true }).waitFor()
   const admin = await browser.newContext({ ignoreHTTPSErrors: true })
   expect(
-    (await admin.request.post(`${origin}/login`, { headers: { origin }, form: { username: 'fixtureadmin', password: 'password' }, maxRedirects: 0 })).status(),
+    (await admin.request.post(`${origin}/login`, { headers: { origin }, form: { username: adminUsername, password: 'password' }, maxRedirects: 0 })).status(),
   ).toBe(303)
   expect(
     (
@@ -367,6 +377,16 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
   dialog = await openSwitcher()
   const rememberedBob = dialog.getByRole('listitem').filter({ hasText: 'bob' })
   await rememberedBob.getByText('Sign in again', { exact: true }).waitFor()
+  const desktopViewport = alice.page.viewportSize()!
+  await alice.page.setViewportSize({ width: 390, height: 844 })
+  await dialog.getByRole('button', { name: adminUsername, exact: true }).waitFor()
+  const actionButtons = dialog.getByRole('button', { name: 'More actions', exact: true })
+  await expect.poll(() => actionButtons.count()).toBeGreaterThan(1)
+  const actionPositions = await actionButtons.evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().right))
+  expect(new Set(actionPositions).size).toBe(1)
+  expect(await dialog.evaluate(node => node.scrollWidth)).toBe(await dialog.evaluate(node => node.clientWidth))
+  await dialog.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'account-switch-narrow.png'), animations: 'disabled' })
+  await alice.page.setViewportSize(desktopViewport)
   await rememberedBob.getByRole('button', { name: 'bob', exact: true }).click()
   await alice.page.waitForURL(`${origin}/login?username=bob`)
   expect(await alice.page.getByLabel('Username', { exact: true }).inputValue()).toBe('bob')

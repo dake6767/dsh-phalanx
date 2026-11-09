@@ -71,7 +71,7 @@ export async function expertRoute(
       typeof value.expert !== 'object' ||
       Array.isArray(value.expert) ||
       Object.keys(value.expert).some(
-        key => !['name', 'description', 'icon', 'persona', 'skills', 'skillPacks', 'plugins', 'mcp', 'examples', 'model'].includes(key),
+        key => !['name', 'description', 'icon', 'persona', 'skills', 'skillPacks', 'plugins', 'mcp', 'examples', 'model', 'reasoningEffort'].includes(key),
       )
     )
       invalid()

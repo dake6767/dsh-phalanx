@@ -62,7 +62,7 @@ it('selects prepared dependencies in the existing MCP editor and retains its tab
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) await page.screenshot({ path: join(evidence, 'mcp-dependency-picker-desktop.png'), fullPage: true })
     await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await page.getByRole('row').filter({ hasText: 'p-tools' }).getByRole('button', { name: 'Edit', exact: true }).click()
+    await page.locator('.mcp-service-card').filter({ hasText: 'p-tools' }).getByRole('button', { name: 'Edit', exact: true }).click()
     expect(await dependency.isChecked()).toBe(true)
     const services = await (await page.request.get(origin + '/admin/api/mcp')).json()
     expect(services[0].run).toMatchObject({ command: 'fixture', runtimeDependencies: ['fixture'] })

@@ -54,7 +54,6 @@ export default function CommunityMcpUpdate({
   return (
     <CommunityDialog
       drawer
-      eyebrow={t('MCP catalog')}
       title={t('Review catalog update')}
       busy={busy}
       onClose={onClose}

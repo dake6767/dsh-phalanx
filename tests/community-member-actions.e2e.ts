@@ -98,9 +98,26 @@ it('logs out without cancelling a running task and recovers its own failed resta
   expect(await (await alice.context.request.get(`${origin}/account/identity`)).json()).toEqual({ username: 'alice' })
   expect((await alice.context.request.get(`${origin}/admin/api/session`)).status()).toBe(403)
   const account = alice.page.getByRole('button', { name: 'Platform account: alice', exact: true })
-  const settings = alice.page.getByRole('button', { name: 'Account menu', exact: true })
+  const settings = alice.page.getByRole('button', { name: 'Settings menu', exact: true })
   expect(await alice.page.locator('#phalanx-platform-actions').count()).toBe(0)
-  expect((await settings.boundingBox())!.y).toBeGreaterThan((await account.boundingBox())!.y)
+  expect((await settings.boundingBox())!.x).toBeGreaterThan((await account.boundingBox())!.x)
+  const accountBox = (await account.boundingBox())!,
+    settingsBox = (await settings.boundingBox())!
+  expect(settingsBox.y + settingsBox.height / 2).toBeCloseTo(accountBox.y + accountBox.height / 2, 0)
+  expect(await alice.page.getByRole('button', { name: 'Account menu', exact: true }).count()).toBe(0)
+  await settings.click()
+  const feedback = alice.page.getByRole('menuitem', { name: 'Feedback', exact: true })
+  await feedback.waitFor()
+  expect(await alice.page.getByRole('menuitem', { name: 'Sign in', exact: true }).count()).toBe(0)
+  await alice.page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'phalanx-settings-menu.png'), animations: 'disabled' })
+  const feedbackSite = 'https://trtgsjkv6r.feishu.cn/share/base/form/**'
+  await alice.context.route(feedbackSite, route => route.fulfill({ body: 'Feedback form' }))
+  const popup = alice.page.waitForEvent('popup')
+  await feedback.click()
+  const feedbackPage = await popup
+  await feedbackPage.getByText('Feedback form', { exact: true }).waitFor()
+  await feedbackPage.close()
+  await alice.context.unroute(feedbackSite)
   await openNativeSettings(alice.page)
   await alice.page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
   await alice.page.keyboard.press('Escape')
@@ -136,13 +153,25 @@ it('logs out without cancelling a running task and recovers its own failed resta
     await expect.poll(() => alice.page.locator('body').evaluate(element => element.hasAttribute('data-ds-dark-theme'))).toBe(scheme === 'dark')
     colors.push(await avatar.evaluate(element => getComputedStyle(element).color))
     await openCommunityAccountMenu(alice.page)
+    await alice.page.screenshot({
+      path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, `phalanx-account-expanded-${scheme}.png`),
+      animations: 'disabled',
+    })
     await alice.page.keyboard.press('Escape')
   }
   expect(colors[0]).not.toBe(colors[1])
   await alice.page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click()
   await expect.poll(() => account.locator('.phalanx-account-name').count()).toBe(0)
-  await openCommunityAccountMenu(alice.page)
-  await alice.page.keyboard.press('Escape')
+  for (const scheme of ['light', 'dark'] as const) {
+    await alice.page.emulateMedia({ colorScheme: scheme })
+    await expect.poll(() => alice.page.locator('body').evaluate(element => element.hasAttribute('data-ds-dark-theme'))).toBe(scheme === 'dark')
+    await openCommunityAccountMenu(alice.page)
+    await alice.page.screenshot({
+      path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, `phalanx-account-collapsed-${scheme}.png`),
+      animations: 'disabled',
+    })
+    await alice.page.keyboard.press('Escape')
+  }
   await alice.page.getByRole('button', { name: 'Open sidebar', exact: true }).click()
   await alice.page.setViewportSize({ width: 390, height: 844 })
   await openCommunityAccountMenu(alice.page)
@@ -243,6 +272,7 @@ it('logs out without cancelling a running task and recovers its own failed resta
   await recoveredPage.getByRole('heading', { name: 'Instance recovery' }).waitFor()
   // Restore the same saved profile; the member can now retry the failed operation.
   await writeFile(patch, original)
+  await recoveredPage.getByRole('tab', { name: 'Restart instance', exact: true }).click()
   await recoveredPage.locator('#restart').getByRole('checkbox').check()
   await recoveredPage.getByRole('button', { name: 'Restart instance', exact: true }).click()
   await recoveredPage.getByRole('status').filter({ hasText: 'Instance restarted.' }).waitFor({ timeout: 300_000 })

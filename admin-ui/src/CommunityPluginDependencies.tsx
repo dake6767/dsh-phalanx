@@ -49,12 +49,13 @@ export default function CommunityPluginDependencies({
     return () => onCloseGuard(undefined)
   }, [onCloseGuard, guard.request])
   return (
-    <section className="plugin-detail-section page-stack">
+    <section className="plugin-detail-section" aria-label={t('Runtime dependencies')}>
+      <h2>{t('Runtime dependencies')}</h2>
       <p>{t('Members who acquire this plugin receive its runtime dependencies. Restart running instances to apply changes.')}</p>
       {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
       {notice ? <CommunityMessage role="status" status="success" title={t('Runtime dependency references saved.')} /> : null}
-      <CommunityDependencyPicker value={names} onChange={setNames} disabled={busy || Boolean(detail.suiteOrigin)} />
-      <div>
+      <CommunityDependencyPicker hideLabel value={names} onChange={setNames} disabled={busy || Boolean(detail.suiteOrigin)} />
+      <div className="plugin-settings-actions">
         <Button
           isDisabled={busy || !dirty || Boolean(detail.suiteOrigin)}
           onPress={() => {

@@ -9,7 +9,7 @@ export function apply(ctx, config) {
       const impl = ctx.reflect.store[key];
       if (!impl) continue;
       const seen = new Set();
-      for (let fiber = impl.fiber; fiber && !seen.has(fiber); fiber = fiber.parent?.fiber) {
+      for (let fiber = impl.ctx.fiber; fiber && !seen.has(fiber); fiber = fiber.parent?.fiber) {
         seen.add(fiber);
         if (fiber.entry?.options.id?.startsWith(config.prefix + '-')) { names.add(impl.name); break; }
       }

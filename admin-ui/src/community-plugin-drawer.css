@@ -3,10 +3,27 @@
 .plugin-drawer .drawer__header { padding: 28px 32px 12px; }
 .plugin-drawer .drawer__heading { padding-right: 32px; }
 .plugin-drawer .drawer__body { margin: 0; padding: 0 32px 32px; }
-.plugin-drawer .drawer-description { margin-bottom: 24px; overflow-wrap: anywhere; }
+.library-form-drawer .drawer__dialog {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.library-form-drawer .drawer__body {
+  flex: none;
+  overflow: visible;
+}
+.library-form-drawer .drawer__footer {
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding: 16px 32px;
+  border-top: 1px solid var(--separator);
+}
+@media (max-width: 600px) {
+  .library-form-drawer .drawer__footer { padding-inline: 20px; }
+}
+.plugin-summary-description { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .plugin-identity { flex-wrap: wrap; }
 .plugin-identity > div { flex-basis: 240px; }
-.plugin-detail-sections { display: grid; gap: 28px; padding-top: 28px; }
+.plugin-detail-sections { display: grid; gap: 12px; padding-top: 20px; }
 .plugin-detail-section { display: grid; gap: 16px; min-width: 0; }
 .plugin-detail-section + .plugin-detail-section { border-top: 1px solid var(--separator); padding-top: 28px; }
 .plugin-detail-section h2 { font-size: 17px; }
@@ -15,7 +32,7 @@
 .plugin-detail-section p { margin: 0; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .plugin-section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .plugin-detail-section > .button { justify-self: start; }
-.plugin-upstreams, .plugin-access-template { display: grid; gap: 14px; min-width: 0; }
+.plugin-access-template { display: grid; gap: 14px; min-width: 0; }
 .plugin-access-template { padding-top: 24px; border-top: 1px solid var(--separator); margin-top: 8px; }
 .plugin-upstream-card { padding: 18px; border-radius: calc(var(--radius) * 2); box-shadow: none; background: var(--surface-secondary); }
 .plugin-upstream-card .card__content { display: grid; gap: 12px; min-width: 0; }
@@ -42,10 +59,22 @@
 .plugin-detail-tabs { min-width: 0; }
 /* Keep drafts mounted while excluding inactive panels from layout and navigation. */
 .plugin-detail-tabs .tabs__panel[data-inert] { display: none; }
-.plugin-detail-tabs .tabs__panel { padding-top: 24px; }
+.plugin-detail-tabs .tabs__panel { padding: 16px 0 0; }
 .plugin-detail-tabs .tabs__list { width: 100%; }
 .plugin-detail-tabs .tabs__tab { flex: 1; }
-.plugin-detail-tabs .plugin-integrity { margin-top: 28px; }
+.plugin-detail-tabs .plugin-integrity { margin-block: 16px; padding-top: 12px; }
+.plugin-member-diagnostics { color: var(--danger-ink); font-size: 13px; }
+.plugin-member-diagnostics summary { cursor: pointer; }
+.plugin-member-diagnostics ul { margin: 8px 0 0; padding-inline-start: 20px; overflow-wrap: anywhere; }
+.plugin-drawer .plugin-removal {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid var(--separator);
+  border-radius: calc(var(--radius) * 1.5);
+}
+@media (max-width: 600px) {
+  .plugin-detail-tabs .tabs__tab { min-width: 0; padding-inline: 6px; white-space: normal; }
+}
 
 .platform-dialog.platform-dialog-wide { width: min(720px, calc(100vw - 32px)); max-width: 720px; }
 .upstream-editor { display: grid; gap: 16px; }
@@ -62,3 +91,68 @@
   .upstream-editor-tabs .tabs__panel { min-height: 0; }
   .upstream-header-row { grid-template-columns: minmax(0, 1fr); }
 }
+
+.plugin-settings-panel > .plugin-detail-section,
+.plugin-settings-panel .skill-content > section {
+  padding: 16px;
+  gap: 10px;
+  border: 1px solid var(--separator);
+  border-radius: calc(var(--radius) * 1.5);
+}
+.plugin-settings-panel > .plugin-detail-section + .plugin-detail-section {
+  margin-top: 12px;
+}
+.plugin-settings-panel > .plugin-detail-section h2 { margin: 0; color: var(--foreground); font-weight: 600; }
+.plugin-settings-panel > .plugin-removal { border-color: color-mix(in oklab, var(--danger-ink) 30%, var(--separator)); }
+.plugin-catalog-origin { margin-top: 16px; font-size: 13px; }
+
+.plugin-settings-actions {
+  padding-top: 12px;
+  border-top: 1px solid var(--separator);
+}
+
+
+.upstream-editor-tabs .mcp-editor-panel {
+  display: block;
+  min-height: 0;
+  padding: 16px 0 0;
+}
+.upstream-editor-tabs .mcp-editor-panel[data-inert] { display: none; }
+.mcp-tool-item .checkbox { min-width: 0; }
+.mcp-tool-item .checkbox__content { min-width: 0; align-items: start; }
+.mcp-tool-name { min-width: 0; overflow-wrap: anywhere; }
+
+.mcp-template-fields {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.mcp-template-fields + .mcp-template-fields {
+  padding-top: 12px;
+  border-top: 1px solid var(--separator);
+}
+.mcp-template-fields .upstream-header-row > .button { margin-bottom: 0; }
+@media (min-width: 601px) {
+  .mcp-template-fields .upstream-header-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 36px; }
+  .mcp-template-fields .mcp-argument-row { grid-template-columns: minmax(0, 1fr) 36px; }
+}
+
+.plugin-detail-section .mcp-section-note { color: var(--muted); font-size: 12px; }
+.mcp-preparation-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mcp-preparation-status time { color: var(--muted); font-size: 12px; }
+.mcp-preparation-log summary { cursor: pointer; width: fit-content; color: var(--muted); font-size: 13px; }
+.mcp-preparation-log[open] summary { margin-bottom: 8px; }
+.mcp-preparation-log pre { margin: 0; max-height: 200px; overflow: auto; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-secondary); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; }
+
+.dependency-picker-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 16px; }
+.dependency-picker-options [data-slot="checkbox"] { margin-top: 0; min-width: 0; }
+.dependency-picker-options .label { overflow-wrap: anywhere; }
+.dependency-picker-stack { display: grid; gap: 12px; justify-items: start; }
+.dependency-picker-stack > .checkbox-group { justify-self: stretch; }
+
+.mcp-catalog-card .card__footer.plugin-card-status { align-items: center; flex-wrap: nowrap; }
+.mcp-catalog-card .plugin-card-status .chip { flex: none; }
+.mcp-catalog-credential { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-catalog-import { display: block; padding-top: 4px; }
+.mcp-catalog-import-note { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 20px; }
+.mcp-catalog-import-note svg { flex: none; margin-top: 2px; }

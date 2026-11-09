@@ -111,9 +111,9 @@ export default function CommunitySkillExecution({
     return () => onCloseGuard(undefined)
   }, [onCloseGuard, guard.request])
   return (
-    <section className="plugin-access-template" aria-label={t('Platform execution')}>
+    <section className="plugin-detail-section" aria-label={t('Platform execution')}>
       <div className="plugin-section-heading">
-        <h3>{t('Platform execution')}</h3>
+        <h2>{t('Platform execution')}</h2>
       </div>
       <p>{t('Run delegated commands with platform credentials for members who own this skill.')}</p>
       {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}

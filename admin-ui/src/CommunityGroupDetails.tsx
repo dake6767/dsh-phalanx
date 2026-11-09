@@ -1,3 +1,4 @@
+import { featureVisible } from '../../src/domain/release-visibility'
 import { useNativeFeatures } from './useNativeFeatures'
 import CommunityGroupNativeFeatures from './CommunityGroupNativeFeatures'
 import type { CommunityExpertGroup } from '../../src/domain/admin-contract'
@@ -11,7 +12,8 @@ import CommunityGroupSkills from './CommunityGroupSkills'
 import type { CommunitySkillGroupView } from '../../src/domain/admin-contract'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
-import { Checkbox } from '@heroui/react/checkbox'
+import CommunityGrantList from './CommunityGrantList'
+import CommunityGrantSection from './CommunityGrantSection'
 import type { CommunityManagedGroupView } from '../../src/domain/admin-contract'
 import { communityGroupPlugins, updateCommunityGroupPlugins, communityGroupSkills, saveCommunityGroupSkills } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
@@ -342,9 +344,8 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
     <>
       <CommunityDialog
         drawer
-        drawerClassName="group-drawer"
+        drawerClassName="plugin-drawer library-form-drawer group-drawer"
         title={data ? communityGroupLabel(data.group, t) : t('Group details')}
-        eyebrow={t('Group details')}
         closeLabel={t('Close group details')}
         busy={busy}
         onClose={() => guard.request(onClose)}
@@ -360,7 +361,7 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
                   void save()
                 }}
               >
-                {busy ? t('Saving…') : t(tab === 'plugins' || tab === 'native-features' ? 'Save configuration' : 'Save grants')}
+                {busy ? t('Saving…') : t('Save changes')}
               </Button>
             ) : null}
           </>
@@ -371,10 +372,6 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
         <Tabs className="plugin-detail-tabs" variant="secondary" selectedKey={tab} onSelectionChange={key => guard.request(() => setTab(String(key)))}>
           <Tabs.ListContainer>
             <Tabs.List aria-label={t('Group details')}>
-              <Tabs.Tab id="native-features">
-                {t('DSH native features')}
-                <Tabs.Indicator />
-              </Tabs.Tab>
               <Tabs.Tab id="plugins">
                 {t('Plugins')}
                 <Tabs.Indicator />
@@ -383,33 +380,45 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
                 {t('Skills')}
                 <Tabs.Indicator />
               </Tabs.Tab>
-              <Tabs.Tab id="experts">
-                {t('Expert grants')}
-                <Tabs.Indicator />
-              </Tabs.Tab>
+              {featureVisible('experts') ? (
+                <Tabs.Tab id="experts">
+                  {t('Expert grants')}
+                  <Tabs.Indicator />
+                </Tabs.Tab>
+              ) : null}
               <Tabs.Tab id="mcp">
                 {t('MCP grants')}
                 <Tabs.Indicator />
               </Tabs.Tab>
+              <Tabs.Tab id="native-features">
+                {t('DSH native features')}
+                <Tabs.Indicator />
+              </Tabs.Tab>
             </Tabs.List>
           </Tabs.ListContainer>
-          <Tabs.Panel id="native-features">
-            <CommunityGroupNativeFeatures data={native.data} disabled={native.disabled} onChange={native.setDisabled} busy={busy} saved={native.saved} />
-          </Tabs.Panel>
-          <Tabs.Panel id="plugins">
+          <Tabs.Panel id="plugins" className="plugin-settings-panel">
             {data ? (
-              <section className="group-grants" aria-label={t('Plugin configuration')}>
-                <div className="group-grants-intro">
-                  <h3>{t('Plugin configuration')}</h3>
-                  <p>{t('Controlled plugins cannot be uninstalled; preinstalled copies belong to members.')}</p>
-                  {data.group.kind === 'admin' ? <p>{t('Administrator instances only receive explicitly configured plugins.')}</p> : null}
-                </div>
-                <div className="group-grants-status">
-                  <p role="status">{t('{count} running members have pending changes.', { count: data.pendingMembers.length })}</p>
-                  <Button variant="secondary" isDisabled={busy || dirty || data.pendingMembers.length === 0} onPress={() => setConfirmRestart(true)}>
-                    {t('Restart affected members')}
-                  </Button>
-                </div>
+              <CommunityGrantSection
+                title={t('Plugin configuration')}
+                description={
+                  <>
+                    <p>{t('Controlled plugins cannot be uninstalled; preinstalled copies belong to members.')}</p>
+                    {data.group.kind === 'admin' ? <p>{t('Administrator instances only receive explicitly configured plugins.')}</p> : null}
+                  </>
+                }
+              >
+                {data.pendingMembers.length ? (
+                  <div className="grant-pending">
+                    <CommunityMessage
+                      role="status"
+                      status="accent"
+                      title={t('{count} running members have pending changes.', { count: data.pendingMembers.length })}
+                    />
+                    <Button size="sm" variant="secondary" isDisabled={busy || dirty} onPress={() => setConfirmRestart(true)}>
+                      {t('Restart affected members')}
+                    </Button>
+                  </div>
+                ) : null}
                 <CommunityGroupPlugins
                   data={data}
                   selected={selected}
@@ -418,53 +427,78 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
                   onPreinstall={setPreinstalled}
                   busy={busy}
                 />
-              </section>
+              </CommunityGrantSection>
             ) : (
               <p role="status">{t('Loading…')}</p>
             )}
           </Tabs.Panel>
-          <Tabs.Panel id="skills">
-            <CommunityGroupSkills
-              data={skillData}
-              selected={skillSelected}
-              onSelect={setSkillSelected}
-              busy={busy}
-              packs={packSelected}
-              onPacks={setPackSelected}
-            />
-          </Tabs.Panel>
-          <Tabs.Panel id="mcp">
-            <CommunityGroupMcp data={mcpData} selected={mcpSelected} onSelect={setMcpSelected} busy={busy} />
-          </Tabs.Panel>
-          <Tabs.Panel id="experts">
-            <section className="group-grants" aria-label={t('Expert grants')}>
-              <h3>{t('Expert grants')}</h3>
-              <p>{t('Expert changes take effect after members restart their instances.')}</p>
-              <CommunityMessage
-                status="warning"
-                title={t('Members granted this expert can use all its entries and platform credentials, including entries not granted separately.')}
+          <Tabs.Panel id="skills" className="plugin-settings-panel">
+            <CommunityGrantSection
+              title={t('Skill grants')}
+              description={
+                <>
+                  <p>{t('Skill grant changes apply to new sessions without restarting instances.')}</p>
+                  {skillData?.group.kind === 'admin' ? <p>{t('Administrator instances only receive explicitly configured skills and skill packs.')}</p> : null}
+                </>
+              }
+            >
+              <CommunityGroupSkills
+                data={skillData}
+                selected={skillSelected}
+                onSelect={setSkillSelected}
+                busy={busy}
+                packs={packSelected}
+                onPacks={setPackSelected}
               />
-              <div className="group-grants-list">
-                {expertData?.experts.map(expert => (
-                  <div className="group-grant-item" key={expert.id}>
-                    <Checkbox
-                      isSelected={expertSelected.includes(expert.id)}
-                      isDisabled={busy}
-                      onChange={checked => setExpertSelected(current => (checked ? [...current, expert.id] : current.filter(id => id !== expert.id)))}
-                    >
-                      <Checkbox.Content>
-                        <Checkbox.Control>
-                          <Checkbox.Indicator />
-                        </Checkbox.Control>
-                        {expert.name}
-                      </Checkbox.Content>
-                    </Checkbox>
-                    <p>{expert.description}</p>
-                  </div>
-                ))}
-              </div>
-              {expertData?.group.kind === 'admin' ? <p>{t('Administrator instances only receive explicitly configured experts.')}</p> : null}
-            </section>
+            </CommunityGrantSection>
+          </Tabs.Panel>
+          {featureVisible('experts') ? (
+            <Tabs.Panel id="experts" className="plugin-settings-panel">
+              <CommunityGrantSection
+                title={t('Expert grants')}
+                description={
+                  <>
+                    <p>{t('Expert changes take effect after members restart their instances.')}</p>
+                    {expertData?.group.kind === 'admin' ? <p>{t('Administrator instances only receive explicitly configured experts.')}</p> : null}
+                  </>
+                }
+              >
+                <CommunityMessage
+                  status="warning"
+                  title={t('Members granted this expert can use all its entries and platform credentials, including entries not granted separately.')}
+                />
+                {expertData ? (
+                  <CommunityGrantList
+                    rows={expertData.experts.map(expert => ({ id: expert.id, name: expert.name }))}
+                    selected={expertSelected}
+                    onChange={setExpertSelected}
+                    busy={busy}
+                    addLabel={t('Add experts')}
+                    dialogTitle={t('Add experts')}
+                    emptyLabel={t('No granted experts')}
+                    noCandidatesLabel={t('No experts available to add')}
+                  />
+                ) : (
+                  <p role="status">{t('Loading…')}</p>
+                )}
+              </CommunityGrantSection>
+            </Tabs.Panel>
+          ) : null}
+          <Tabs.Panel id="mcp" className="plugin-settings-panel">
+            <CommunityGrantSection
+              title={t('MCP grants')}
+              description={
+                <>
+                  <p>{t('MCP changes take effect immediately. Tools update on the next agent request.')}</p>
+                  <p>{t('Administrator instances also require explicit group configuration.')}</p>
+                </>
+              }
+            >
+              <CommunityGroupMcp data={mcpData} selected={mcpSelected} onSelect={setMcpSelected} busy={busy} />
+            </CommunityGrantSection>
+          </Tabs.Panel>
+          <Tabs.Panel id="native-features" className="plugin-settings-panel">
+            <CommunityGroupNativeFeatures data={native.data} disabled={native.disabled} onChange={native.setDisabled} busy={busy} saved={native.saved} />
           </Tabs.Panel>
         </Tabs>
       </CommunityDialog>

@@ -78,13 +78,13 @@ it('persists hourly model totals, retains unknown fields and starting groups, an
     requests: 1,
     unknownRequests: 0,
     deniedRequests: 0,
-    tokens: { input: 10, output: 12, cacheRead: 2, cacheWrite: 3 },
+    tokens: { input: 10, output: 12, cacheRead: 2, cacheWrite: 3, reasoning: null },
   }
   try {
     await store.appendModel(row)
-    await store.appendModel({ ...row, unknownRequests: 1, tokens: { input: null, output: 5, cacheRead: null, cacheWrite: 0 } })
-    await store.appendModel({ ...row, groupId: 'after', unknownRequests: 1, tokens: { input: 4, output: null, cacheRead: 0, cacheWrite: 0 } })
-    await store.appendModel({ ...row, hour: 3600000, groupId: 'after', tokens: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 } })
+    await store.appendModel({ ...row, unknownRequests: 1, tokens: { input: null, output: 5, cacheRead: null, cacheWrite: 0, reasoning: null } })
+    await store.appendModel({ ...row, groupId: 'after', unknownRequests: 1, tokens: { input: 4, output: null, cacheRead: 0, cacheWrite: 0, reasoning: null } })
+    await store.appendModel({ ...row, hour: 3600000, groupId: 'after', tokens: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1, reasoning: null } })
     await store.saveRetention(7)
     await store.close()
     store = await openUsage(path)
@@ -96,27 +96,30 @@ it('persists hourly model totals, retains unknown fields and starting groups, an
         requests: 3,
         unknownRequests: 2,
         deniedRequests: 0,
-        tokens: { input: 14, output: 17, cacheRead: 2, cacheWrite: 3 },
+        tokens: { input: 14, output: 17, cacheRead: 2, cacheWrite: 3, reasoning: null },
       },
     ])
-    expect((await store.models({ groupId: 'before' })).items[0]).toMatchObject({ requests: 2, tokens: { input: 10, output: 17, cacheRead: 2, cacheWrite: 3 } })
+    expect((await store.models({ groupId: 'before' })).items[0]).toMatchObject({
+      requests: 2,
+      tokens: { input: 10, output: 17, cacheRead: 2, cacheWrite: 3, reasoning: null },
+    })
     expect((await store.models({ from: 3600000, until: 7200000 })).items[0]).toMatchObject({
       requests: 1,
-      tokens: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 },
+      tokens: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1, reasoning: null },
     })
     const unknown = {
       ...row,
       modelId: 'unknown-model',
       hour: 3600000,
       unknownRequests: 1,
-      tokens: { input: null, output: null, cacheRead: null, cacheWrite: null },
+      tokens: { input: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null },
     }
     await store.appendModel(unknown)
     await store.appendModel(unknown)
     expect((await store.models({ modelId: 'unknown-model' })).items[0]).toMatchObject({
       requests: 2,
       unknownRequests: 2,
-      tokens: { input: null, output: null, cacheRead: null, cacheWrite: null },
+      tokens: { input: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null },
     })
     await store.prune(3599999)
     expect((await store.models({ modelId: 'model' })).items[0]?.requests).toBe(4)
@@ -168,6 +171,33 @@ it('rolls back a reported batch when its cumulative count would exceed the safe 
       ]),
     ).rejects.toThrow('Skill report count limit reached')
     expect((await store.reported({})).items).toEqual([{ username: 'member', skill: 'managed', day: 0, count: Number.MAX_SAFE_INTEGER }])
+  } finally {
+    await store.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+it('retains known reasoning counts through unknown observations, hours and reopening without adding to output', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'reasoning-usage-'))
+  let store = await openUsage(join(root, 'usage.db'))
+  const row = {
+    username: 'member',
+    groupId: null,
+    modelId: 'model',
+    hour: 0,
+    requests: 1,
+    unknownRequests: 0,
+    deniedRequests: 0,
+    tokens: { input: 10, output: 12, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+  }
+  try {
+    await store.appendModel(row)
+    expect((await store.models({})).items[0]!.tokens).toMatchObject({ output: 12, reasoning: 0 })
+    await store.appendModel({ ...row, tokens: { ...row.tokens, reasoning: null } })
+    await store.appendModel({ ...row, hour: 3600000, tokens: { ...row.tokens, reasoning: 7 } })
+    await store.close()
+    store = await openUsage(join(root, 'usage.db'))
+    expect((await store.models({})).items[0]!.tokens).toMatchObject({ input: 30, output: 36, reasoning: 7 })
   } finally {
     await store.close()
     rmSync(root, { recursive: true, force: true })

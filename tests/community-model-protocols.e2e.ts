@@ -148,6 +148,7 @@ describe('shared model gateway protocols through native DSH', () => {
       const bucket = (await readBucket())!
       expect(bucket.deniedRequests).toBe(0)
       expect(bucket.tokens).toEqual({
+        reasoning: null,
         input: entry.perRequest.input === null ? null : entry.perRequest.input * bucket.requests,
         output: entry.perRequest.output * bucket.requests,
         cacheRead: entry.perRequest.cacheRead * bucket.requests,

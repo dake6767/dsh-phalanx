@@ -1,3 +1,4 @@
+import { featureVisible } from '../domain/release-visibility.js'
 import { nativeExpertsTab } from './community-market-experts-client.js'
 import { nativeMcpTab } from './community-market-mcp-client.js'
 import { nativeMarketHelpers } from './community-market-shared-client.js'
@@ -9,6 +10,7 @@ import { platformMessages, platformErrorMessages, type PlatformMessageKey } from
 const keys = [
   'Checking capabilities…',
   'Some capabilities are temporarily unavailable.',
+  'Reasoning unavailable',
   'Start conversation',
   'Host default model',
   'Experts',
@@ -67,7 +69,7 @@ const keys = [
   'View skill pack {name}',
   'Skill pack details',
   'Close skill pack details',
-  'Orchestration instructions (optional)',
+  'Orchestration instructions',
   'Plugins',
   'Skills',
   'Skill packs',
@@ -111,11 +113,14 @@ const copy = Object.fromEntries(
 /** Own presentation only. DSH supplies the public primitives and live semantic tokens. */
 export const nativeMarketCss = `
 .phalanx-market{display:flex;flex-direction:column;align-items:center;gap:32px;box-sizing:border-box;height:100%;overflow:auto;padding:0 clamp(24px,4vw,48px) 48px;color:var(--dsw-alias-label-primary)}
-.phalanx-market>*{width:100%;max-width:960px;min-width:0}
+.phalanx-market>*{box-sizing:border-box;width:100%;max-width:960px;min-width:0}
 .phalanx-market-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-top:28px}
 .phalanx-market h1{margin:0;font-size:20px;line-height:28px;font-weight:500}
 .phalanx-market-intro{margin:4px 0 0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary)}
 .phalanx-market-refresh{flex:none}
+body[data-ds-dark-theme] .phalanx-market [role=tablist]{--dsw-alias-bg-layer-3:var(--dsw-alias-button-primary-fill)}
+body[data-ds-dark-theme] .phalanx-market [role=tab][aria-selected=true]{color:var(--dsw-alias-label-primary-foreground)}
+
 .phalanx-market-tab-content{display:flex;flex-direction:column;gap:20px}
 .phalanx-market-tab-content .phalanx-market-head{padding-top:0}
 .phalanx-market-group{display:flex;flex-direction:column;gap:8px}
@@ -131,14 +136,42 @@ export const nativeMarketCss = `
 .phalanx-market-description{margin:4px 0 0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere}
 .phalanx-market-action{flex:none}
 .phalanx-market-actions{display:flex;flex-wrap:wrap;gap:8px}
+.phalanx-market-structured .phalanx-market-row{display:grid;grid-template-columns:minmax(0,1fr) fit-content(45%);align-items:start;gap:8px 16px;padding:12px 0}
+.phalanx-market-structured .phalanx-market-row+.phalanx-market-row{border-top:1px solid var(--dsw-alias-border-l3)}
+.phalanx-market-structured .phalanx-market-actions{justify-content:flex-end;align-items:center;gap:4px}
+.phalanx-market-sublist,.phalanx-market-disclosure{margin-top:8px;font-size:13px;line-height:20px;overflow-wrap:anywhere}
+.phalanx-market-sublist{grid-column:1/-1;border-inline-start:1px solid var(--dsw-alias-border-l3);padding-inline-start:12px}
+.phalanx-market-disclosure summary{cursor:pointer;color:var(--dsw-alias-label-secondary)}
+.phalanx-market-disclosure h4{margin:8px 0 2px;font-size:13px}
+.phalanx-market-disclosure ul{margin:0;padding-inline-start:20px}
 .phalanx-market-modal{max-height:75vh;overflow:auto}
+.phalanx-market-dialog[role=dialog]{width:min(440px,100%)}
+.phalanx-market-dialog-content{overflow-wrap:anywhere}
+.phalanx-market-detail-body{display:grid;gap:16px;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}
+.phalanx-market-detail-body h3{margin:0 0 6px;font-size:14px;line-height:22px;font-weight:600}
+.phalanx-market-detail-body ol{margin:0;padding-inline-start:22px}
+.phalanx-market-detail-body li+li{margin-top:4px}
+.phalanx-market-detail-body li::marker{color:var(--dsw-alias-label-secondary)}
+.phalanx-market-detail-body>.phalanx-market-detail{border-top:1px solid var(--dsw-alias-border-l3);padding-top:12px}
+.phalanx-market-dialog-content{font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}
+.phalanx-market-tool-list{list-style:none;display:grid;gap:12px;margin:0;padding:0}
+.phalanx-market-tool-list li+li{border-top:1px solid var(--dsw-alias-border-l3);padding-top:12px}
+.phalanx-market-tool-list strong{font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.phalanx-market-detail-body .phalanx-market-detail{display:grid;gap:16px}
+.phalanx-market-detail-body .phalanx-market-detail ul{margin:0;padding-inline-start:22px}
 .phalanx-market-detail{min-width:0;overflow-wrap:anywhere}
 .phalanx-market-status{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.phalanx-market-empty{color:var(--dsw-alias-label-tertiary);margin-top:8px}
 .phalanx-market-error{color:var(--dsw-alias-state-error-primary)}
 .phalanx-market-copy-toggle{display:flex;align-items:center;gap:8px}
 .phalanx-market-notice{display:flex;flex-direction:column;gap:8px}
 .phalanx-market-notice a{color:var(--dsw-alias-link)}
-@media(max-width:600px){.phalanx-market-row{display:grid;grid-template-columns:48px minmax(0,1fr)}.phalanx-market-action{grid-column:2;justify-self:start}.phalanx-market-row:not(:has(.phalanx-market-icon)){display:flex;align-items:flex-start;flex-direction:column}}
+@media(max-width:600px){
+.phalanx-market [role=tab]{min-width:0;min-height:34px;height:auto;padding:4px;white-space:normal;line-height:16px}
+.phalanx-market .phalanx-market-structured .phalanx-market-row{display:grid;grid-template-columns:minmax(0,1fr);align-items:start}
+.phalanx-market-structured .phalanx-market-actions{justify-content:flex-start}
+.phalanx-market-structured .phalanx-market-actions button:not([role=switch]){max-width:100%;height:auto;min-height:28px;white-space:normal}
+.phalanx-market-row{display:grid;grid-template-columns:48px minmax(0,1fr)}.phalanx-market-action{grid-column:2;justify-self:start}.phalanx-market-row:not(:has(.phalanx-market-icon)){display:flex;align-items:flex-start;flex-direction:column}}
 `
 
 /** Runs inside DSH's official closure factory; never imports a feature's private implementation. */
@@ -157,13 +190,17 @@ isolated(()=>{${nativePacksTab}
 marketTabs.packs=PacksPanel;});
 isolated(()=>{${nativeMcpTab}
 marketTabs.mcp=McpPanel;});
-isolated(()=>{${nativeExpertsTab}
-marketTabs.experts=ExpertsPanel;});
+${
+  featureVisible('experts')
+    ? `isolated(()=>{${nativeExpertsTab}
+marketTabs.experts=ExpertsPanel;});`
+    : ''
+}
 function MarketPanel(){
  const locale=React.useSyncExternalStore(subscribe,snapshot)==='zh'?'zh-CN':'en';
  const text=key=>marketCopy[locale][key]||key;
  const [selected,setSelected]=React.useState('plugins');
- const items=[['plugins','Plugins'],['skills','Skills'],['packs','Skill packs'],['mcp','MCP services'],['experts','Experts']].map(([value,label])=>({value,label:text(label),id:'phalanx-tab-'+value,panelId:'phalanx-panel-'+value}));
+ const items=[['plugins','Plugins'],['skills','Skills'],['packs','Skill packs'],['mcp','MCP services']${featureVisible('experts') ? ",['experts','Experts']" : ''}].map(([value,label])=>({value,label:text(label),id:'phalanx-tab-'+value,panelId:'phalanx-panel-'+value}));
  const Tab=marketTabs[selected]||UnavailableMarket;
  return h('section',{className:'phalanx-market','aria-label':text('Platform apps')},
   h('header',{className:'phalanx-market-head'},h('h1',null,text('Platform apps'))),

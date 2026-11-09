@@ -206,14 +206,10 @@ it('reports platform skill loads without counting personal overrides or interrup
     expect(await load(first, 'reported-selected')).toMatchObject({ isError: false })
     await expect.poll(counts, { timeout: 20000 }).toEqual({ 'reported-expert': 1, [longName]: 1, 'reported-selected': 2 })
     expect(await observe({ operation: 'inventory' })).toMatchObject({ instance: original.instance, failedReports: 1 })
-    await admin.goto(origin + '/admin/usage-records')
-    await admin.getByRole('tab', { name: 'Self-reported usage', exact: true }).click()
-    await admin.getByText('Reported by member instances. The platform cannot verify these counts.', { exact: true }).waitFor()
-    const grid = admin.getByRole('grid', { name: 'Self-reported skill loads', exact: true })
-    for (const name of [longName, 'reported-selected', 'reported-expert']) await grid.getByText(name, { exact: true }).waitFor()
-    await admin
-      .getByText('Plugin-local tools and member-container MCP are excluded. Plugin upstreams and remote or shared MCP retain gateway records.', { exact: true })
-      .waitFor()
+    // hidden in 0.1.32: self-reported usage remains queryable.
+    expect((await api('usage-reported')).items.map((row: { skill: string }) => row.skill).sort()).toEqual(
+      [longName, 'reported-selected', 'reported-expert'].sort(),
+    )
   } catch (error) {
     failure = error
     throw error

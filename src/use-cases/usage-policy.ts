@@ -81,14 +81,18 @@ export class UsagePolicy {
             await this.prune()
             if (target.kind === 'model') {
               const denied = !allowed || result.outcome === 'denied',
-                tokens = result.tokens ?? { input: null, output: null, cacheRead: null, cacheWrite: null }
+                tokens = result.tokens ?? { input: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null }
               await this.store.appendModel({
                 ...identity,
                 modelId: target.id,
                 hour: Math.floor(startedAt / 3600000) * 3600000,
                 tokens,
                 requests: 1,
-                unknownRequests: denied ? 0 : result.usageUnknown || Object.values(tokens).some(value => value === null) ? 1 : 0,
+                unknownRequests: denied
+                  ? 0
+                  : result.usageUnknown || [tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite].some(value => value === null)
+                    ? 1
+                    : 0,
                 deniedRequests: denied ? 1 : 0,
               })
               return

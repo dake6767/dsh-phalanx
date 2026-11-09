@@ -10,9 +10,10 @@ const { Context } = await import(pathToFileURL(runtime.resolve('@deepseek-ai/cor
 // FiberState is a public const enum in the pinned SDK, erased from its JavaScript exports.
 const FAILED = 3;
 const PENDING = 0;
-class MemoryTree extends EntryTree { write() {} }
+class MemoryTree extends EntryTree { commit() {} }
 export const name = 'phalanx-expert-plugins';
-export const inject = ['loader'];
+// MCP activation waits for tools; audit only after that dependency is available.
+export const inject = ['loader', 'tools'];
 export async function apply(ctx, config) {
   const tree = new MemoryTree(ctx), failures = new Set(), lostServices = new Set();
   ctx.effect(() => () => tree.root.stop());
@@ -44,7 +45,7 @@ export async function apply(ctx, config) {
       const impl = ctx.reflect.store[key];
       if (!impl || ctx.root[Context.isolate][impl.name] !== key) continue;
       const seen = new Set();
-      for (let fiber = impl.fiber; fiber && !seen.has(fiber); fiber = fiber.parent?.fiber) {
+      for (let fiber = impl.ctx.fiber; fiber && !seen.has(fiber); fiber = fiber.parent?.fiber) {
         seen.add(fiber);
         if (packages.has(fiber.entry)) { lostServices.add(impl.name); rejected.add(fiber.entry); break; }
       }

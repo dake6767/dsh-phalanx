@@ -90,9 +90,9 @@ export default function CommunityPluginAccess({
     setEnvironment(rows => rows.map((row, i) => (i === index ? { ...row, [field]: value } : row)))
   }
   return (
-    <section className="plugin-access-template" aria-label={t('Access templates')}>
+    <section className="plugin-detail-section" aria-label={t('Access templates')}>
       <div className="plugin-section-heading">
-        <h3>{t('Access templates')}</h3>
+        <h2>{t('Access templates')}</h2>
         {saved ? (
           <Chip size="sm" variant="soft">
             {t(saved.configured ? 'Access configured' : 'Access not configured')}
@@ -173,7 +173,7 @@ export default function CommunityPluginAccess({
             )}
           </p>
           {notice ? <CommunityMessage status="success" title={t('Access saved. Affected members must restart their instances.')} /> : null}
-          <div>
+          <div className="plugin-settings-actions">
             <Button
               isDisabled={busy || !dirty}
               onPress={() => {

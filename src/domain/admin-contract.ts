@@ -97,12 +97,24 @@ export interface CommunityProviderInput {
   readonly apiKey?: string
   readonly enabled: boolean
   /** An omitted input keeps older management clients compatible; the server reuses the stored row's declaration, or the known model default for a new row. */
-  readonly models: readonly { readonly id?: string; readonly name: string; readonly enabled: boolean; readonly input?: CommunityModelInput }[]
+  readonly models: readonly {
+    readonly id?: string
+    readonly name: string
+    readonly enabled: boolean
+    readonly input?: CommunityModelInput
+    readonly reasoning?: boolean
+  }[]
 }
 export interface CommunityProviderView extends Omit<CommunityProviderInput, 'id' | 'apiKey' | 'models'> {
   readonly id: string
   readonly apiKey: { readonly configured: boolean; readonly last4: string }
-  readonly models: readonly { readonly id: string; readonly name: string; readonly enabled: boolean; readonly input: CommunityModelInput }[]
+  readonly models: readonly {
+    readonly id: string
+    readonly name: string
+    readonly enabled: boolean
+    readonly input: CommunityModelInput
+    readonly reasoning?: boolean
+  }[]
 }
 export interface CommunityModelSettings {
   readonly revision: number

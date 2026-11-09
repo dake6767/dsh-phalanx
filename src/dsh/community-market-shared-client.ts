@@ -31,7 +31,7 @@ function MarketFailure({error,locale}){
 function MarketContent({markdown,files,locale,title='SKILL.md'}){
  const text=marketText(locale);const labels=locale==='zh-CN'?{code:{copyLabel:'复制',copiedLabel:'已复制'},footnotes:'脚注'}:{code:{copyLabel:'Copy',copiedLabel:'Copied'},footnotes:'Footnotes'};
  return h('div',{className:'phalanx-market-detail'},
-  files?h('section',{'aria-label':text('Skill files')},h('h3',null,text('Skill files')),h('ul',null,files.map(path=>h('li',{key:path},h('code',null,path))))):null,
+  files?.length?h('section',{'aria-label':text('Skill files')},h('h3',null,text('Skill files')),h('ul',null,files.map(path=>h('li',{key:path},h('code',null,path))))):null,
   h('section',{'aria-label':title},h('h3',null,title),h(MarkdownText,{text:markdown.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u,''),labels}))
  );
 }

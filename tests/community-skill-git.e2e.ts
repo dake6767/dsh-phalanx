@@ -58,7 +58,7 @@ it('imports manifest groups from Git and reviews manual updates through the same
     await page.getByRole('heading', { name: 'Other skills', exact: true }).waitFor()
     expect(await page.getByRole('checkbox', { name: 'Create suggested pack fixture-pack', exact: true }).isChecked()).toBe(true)
     await page.getByRole('button', { name: 'Confirm import', exact: true }).click()
-    await page.getByRole('button', { name: 'Expand skill pack fixture-pack', exact: true }).click()
+    await page.getByRole('button', { name: 'View skills in fixture-pack', exact: true }).click()
     await page.getByRole('button', { name: 'View skill one', exact: true }).click()
     await page.getByRole('tab', { name: 'Version management', exact: true }).click()
     await page.getByText(first, { exact: true }).waitFor()

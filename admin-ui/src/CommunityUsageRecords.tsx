@@ -17,6 +17,8 @@ import { communityGroupLabel } from './community-group-label'
 export default function CommunityUsageRecords() {
   const { t, errorText, locale } = usePlatformLanguage()
   const [category, setCategory] = useState('tools')
+  // Capability and operation filters start open when a link or earlier search already set them.
+  const [moreFilters, setMoreFilters] = useState(false)
   const [username, setUsername] = useState(() => new URLSearchParams(location.search).get('username') ?? '')
   const [groupId, setGroupId] = useState(''),
     [capability, setCapability] = useState(''),
@@ -99,12 +101,12 @@ export default function CommunityUsageRecords() {
           {t('Refresh records')}
         </Button>
       </section>
-      <p className="muted">
+      <p className="muted usage-scope-note">
         {t(
           'Direct outbound proxy traffic, personal credentials, and member-installed or configured content are not recorded. Self-reports cover platform skills only; local plugin tools and member-container MCP are not covered.',
         )}
       </p>
-      <Tabs selectedKey={category} onSelectionChange={key => setCategory(String(key))}>
+      <Tabs className="skill-library-tabs library-workspace-tabs usage-tabs" selectedKey={category} onSelectionChange={key => setCategory(String(key))}>
         <Tabs.ListContainer>
           <Tabs.List aria-label={t('Usage categories')}>
             <Tabs.Tab id="tools">
@@ -125,18 +127,17 @@ export default function CommunityUsageRecords() {
           {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
           <section className="panel" aria-label={t('Usage filters')}>
             <form
-              className="usage-filters"
+              className={`usage-filters${moreFilters ? ' is-expanded' : ''}`}
               onSubmit={event => {
                 event.preventDefault()
                 apply()
               }}
             >
-              <CommunityField label={t('Filter by member')} value={username} onChange={setUsername} variant="secondary" />
+              <CommunityField label={t('Filter by member')} value={username} onChange={setUsername} />
               <CommunitySelect
                 label={t('Filter by group')}
                 value={groupId || 'all'}
                 onChange={value => setGroupId(value === 'all' ? '' : value)}
-                variant="secondary"
                 options={[
                   { id: 'all', label: t('All groups') },
                   ...groups.map(group => ({ id: group.id, label: communityGroupLabel(group, t) })),
@@ -145,44 +146,43 @@ export default function CommunityUsageRecords() {
                     .map(row => ({ id: row.key, label: row.key })) ?? []),
                 ]}
               />
-              <CommunityField
-                label={t('Filter by capability')}
-                description={t('For execution, enter skill:<name>.')}
-                value={capability}
-                onChange={setCapability}
-                variant="secondary"
-              />
-              <CommunityField
-                label={t('Filter by operation')}
-                description={t('For execution, enter the command.')}
-                value={operation}
-                onChange={setOperation}
-                variant="secondary"
-              />
               <CommunitySelect
                 label={t('Filter by result')}
                 value={outcome}
                 onChange={setOutcome}
-                variant="secondary"
                 options={[{ id: 'all', label: t('All results') }, ...(['succeeded', 'failed', 'denied'] as const).map(id => ({ id, label: resultText(id) }))]}
               />
-              <CommunityField
-                label={t('From (local time)')}
-                value={from}
-                onChange={setFrom}
-                description={t('Date and time, for example 2026-01-01T00:00')}
-                variant="secondary"
-              />
+              <CommunityField label={t('From (local time)')} value={from} onChange={setFrom} description={t('Date and time, for example 2026-01-01T00:00')} />
               <CommunityField
                 label={t('Until (exclusive, local time)')}
                 value={until}
                 onChange={setUntil}
                 description={t('Date and time, for example 2026-01-01T00:00')}
-                variant="secondary"
               />
-              <Button type="submit" variant="secondary">
-                {t('Apply filters')}
-              </Button>
+              <div className="usage-filter-extra">
+                <CommunityField
+                  label={t('Filter by capability')}
+                  description={t('For execution, enter skill:<name>.')}
+                  value={capability}
+                  onChange={setCapability}
+                />
+              </div>
+              <div className="usage-filter-extra">
+                <CommunityField
+                  label={t('Filter by operation')}
+                  description={t('For execution, enter the command.')}
+                  value={operation}
+                  onChange={setOperation}
+                />
+              </div>
+              <div className="usage-filter-actions">
+                <Button type="button" variant="tertiary" aria-expanded={moreFilters} onPress={() => setMoreFilters(value => !value)}>
+                  {t(moreFilters ? 'Fewer filters' : 'More filters')}
+                </Button>
+                <Button type="submit" variant="secondary">
+                  {t('Apply filters')}
+                </Button>
+              </div>
             </form>
           </section>
           {data && (
@@ -198,7 +198,7 @@ export default function CommunityUsageRecords() {
                 <section className="panel" key={key}>
                   <h2>{t(label)}</h2>
                   <dl>
-                    {data.summaries[key].map(row => (
+                    {data.summaries[key].slice(0, 5).map(row => (
                       <div key={row.key}>
                         <dt>
                           {key === 'groups'

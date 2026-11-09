@@ -37,7 +37,7 @@ function waitForExpertCatalogs(services){
   check();
  });
 }
-async function launchExpertConversation(services,plan,failureText){
+async function launchExpertConversation(services,plan){
  await waitForExpertCatalogs(services);
  services.signal.throwIfAborted();
  // Cancel startup's pending initialization before it can reconnect a new expert blank as the default.
@@ -45,9 +45,7 @@ async function launchExpertConversation(services,plan,failureText){
  const workspace=services.workspaces.list.getSnapshot().items[0]||await services.workspaces.initializeDefault(navigation);
  navigation.throwIfAborted();
  if(!workspace)throw {code:'expert-unavailable'};
- const sessionId=await services.sessions.create({workspaceId:workspace.workspaceId,agentPreset:plan.agentPreset});
- navigation.throwIfAborted();
- if(plan.model){const result=await services.remote.session.selectModel({sessionId,...plan.model});if(!result.ok)throw {error:failureText}}
+ const {sessionId}=await marketRequest(new URL('api/phalanx.expert-conversation',document.baseURI).href,{method:'POST',signal:navigation,headers:{'content-type':'application/json'},body:JSON.stringify({workspaceId:workspace.workspaceId,agentPreset:plan.agentPreset,model:plan.model,...(plan.reasoningEffort?{reasoningEffort:plan.reasoningEffort}:{})})});
  navigation.throwIfAborted();
  services.uiWorkspace.openSession(sessionId);
 }
@@ -63,24 +61,25 @@ function ExpertsPanel(){
    await launchExpertConversation(services,plan,text('Request failed'));
   }catch(failure){setLaunchError(failure)}finally{launchPending.current=false;setLaunching(undefined)}
  }
- return h('section',{className:'phalanx-market-tab-content','aria-label':text('Experts')},
-  h('header',{className:'phalanx-market-head'},h('h2',null,text('Experts')),h(Button,{variant:'ghost',size:'sm',onClick:resource.reload},text('Reload experts'))),
-  h('p',{className:'phalanx-market-intro'},text('Summoning gives you access to all expert entries and platform credentials throughout your instance, including entries not granted separately.')),
-  h('p',{className:'phalanx-market-intro'},text('Dismissing an expert immediately withdraws its exclusive access. After restarting, its sessions cannot continue; history is retained.')),
+ return h('section',{className:'phalanx-market-tab-content phalanx-market-structured','aria-label':text('Experts')},
+  h('header',{className:'phalanx-market-head'},h('div',null,h('h2',null,text('Experts')),
+   h('p',{className:'phalanx-market-intro'},text('Summoning gives you access to all expert entries and platform credentials throughout your instance, including entries not granted separately.')),
+   h('p',{className:'phalanx-market-intro'},text('Dismissing an expert immediately withdraws its exclusive access. After restarting, its sessions cannot continue; history is retained.'))),h(Button,{variant:'ghost',size:'sm',className:'phalanx-market-refresh',onClick:resource.reload,title:text('Reload experts'),'aria-label':text('Reload experts'),icon:h(IconRefreshOutlineRegular,{size:16})})),
   data?.pending?h('div',{className:'phalanx-market-notice',role:'status'},h('p',null,text('Changes take effect after restarting your instance.')),h('a',{href:'/recovery?restart=1'},text('Restart DSH instance'))):null,
   h(MarketFailure,{error:launchError||error,locale}),!data?h('p',{role:'status'},text('Loading…')):!data.experts.length?h('p',null,text('No experts yet')):
   h('ul',{className:'phalanx-market-list'},data.experts.map(expert=>h('li',{key:expert.id,className:'phalanx-market-row'},
-   h('span',{className:'phalanx-market-icon','aria-hidden':true},expert.icon||'✦'),
-   h('div',{className:'phalanx-market-main'},h('h3',null,expert.name),h('p',{className:'phalanx-market-description'},expert.description),
+   h('div',{className:'phalanx-market-main'},h('div',{className:'phalanx-market-title'},h('span',{'aria-hidden':true},expert.icon||'✦'),h('h3',null,expert.name)),h('p',{className:'phalanx-market-description'},expert.description),
     h('p',{className:'phalanx-market-description'},expert.modelLabel||text('Host default model')),
 
+    expert.reasoningUnavailable?h('p',{className:'phalanx-market-status'},text('Reasoning unavailable')):null,
     expert.checking?h('p',{className:'phalanx-market-status'},text('Checking capabilities…')):null,
     expert.partial?h('p',{className:'phalanx-market-status'},text('Some capabilities are temporarily unavailable.')):null,
+    h('details',{className:'phalanx-market-disclosure'},h('summary',null,text('Included entries')),
     expert.examples.length?h('section',{'aria-label':text('Example tasks')},h('h4',null,text('Example tasks')),h('ul',null,expert.examples.map(example=>h('li',{key:example},example)))):null,
-    h('section',{'aria-label':text('Included entries')},h('h4',null,text('Included entries')),h('ul',null,[['Expert plugins',expert.plugins],['Expert skills',expert.skills],['Expert skill packs',expert.skillPacks],['MCP services',expert.mcp]].flatMap(([kind,names])=>names.map(name=>h('li',{key:kind+':'+name},text(kind)+': '+name))))),
+    h('ul',null,[['Expert plugins',expert.plugins],['Expert skills',expert.skills],['Expert skill packs',expert.skillPacks],['MCP services',expert.mcp]].flatMap(([kind,names])=>names.map(name=>h('li',{key:kind+':'+name},text(kind)+': '+name))))),
     expert.status==='granted'?h('p',{className:'phalanx-market-status'},text('Experts granted by your group cannot be dismissed.')):null),
-   expert.status!=='available'?h(Button,{variant:'ghost',size:'sm',className:'phalanx-market-action',disabled:!services||busy!==undefined||launching!==undefined||data.pending,onClick:()=>void start(expert.id)},text('Start conversation')):null,
-   h(Button,{variant:'ghost',size:'sm',className:'phalanx-market-action',disabled:busy!==undefined||launching!==undefined||expert.status==='granted',onClick:()=>void resource.save(expert.id,expert.status==='summoned'?'dismiss':'summon')},text(expert.status==='granted'?'Owned expert':expert.status==='summoned'?'Dismiss expert':'Summon expert'))
+   h('div',{className:'phalanx-market-actions'},expert.status!=='available'?h(Button,{variant:'outline',size:'sm',className:'phalanx-market-action',disabled:!services||busy!==undefined||launching!==undefined||data.pending,onClick:()=>void start(expert.id)},text('Start conversation')):null,
+   h(Button,{variant:'outline',size:'sm',className:'phalanx-market-action',disabled:busy!==undefined||launching!==undefined||expert.status==='granted',onClick:()=>void resource.save(expert.id,expert.status==='summoned'?'dismiss':'summon')},text(expert.status==='granted'?'Owned expert':expert.status==='summoned'?'Dismiss expert':'Summon expert')))
   )))
  );
 }

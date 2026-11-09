@@ -15,8 +15,8 @@ for (const file of files) {
   }
 }
 if (
-  selection.regular.length !== 78 ||
-  new Set(selection.regular).size !== 78 ||
+  selection.regular.length !== 72 ||
+  new Set(selection.regular).size !== 72 ||
   selection.regular.reduce((sum, file) => sum + selection.regularFileCases[file], 0) !== selection.regularCases ||
   selection.regular.some(file => !files.includes(file)) ||
   selection.smoke.some(file => !selection.regular.includes(file))

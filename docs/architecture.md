@@ -21,7 +21,7 @@ and behavior at official seams.
 | Frozen seam | Owner | Caller/transport |
 | --- | --- | --- |
 | Expert preset projection, roster and pinned standard tools | `dsh/expert-preset.ts`, `dsh/expert-base-tools.ts`, `dsh/expert-plugins.ts` | `adapters/member-experts.ts`, `adapters/expert-status.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
-| Protected MCP include and prompt-boundary hot refresh | `dsh/member-mcp.ts` | `adapters/mcp-projection.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
+| Protected MCP include and pre-admission hot refresh | `dsh/member-mcp.ts`, `dsh/member-tools.ts` | `adapters/mcp-projection.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web and composed-configuration CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `adapters/native-config-dump.ts`, `dsh/container.ts`, generated image CMD |
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
@@ -45,7 +45,7 @@ and behavior at official seams.
 | Protected platform plugin and invocation patch | `dsh/community-platform-plugin.ts` | `adapters/community-platform-plugin.ts`, `dsh/container.ts` |
 | Per-member final native-feature patch and build-time entry bindings | `dsh/native-features.ts` | `adapters/member-native-features.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Built-in preset declarations, effective default reads, revisioned repair and Creator entry slots | `dsh/native-presets.ts`, `dsh/native-preset-client.ts` | `adapters/community-runtime-driver.ts`, `adapters/member-native-features.ts` |
-| Creator installation-tool projection from official composed configuration | `dsh/native-creator-tools.ts` | `adapters/native-config-dump.ts`, `adapters/member-native-feature-launch.ts` |
+| Creator and fetch tool policy from official composed configuration | `dsh/native-creator-tools.ts` | `adapters/native-config-dump.ts`, `adapters/member-native-feature-launch.ts` |
 | Native bundle access policy, platform install proof and localized refusals | `dsh/native-plugin-policy.ts`, `dsh/native-plugin-install.ts`, `dsh/native-feature-locale.ts` | `adapters/member-native-features.ts`, `adapters/native-install-transport.ts` |
 
 DSH remains an external frozen dependency. Upgrade these seam owners against its
@@ -56,7 +56,7 @@ and client entries even when a member edits bundle selection. Other bundle
 operations retain native Gateway validation and behavior. A member Host module reads the public preset registry’s live effective default before admission. Only a disabled built-in default is repaired through revisioned Settings; the member’s registry configuration and other default choices are preserved. Group native-feature
 choices apply on the next instance start. Disabling self-installation refuses
 browser installation and first-time official optional bundles, while preserving
-existing bundle management and platform App Center deliveries. Creator tools are
+existing bundle management and platform App Center deliveries. Unconfined `web_fetch` is disabled in composed root and preset configuration, with a deployment tool guard refusing later same-name registrations. The public tool service composition waits for platform MCP refresh before resolving each step; obsolete registrations remain subject to native admission identity checks. Creator tools are
 removed through a complete preset configuration derived from the official CLI's
 composed configuration output; lazy expressions remain unevaluated.
 
@@ -1043,10 +1043,10 @@ download or stop. The public bootstrap path validates exact-commit module hashes
 and replaces only the root updater bank; the current platform stays running.
 Legacy executors reject this protocol before acquiring platform archives.
 
-Expert conversation models: the platform App Center creates a new session with the
+The fixed entry visibility list in `domain/release-visibility.ts` pauses expert, usage and contribution UI and contribution tool registration. Storage, APIs, usage collection and expert projection remain active. The retained expert launch implementation creates a new session with the
 expert preset, selects its currently enabled shared model, then opens that session.
-Members can change models with the native model picker. An unavailable expert model
-is flagged in the expert library and leaves new sessions on the host default.
+Members can change models with the native model picker. The authenticated native launch route creates a fresh expert session and selects its model and optional reasoning effort through the public session controller and Agent model service; it never saves the platform default. Shared model reasoning capabilities are opt-in and live-reloaded. Reasoning usage is an optional output subset, stored separately without increasing output totals. An unavailable expert model
+is reported in expert metadata and leaves new sessions on the host default.
 The pinned DSH preset schema has no model field: choosing an expert in the native
 mode list follows the host's model rules and does not apply the expert model.
 

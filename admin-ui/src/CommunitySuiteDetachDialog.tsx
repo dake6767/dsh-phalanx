@@ -2,7 +2,6 @@ import { useState } from 'react'
 import type { CommunitySuiteInstallView } from '../../src/domain/admin-contract'
 import { detachCommunitySuiteEntry } from './community-api'
 import CommunityDialog from './CommunityDialog'
-import { suiteKindLabels as kindLabels } from './community-suite-labels'
 import { Button } from '@heroui/react/button'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityMessage from './CommunityMessage'
@@ -38,7 +37,6 @@ export default function CommunitySuiteDetachDialog({
   return (
     <CommunityDialog
       title={t('Detach {name} from {tool}?', { name: entry.name, tool })}
-      eyebrow={t(kindLabels[entry.kind])}
       busy={busy}
       onClose={onClose}
       footer={

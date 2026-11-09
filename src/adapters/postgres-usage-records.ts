@@ -89,12 +89,13 @@ export class PostgresUsageRecords implements UsageRecordsPort {
   }
   async appendModel(row: UsageModelBucket): Promise<void> {
     await this.db.query(
-      `INSERT INTO ${table('model_hours')}(username,model_id,group_id,hour,requests,unknown_requests,denied_requests,input_tokens,output_tokens,cache_read,cache_write)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(username,model_id,group_id,hour) DO UPDATE SET
+      `INSERT INTO ${table('model_hours')}(username,model_id,group_id,hour,requests,unknown_requests,denied_requests,input_tokens,output_tokens,cache_read,cache_write,reasoning_tokens)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(username,model_id,group_id,hour) DO UPDATE SET
       requests=usage_model_hours.requests+excluded.requests, unknown_requests=usage_model_hours.unknown_requests+excluded.unknown_requests, denied_requests=usage_model_hours.denied_requests+excluded.denied_requests,
       input_tokens=CASE WHEN excluded.input_tokens IS NULL THEN usage_model_hours.input_tokens ELSE coalesce(usage_model_hours.input_tokens,0)+excluded.input_tokens END,
       output_tokens=CASE WHEN excluded.output_tokens IS NULL THEN usage_model_hours.output_tokens ELSE coalesce(usage_model_hours.output_tokens,0)+excluded.output_tokens END,
       cache_read=CASE WHEN excluded.cache_read IS NULL THEN usage_model_hours.cache_read ELSE coalesce(usage_model_hours.cache_read,0)+excluded.cache_read END,
+      reasoning_tokens=CASE WHEN excluded.reasoning_tokens IS NULL THEN usage_model_hours.reasoning_tokens ELSE coalesce(usage_model_hours.reasoning_tokens,0)+excluded.reasoning_tokens END,
       cache_write=CASE WHEN excluded.cache_write IS NULL THEN usage_model_hours.cache_write ELSE coalesce(usage_model_hours.cache_write,0)+excluded.cache_write END`,
       [
         row.username,
@@ -108,6 +109,7 @@ export class PostgresUsageRecords implements UsageRecordsPort {
         row.tokens.output,
         row.tokens.cacheRead,
         row.tokens.cacheWrite,
+        row.tokens.reasoning ?? null,
       ],
     )
   }
@@ -179,7 +181,7 @@ export class PostgresUsageRecords implements UsageRecordsPort {
     return this.db.transaction(async sql => {
       const items = (
         await sql.query(
-          `SELECT username,model_id,sum(requests) AS requests,sum(unknown_requests) AS unknown_requests,sum(denied_requests) AS denied_requests,sum(input_tokens) AS input_tokens,sum(output_tokens) AS output_tokens,sum(cache_read) AS cache_read,sum(cache_write) AS cache_write FROM ${table('model_hours')}${where} GROUP BY username,model_id ORDER BY username,model_id`,
+          `SELECT username,model_id,sum(requests) AS requests,sum(unknown_requests) AS unknown_requests,sum(denied_requests) AS denied_requests,sum(input_tokens) AS input_tokens,sum(output_tokens) AS output_tokens,sum(cache_read) AS cache_read,sum(cache_write) AS cache_write,sum(reasoning_tokens) AS reasoning_tokens FROM ${table('model_hours')}${where} GROUP BY username,model_id ORDER BY username,model_id`,
           values,
         )
       ).map(row => ({
@@ -193,6 +195,7 @@ export class PostgresUsageRecords implements UsageRecordsPort {
           output: row.output_tokens === null ? null : Number(row.output_tokens),
           cacheRead: row.cache_read === null ? null : Number(row.cache_read),
           cacheWrite: row.cache_write === null ? null : Number(row.cache_write),
+          reasoning: row.reasoning_tokens === null ? null : Number(row.reasoning_tokens),
         },
       }))
       const counts = (column: string) => this.counts(sql, 'model_hours', where, values, column, 'sum(requests)')

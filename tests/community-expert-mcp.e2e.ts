@@ -89,7 +89,6 @@ it('projects remote, shared and member MCP into an expert, isolates failed servi
   await writeFile(
     overlay,
     JSON.stringify([
-      { id: 'tools', config: { mode: 'native' } },
       {
         insert: [{ id: 'expert-mcp-observer', name: runtime.container ? '/dsh-phalanx/home/expert-mcp-observer.mjs' : join(home, 'expert-mcp-observer.mjs') }],
       },
@@ -183,15 +182,19 @@ it('projects remote, shared and member MCP into an expert, isolates failed servi
         .poll(async () => (await api('mcp')).find((row: { name: string }) => row.name === 'p-bad-' + location)?.preparation?.stage, { timeout: 120000 })
         .toBe('ready')
     }
-    await admin.getByRole('link', { name: 'Expert library', exact: true }).click()
-    await admin.getByRole('button', { name: 'Create expert', exact: true }).click()
-    await admin.getByLabel('Expert name', { exact: true }).fill('MCP expert')
-    await admin.getByLabel('Expert description', { exact: true }).fill('Three MCP locations')
-    await admin.getByLabel('Expert persona', { exact: true }).fill('Use expert MCP tools.')
-    for (const name of ['p-remote', 'p-shared', 'p-member', 'p-bad-remote', 'p-bad-shared', 'p-bad-member'])
-      await admin.getByRole('dialog').getByText(name, { exact: true }).first().click()
-    await admin.getByRole('button', { name: 'Save expert', exact: true }).click()
-    await admin.getByRole('button', { name: 'Edit expert MCP expert', exact: true }).waitFor()
+    // hidden in 0.1.32: configure through the existing management contract.
+    await api('experts', {
+      revision: (await api('experts')).revision,
+      expert: {
+        name: 'MCP expert',
+        description: 'Three MCP locations',
+        icon: '',
+        persona: 'Use expert MCP tools.',
+        skills: [],
+        skillPacks: [],
+        mcp: ['p-remote', 'p-shared', 'p-member', 'p-bad-remote', 'p-bad-shared', 'p-bad-member'],
+      },
+    })
     const expert = (await api('experts')).experts[0],
       preset = 'phalanx-expert-' + expert.id,
       grantPath = `groups/${account.groupId}/experts`,

@@ -14,11 +14,16 @@ export default function CommunityDependencyPicker({
   onChange,
   disabled = false,
   items,
+  hideLabel = false,
+  readOnly = false,
 }: {
   value: readonly string[]
   onChange: (names: string[]) => void
   disabled?: boolean
   items?: readonly CommunityRuntimeDependencyView[]
+  hideLabel?: boolean
+  /** Lock the selection and hide the management link, for platform-maintained resources. */
+  readOnly?: boolean
 }) {
   const { t, errorText } = usePlatformLanguage()
   const [loaded, setRows] = useState<readonly CommunityRuntimeDependencyView[]>(),
@@ -41,7 +46,7 @@ export default function CommunityDependencyPicker({
     return () => controller.abort()
   }, [revision, items])
   return (
-    <div className="page-stack">
+    <div className="page-stack dependency-picker-stack">
       {error !== undefined ? (
         <>
           <CommunityMessage role="alert" status="danger" title={errorText(error)} />
@@ -53,25 +58,28 @@ export default function CommunityDependencyPicker({
       {rows === undefined ? (
         <p role="status">{t('Loading…')}</p>
       ) : (
-        <CheckboxGroup value={[...value]} onChange={onChange} isDisabled={disabled}>
-          <Label>{t('Runtime dependencies')}</Label>
-          {rows.map(row => (
-            <Checkbox key={row.name} value={row.name} isDisabled={!row.current && !value.includes(row.name)}>
-              <Checkbox.Content>
-                <Checkbox.Control>
-                  <Checkbox.Indicator />
-                </Checkbox.Control>
-                <Label>{row.name}</Label>
-              </Checkbox.Content>
-              <p className="text-sm text-muted">{row.current ? row.current.commands.join(', ') : t('No usable dependency version')}</p>
-            </Checkbox>
-          ))}
+        <CheckboxGroup className="dependency-picker" value={[...value]} onChange={onChange} isDisabled={disabled || readOnly}>
+          <Label className={hideLabel ? 'sr-only' : undefined}>{t('Runtime dependencies')}</Label>
+          <div className="dependency-picker-options">
+            {rows.map(row => (
+              <Checkbox key={row.name} value={row.name} isDisabled={!row.current && !value.includes(row.name)}>
+                <Checkbox.Content>
+                  <Checkbox.Control>
+                    <Checkbox.Indicator />
+                  </Checkbox.Control>
+                  <Label>{row.name}</Label>
+                </Checkbox.Content>
+              </Checkbox>
+            ))}
+          </div>
           {rows.length === 0 ? <p>{t('No runtime dependencies yet')}</p> : null}
         </CheckboxGroup>
       )}
-      <a href="/admin/runtime-dependencies" target="_blank" rel="noreferrer">
-        {t('Manage runtime dependencies')}
-      </a>
+      {readOnly ? null : (
+        <a href="/admin/runtime-dependencies" target="_blank" rel="noreferrer">
+          {t('Manage runtime dependencies')}
+        </a>
+      )}
     </div>
   )
 }

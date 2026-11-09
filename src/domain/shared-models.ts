@@ -56,7 +56,13 @@ export function isProviderProtocol(value: unknown): value is CommunityProviderPr
 export interface SharedProvider extends Omit<CommunityProviderInput, 'id' | 'apiKey' | 'models'> {
   readonly id: string
   readonly apiKey: string
-  readonly models: readonly { readonly id: string; readonly name: string; readonly enabled: boolean; readonly input: CommunityModelInput }[]
+  readonly models: readonly {
+    readonly id: string
+    readonly name: string
+    readonly enabled: boolean
+    readonly input: CommunityModelInput
+    readonly reasoning?: boolean
+  }[]
 }
 export interface SharedModelState {
   readonly revision: number
@@ -93,6 +99,7 @@ export function normalizeSharedModelState(state: SharedModelState): SharedModelS
         ...model,
         // Only a missing declaration is upgraded from the known table; a corrupt present value stays text-only.
         input: model.input === undefined ? knownModelInput(model.name) : isModelInput(model.input) ? model.input : 'text',
+        reasoning: model.reasoning === true,
       })),
     })),
   }

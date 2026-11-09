@@ -5,7 +5,13 @@ import type { ModelTokenUsage } from '../domain/usage-record.js'
 function messagesUsageObserver(contentType: string) {
   const decoder = new TextDecoder('utf-8', { fatal: true }),
     encoder = new TextEncoder()
-  const tokens = { input: null as number | null, output: null as number | null, cacheRead: null as number | null, cacheWrite: null as number | null }
+  const tokens = {
+    input: null as number | null,
+    output: null as number | null,
+    cacheRead: null as number | null,
+    cacheWrite: null as number | null,
+    reasoning: null as number | null,
+  }
   const streaming = /^text\/event-stream\b/iu.test(contentType),
     totalLimit = 2 * 1024 * 1024,
     eventLimit = 64 * 1024
@@ -41,6 +47,9 @@ function messagesUsageObserver(contentType: string) {
       if (Number.isSafeInteger(count) && (count as number) >= 0) tokens[key] = count as number
       else unknown = true
     }
+    const reasoning = reasoningUsage(value as Record<string, unknown>, 'output_tokens_details', 'thinking_tokens')
+    if (reasoning.present) tokens.reasoning = reasoning.count
+    unknown ||= reasoning.invalid
   }
   const dispatch = () => {
     if (data.length)
@@ -129,7 +138,10 @@ function messagesUsageObserver(contentType: string) {
       pending = ''
       data = []
       stopped = true
-      return { tokens: { ...tokens }, usageUnknown: unknown || Object.values(tokens).some(value => value === null) }
+      return {
+        tokens: { ...tokens },
+        usageUnknown: unknown || [tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite].some(value => value === null),
+      }
     },
   }
 }
@@ -212,19 +224,38 @@ function openAIUsageObserver(protocol: 'openai-completions' | 'openai-responses'
       text = ''
       stopped = true
       let tokens: ModelTokenUsage
-      if (usage === undefined) tokens = { input: null, output: null, cacheRead: null, cacheWrite: null }
+      if (usage === undefined) tokens = { input: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null }
       else if (protocol === 'openai-completions') {
         const cacheRead = detail(usage.prompt_tokens_details, 'cached_tokens'),
           cacheWrite = detail(usage.prompt_tokens_details, 'cache_write_tokens')
-        tokens = { input: normalizedInput(usage.prompt_tokens, cacheRead, cacheWrite), output: counter(usage.completion_tokens), cacheRead, cacheWrite }
+        tokens = {
+          input: normalizedInput(usage.prompt_tokens, cacheRead, cacheWrite),
+          output: counter(usage.completion_tokens),
+          cacheRead,
+          cacheWrite,
+          reasoning: reasoningUsage(usage, 'completion_tokens_details', 'reasoning_tokens').count,
+        }
       } else {
         const cacheRead = detail(usage.input_tokens_details, 'cached_tokens'),
           cacheWrite = detail(usage.input_tokens_details, 'cache_write_tokens')
-        tokens = { input: normalizedInput(usage.input_tokens, cacheRead, cacheWrite), output: counter(usage.output_tokens), cacheRead, cacheWrite }
+        tokens = {
+          input: normalizedInput(usage.input_tokens, cacheRead, cacheWrite),
+          output: counter(usage.output_tokens),
+          cacheRead,
+          cacheWrite,
+          reasoning: reasoningUsage(usage, 'output_tokens_details', 'reasoning_tokens').count,
+        }
       }
+      if (usage)
+        malformed ||= reasoningUsage(
+          usage,
+          protocol === 'openai-completions' ? 'completion_tokens_details' : 'output_tokens_details',
+          'reasoning_tokens',
+        ).invalid
       return {
         tokens,
-        usageUnknown: truncated || malformed || usage === undefined || Object.values(tokens).some(value => value === null),
+        usageUnknown:
+          truncated || malformed || usage === undefined || [tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite].some(value => value === null),
       }
     },
   }
@@ -233,4 +264,14 @@ function openAIUsageObserver(protocol: 'openai-completions' | 'openai-responses'
 /** Bounded per-protocol observation; forwarding never waits for parsing or persistence. */
 export function modelUsageObserver(protocol: CommunityProviderProtocol, contentType: string) {
   return protocol === 'anthropic-messages' ? messagesUsageObserver(contentType) : openAIUsageObserver(protocol, contentType)
+}
+
+/** A missing optional detail is unknown; a supplied malformed detail also marks parsing incomplete. */
+function reasoningUsage(usage: Record<string, unknown>, details: string, field: string) {
+  const value = usage[details]
+  if (value === undefined || value === null) return { count: null, present: false, invalid: false }
+  if (typeof value !== 'object' || Array.isArray(value)) return { count: null, present: true, invalid: true }
+  const raw = (value as Record<string, unknown>)[field]
+  const count = counter(raw)
+  return { count, present: raw !== undefined, invalid: raw !== undefined && count === null }
 }

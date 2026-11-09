@@ -31,7 +31,8 @@ it('clears plugin rows recorded before sources and their plugin relations while 
   const security = { masterKeyPath, registry: key.registry() },
     connection = postgresConnection()
   key.close()
-  const previousVersion = PLATFORM_SCHEMA_VERSION - 1
+  // Source cleanup was introduced in migration 18; later migrations must not move this baseline.
+  const previousVersion = 17
   const previous = new PlatformDatabase(connection, security, [
     { name: 'dsh_phalanx', migrations: PLATFORM_MIGRATIONS.filter(migration => migration.version <= previousVersion) },
   ])

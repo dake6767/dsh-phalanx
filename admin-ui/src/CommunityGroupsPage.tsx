@@ -66,7 +66,6 @@ export default function CommunityGroupsPage() {
               <Table.Content className="accounts-table groups-table" aria-label={t('Groups')}>
                 <Table.Header>
                   <Table.Column isRowHeader>{t('Group')}</Table.Column>
-                  <Table.Column>{t('Role')}</Table.Column>
                   <Table.Column>{t('Members')}</Table.Column>
                   <Table.Column>{t('Plugins')}</Table.Column>
                   <Table.Column>{t('Granted skills')}</Table.Column>
@@ -82,16 +81,18 @@ export default function CommunityGroupsPage() {
                               <CommunityIcon name={group.kind === 'admin' ? 'shield' : 'groups'} size={16} />
                             </Avatar.Fallback>
                           </Avatar>
-                          <div>
+                          <div className="group-name">
                             <strong>{communityGroupLabel(group, t)}</strong>
-                            {group.isDefault ? <span className="group-default">{t('Default for new accounts')}</span> : null}
+                            <span className="group-row-counts">
+                              {t('Members')} {group.memberCount} · {t('Plugins')} {group.pluginCount ?? 0} · {t('Granted skills')} {group.skillCount ?? 0}
+                            </span>
+                            {group.isDefault ? (
+                              <Chip size="sm" variant="soft" color="success">
+                                {t('Default for new accounts')}
+                              </Chip>
+                            ) : null}
                           </div>
                         </div>
-                      </Table.Cell>
-                      <Table.Cell>
-                        <Chip size="sm" variant="soft" color={group.kind === 'admin' ? 'accent' : 'default'}>
-                          {t(group.kind === 'admin' ? 'Administrators' : 'Ordinary group')}
-                        </Chip>
                       </Table.Cell>
                       <Table.Cell>
                         <span className="group-count">{group.memberCount}</span>
@@ -107,10 +108,6 @@ export default function CommunityGroupsPage() {
                           <Button size="sm" variant="secondary" onPress={() => setDetails(group.id)}>
                             {t('Details')}
                           </Button>
-                          <Button size="sm" variant="tertiary" onPress={() => setSelection({ action: 'rename', group })}>
-                            <CommunityIcon name="edit" size={14} />
-                            {t('Rename group')}
-                          </Button>
                           <Dropdown>
                             <Button size="sm" variant="ghost" aria-label={t('More actions for group {name}', { name: communityGroupLabel(group, t) })}>
                               <CommunityIcon name="more" size={16} />
@@ -119,10 +116,14 @@ export default function CommunityGroupsPage() {
                               <Dropdown.Menu
                                 aria-label={t('Actions')}
                                 onAction={key => {
-                                  if (key === 'default') setSelection({ action: 'set-default', group })
+                                  if (key === 'rename') setSelection({ action: 'rename', group })
+                                  else if (key === 'default') setSelection({ action: 'set-default', group })
                                   else if (key === 'delete') setSelection({ action: 'delete', group })
                                 }}
                               >
+                                <Dropdown.Item id="rename" textValue={t('Rename group')}>
+                                  <Label>{t('Rename group')}</Label>
+                                </Dropdown.Item>
                                 <Dropdown.Item id="default" textValue={t('Set as default')} isDisabled={group.kind === 'admin' || group.isDefault}>
                                   <Label>{t('Set as default')}</Label>
                                 </Dropdown.Item>

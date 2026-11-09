@@ -7,7 +7,6 @@ export default function CommunityDialog({
   closeLabel,
   children,
   footer,
-  eyebrow,
   busy = false,
   drawer = false,
   drawerClassName,
@@ -18,7 +17,6 @@ export default function CommunityDialog({
   closeLabel?: string
   children: ReactNode
   footer?: ReactNode
-  eyebrow?: string
   busy?: boolean
   drawer?: boolean
   drawerClassName?: string
@@ -38,7 +36,6 @@ export default function CommunityDialog({
             <Drawer.Dialog className="account-drawer" aria-label={title} onPointerDown={() => {}} style={{ touchAction: 'auto' }}>
               {busy ? null : <Drawer.CloseTrigger aria-label={closeLabel ?? t('Close account details')} />}
               <Drawer.Header>
-                {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
                 <Drawer.Heading>{title}</Drawer.Heading>
               </Drawer.Header>
               <Drawer.Body>{children}</Drawer.Body>

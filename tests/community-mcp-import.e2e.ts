@@ -118,7 +118,7 @@ it('previews MCP JSON, protects credentials and confirms each service without ov
     await page.getByText('MCP connection passed.', { exact: true }).waitFor()
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page
-      .getByRole('row')
+      .locator('.mcp-service-card')
       .filter({ has: page.getByText('p-tested', { exact: true }) })
       .getByRole('button', { name: 'Edit', exact: true })
       .click()

@@ -4,21 +4,16 @@ import type {
   CommunityAccountsPageData,
   CommunityNativeFeatureGroup,
   CommunityRuntimeDependencyView,
-  CommunitySkillGroupView,
-  CommunitySkillPackLibrary,
   CommunitySkillView,
   CommunityUsageRecords,
 } from '../../src/domain/admin-contract.js'
+import type { UsageModelView } from '../../src/domain/usage-record.js'
 import { runCommunityTerminal, signInCommunity } from '../fixtures/community-native-browser.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
-import {
-  reconfigureRetainedPlugins,
-  retainedCatalogSnapshot,
-  retainedContributionSnapshot,
-  retainedOfficialCatalog,
-} from './installed-retained-contributions.js'
+import { retainedPluginSnapshot, retainedCatalogSnapshot, retainedContributionSnapshot, retainedOfficialCatalog } from './installed-retained-contributions.js'
 import { installedShellArgument, installedUserDataRoot } from './installed-storage-layout.js'
-import { retainedExecutionTrial } from './installed-upgrade-trial.js'
+import { assertPausedUpgradeState, type PausedUpgradeState } from './installed-retained-paused.js'
+import { retainedExecutionTrial, withAdministratorSkill } from './installed-upgrade-trial.js'
 import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
 
 // A different runtime image regenerates artifacts. Preserve the definition and
@@ -53,7 +48,7 @@ export async function assertRetainedUpgradeAfter(input: {
   deploymentInputs: Parameters<ReturnType<typeof installedInstanceAcceptance>['assertImported']>[0]
   beforeDependencies: readonly CommunityRuntimeDependencyView[]
   beforeSkills: readonly CommunitySkillView[]
-  beforeAdministratorSkills: string[]
+  beforeAdministratorSkills: unknown
   groupId: string
   beforeSkillGrants: unknown
   beforePacks: unknown
@@ -61,12 +56,14 @@ export async function assertRetainedUpgradeAfter(input: {
   retainedApi: Parameters<typeof retainedContributionSnapshot>[0]
   retainedCatalog: Awaited<ReturnType<typeof retainedOfficialCatalog>>
   beforeContributions: Awaited<ReturnType<typeof retainedContributionSnapshot>>
+  beforePaused: PausedUpgradeState
+  expertReplies: Record<string, boolean>
   beforeAccounts: unknown
   beforeLibrary: unknown
   beforeSelection: unknown
   beforeGrants: { implicit?: boolean } & Record<string, unknown>
-  history: () => Promise<{ execution: CommunityUsageRecords; mcp: CommunityUsageRecords }>
-  beforeUsage: { execution: CommunityUsageRecords; mcp: CommunityUsageRecords }
+  history: () => Promise<{ execution: CommunityUsageRecords; mcp: CommunityUsageRecords; models: UsageModelView }>
+  beforeUsage: { execution: CommunityUsageRecords; mcp: CommunityUsageRecords; models: UsageModelView }
   beforeLimits: unknown
   beforeUsageSettings: { retentionDays: number }
   call: (marker: string) => Promise<string>
@@ -99,6 +96,8 @@ export async function assertRetainedUpgradeAfter(input: {
     retainedApi,
     retainedCatalog,
     beforeContributions,
+    beforePaused,
+    expertReplies,
     beforeAccounts,
     beforeLibrary,
     beforeSelection,
@@ -128,9 +127,6 @@ export async function assertRetainedUpgradeAfter(input: {
     .poll(async () => retainedDependencyState(await get('runtime-dependencies')), { timeout: 300000 })
     .toEqual(retainedDependencyState(beforeDependencies))
   const dependencies: CommunityRuntimeDependencyView[] = await get('runtime-dependencies')
-  // The previous release implicitly counted the administrator as a managed
-  // skill user. Library contents and ordinary-member access remain intact;
-  // this version deliberately starts the administrator group without grants.
   const groups: { id: string; kind: string }[] = await get('groups')
   expect(groups.some(group => group.id === groupId)).toBe(true)
   for (const group of groups) {
@@ -150,41 +146,9 @@ export async function assertRetainedUpgradeAfter(input: {
   }
   const administratorGroup = groups.find(row => row.kind === 'admin')!
   const administratorSkills = await get(`groups/${administratorGroup.id}/skills`)
-  expect(administratorSkills.skills.filter((row: { granted: boolean }) => row.granted)).toEqual([])
-  expect(administratorSkills.packs.filter((row: { granted: boolean }) => row.granted)).toEqual([])
-  const packLibrary = beforePacks as CommunitySkillPackLibrary
-  const packsBySkill = new Map<string, string[]>()
-  for (const pack of packLibrary.packs)
-    for (const name of pack.skills) {
-      const names = packsBySkill.get(name) ?? []
-      names.push(pack.name)
-      packsBySkill.set(name, names)
-    }
-  const beforeGrantsView = beforeSkillGrants as CommunitySkillGroupView
-  const directlyGranted = new Set(beforeGrantsView.skills.filter(row => row.granted).map(row => row.name))
-  // 0.1.31 derives topLevel from direct skill grants/selections and pack membership:
-  // true for a direct grant or an unpacked skill, false when reachable only through a pack.
-  const expectedTopLevel = (name: string) => directlyGranted.has(name) || !packsBySkill.has(name)
-  const afterSkills = (await get('skills')) as CommunitySkillView[]
-  expect(afterSkills.map(skill => [skill.name, skill.topLevel])).toEqual(afterSkills.map(skill => [skill.name, expectedTopLevel(skill.name)]))
-  expect(afterSkills.find(skill => skill.name === 'retained-skill')!.topLevel).toBe(true)
-  expect(
-    afterSkills.map(skill => {
-      const { topLevel: omitted, ...legacy } = skill
-      void omitted
-      return legacy
-    }),
-  ).toEqual(beforeSkills.map(skill => ({ ...skill, managedMembers: skill.managedMembers - (beforeAdministratorSkills.includes(skill.name) ? 1 : 0) })))
-  const afterGroupSkills = (await get(`groups/${groupId}/skills`)) as CommunitySkillGroupView
-  // The group view gained the same derived flag, and each pack row now lists its child skills.
-  expect(afterGroupSkills).toEqual({
-    ...beforeGrantsView,
-    skills: beforeGrantsView.skills.map(row => ({ ...row, topLevel: expectedTopLevel(row.name) })),
-    packs: (beforeGrantsView.packs ?? []).map(row => ({
-      ...row,
-      skills: packLibrary.packs.find(pack => pack.name === row.name)?.skills ?? row.skills,
-    })),
-  })
+  expect(administratorSkills).toEqual(beforeAdministratorSkills)
+  expect(await get('skills')).toEqual(beforeSkills)
+  expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
   expect(await get('skill-packs')).toEqual(beforePacks)
   expect(await (await member.request.get(origin + '/market/api/skill-packs')).json()).toEqual(beforePackSelections)
   const { plugins, access, grants, selections, ...beforeCatalog } = beforeContributions
@@ -211,9 +175,7 @@ export async function assertRetainedUpgradeAfter(input: {
   }
   expect(retainedAccounts).toEqual(beforeAccounts)
   expect(await get('mcp')).toEqual(beforeLibrary)
-  const { implicit: previousImplicitGrant, ...retainedMcpGrants } = beforeGrants
-  expect([false, undefined]).toContain(previousImplicitGrant)
-  expect(await get(`groups/${groupId}/mcp`)).toEqual(retainedMcpGrants)
+  expect(await get(`groups/${groupId}/mcp`)).toEqual(beforeGrants)
   expect(await (await member.request.get(origin + '/market/api/mcp')).json()).toEqual(beforeSelection)
   expect(await remote('sudo cat ' + installedShellArgument((await installedUserDataRoot(remote)) + '/member/home/upgrade-owned.txt'))).toBe(
     'MEMBER_DATA_PRESERVED',
@@ -227,21 +189,24 @@ export async function assertRetainedUpgradeAfter(input: {
   }
   expect(await get('usage-settings')).toEqual(beforeUsageSettings)
   await assertHistory()
+  const normalizeModels = (view: UsageModelView) => ({
+    ...view,
+    items: view.items.map(row => ({ ...row, tokens: { ...row.tokens, reasoning: row.tokens.reasoning ?? null } })),
+  })
+  expect(beforeUsage.models.items.length).toBeGreaterThan(0)
+  expect(beforeUsage.models.items.some(row => row.requests > 0 && (row.tokens.output ?? 0) > 0)).toBe(true)
+  expect(normalizeModels((await history()).models)).toEqual(normalizeModels(beforeUsage.models))
   expect((await admin.request.get(origin + '/admin/api/execution/records')).status()).toBe(404)
   expect((await admin.request.get(origin + '/admin/execution-records')).status()).toBe(404)
-  await admin.goto(origin + '/admin/usage-records')
-  const usageGrid = admin.getByRole('grid', { name: 'Tool usage records', exact: true })
-  await usageGrid.getByText('skill:retained-skill', { exact: true }).waitFor()
-  await usageGrid.getByText('p-selected', { exact: true }).first().waitFor()
-  // The upgraded administrator must explicitly acquire skills before running as themselves.
-  const adminGroup = (await get('groups')).find((row: { kind: string }) => row.kind === 'admin')
-  const adminGrantPath = `groups/${adminGroup.id}/skills`,
-    adminGrant = await get(adminGrantPath)
-  expect((await post(adminGrantPath, { action: 'save', names: ['retained-skill'], revision: adminGrant.revision, confirmed: true })).status()).toBe(200)
-  const trial = () => retainedExecutionTrial({ get, post: (path, input) => post(path, input, executionTrialTimeout) }, 'after', trialEvidence, redact)
+  expect((await admin.request.get(origin + '/admin/usage-records', { maxRedirects: 0 })).status()).toBe(302)
+  const trialApi = { get, post: (path: string, input: object) => post(path, input, executionTrialTimeout) }
+  const trial = () => withAdministratorSkill(trialApi, 'retained-skill', () => retainedExecutionTrial(trialApi, 'after', trialEvidence, redact))
   await trial()
   await call('AFTER_OS_UPGRADE')
-  await reconfigureRetainedPlugins(retainedApi, { plugins, access, grants, selections })
+  const pluginState = { plugins, access, grants, selections }
+  expect(await retainedPluginSnapshot(retainedApi)).toEqual(pluginState)
+  const assertPaused = (phase: string) => assertPausedUpgradeState({ ...retainedApi, before: beforePaused, phase, expertReplies })
+  await assertPaused('after-upgrade')
   await callPlugin('RETAINED_PLUGIN_AFTER')
   await runCommunityTerminal(member, 'officecli --version', '1.0.157')
   expect((await post('usage-settings', { retentionDays: 7 })).status()).toBe(200)
@@ -266,6 +231,18 @@ export async function assertRetainedUpgradeAfter(input: {
   await signInCommunity(member, origin, 'member', 'password')
   expect(await get('usage-settings')).toEqual({ retentionDays: 7 })
   await assertHistory()
+  const restartedModels = (await history()).models
+  for (const original of beforeUsage.models.items) {
+    const retained = restartedModels.items.find(row => row.username === original.username && row.modelId === original.modelId)
+    expect(retained).toBeDefined()
+    for (const field of ['requests', 'unknownRequests', 'deniedRequests'] as const) expect(retained![field]).toBeGreaterThanOrEqual(original[field])
+    for (const field of ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'] as const) {
+      const count = original.tokens[field]
+      if (count != null) expect(retained!.tokens[field]).toBeGreaterThanOrEqual(count)
+    }
+  }
+  expect(await retainedPluginSnapshot(retainedApi)).toEqual(pluginState)
+  await assertPaused('after-restart')
   await trial()
   const retainedSession = await call('AFTER_RECORDS_RESTART')
   await member.getByRole('button', { name: 'Platform App Center', exact: true }).waitFor()
@@ -280,6 +257,8 @@ export async function assertRetainedUpgradeAfter(input: {
     usageExecutionRecordsPreserved: beforeUsage.execution.items.length,
     usageMcpRecordsPreserved: beforeUsage.mcp.items.length,
     usageRecordIdsAndFieldsPreserved: true,
+    modelUsagePreservedBeforeNewRequests: true,
+    modelUsageCountersNondecreasingAcrossRestart: true,
     originalRetentionDays: beforeUsageSettings.retentionDays,
     restartRetentionDays: 7,
     historyStableAcrossRestart: true,
@@ -288,7 +267,10 @@ export async function assertRetainedUpgradeAfter(input: {
     memberUiUnchanged: true,
     manualDependenciesPreserved: true,
     nonemptyCatalogInstallationsPreserved: true,
-    pluginsClearedAndReconfigured: true,
+    pluginsAndSelectionsPreserved: true,
+    expertsAndSelectionsPreserved: true,
+    summonedExpertsExecutable: true,
+    memberContributionsPreserved: true,
     retainedPluginToolPassed: true,
     retainedOfficeCliPassed: true,
     dependencyImageRefreshObserved: dependencies.some(

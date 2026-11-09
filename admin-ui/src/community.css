@@ -3,6 +3,19 @@
 @import './community-shell.css';
 @import './community-reference.css';
 @import './community-plugin-drawer.css';
+/* Keep the admin radius available to dialogs rendered through portals. */
+html:has(.admin-shell) {
+  --radius: 0.1875rem;
+}
+
+html:has(.admin-shell) .button:not(.button--outline, .button--ghost, .plugin-details-action) {
+  border: 1px solid var(--admin-button-border, var(--border));
+}
+
+html:has(.admin-shell) :is(.button--primary, .button--secondary, .button--tertiary, .button--danger, .button--danger-soft) {
+  --admin-button-border: color-mix(in oklab, var(--button-bg) 88%, var(--foreground));
+}
+
 /* Element defaults stay in the base layer so HeroUI component styles always win. */
 @layer base{
 :root{color:var(--foreground);background:var(--background);-webkit-font-smoothing:antialiased}
@@ -48,3 +61,26 @@ h1{font-size:24px;letter-spacing:-.02em;margin:6px 0 10px;font-weight:600}h2{fon
 .instance-resource-comparison h4{font-size:13px;margin:0 0 14px}.instance-resource-comparison .account-details{margin-bottom:12px}
 
 .system-status-facts{display:grid;gap:1rem}.system-status-facts div{display:grid;grid-template-columns:minmax(9rem,1fr) minmax(0,3fr);gap:1rem}.system-status-facts dt{color:var(--muted)}.system-status-facts dd{margin:0;overflow-wrap:anywhere}.system-status-facts code{font-size:.85rem}@media(max-width:760px){.system-status-facts div{grid-template-columns:1fr;gap:.25rem}}
+
+/* Light theme: white cards and buttons with soft gray borders. Tokens stay untouched so tabs and chips keep their gray track. */
+html.light:has(.admin-shell) {
+  --admin-light-border: color-mix(in oklab, var(--border) 65%, var(--surface));
+  --admin-card-tint: color-mix(in oklab, var(--accent) 5%, var(--surface));
+}
+html.light:has(.admin-shell) :is(.button--secondary, .button--tertiary) {
+  --button-bg: var(--surface);
+  --button-bg-hover: var(--default);
+  --button-bg-pressed: var(--default-hover);
+  --admin-button-border: var(--admin-light-border);
+}
+html.light:has(.admin-shell) .plugin-library-card {
+  background: linear-gradient(160deg, var(--admin-card-tint) 0%, var(--surface) 55%);
+  border: 1px solid var(--admin-light-border);
+  box-shadow: 0 1px 2px oklch(0.45 0.08 254 / 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+html.light:has(.admin-shell) .plugin-library-card:hover {
+  background: linear-gradient(160deg, color-mix(in oklab, var(--accent) 8%, var(--surface)) 0%, var(--surface) 60%);
+  border-color: color-mix(in oklab, var(--accent) 22%, var(--admin-light-border));
+  box-shadow: 0 4px 12px oklch(0.45 0.08 254 / 0.07);
+}

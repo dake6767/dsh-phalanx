@@ -84,6 +84,8 @@ export const en = {
   Skill: 'Skill',
   'MCP service': 'MCP service',
   Plugin: 'Plugin',
+  '{count} references': '{count} references',
+  Definition: 'Definition',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
   'Dependency category': '依赖类别',
@@ -167,4 +169,6 @@ export const zhCN: Record<keyof typeof en, string> = {
   Skill: '技能',
   'MCP service': 'MCP 服务',
   Plugin: '插件',
+  '{count} references': '{count} 处引用',
+  Definition: '定义',
 }

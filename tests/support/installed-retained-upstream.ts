@@ -13,6 +13,7 @@ export async function createRetainedUpgradeUpstream(input: {
   const { address, catalogBytes, progress } = input
   const calls: Record<string, { failed: boolean; valid: boolean; tools: string[] }> = {}
   const pluginCalls: Record<string, { failed: boolean; valid: boolean }> = {}
+  const expertReplies: Record<string, boolean> = {}
   const state = { exposed: false }
   const fixture = createServer(async (request, response) => {
     if (request.method === 'GET' && request.url === '/catalog.json') {
@@ -52,6 +53,11 @@ export async function createRetainedUpgradeUpstream(input: {
     const marker = latestHumanText(body)
     state.exposed ||= text.includes('fictional-upgrade-mcp-key')
     response.setHeader('content-type', 'text/event-stream')
+    if (marker.startsWith('RETAINED_EXPERT_')) {
+      expertReplies[marker] = text.includes('Keep this expert through upgrades.')
+      streamText(response, 'RETAINED_EXPERT_DONE')
+      return
+    }
     if (marker.startsWith('RETAINED_PLUGIN_')) {
       const result = retainedPluginResult(body, marker)
       if (result) {
@@ -76,5 +82,5 @@ export async function createRetainedUpgradeUpstream(input: {
   await once(fixture, 'listening')
   await progress.step('fixture', async () => ({ port: (fixture.address() as { port: number }).port }))
   const upstream = `http://${address}:${(fixture.address() as { port: number }).port}`
-  return { fixture, upstream, calls, pluginCalls, state }
+  return { fixture, upstream, calls, pluginCalls, expertReplies, state }
 }

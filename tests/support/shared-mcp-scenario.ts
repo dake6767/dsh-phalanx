@@ -21,12 +21,12 @@ import { execFileText } from '../../src/adapters/runtime-command.js'
 import { runtimeSection, assertPinnedDshRevision } from './real-dsh-runtime.js'
 import { runtimeSettings } from './real-dsh-kit.js'
 import { createRealDshRpc } from './real-dsh-rpc.js'
-import { latestHumanText, streamText, streamToolCall, hasToolResult } from './real-dsh-model.js'
+import { latestHumanText, streamText, streamToolCall, hasToolResult, failedToolResults } from './real-dsh-model.js'
 
 export async function verifySharedMcpScenario(scenario: 'management' | 'recovery' | 'lifecycle' | 'installed-lifecycle'): Promise<void> {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'mcp-shared-'))
-  const observations: { marker: string; tools: string[]; result: boolean; failed: boolean; text: string }[] = []
+  const observations: { marker: string; tools: string[]; result: boolean; failed: boolean; errors: string[]; text: string }[] = []
   const recoveryDurationsMs: number[] = []
   let crashCount = 0,
     silentDurationMs = 0,
@@ -43,6 +43,7 @@ export async function verifySharedMcpScenario(scenario: 'management' | 'recovery
       failed: hasToolResult(body, marker.toLowerCase(), true),
       tools: (body.tools ?? []).map((row: { name: string }) => row.name),
       text,
+      errors: failedToolResults(body, ['fictional-shared-secret', 'fictional-rotated-key', 'fictional-model-key', 'member-private-value']),
     })
     res.setHeader('content-type', 'text/event-stream')
     if (marker.startsWith('CALL_') && !result && !hasToolResult(body, marker.toLowerCase(), true))
@@ -194,7 +195,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       })
       await page.goto(origin + '/admin')
       await page.getByRole('link', { name: 'MCP library', exact: true }).click()
-      await page.getByRole('row').filter({ hasText: 'p-search' }).getByRole('button', { name: 'Edit', exact: true }).click()
+      await page.locator('.plugin-library-card').filter({ hasText: 'p-search' }).getByRole('button', { name: 'Edit', exact: true }).click()
       await page.getByText('Dependencies ready', { exact: true }).waitFor()
       expect(await page.getByRole('button', { name: 'Prepare again', exact: true }).isEnabled()).toBe(true)
       await page.getByRole('tab', { name: 'MCP tools', exact: true }).click()
@@ -444,10 +445,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       const usagePage = await browser.newPage({ locale: 'en' })
       usagePage.setDefaultTimeout(30000)
       await signInCommunity(usagePage, origin, 'admin', 'password', true)
-      await usagePage.goto(origin + '/admin/usage-records')
-      const grid = usagePage.getByRole('grid', { name: 'Tool usage records', exact: true })
-      await grid.getByText('p-search', { exact: true }).first().waitFor()
-      await grid.getByText('Usage denied', { exact: true }).first().waitFor()
+      // hidden in 0.1.32: retain administrator access to the collected records through the API.
+      const response = await usagePage.request.get(origin + '/admin/api/usage-records')
+      expect(response.ok()).toBe(true)
+      expect(await response.json()).toEqual(usage)
     }
     passed = true
   } catch (error) {
@@ -484,9 +485,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
             crashCount,
             silentDurationMs,
             deadlineDurationMs,
-            observations: observations.map(({ marker, tools, result, failed }) => ({
+            observations: observations.map(({ marker, tools, result, failed, errors }) => ({
               marker,
               failed,
+              errors,
               tools: tools.filter(name => name.startsWith('mcp__')),
               result,
             })),

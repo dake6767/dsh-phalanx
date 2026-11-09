@@ -43,7 +43,6 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
   expect(await page.locator('html').getAttribute('data-theme')).toBe('dark')
   await page.getByRole('radio', { name: 'Light', exact: true }).click()
   for (const [path, title] of [
-    ['usage-records', 'Usage records'],
     ['groups', 'Group management'],
     ['models', 'Model management'],
     ['settings', 'System settings'],
@@ -56,48 +55,12 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
     expect(await page.locator('html').getAttribute('data-theme')).toBe('light')
     expect(await page.getByRole('radio', { name: 'Light', exact: true }).getAttribute('aria-checked')).toBe('true')
   }
+  for (const hidden of ['experts', 'usage-records']) {
+    const response = await page.request.get(`${origin}/admin/${hidden}`, { maxRedirects: 0 })
+    expect(response.status()).toBe(302)
+    expect(response.headers().location).toBe('/admin')
+  }
   let checking = true
-  await page.route('**/admin/api/experts', route =>
-    route.fulfill({
-      json: {
-        revision: '1',
-        models: [],
-        plugins: [],
-        mcp: [],
-        experts: [
-          {
-            id: 'writer',
-            revision: 1,
-            name: 'Fixture writer',
-            description: 'Writes',
-            icon: '',
-            persona: 'Write.',
-            published: false,
-            skills: [],
-            skillPacks: [],
-            plugins: [],
-            mcp: [],
-            examples: [],
-            model: null,
-            modelLabel: null,
-            modelUnavailable: false,
-            missing: ['skill:missing'],
-            failures: [{ username: 'member', entries: ['preset'] }],
-            ...(checking ? { checking: ['member'] } : {}),
-          },
-        ],
-      },
-    }),
-  )
-  await page.goto(`${origin}/admin/experts`)
-  await page.getByText('Checking capabilities…', { exact: true }).waitFor()
-  await page.getByText('Unavailable entries', { exact: true }).waitFor()
-  await page.getByText('Expert load failed for member', { exact: true }).waitFor()
-  checking = false
-  await expect.poll(() => page.getByText('Checking capabilities…', { exact: true }).count(), { timeout: 15000 }).toBe(0)
-  await page.getByText('Expert load failed for member', { exact: true }).waitFor()
-  await page.unroute('**/admin/api/experts')
-  checking = true
   await page.route('**/admin/api/plugins', route =>
     route.fulfill({
       json: [
@@ -131,6 +94,7 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
   await page.getByRole('link', { name: 'System settings', exact: true }).click()
   await page.getByRole('heading', { name: 'System settings', exact: true }).waitFor()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.getByRole('tab', { name: 'Resources and limits', exact: true }).click()
   const limits = page.getByRole('region', { name: 'Member instances', exact: true })
   await limits.getByText('Limits do not apply in development mode.', { exact: true }).waitFor()
   await limits.getByText('Member containers have no limits.', { exact: true }).waitFor()

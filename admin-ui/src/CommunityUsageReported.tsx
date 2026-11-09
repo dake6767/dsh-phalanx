@@ -78,9 +78,9 @@ export default function CommunityUsageReported({ revision }: { revision: number 
   }
   return (
     <>
-      <p>{t('Reported by member instances. The platform cannot verify these counts.')}</p>
-      <p className="muted">
-        {t('Plugin-local tools and member-container MCP are excluded. Plugin upstreams and remote or shared MCP retain gateway records.')}
+      <p className="muted usage-tab-note">
+        <span>{t('Reported by member instances. The platform cannot verify these counts.')}</span>{' '}
+        <span>{t('Plugin-local tools and member-container MCP are excluded. Plugin upstreams and remote or shared MCP retain gateway records.')}</span>
       </p>
       {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
       <section className="panel">
@@ -91,12 +91,11 @@ export default function CommunityUsageReported({ revision }: { revision: number 
             apply()
           }}
         >
-          <CommunityField label={t('Filter by member')} value={username} onChange={setUsername} variant="secondary" />
+          <CommunityField label={t('Filter by member')} value={username} onChange={setUsername} />
           <CommunitySelect
             label={t('Filter by group')}
             value={groupId || 'all'}
             onChange={value => setGroupId(value === 'all' ? '' : value)}
-            variant="secondary"
             options={[
               { id: 'all', label: t('All groups') },
               ...groups.map(group => ({ id: group.id, label: communityGroupLabel(group, t) })),
@@ -104,12 +103,14 @@ export default function CommunityUsageReported({ revision }: { revision: number 
                 []),
             ]}
           />
-          <CommunityField label={t('Filter by skill')} value={skill} onChange={setSkill} variant="secondary" />
-          <CommunityField label={t('From (UTC day)')} value={from} onChange={setFrom} variant="secondary" />
-          <CommunityField label={t('Until (exclusive, UTC day)')} value={until} onChange={setUntil} variant="secondary" />
-          <Button type="submit" variant="secondary">
-            {t('Apply filters')}
-          </Button>
+          <CommunityField label={t('Filter by skill')} value={skill} onChange={setSkill} />
+          <CommunityField label={t('From (UTC day)')} value={from} onChange={setFrom} />
+          <CommunityField label={t('Until (exclusive, UTC day)')} value={until} onChange={setUntil} />
+          <div className="usage-filter-actions">
+            <Button type="submit" variant="secondary">
+              {t('Apply filters')}
+            </Button>
+          </div>
         </form>
       </section>
       {data && (
@@ -125,7 +126,7 @@ export default function CommunityUsageReported({ revision }: { revision: number 
             <section className="panel" key={key}>
               <h2>{t(label)}</h2>
               <dl>
-                {data.summaries[key].map(row => (
+                {data.summaries[key].slice(0, 5).map(row => (
                   <div key={row.key}>
                     <dt>{key === 'groups' ? groupLabel(row.key) : row.key || '—'}</dt>
                     <dd>{row.count.toLocaleString(locale)}</dd>

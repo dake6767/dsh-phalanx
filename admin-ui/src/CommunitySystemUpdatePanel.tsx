@@ -2,10 +2,6 @@ import { Card } from '@heroui/react/card'
 import SystemUpdateCheck from './CommunitySystemUpdateCheck'
 import { UpdateFailure } from './CommunitySystemUpdateDetails'
 import SystemUpdateOperation from './CommunitySystemUpdateOperation'
-import CommunityInstanceResourceSettings from './CommunityInstanceResourceSettings'
-import CommunityUsageSettings from './CommunityUsageSettings'
-import CommunityDownloadSources from './CommunityDownloadSources'
-import CommunityExecutionSettings from './CommunityExecutionSettings'
 import { usePlatformLanguage } from './CommunityLanguage'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
@@ -169,17 +165,13 @@ export default function CommunitySystemUpdatePanel() {
   const changing = operation && (active.has(operation.phase) || operation.cleanup?.status === 'running')
   const showOperation = Boolean(operation && (changing || operation.phase === 'prepared' || !preferCheck))
   return (
-    <div className="system-settings-stack">
-      <section className="page-heading">
-        <div>
-          <h1>{t('System settings')}</h1>
-          <p>{t('Manage the installed version and recoverable system updates.')}</p>
-        </div>
-      </section>
+    <>
       <Card id="system-update" className="system-update" role="region" aria-label={t('System update')}>
-        <Card.Header>
-          <Card.Title>{t('System update')}</Card.Title>
-          <Card.Description>{t('Check manually for compatible formal releases. Downloading leaves the current service running.')}</Card.Description>
+        <Card.Header className="system-update-header">
+          <div>
+            <Card.Title>{t('System update')}</Card.Title>
+            <Card.Description>{t('Check manually for compatible formal releases. Downloading leaves the current service running.')}</Card.Description>
+          </div>
           <Button
             variant="secondary"
             isDisabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)}
@@ -192,8 +184,10 @@ export default function CommunitySystemUpdatePanel() {
         </Card.Header>
         <Card.Content className="settings-panel-body">
           <div className="update-versions">
-            <p>{t('Installed version: {version}', { version: snapshot?.currentVersion ?? t('Unknown') })}</p>
-            <p>{t('Running version: {version}', { version: reconnecting ? t('Unknown while reconnecting.') : (snapshot?.runningVersion ?? t('Unknown')) })}</p>
+            <span>{t('Installed version: {version}', { version: snapshot?.currentVersion ?? t('Unknown') })}</span>
+            <span>
+              {t('Running version: {version}', { version: reconnecting ? t('Unknown while reconnecting.') : (snapshot?.runningVersion ?? t('Unknown')) })}
+            </span>
           </div>
           {reconnecting && snapshot?.runningVersion && <p>{t('Last verified running version: {version}', { version: snapshot.runningVersion })}</p>}
           {check && !showOperation && (
@@ -273,10 +267,6 @@ export default function CommunitySystemUpdatePanel() {
           )}
         </Card.Content>
       </Card>
-      <CommunityDownloadSources />
-      <CommunityUsageSettings />
-      <CommunityInstanceResourceSettings />
-      <CommunityExecutionSettings />
-    </div>
+    </>
   )
 }

@@ -101,9 +101,11 @@ export default function CommunityDownloadSources() {
                 setNotice(false)
               }}
             />
-            {fields.map(([key, label]) => (
-              <CommunityField key={key} label={t(label)} value={draft[key]} type="url" disabled={busy} onChange={value => edit(key, value)} />
-            ))}
+            <div className="download-source-fields">
+              {fields.map(([key, label]) => (
+                <CommunityField key={key} label={t(label)} value={draft[key]} type="url" disabled={busy} onChange={value => edit(key, value)} />
+              ))}
+            </div>
             <p className="muted">{t('Leave mirror and prefix fields empty for direct official downloads.')}</p>
             <p className="muted">
               {t(

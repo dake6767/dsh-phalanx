@@ -151,7 +151,7 @@ it('installs a member sign-in suite with the login command shown and no credenti
     await zhConfirm.waitFor({ state: 'detached' })
     await zhDetails.getByRole('button', { name: '关闭广场条目详情', exact: true }).click()
     await page.locator('nav.nav-list').getByRole('link', { name: '技能库', exact: true }).click()
-    const skillCard = page.locator('.plugin-library-card').filter({ hasText: 'team-chat' })
+    const skillCard = page.locator('.plugin-library-card').filter({ hasText: 'chat-suite' })
     await skillCard.waitFor()
     expect(await skillCard.getByText('来自『聊天工具』').count()).toBe(0)
     expect(errors).toEqual([])

@@ -2,8 +2,13 @@ import { sharedModelProviderKey } from './shared-models.js'
 export const expertPresetId = (id: string) => `phalanx-expert-${id}`
 
 /** Translate an authorized platform launch plan through the named DSH seam owners. */
-export const expertConversationPlan = (plan: { readonly expertId: string; readonly model: { readonly providerId: string; readonly id: string } | null }) => ({
+export const expertConversationPlan = (plan: {
+  readonly expertId: string
+  readonly reasoningEffort?: string
+  readonly model: { readonly providerId: string; readonly id: string } | null
+}) => ({
   agentPreset: expertPresetId(plan.expertId),
+  ...(plan.reasoningEffort ? { reasoningEffort: plan.reasoningEffort } : {}),
   model: plan.model === null ? null : { provider: sharedModelProviderKey(plan.model.providerId), model: plan.model.id },
 })
 

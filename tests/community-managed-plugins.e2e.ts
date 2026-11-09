@@ -77,7 +77,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
       ).status(),
     ).toBe(200)
     await page.getByRole('link', { name: 'Group management', exact: true }).click()
-    const ordinary = page.getByRole('row').filter({ hasText: 'Ordinary group' })
+    const ordinary = page.getByRole('row').filter({ hasText: 'Default group' })
     await ordinary.getByRole('button', { name: 'Details', exact: true }).click()
     const drawer = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Close group details', exact: true }) })
     const groups = await (await page.request.get(origin + '/admin/api/groups')).json(),
@@ -89,7 +89,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     page.on('request', request => {
       if (request.method() === 'POST' && /\/admin\/api\/groups\/[^/]+\/plugins$/u.test(new URL(request.url()).pathname)) posts++
     })
-    const save = drawer.getByRole('button', { name: 'Save configuration', exact: true })
+    const save = drawer.getByRole('button', { name: 'Save changes', exact: true })
     const row = (name: string) => drawer.getByRole('listitem').filter({ hasText: name })
     const add = async (tab: 'Platform controlled' | 'Preinstalled plugins', names: readonly string[]) => {
       await drawer.getByRole('tab', { name: tab, exact: true }).click()
@@ -101,7 +101,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
       }
       await modal.getByRole('button', { name: 'Confirm selection', exact: true }).click()
     }
-    await drawer.getByRole('tab', { name: 'Platform controlled', exact: true }).waitFor()
+    await drawer.getByRole('tab', { name: 'Platform controlled', exact: true }).click()
     await drawer.getByRole('button', { name: 'Add plugins', exact: true }).click()
     const cancelled = page.getByRole('dialog', { name: 'Add controlled plugins', exact: true })
     await cancelled.getByText('Shared sidebar', { exact: true }).click()
@@ -167,11 +167,12 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await save.click()
     await move.getByText('Moving to platform control discards members’ setting changes after restart.', { exact: true }).waitFor()
     await move.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await drawer.getByRole('tab', { name: 'Expert grants', exact: true }).click()
+    await drawer.getByRole('tab', { name: 'Skills', exact: true }).click()
     await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).getByRole('button', { name: 'Continue editing', exact: true }).click()
     await drawer.getByRole('button', { name: 'Close group details', exact: true }).last().click()
     await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).getByRole('button', { name: 'Discard changes', exact: true }).click()
     await ordinary.getByRole('button', { name: 'Details', exact: true }).click()
+    await drawer.getByRole('tab', { name: 'Platform controlled', exact: true }).click()
     await row('credential-sidebar').waitFor() // The second administrator changes an already loaded draft.
     const stale = await current()
     expect(
@@ -200,6 +201,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await expect.poll(() => save.isDisabled()).toBe(true)
     await drawer.getByRole('button', { name: 'Close group details', exact: true }).last().click()
     await page.getByRole('row').filter({ hasText: 'Administrators' }).getByRole('button', { name: 'Details', exact: true }).click()
+    await drawer.getByRole('tab', { name: 'Platform controlled', exact: true }).click()
     await expect.poll(() => row('shared-sidebar').count()).toBe(1)
     await row('shared-sidebar').getByRole('button', { name: 'Revoke', exact: true }).click()
     await revoke.getByRole('button', { name: 'Confirm action', exact: true }).click()
@@ -209,23 +211,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await removal.getByRole('button', { name: 'Confirm action', exact: true }).click()
     await save.click()
     await expect.poll(() => save.isDisabled()).toBe(true)
-    await page.getByRole('tab', { name: 'Expert grants', exact: true }).click()
-    const expert = drawer.getByRole('checkbox', { name: 'Reviewer', exact: true })
-    await expert.waitFor()
-    expect(await expert.isDisabled()).toBe(false)
-    expect(await expert.isChecked()).toBe(false)
-    await drawer.getByText('Reviewer', { exact: true }).click()
-    await drawer.getByRole('button', { name: 'Save grants', exact: true }).click()
-    await expect.poll(() => drawer.getByRole('button', { name: 'Save grants', exact: true }).isDisabled()).toBe(true)
-    await drawer.getByRole('button', { name: 'Close group details', exact: true }).last().click()
-    await page.getByRole('row').filter({ hasText: 'Administrators' }).getByRole('button', { name: 'Details', exact: true }).click()
-    await page.getByRole('tab', { name: 'Expert grants', exact: true }).click()
-    expect(await expert.isChecked()).toBe(true)
-    await drawer.getByText('Reviewer', { exact: true }).click()
-    await drawer.getByRole('button', { name: 'Save grants', exact: true }).click()
-    await expect.poll(() => drawer.getByRole('button', { name: 'Save grants', exact: true }).isDisabled()).toBe(true)
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
-      await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'group-grants.png'), fullPage: true, animations: 'disabled' })
+    // hidden in 0.1.32: expert-grant editor interactions are paused.
     await drawer.getByRole('button', { name: 'Close group details', exact: true }).last().click()
     // Controlled browser projection; failure aggregation is covered at the policy seam.
     let incomplete = 2

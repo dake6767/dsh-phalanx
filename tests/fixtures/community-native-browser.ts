@@ -3,16 +3,43 @@ import { expect } from 'vitest'
 import { SESSION_LIST } from '../../src/dsh/session-protocol.js'
 import { cookieHeader, createBrowserDshRpc } from '../support/real-dsh-rpc.js'
 import { ensureWorkspaceSelected } from './real-dsh-browser.js'
-/** Native settings moved into the upstream account menu. */
+/** Narrow layouts keep the native sidebar inert until its opener is used. */
+export async function openCommunitySidebar(page: Page): Promise<void> {
+  const opener = page.locator('[data-sidebar-opener]')
+  const toggle = page.locator('[data-sidebar-toggle]')
+  await toggle.waitFor({ state: 'attached' })
+  // ResizeObserver updates the native drawer mode after the viewport itself changes.
+  await expect
+    .poll(() =>
+      toggle.evaluate(element => {
+        const narrow = matchMedia('(width < 768px)').matches && !document.documentElement.hasAttribute('data-windows-titlebar')
+        return narrow === Boolean(element.closest('[data-sidebar-drawer]'))
+      }),
+    )
+    .toBe(true)
+  await expect.poll(async () => (await opener.isVisible()) || (await toggle.isVisible())).toBe(true)
+  if (await page.locator('[data-sidebar-drawer][data-sidebar-collapsed]').count()) {
+    await opener.click()
+    await expect.poll(() => page.locator('[data-sidebar-drawer][data-sidebar-collapsed]').count()).toBe(0)
+  }
+}
+
+/** The upstream account menu remains available when the platform client fails. */
 export async function openNativeSettings(page: Page, language: 'en' | 'zh' = 'en'): Promise<void> {
+  await openCommunitySidebar(page)
   const accountMenu = language === 'zh' ? '账号菜单' : 'Account menu'
   const settings = language === 'zh' ? '设置' : 'Settings'
-  await page.getByRole('button', { name: accountMenu, exact: true }).click()
+  const gearMenu = language === 'zh' ? '设置菜单' : 'Settings menu'
+  await page
+    .getByRole('button', { name: gearMenu, exact: true })
+    .or(page.getByRole('button', { name: accountMenu, exact: true }))
+    .click()
   await page.getByRole('menuitem', { name: settings, exact: true }).click()
   await page.getByRole('dialog', { name: settings, exact: true }).waitFor()
 }
 
 export async function openCommunityAccountMenu(page: Page): Promise<void> {
+  await openCommunitySidebar(page)
   await page.getByRole('button', { name: /^Platform account:/u }).click()
   await page.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
 }
@@ -84,7 +111,11 @@ export async function startCommunitySession(page: Page): Promise<string> {
   await expect.poll(async () => Boolean((previous = await state())), { timeout: 60_000 }).toBe(true)
   if (previous!.blank) return previous!.id
   const previousId = previous!.id
-  await page.getByRole('button', { name: 'New session', exact: true }).first().click()
+  await page
+    .getByRole('button', { name: 'New session', exact: true })
+    .filter({ hasNot: page.locator('[data-copy-version]') })
+    .first()
+    .click()
   let sessionId: string | undefined
   await expect
     .poll(

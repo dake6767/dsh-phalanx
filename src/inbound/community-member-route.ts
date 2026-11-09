@@ -50,7 +50,7 @@ export function createCommunityMemberRoute(deps: {
     }
     if (url.pathname === '/recovery' && request.method === 'GET') {
       const { locale, preference } = requestLanguage(request)
-      sendHtml(response, 200, communityRecoveryPage(locale, preference, await deps.accountChoices(request)))
+      sendHtml(response, 200, communityRecoveryPage(locale, preference, await deps.accountChoices(request), url.searchParams.get('restart') === '1'))
       return
     }
     const reset = url.pathname === '/recovery/reset'

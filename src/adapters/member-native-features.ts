@@ -17,7 +17,7 @@ export async function prepareMemberNativeFeatures(
   spaceId: string,
   patch: readonly NativeFeaturePatch[],
   canDiscardArtifacts: () => boolean = () => true,
-  options?: { readonly policy: NativePluginPolicyConfiguration; readonly creatorPatch?: string },
+  options?: { readonly policy: NativePluginPolicyConfiguration; readonly toolPolicyPatch?: string },
 ): Promise<PreparedMemberNativeFeatures> {
   if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new TypeError('Invalid native feature member identity')
   const host = join(dataRoot, 'native-features', 'members', spaceId)
@@ -31,11 +31,11 @@ export async function prepareMemberNativeFeatures(
     await mkdir(dirname(target), { recursive: true, mode: 0o700 })
     await writeFile(target, contents, { mode: 0o600, flag: 'wx' })
   }
-  const filename = options?.creatorPatch ? 'overlay.yml' : 'overlay.json'
+  const filename = options?.toolPolicyPatch ? 'overlay.yml' : 'overlay.json'
   let overlay = JSON.stringify(projection.patch)
-  if (options?.creatorPatch) {
-    const document: Document = parseDocument(options.creatorPatch, { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: (value: string) => value }] })
-    if (document.errors.length || !isSeq(document.contents)) throw new Error('Invalid native Creator patch')
+  if (options?.toolPolicyPatch) {
+    const document: Document = parseDocument(options.toolPolicyPatch, { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: (value: string) => value }] })
+    if (document.errors.length || !isSeq(document.contents)) throw new Error('Invalid native tool policy patch')
     document.contents.items.unshift(...projection.patch.map(row => document.createNode(row)))
     overlay = document.toString()
   }

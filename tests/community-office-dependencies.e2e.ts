@@ -23,10 +23,7 @@ it.skipIf(!runtimeSettings.containerImage)(
     assertPinnedDshRevision(runtimeSettings)
     const root = await mkdtemp(join(tmpdir(), 'office-python-')),
       overlay = join(root, 'observer.json')
-    await writeFile(
-      overlay,
-      JSON.stringify([{ id: 'tools', config: { mode: 'native' } }, { insert: [{ id: 'skills-observer', name: '/dsh-phalanx/home/skills-observer.mjs' }] }]),
-    )
+    await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'skills-observer', name: '/dsh-phalanx/home/skills-observer.mjs' }] }]))
     const runtime = { ...runtimeSection(root, 'https://example.test', runtimeSettings), patches: [overlay] }
     const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'office-python-library-fixture-session-secret', runtime })
     const accounts = await openTestAccounts(root)

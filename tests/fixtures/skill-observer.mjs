@@ -58,13 +58,13 @@ export function apply(ctx) {
             else if (input.operation === 'snapshot') value = { ...(await ctx.skills.snapshot(lookup)), changes }
             else if (input.operation === 'get') value = (await ctx.skills.get(input.name, lookup)) ?? null
             else if (input.operation === 'tool')
-              value = await ctx.tools.execute({
-                callId: 'skills-fixture-' + randomUUID(),
-                name: input.name,
-                arguments: input.args,
-                agent,
-                signal: AbortSignal.timeout(20000),
-              })
+              value = (
+                await ctx.tools.execute({
+                  calls: [{ type: 'tool_call', id: 'skills-fixture-' + randomUUID(), name: input.name, arguments: JSON.stringify(input.args) }],
+                  agent,
+                  signal: AbortSignal.timeout(20000),
+                })
+              ).results[0].result
             else throw Error('Unknown operation')
           }
           res.setHeader('content-type', 'application/json')

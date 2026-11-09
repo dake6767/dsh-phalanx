@@ -39,7 +39,10 @@ it('reopens shared model settings from PostgreSQL without persisting the provide
     expect(JSON.stringify(rows)).not.toContain('fictional-provider-credential')
     const reopened = new PostgresSharedModelStore(other, new FileSharedModelProjection(root))
     await reopened.initialize()
-    expect(reopened.read()).toEqual(state)
+    expect(reopened.read()).toEqual({
+      ...state,
+      providers: state.providers.map(provider => ({ ...provider, models: provider.models.map(model => ({ ...model, reasoning: false })) })),
+    })
   } finally {
     await Promise.all([database.close(), other.close()])
     await rm(root, { recursive: true, force: true })
@@ -63,14 +66,14 @@ it('publishes the committed model catalog through the official runtime include w
           apiFormat: 'anthropic-messages',
           apiKey: 'fictional-provider-credential',
           enabled: true,
-          models: [{ id: 'chat', name: 'fixture-chat', enabled: true, input: 'text' }],
+          models: [{ id: 'chat', name: 'fixture-chat', enabled: true, input: 'text', reasoning: true }],
         },
       ],
     })
     const catalog = await readFile(join(root, 'managed-models/catalog.json'), 'utf8')
     expect(JSON.parse(catalog)[0].config.providers['phalanx-provider']).toMatchObject({
       displayName: 'Shared',
-      models: [{ id: 'chat', name: 'fixture-chat', input: ['text'] }],
+      models: [{ id: 'chat', name: 'fixture-chat', input: ['text'], reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high' } }],
     })
     expect(catalog).toContain('DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN')
     expect(catalog).not.toContain('fictional-provider-credential')
@@ -254,7 +257,7 @@ it('reports a committed publication failure and recovers the latest PostgreSQL r
         apiFormat: 'anthropic-messages',
         apiKey: 'fictional-provider-credential',
         enabled: true,
-        models: [{ id: 'chat', name: 'chat', enabled: true, input: 'text' }],
+        models: [{ id: 'chat', name: 'chat', enabled: true, input: 'text', reasoning: false }],
       },
     ],
   })

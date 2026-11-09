@@ -1,12 +1,11 @@
+import { featureVisible } from '../../src/domain/release-visibility'
 const AccountSwitcher = lazy(() => import('./CommunityAccountSwitcher'))
 const UsageRecords = lazy(() => import('./CommunityUsageRecords'))
-import { useContributionCount } from './useContributionCount'
-import { Chip } from '@heroui/react/chip'
 import { usePlatformLanguage } from './CommunityLanguage'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Button } from '@heroui/react/button'
+import { Tooltip } from '@heroui/react/tooltip'
 import { Avatar } from '@heroui/react/avatar'
-import { Breadcrumbs } from '@heroui/react/breadcrumbs'
 import type { CommunityManagementSession } from '../../src/domain/admin-contract'
 import { communitySession, CommunityApiRequestError } from './community-api'
 import CommunityIcon from './CommunityIcon'
@@ -21,8 +20,19 @@ const Plugins = lazy(() => import('./CommunityPluginsPage'))
 const Groups = lazy(() => import('./CommunityGroupsPage'))
 const Accounts = lazy(() => import('./CommunityAccountsPage'))
 const Models = lazy(() => import('./CommunityModelsPanel'))
-const SystemStatus = lazy(() => import('./CommunitySystemStatusPanel'))
-const Updates = lazy(() => import('./CommunitySystemUpdatePanel'))
+const SystemSettings = lazy(() => import('./CommunitySystemSettingsPage'))
+const navIcons = {
+  accounts: 'user',
+  groups: 'groups',
+  plugins: 'plugins',
+  mcp: 'mcp',
+  skills: 'skills',
+  experts: 'experts',
+  'runtime-dependencies': 'package',
+  'usage-records': 'usage',
+  models: 'models',
+  settings: 'settings',
+} as const
 const routes = [
   ['accounts', 'Account management'],
   ['groups', 'Group management'],
@@ -37,31 +47,30 @@ const routes = [
 ] as const
 export default function CommunityAdminApp() {
   const { t, errorText } = usePlatformLanguage()
-  const contributionCount = useContributionCount()
-  const pluginContributionCount = useContributionCount('plugins')
   const [session, setSession] = useState<CommunityManagementSession>()
   const [error, setError] = useState<unknown>()
   const [open, setOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
-  const route = location.pathname.endsWith('/usage-records')
-    ? 'usage-records'
-    : location.pathname.endsWith('/experts')
-      ? 'experts'
-      : location.pathname.endsWith('/runtime-dependencies')
-        ? 'runtime-dependencies'
-        : location.pathname.endsWith('/mcp')
-          ? 'mcp'
-          : location.pathname.endsWith('/skills')
-            ? 'skills'
-            : location.pathname.endsWith('/plugins')
-              ? 'plugins'
-              : location.pathname.endsWith('/groups')
-                ? 'groups'
-                : location.pathname.endsWith('/models')
-                  ? 'models'
-                  : location.pathname.endsWith('/settings')
-                    ? 'settings'
-                    : 'accounts'
+  const route =
+    featureVisible('usage') && location.pathname.endsWith('/usage-records')
+      ? 'usage-records'
+      : featureVisible('experts') && location.pathname.endsWith('/experts')
+        ? 'experts'
+        : location.pathname.endsWith('/runtime-dependencies')
+          ? 'runtime-dependencies'
+          : location.pathname.endsWith('/mcp')
+            ? 'mcp'
+            : location.pathname.endsWith('/skills')
+              ? 'skills'
+              : location.pathname.endsWith('/plugins')
+                ? 'plugins'
+                : location.pathname.endsWith('/groups')
+                  ? 'groups'
+                  : location.pathname.endsWith('/models')
+                    ? 'models'
+                    : location.pathname.endsWith('/settings')
+                      ? 'settings'
+                      : 'accounts'
   useEffect(() => {
     document.title = `${t(routes.find(([id]) => id === route)![1])} · dsh-phalanx`
   }, [route, t])
@@ -108,31 +117,34 @@ export default function CommunityAdminApp() {
       <aside id="admin-sidebar" className={`admin-sidebar sidebar${open ? ' is-open' : ''}`}>
         <a className="brand" href="/admin">
           <div className="brand-mark" aria-hidden="true">
-            <CommunityIcon name="models" size={18} />
+            <CommunityIcon name="brand" size={18} />
           </div>
           <div>
             <strong>dsh-phalanx</strong>
             <span>{t('Administration')}</span>
           </div>
         </a>
-        <p className="nav-caption">{t('Administration')}</p>
-        <nav className="nav-list" aria-label={t('Management')}>
-          {routes.map(([id, title]) => (
-            <a className={`nav-item${route === id ? ' active' : ''}`} key={id} href={`/admin/${id}`} aria-current={route === id ? 'page' : undefined}>
-              <CommunityIcon
-                name={id === 'experts' ? 'models' : id === 'mcp' || id === 'runtime-dependencies' ? 'plugins' : id === 'usage-records' ? 'activity' : id}
-                size={18}
-              />
-              <span>{t(title)}</span>
-              {(id === 'skills' ? contributionCount : id === 'plugins' ? pluginContributionCount : 0) > 0 ? (
-                <Chip size="sm" variant="soft" aria-hidden="true">
-                  {id === 'plugins' ? pluginContributionCount : contributionCount}
-                </Chip>
-              ) : null}
-            </a>
-          ))}
+        <nav className="nav-list admin-nav-list" aria-label={t('Management')}>
+          {routes
+            .filter(([id]) => (id === 'experts' ? featureVisible('experts') : id === 'usage-records' ? featureVisible('usage') : true))
+            .map(([id, title]) => (
+              <a className={`nav-item${route === id ? ' active' : ''}`} key={id} href={`/admin/${id}`} aria-current={route === id ? 'page' : undefined}>
+                <CommunityIcon name={navIcons[id]} size={18} />
+                <span>{t(title)}</span>
+              </a>
+            ))}
         </nav>
         <div className="sidebar-bottom">
+          <div className="sidebar-actions">
+            <button type="button" className="sidebar-action" onClick={() => setSwitching(true)}>
+              <CommunityIcon name="switch" size={16} />
+              <span>{t('Switch accounts')}</span>
+            </button>
+            <a className="sidebar-action" href="/enter" target="_blank" rel="noopener">
+              <CommunityIcon name="external" size={16} />
+              <span>{t('Open {name} DSH', { name: session?.username ?? '…' })}</span>
+            </a>
+          </div>
           <div className="sidebar-profile">
             <Avatar size="sm" color="accent" variant="soft" aria-hidden="true">
               <Avatar.Fallback>{session?.username.slice(0, 1).toUpperCase() ?? '·'}</Avatar.Fallback>
@@ -142,36 +154,22 @@ export default function CommunityAdminApp() {
               <small>{t('Administrator')}</small>
             </div>
             <form method="post" action="/logout">
-              <Button isIconOnly variant="tertiary" size="sm" type="submit" aria-label={t('Sign out')}>
-                <CommunityIcon name="logout" size={17} />
-              </Button>
+              <Tooltip delay={300}>
+                <Button isIconOnly variant="ghost" size="sm" type="submit" aria-label={t('Sign out')}>
+                  <CommunityIcon name="logout" size={16} />
+                </Button>
+                <Tooltip.Content>{t('Sign out')}</Tooltip.Content>
+              </Tooltip>
             </form>
           </div>
-          <Button variant="tertiary" onPress={() => setSwitching(true)}>
-            {t('Switch accounts')}
-          </Button>
-          <a className="sidebar-usage-link" href="/enter" aria-label={t('Open DSH')}>
-            <span>{t('Open DSH')}</span>
-            <CommunityIcon name="arrow" size={16} />
-          </a>
         </div>
       </aside>
       <Suspense fallback={null}>{switching ? <AccountSwitcher onClose={() => setSwitching(false)} /> : null}</Suspense>
       <div className="admin-workspace main-area">
         <header className="topbar">
-          <nav aria-label={t('Breadcrumb')}>
-            <Breadcrumbs>
-              <Breadcrumbs.Item href="/admin">dsh-phalanx</Breadcrumbs.Item>
-              <Breadcrumbs.Item href="/admin">{t('Administration')}</Breadcrumbs.Item>
-              <Breadcrumbs.Item>{t(routes.find(([id]) => id === route)![1])}</Breadcrumbs.Item>
-            </Breadcrumbs>
-          </nav>
+          <span className="admin-current-page">{t(routes.find(([id]) => id === route)![1])}</span>
           <div className="topbar-actions">
             <CommunityHeaderControls />
-            <span className="session-pill">
-              <strong>{session?.username ?? '…'}</strong>
-              {t('Administrator')}
-            </span>
           </div>
         </header>
         <main className="admin-content content-wrap" id="main-content">
@@ -201,10 +199,7 @@ export default function CommunityAdminApp() {
                     onConfigured={configured => setSession(viewer => (viewer ? { ...viewer, modelState: configured ? 'configured' : 'unconfigured' } : viewer))}
                   />
                 ) : (
-                  <>
-                    <SystemStatus />
-                    <Updates />
-                  </>
+                  <SystemSettings />
                 )}
               </Suspense>
             </CommunityPageBoundary>

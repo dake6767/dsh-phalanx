@@ -1,3 +1,4 @@
+import { featureVisible } from '../domain/release-visibility.js'
 import { PLATFORM_ACCOUNT_SYNC_SCRIPT } from '../domain/platform-account-sync.js'
 import { platformText } from '../domain/platform-copy.js'
 import { requestLanguage } from './platform-language.js'
@@ -34,6 +35,11 @@ export class AdminAssetServer {
     if (!this.handles(pathname)) return false
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       sendAssetText(response, 405, 'Method Not Allowed')
+      return true
+    }
+    if ((pathname === '/admin/experts' && !featureVisible('experts')) || (pathname === '/admin/usage-records' && !featureVisible('usage'))) {
+      response.writeHead(302, { location: '/admin', 'cache-control': 'no-store' })
+      response.end()
       return true
     }
     if (pathname === '/admin/suites') {

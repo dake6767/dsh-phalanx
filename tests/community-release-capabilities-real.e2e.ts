@@ -1,4 +1,4 @@
-// Validation: T4 only; real credentials: required protected DeepSeek model and Search/Fetch inputs; installed rootless Linux candidate.
+// Validation: T4 only; real credentials: required protected DeepSeek model and Search inputs; installed rootless Linux candidate.
 import { once } from 'node:events'
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -66,7 +66,7 @@ function toolResultText(body: Record<string, unknown>, id: string): string {
 
 /** Deterministic model tool requests; only the retrieval service is real in this case. */
 async function retrievalModel() {
-  const observations = { search: false, fetch: false, failed: false }
+  const observations = { search: false, failed: false }
   const requests: string[] = []
   const server = createServer((request, response) => {
     void (async () => {
@@ -79,16 +79,13 @@ async function retrievalModel() {
         streamText(response, 'RETRIEVAL_TITLE')
         return
       }
-      observations.failed ||= hasToolResult(body, 'live-search', true) || hasToolResult(body, 'live-fetch', true)
+      observations.failed ||= hasToolResult(body, 'live-search', true)
       if (observations.failed) {
         streamText(response, 'RETRIEVAL_REAL_FAILED')
         return
       }
       observations.search ||= hasToolResult(body, 'live-search', false) && /https?:/u.test(toolResultText(body, 'live-search'))
-      // The Fetch provider returns page content; the service's separate title is not part of that body.
-      observations.fetch ||= hasToolResult(body, 'live-fetch', false) && /documentation examples/u.test(toolResultText(body, 'live-fetch'))
       if (!hasToolResult(body, 'live-search', false)) streamToolCall(response, 'live-search', 'web_search', { queries: ['DeepSeek official documentation'] })
-      else if (!hasToolResult(body, 'live-fetch', false)) streamToolCall(response, 'live-fetch', 'web_fetch', { url: 'https://example.com' })
       else streamText(response, 'RETRIEVAL_REAL_DONE')
     })().catch(() => response.destroy())
   })
@@ -181,7 +178,11 @@ async function setup(mode: 'image' | 'retrieval'): Promise<{ page: Page; inputs:
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect.poll(() => page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), { timeout: 20000 }).toBe(true)
     expect(await toggle.isChecked()).toBe(true)
-    await page.getByRole('button', { name: 'New session', exact: true }).first().click()
+    await page
+      .getByRole('button', { name: 'New session', exact: true })
+      .filter({ hasNot: page.locator('[data-copy-version]') })
+      .first()
+      .click()
     await page.locator('[data-composer-input]').waitFor()
   }
   return { page, inputs }
@@ -207,23 +208,23 @@ it('recognizes a real attached image with the installed shared Flash model', asy
   receipt.result = { passed: true, realProvider: true, model: 'deepseek-flash', imageRecognized: 'red circle', memberHtmlCredentialAbsent: true }
 }, 360000)
 
-it('calls real Search and Fetch through the native DSH web providers without a member API key', async () => {
-  receipt = { name: 'search-fetch', result: { passed: false } }
+it('calls real Search through the native DSH web provider without a member API key', async () => {
+  receipt = { name: 'search', result: { passed: false } }
   const { page, inputs } = await setup('retrieval')
-  await sendCommunityPrompt(page, 'Search the web for the DeepSeek official documentation, then fetch https://example.com.')
+  await sendCommunityPrompt(page, 'Search the web for the DeepSeek official documentation.')
   await page
     .locator('p')
     .filter({ hasText: /RETRIEVAL_REAL_(DONE|FAILED)/u })
     .last()
     .waitFor({ timeout: 180000 })
   receipt.result = { passed: false, ...model!.observations }
-  expect(model!.observations).toEqual({ search: true, fetch: true, failed: false })
+  expect(model!.observations).toEqual({ search: true, failed: false })
   expect(model!.requests.some(text => text.includes(inputs.deepseekSearchApiKey))).toBe(false)
   expect((await page.content()).includes(inputs.deepseekSearchApiKey)).toBe(false)
   receipt.result = {
     passed: true,
     realSearch: true,
-    realFetch: true,
+    fetchAvailable: false,
     nativeDshProviders: true,
     toolDrivingModelIsFixture: true,
     upstreamCredentialAbsentFromModelAndMember: true,

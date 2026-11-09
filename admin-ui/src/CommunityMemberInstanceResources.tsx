@@ -2,6 +2,7 @@ import { Checkbox } from '@heroui/react/checkbox'
 import { Button } from '@heroui/react/button'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunitySelect from './CommunitySelect'
+import CommunityGrantSection from './CommunityGrantSection'
 import CommunityMessage from './CommunityMessage'
 import CommunityInstanceResourceFields, { InstanceResourceSummary } from './CommunityInstanceResourceFields'
 import CommunityInstanceResourceConfirmation from './CommunityInstanceResourceConfirmation'
@@ -19,8 +20,14 @@ export default function CommunityMemberInstanceResources({
   const { t, errorText } = usePlatformLanguage(),
     saved = resources.saved
   return (
-    <section className="drawer-space" aria-label={t('Instance resource limits')}>
-      <h3>{t('Instance resource limits')}</h3>
+    <CommunityGrantSection
+      title={t('Instance resource limits')}
+      action={
+        <Button size="sm" variant="tertiary" isDisabled={disabled} onPress={onReload}>
+          {t('Reload instance limits')}
+        </Button>
+      }
+    >
       {resources.error !== undefined && <CommunityMessage role="alert" status="danger" title={errorText(resources.error)} />}
       {!saved ? (
         <p role="status">{t('Loading…')}</p>
@@ -34,8 +41,10 @@ export default function CommunityMemberInstanceResources({
               {t('Resident instance')}
             </Checkbox.Content>
           </Checkbox>
-          <p>{t('Resident instances start automatically and are not reclaimed when idle. There is no limit on their number.')}</p>
-          <p>{t('Restarting the platform interrupts tasks in resident instances.')}</p>
+          <div className="section-note">
+            <p>{t('Resident instances start automatically and are not reclaimed when idle. There is no limit on their number.')}</p>
+            <p>{t('Restarting the platform interrupts tasks in resident instances.')}</p>
+          </div>
           {saved.automaticStartFailure && (
             <CommunityMessage
               status="warning"
@@ -56,7 +65,7 @@ export default function CommunityMemberInstanceResources({
             ]}
           />
           {resources.mode === 'custom' && <CommunityInstanceResourceFields value={resources.draft} onChange={resources.setDraft} disabled={disabled} />}
-          <p>{t('Save changes to update the target limits. Running instances retain their current limits until applied.')}</p>
+          <p className="section-note">{t('Save changes to update the target limits. Running instances retain their current limits until applied.')}</p>
           <div className="instance-resource-comparison">
             <div>
               <h4>{t('Target limits')}</h4>
@@ -77,13 +86,10 @@ export default function CommunityMemberInstanceResources({
               {t('Apply immediately')}
             </Button>
           )}
-          <p>{t('Exceeding memory limits terminates processes inside the container. Swap is disabled when memory is limited.')}</p>
+          <p className="section-note">{t('Exceeding memory limits terminates processes inside the container. Swap is disabled when memory is limited.')}</p>
           {resources.partial && <CommunityMessage status="warning" title={t('Some instances changed or could not be updated. Review their current limits.')} />}
         </>
       )}
-      <Button variant="tertiary" isDisabled={disabled} onPress={onReload}>
-        {t('Reload instance limits')}
-      </Button>
       {resources.selection && (
         <CommunityInstanceResourceConfirmation
           members={[resources.selection]}
@@ -95,6 +101,6 @@ export default function CommunityMemberInstanceResources({
           }}
         />
       )}
-    </section>
+    </CommunityGrantSection>
   )
 }

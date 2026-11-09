@@ -1,7 +1,7 @@
+import { featureVisible } from '../../src/domain/release-visibility'
 import CommunitySuitesPage from './CommunitySuitesPage'
 import CommunitySkillDependencies from './CommunitySkillDependencies'
-import CommunityLibraryMaintenance from './CommunityLibraryMaintenance'
-import { useContributionCount } from './useContributionCount'
+import CommunityLibraryMaintenance, { CommunityLibraryVersionHistory } from './CommunityLibraryMaintenance'
 import CommunityContributions from './CommunityContributions'
 import CommunitySkillPacks from './CommunitySkillPacks'
 import CommunitySkillPackRow from './CommunitySkillPackRow'
@@ -26,7 +26,6 @@ import CommunitySkillContent from './CommunitySkillContent'
 import CommunitySkillUploadDialog from './CommunitySkillUploadDialog'
 
 export default function CommunitySkillsPage() {
-  const contributionCount = useContributionCount()
   const { t, locale, errorText } = usePlatformLanguage()
   const [skills, setSkills] = useState<readonly CommunitySkillView[]>(),
     [packs, setPacks] = useState<readonly CommunitySkillPackView[]>(),
@@ -135,7 +134,7 @@ export default function CommunitySkillsPage() {
         </>
       ) : null}
       <Tabs
-        className="skill-library-tabs skill-catalog-tabs"
+        className="skill-library-tabs library-workspace-tabs"
         selectedKey={libraryTab}
         onSelectionChange={key => {
           setLibraryTab(String(key))
@@ -153,15 +152,12 @@ export default function CommunitySkillsPage() {
               {t('Skill packs')}
               <Tabs.Indicator />
             </Tabs.Tab>
-            <Tabs.Tab id="contributions">
-              {t('Member contributions')}
-              {contributionCount > 0 ? (
-                <Chip size="sm" variant="soft" aria-hidden="true">
-                  {contributionCount}
-                </Chip>
-              ) : null}
-              <Tabs.Indicator />
-            </Tabs.Tab>
+            {featureVisible('contributions') ? (
+              <Tabs.Tab id="contributions">
+                {t('Member contributions')}
+                <Tabs.Indicator />
+              </Tabs.Tab>
+            ) : null}
             <Tabs.Tab id="catalog">
               {t('Skill catalog')}
               <Tabs.Indicator />
@@ -219,7 +215,7 @@ export default function CommunitySkillsPage() {
                 </Card.Footer>
               </Card>
             ) : (
-              <div className="plugin-card-grid">
+              <div className="plugin-card-grid library-compact-grid">
                 {visiblePacks.map(pack => (
                   <CommunitySkillPackRow
                     key={'pack:' + pack.name}
@@ -233,49 +229,46 @@ export default function CommunitySkillsPage() {
                 {visible.map(skill => (
                   <Card key={skill.name} className="plugin-library-card">
                     <Card.Header>
-                      <div className="plugin-card-top">
-                        <span className="plugin-card-icon" aria-hidden="true">
-                          <CommunityIcon name="skills" size={20} />
-                        </span>
+                      <div className="library-card-heading">
+                        <Card.Title>{skill.name}</Card.Title>
+                        <CommunityIcon name="chevron" size={14} />
+                      </div>
+                      <Card.Description>{skill.description}</Card.Description>
+                    </Card.Header>
+                    {skill.conflict ? <p className="plugin-card-error">{t('Conflicts with a bundled runtime skill. Distribution is paused.')}</p> : null}
+                    {skill.published || skill.suiteOrigin || skill.packs?.length || skill.conflict ? (
+                      <Card.Footer className="plugin-card-status">
+                        <div className="flex flex-wrap gap-2">
+                          {skill.conflict ? (
+                            <Chip size="sm" variant="soft" color="danger">
+                              {t('Distribution paused')}
+                            </Chip>
+                          ) : null}
+                          {skill.suiteOrigin ? (
+                            <Chip size="sm" variant="soft" color="accent">
+                              {t('From “{name}”', { name: originName(skill.suiteOrigin) })}
+                            </Chip>
+                          ) : null}
+                          {skill.packs?.map(name => (
+                            <Chip key={name} size="sm" variant="soft">
+                              {name}
+                            </Chip>
+                          ))}
+                        </div>
                         {skill.published ? (
                           <Chip size="sm" variant="soft" color="success">
                             {t('Published')}
                           </Chip>
                         ) : null}
-                        {skill.suiteOrigin ? (
-                          <Chip size="sm" variant="soft" color="accent">
-                            {t('From “{name}”', { name: originName(skill.suiteOrigin) })}
-                          </Chip>
-                        ) : null}
-                      </div>
-                      <Card.Title>{skill.name}</Card.Title>
-                      <Card.Description>{skill.description}</Card.Description>
-                    </Card.Header>
-                    <Card.Content>
-                      <div className="flex flex-wrap gap-2">
-                        {skill.packs?.map(name => (
-                          <Chip key={name} size="sm" variant="soft">
-                            {name}
-                          </Chip>
-                        ))}
-                      </div>
-                      {skill.conflict ? (
-                        <CommunityMessage status="danger" title={t('Conflicts with a bundled runtime skill. Distribution is paused.')} />
-                      ) : null}
-                    </Card.Content>
-                    <Card.Footer>
-                      <span className="plugin-details-label" aria-hidden="true">
-                        {t('Skill details')}
-                        <CommunityIcon name="chevron" size={14} />
-                      </span>
-                      <Button
-                        variant="tertiary"
-                        size="sm"
-                        onPress={() => setSelected(skill.name)}
-                        aria-label={t('View skill {name}', { name: skill.name })}
-                        className="plugin-details-action"
-                      />
-                    </Card.Footer>
+                      </Card.Footer>
+                    ) : null}
+                    <Button
+                      variant="tertiary"
+                      size="sm"
+                      onPress={() => setSelected(skill.name)}
+                      aria-label={t('View skill {name}', { name: skill.name })}
+                      className="plugin-details-action"
+                    />
                   </Card>
                 ))}
               </div>
@@ -289,9 +282,11 @@ export default function CommunitySkillsPage() {
         <Tabs.Panel id="catalog">
           <CommunitySuitesPage />
         </Tabs.Panel>
-        <Tabs.Panel id="contributions">
-          <CommunityContributions onChanged={refresh} />
-        </Tabs.Panel>
+        {featureVisible('contributions') ? (
+          <Tabs.Panel id="contributions">
+            <CommunityContributions onChanged={refresh} />
+          </Tabs.Panel>
+        ) : null}
         <Tabs.Panel id="packs">
           <CommunitySkillPacks />
         </Tabs.Panel>
@@ -324,7 +319,6 @@ export default function CommunitySkillsPage() {
         <CommunityDialog
           drawer
           drawerClassName="plugin-drawer"
-          eyebrow={t('Skill details')}
           title={selected}
           closeLabel={t('Close skill details')}
           busy={busy}
@@ -342,13 +336,11 @@ export default function CommunitySkillsPage() {
             <p role="status">{t('Loading…')}</p>
           ) : (
             <>
-              <p className="drawer-description">{detail.description}</p>
               <div className="drawer-identity plugin-identity">
                 <span className="plugin-card-icon" aria-hidden="true">
                   <CommunityIcon name="skills" size={22} />
                 </span>
                 <div>
-                  <strong>{detail.name}</strong>
                   <span>
                     {t('Imported')} · {date(detail.importedAt)}
                   </span>
@@ -357,6 +349,7 @@ export default function CommunitySkillsPage() {
                   {t(detail.published ? 'Published' : 'Not published')}
                 </Chip>
               </div>
+              <p className="plugin-summary-description">{detail.description}</p>
               <p>{t('{managed} managed members · {selected} member selections', { managed: detail.managedMembers, selected: detail.selectedMembers })}</p>
               <Tabs
                 className="plugin-detail-tabs"
@@ -388,26 +381,19 @@ export default function CommunitySkillsPage() {
                     </Tabs.Tab>
                   </Tabs.List>
                 </Tabs.ListContainer>
-                <Tabs.Panel id="contents">
+                <Tabs.Panel id="contents" className="plugin-settings-panel">
                   <CommunitySkillContent markdown={detail.markdown} files={detail.files} />
                 </Tabs.Panel>
-                <Tabs.Panel id="publication">
+                <Tabs.Panel id="publication" className="plugin-settings-panel">
                   <CommunitySkillPublication detail={detail} />
                 </Tabs.Panel>
-                <Tabs.Panel id="dependencies">
+                <Tabs.Panel id="dependencies" className="plugin-settings-panel">
                   <CommunitySkillDependencies key={detail.name} detail={detail} onChanged={refresh} onCloseGuard={onExecutionGuard} />
                 </Tabs.Panel>
-                <Tabs.Panel id="execution">
+                <Tabs.Panel id="execution" className="plugin-settings-panel">
                   <CommunitySkillExecution name={detail.name} onCloseGuard={onExecutionGuard} />
                 </Tabs.Panel>
-                <Tabs.Panel id="maintenance">
-                  <CommunityLibraryMaintenance
-                    kind="skill"
-                    name={detail.name}
-                    provenance={detail.provenance}
-                    revision={detail.maintenanceRevision ?? ''}
-                    onChanged={refresh}
-                  />
+                <Tabs.Panel id="maintenance" className="plugin-settings-panel">
                   <section className="plugin-detail-section">
                     <h2>{t('Version management')}</h2>
                     {detail.source ? (
@@ -458,6 +444,16 @@ export default function CommunitySkillsPage() {
                       <summary>{t('Content hash (sha256)')}</summary>
                       <code>{detail.hash}</code>
                     </details>
+                    <CommunityLibraryVersionHistory provenance={detail.provenance} />
+                  </section>
+                  <CommunityLibraryMaintenance
+                    kind="skill"
+                    name={detail.name}
+                    provenance={detail.provenance}
+                    revision={detail.maintenanceRevision ?? ''}
+                    onChanged={refresh}
+                  />
+                  <section className="plugin-detail-section plugin-removal" aria-label={t('Remove skill')}>
                     <Button variant="danger" onPress={() => setRemoving(true)}>
                       {t('Remove skill')}
                     </Button>
@@ -489,12 +485,15 @@ export default function CommunitySkillsPage() {
               }
             >
               <p>{detail.name}</p>
-              {detail.experts.length ? <p>{t('Will be removed from experts: {names}', { names: detail.experts.map(row => row.name).join(', ') })}</p> : null}
+              {featureVisible('experts') && detail.experts.length ? (
+                <p>{t('Will be removed from experts: {names}', { names: detail.experts.map(row => row.name).join(', ') })}</p>
+              ) : null}
               {detail.packs?.length ? (
                 <p>
                   {t('Affected skill packs')}: {detail.packs.join(', ')}
                 </p>
               ) : null}
+              <p className="plugin-summary-description">{detail.description}</p>
               <p>{t('{managed} managed members · {selected} member selections', { managed: detail.managedMembers, selected: detail.selectedMembers })}</p>
               <CommunityMessage status="warning" title={t('Changes apply to new sessions. Running tasks using this skill may fail.')} />
             </CommunityDialog>

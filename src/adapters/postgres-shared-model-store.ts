@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { PlatformSecretEnvelope } from '../domain/platform-secret.js'
-import type { SharedModelState, SharedProvider } from '../domain/shared-models.js'
+import { normalizeSharedModelState, type SharedModelState, type SharedProvider } from '../domain/shared-models.js'
 import type { SharedModelProjectionPort, SharedModelStorePort } from '../ports/shared-models.js'
 import { PlatformDatabase } from './platform-database.js'
 import { PlatformStoreLifecycle } from './platform-store-lifecycle.js'
@@ -53,7 +53,7 @@ export class PostgresSharedModelStore implements SharedModelStorePort {
         'SELECT revision,default_model_id FROM dsh_phalanx.shared_model_settings WHERE id=1 FOR UPDATE',
       )
       const providers = await sql.query<ProviderRow>('SELECT id,configuration,api_key FROM dsh_phalanx.shared_model_providers ORDER BY position,id')
-      return {
+      return normalizeSharedModelState({
         revision: Number(settings!.revision),
         defaultModelId: settings!.default_model_id,
         providers: providers.map(row => ({
@@ -61,7 +61,7 @@ export class PostgresSharedModelStore implements SharedModelStorePort {
           id: row.id,
           apiKey: providerSecrets.decrypt(this.database.cipher(), row.id, 'api_key', row.api_key),
         })),
-      }
+      })
     })
   }
   /** Attach the per-space projection owner after construction; publication fans out through it. */

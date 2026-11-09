@@ -45,6 +45,7 @@ export function createExpertLibrary(
         name: model.name,
         id: model.id,
         label: `${provider.name} / ${model.name}`,
+        reasoning: model.reasoning === true,
       })),
   )
   return { experts, storage }

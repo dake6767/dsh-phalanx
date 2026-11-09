@@ -20,6 +20,12 @@ import { runtimeSettings } from './support/real-dsh-kit.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { assertPinnedDshRevision, defaultWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 import { memberExposesMcpCredentials, readPrivateMcpCredential } from './support/real-mcp-credentials.js'
+const pickExpertEntries = async (page: import('playwright').Page, label: 'Add skills' | 'Add plugins' | 'Add MCP services', names: readonly string[]) => {
+  await page.getByRole('dialog').getByRole('button', { name: label, exact: true }).click()
+  const picker = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Confirm selection', exact: true }) })
+  for (const name of names) await picker.getByText(name, { exact: true }).first().click()
+  await picker.getByRole('button', { name: 'Confirm selection', exact: true }).click()
+}
 
 interface ModelBlock {
   type: string
@@ -273,7 +279,9 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
       )
     await admin.getByRole('button', { name: /Expert model/u }).click()
     await admin.getByRole('option', { name: 'Expert DeepSeek / deepseek-chat', exact: true }).click()
-    for (const name of [realExpertSearchPackage, 'minimax', 'p-amap']) await admin.getByRole('dialog').getByText(name, { exact: true }).first().click()
+    await pickExpertEntries(admin, 'Add plugins', [realExpertSearchPackage])
+    await pickExpertEntries(admin, 'Add skills', ['minimax'])
+    await pickExpertEntries(admin, 'Add MCP services', ['p-amap'])
     await admin.getByRole('button', { name: 'Save expert', exact: true }).click()
     await admin.getByRole('dialog').waitFor({ state: 'hidden' })
     expertId = (await api('experts')).experts[0].id
@@ -283,8 +291,10 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
       skillPacks: ['minimax'],
       mcp: ['p-amap'],
     })
+    await admin.getByRole('button', { name: 'Edit expert Commerce marketing expert', exact: true }).click()
     await admin.getByRole('button', { name: 'Publish expert Commerce marketing expert', exact: true }).click()
     await admin.getByRole('button', { name: 'Unpublish expert Commerce marketing expert', exact: true }).waitFor()
+    await admin.getByRole('button', { name: 'Cancel', exact: true }).click()
     const openMarket = async () => {
       await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
       await member.getByRole('tab', { name: 'Experts', exact: true }).click()

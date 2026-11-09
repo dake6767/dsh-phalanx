@@ -164,6 +164,11 @@ export const PLATFORM_MIGRATIONS: readonly { readonly version: number; readonly 
         WHERE e->>'kind'='plugin' AND e->>'name' IN (SELECT package_name FROM sourceless_plugins));
     DELETE FROM dsh_phalanx.plugin_library WHERE package_name IN (SELECT package_name FROM sourceless_plugins);`,
   },
+  {
+    version: 19,
+    name: 'model reasoning usage',
+    sql: 'ALTER TABLE dsh_phalanx.usage_model_hours ADD COLUMN reasoning_tokens bigint CHECK(reasoning_tokens >= 0);',
+  },
 ]
 
 /** The newest version this code can prepare, always the last migration. */

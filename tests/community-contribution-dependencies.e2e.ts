@@ -8,7 +8,7 @@ import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
 import { createCommunityApplication, modelAccessToken, openTestAccounts } from './support/community-application.js'
 
-it('matches existing commands and prepares missing dependencies within the contribution adoption drawer', async () => {
+it.skip('hidden in 0.1.32: matches existing commands and prepares missing dependencies within the contribution adoption drawer', async () => {
   const root = await mkdtemp(join(tmpdir(), 'contribution-dependency-admin-'))
   const accounts = await openTestAccounts(root)
   await accounts.createFirstAdmin({ username: 'admin', password: 'password', email: '' })

@@ -39,14 +39,16 @@ export default function CommunityUsageSettings() {
     }
   }
   return (
-    <section className="panel" aria-label={t('Usage record retention')}>
+    <section className="panel settings-panel" aria-label={t('Usage record retention')}>
       <div className="panel-top">
-        <h2>{t('Usage record retention')}</h2>
-        <p>{t('Expired usage records are removed automatically. The default is 180 days.')}</p>
+        <div>
+          <h2>{t('Usage record retention')}</h2>
+          <p>{t('Expired usage records are removed automatically. The default is 180 days.')}</p>
+        </div>
       </div>
       {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
       <form
-        className="plugin-environment-row"
+        className="plugin-environment-row settings-panel-body usage-retention-row"
         onSubmit={event => {
           event.preventDefault()
           void save()
@@ -60,7 +62,6 @@ export default function CommunityUsageSettings() {
           pattern="[0-9]+"
           disabled={busy || !saved}
           description={t('Choose 1 to 3650 days. Shortening retention removes older records.')}
-          variant="secondary"
         />
         <Button type="submit" isDisabled={busy || !saved || days === saved} isPending={busy}>
           {t('Save changes')}

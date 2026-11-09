@@ -164,7 +164,10 @@ it('opens the skill catalog in both languages, hides dependencies and preserves 
     await detail.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
 
     await page.getByRole('link', { name: 'Runtime dependencies', exact: true }).click()
-    await page.getByText('From catalog', { exact: true }).first().waitFor()
+    await page
+      .getByText(/^From catalog · /)
+      .first()
+      .waitFor()
     await page.getByRole('button', { name: 'View dependency fixture-tool', exact: true }).click()
     await page.getByText('Managed by the catalog. Definition is read-only.', { exact: true }).waitFor()
     expect(await page.getByRole('button', { name: 'Edit runtime dependency', exact: true }).count()).toBe(0)
@@ -209,7 +212,10 @@ it('opens the skill catalog in both languages, hides dependencies and preserves 
     expect(await page.getByRole('link', { name: '套件广场', exact: true }).count()).toBe(0)
     expect(await page.locator('body').innerText()).not.toContain('套件')
     await page.getByRole('link', { name: '运行依赖', exact: true }).click()
-    await page.getByText('来自广场', { exact: true }).first().waitFor()
+    await page
+      .getByText(/^来自广场 · /)
+      .first()
+      .waitFor()
     expect((await dependency()).current).toEqual(before.current)
     await page.getByRole('button', { name: '查看依赖 fixture-tool', exact: true }).click()
     await page.getByRole('dialog', { name: 'fixture-tool', exact: true }).getByRole('button', { name: '卸载', exact: true }).click()
