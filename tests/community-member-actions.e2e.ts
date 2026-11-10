@@ -14,6 +14,7 @@ import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-ev
 import { startCommunityModel } from './fixtures/community-model.js'
 import {
   openCommunityAccountMenu,
+  openCommunitySidebar,
   openNativeSettings,
   runCommunityTerminal,
   selectCommunityWorkspace,
@@ -95,7 +96,11 @@ it('logs out without cancelling a running task and recovers its own failed resta
   }
   const alice = worlds[0]!
   const bob = worlds[1]!
-  expect(await (await alice.context.request.get(`${origin}/account/identity`)).json()).toEqual({ username: 'alice' })
+  let identityReads = 0
+  alice.page.on('request', request => {
+    if (new URL(request.url()).pathname === '/account/identity') identityReads++
+  })
+  expect(await (await alice.context.request.get(`${origin}/account/identity`)).json()).toEqual({ username: 'alice', admin: false })
   expect((await alice.context.request.get(`${origin}/admin/api/session`)).status()).toBe(403)
   const account = alice.page.getByRole('button', { name: 'Platform account: alice', exact: true })
   const settings = alice.page.getByRole('button', { name: 'Settings menu', exact: true })
@@ -181,6 +186,109 @@ it('logs out without cancelling a running task and recovers its own failed resta
   await alice.page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'phalanx-account-menu-mobile.png'), fullPage: true })
   await alice.page.keyboard.press('Escape')
   await alice.page.setViewportSize({ width: 1280, height: 800 })
+  const manager = await newValidationContext(browser)
+  expect(
+    (
+      await manager.request.post(origin + '/login', { form: { username: 'fixtureadmin', password: 'password' }, headers: { origin }, maxRedirects: 0 })
+    ).status(),
+  ).toBe(303)
+  const accountRows = await (await manager.request.get(origin + '/admin/api/accounts')).json()
+  const ordinaryGroup = accountRows.items.find((row: { username: string }) => row.username === 'alice').groupId
+  const setRole = (admin: boolean) =>
+    manager.request.post(origin + '/admin/api/accounts/alice/actions', {
+      headers: { origin },
+      data: { action: 'set-admin', admin, ...(admin ? {} : { groupId: ordinaryGroup }) },
+    })
+  expect((await setRole(true)).status()).toBe(200)
+  await openCommunityAccountMenu(alice.page)
+  expect(await alice.page.getByRole('menuitem', { name: 'Go to admin console', exact: true }).count()).toBe(0)
+  await alice.page.keyboard.press('Escape')
+  await alice.page.reload()
+  await openCommunityAccountMenu(alice.page)
+  await expect
+    .poll(() => alice.page.getByRole('menuitem').allTextContents())
+    .toEqual(['Go to admin console', 'Switch accounts', 'Restart instance', 'More recovery options', 'Log out'])
+  const readsAtMount = identityReads
+  await alice.page.keyboard.press('Escape')
+  for (let index = 0; index < 2; index++) {
+    await openCommunityAccountMenu(alice.page)
+    await alice.page.keyboard.press('Escape')
+  }
+  expect(identityReads).toBe(readsAtMount)
+  expect(readsAtMount).toBeGreaterThan(0)
+  for (const identity of [
+    { status: 503, json: { code: 'fixture-unavailable' } },
+    { status: 200, json: { username: 'alice' } },
+    { status: 200, json: { username: 'alice', admin: 'true' } },
+  ]) {
+    const unknown = await alice.context.newPage()
+    await unknown.route('**/account/identity', route => route.fulfill(identity))
+    const observed = unknown.waitForResponse(response => new URL(response.url()).pathname === '/account/identity')
+    await unknown.goto(alice.entry)
+    await (await observed).finished()
+    await openCommunitySidebar(unknown)
+    await unknown.getByRole('button', { name: /^Platform account(?::|$)/u }).click()
+    await expect
+      .poll(() => unknown.getByRole('menuitem').allTextContents())
+      .toEqual(['Switch accounts', 'Restart instance', 'More recovery options', 'Log out'])
+    await unknown.close()
+  }
+  const openConsole = async (label: string, status: number, keyboard = false) => {
+    const beforeUrl = alice.page.url()
+    await openCommunitySidebar(alice.page)
+    await alice.page.getByRole('button', { name: /^(Platform account|平台账户):/u }).click()
+    await expect.poll(() => alice.page.getByRole('menuitem').first().textContent()).toBe(label)
+    if (keyboard) await alice.page.keyboard.press('Home')
+    const navigation = alice.context.waitForEvent('response', {
+      predicate: response => response.url() === origin + '/admin' && response.request().isNavigationRequest(),
+    })
+    const [opened, response] = await Promise.all([
+      alice.page.waitForEvent('popup'),
+      navigation,
+      keyboard ? alice.page.keyboard.press('Enter') : alice.page.getByRole('menuitem', { name: label, exact: true }).click(),
+    ])
+    expect(response.status()).toBe(status)
+    await opened.waitForURL(origin + '/admin')
+    if (status === 200) await opened.locator('#admin-sidebar').waitFor()
+    expect(await opened.evaluate(() => window.opener === null)).toBe(true)
+    expect(alice.page.url()).toBe(beforeUrl)
+    await opened.close()
+  }
+  for (const scheme of ['light', 'dark'] as const) {
+    await alice.page.emulateMedia({ colorScheme: scheme })
+    await openCommunityAccountMenu(alice.page)
+    await alice.page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, `admin-entry-${scheme}.png`), animations: 'disabled' })
+    await alice.page.keyboard.press('Escape')
+  }
+  await openConsole('Go to admin console', 200, true)
+  await openNativeSettings(alice.page)
+  await alice.page.getByRole('button', { name: 'English', exact: true }).click()
+  await alice.page.getByRole('menuitem', { name: '中文', exact: true }).click()
+  await alice.page.keyboard.press('Escape')
+  await alice.page.setViewportSize({ width: 390, height: 844 })
+  await openCommunitySidebar(alice.page)
+  await alice.page.getByRole('button', { name: '平台账户: alice', exact: true }).click()
+  await expect.poll(() => alice.page.getByRole('menuitem').first().textContent()).toBe('前往管理后台')
+  const adminMobile = (await alice.page.getByRole('menu').boundingBox())!
+  expect(adminMobile.x).toBeGreaterThanOrEqual(0)
+  expect(adminMobile.x + adminMobile.width).toBeLessThanOrEqual(390)
+  await alice.page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'admin-entry-mobile-zh.png'), animations: 'disabled' })
+  await alice.page.keyboard.press('Escape')
+  await openConsole('前往管理后台', 200)
+  await openNativeSettings(alice.page, 'zh')
+  await alice.page.getByRole('button', { name: '中文', exact: true }).click()
+  await alice.page.getByRole('menuitem', { name: 'English', exact: true }).click()
+  await alice.page.keyboard.press('Escape')
+  await alice.page.setViewportSize({ width: 1280, height: 800 })
+  expect((await setRole(false)).status()).toBe(200)
+  await openConsole('Go to admin console', 403)
+  expect((await alice.context.request.get(origin + '/admin/api/session')).status()).toBe(403)
+  expect(await (await alice.context.request.get(origin + '/account/identity')).json()).toEqual({ username: 'alice', admin: false })
+  await alice.page.reload()
+  await openCommunityAccountMenu(alice.page)
+  expect(await alice.page.getByRole('menuitem', { name: 'Go to admin console', exact: true }).count()).toBe(0)
+  await alice.page.keyboard.press('Escape')
+  await manager.close()
   const clientFailure = await newValidationContext(browser)
   const degraded = await clientFailure.newPage()
   let injected = 0

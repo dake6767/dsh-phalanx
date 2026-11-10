@@ -180,7 +180,19 @@ for (const sample of samples) {
         count = discovered.tools.length
         expect(discovered.tools.some(tool => tool.name === sample.tool)).toBe(true)
         expect(JSON.stringify(discovered).includes(secret)).toBe(false)
-        if (service.name === 'p-amap') expect((await post('mcp', { action: 'publish', name: service.name, published: true })).status).toBe(200)
+        if (service.name === 'p-amap')
+          expect(
+            (
+              await post('mcp', {
+                action: 'publish',
+                name: service.name,
+                published: true,
+                revision: (
+                  await (await fetch(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent(service.name), { headers: { cookie: admin } })).json()
+                ).revision,
+              })
+            ).status,
+          ).toBe(200)
         else expect((await post(`groups/${account.groupId}/mcp`, { names: [service.name] })).status).toBe(200)
         const login = await fetch(origin + '/login', {
           method: 'POST',
@@ -243,7 +255,19 @@ for (const sample of samples) {
             expect(JSON.stringify(mounts).includes('/users/')).toBe(false)
           }
         }
-        if (service.name === 'p-amap') expect((await post('mcp', { action: 'publish', name: service.name, published: false })).status).toBe(200)
+        if (service.name === 'p-amap')
+          expect(
+            (
+              await post('mcp', {
+                action: 'publish',
+                name: service.name,
+                published: false,
+                revision: (
+                  await (await fetch(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent(service.name), { headers: { cookie: admin } })).json()
+                ).revision,
+              })
+            ).status,
+          ).toBe(200)
         else expect((await post(`groups/${account.groupId}/mcp`, { names: [] })).status).toBe(200)
         if (service.run?.location === 'shared') await expect.poll(sharedCarriers, { timeout: 15000 }).toEqual([])
         const revoked = await exec(

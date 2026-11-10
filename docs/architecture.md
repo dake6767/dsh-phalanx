@@ -22,6 +22,7 @@ and behavior at official seams.
 | --- | --- | --- |
 | Expert preset projection, roster and pinned standard tools | `dsh/expert-preset.ts`, `dsh/expert-base-tools.ts`, `dsh/expert-plugins.ts` | `adapters/member-experts.ts`, `adapters/expert-status.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Protected MCP include and pre-admission hot refresh | `dsh/member-mcp.ts`, `dsh/member-tools.ts` | `adapters/mcp-projection.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
+| Selected model display in native prompt variables | `dsh/shared-models.ts` | Per-space managed watcher through `system-prompt/assemble` |
 | Web and composed-configuration CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `adapters/native-config-dump.ts`, `dsh/container.ts`, generated image CMD |
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
@@ -162,6 +163,10 @@ Platform facts live in PostgreSQL behind one persistence foundation.
   executor reads source-declared schema versions and saved download choices through
   generated read-only adapters using the source release's connection, key and TLS
   owners. It does not initialize the platform or retain facts between requests.
+  Rotation readiness authenticates both protected configurations and the master key,
+  inspects the selected database without preparing it, and fences pending journals,
+  staged files and protected-file identities. The root executor uses this fact
+  before maintenance and to recover only a legacy rotation rejected before initialization.
   Status polling skips database reads while checking the live image and process;
   check shares that request's host and status projection. It samples saved sources
   and schema versions in one read-only repeatable-read transaction, bound to the
@@ -198,7 +203,7 @@ invalidation.
 | View | Owner | Synchronous reader | Source of truth | Refreshed |
 | --- | --- | --- | --- | --- |
 | Session signing key | `PostgresSessionKey` | session and plugin-download HMAC | `session_signing_key` | loaded once at startup; never changes |
-| Shared models | `PostgresSharedModelStore` | model and web-tools upstream routing | `shared_model_*` | after each committed save; startup reloads |
+| Shared models | `PostgresSharedModelStore` | model and web-tools upstream routing | `shared_model_*` | after each committed save; startup reloads; initialization publication retry rereads the committed revision without another save |
 | Gateway token index | `PostgresCommunityModelAccess` | model gateway admission (inside the account fence) | `model_access_tokens` | after each committed issuance; admission rechecks the account in PostgreSQL |
 | MCP policy facts | `PostgresMcpFacts`, assembled by `createMcpStorage` | `McpServices.captureLocalPolicy` fence | MCP service metadata, encrypted-field fingerprints, group grants, member selections/preferences, catalog receipts, runtime bindings and account/group parents | invalidate after COMMIT and publish a consistent read-only snapshot before the write resolves, including parent cascades; rollback never publishes. The view contains no plaintext secrets. Row revisions and encrypted-field fingerprints keep its version stable across reopen while invalidating secret-only changes. Failed refresh makes synchronous readers unavailable until initialization succeeds; ordinary queries read rows on demand |
 | Plugin authorization invalidation | `PostgresPluginLibraryStore`, `PostgresPluginGrants`, `PostgresPluginSelections`, `PostgresPluginUpstreams`; composed by `PluginLocalCopies.revision` | `PluginUpstreamAccess` synchronous account registration fence | plugin library, grants, choices and upstream rows | a generation scoped to library, grants, choices, upstreams and account/group parents advances after successful autocommit or COMMIT, including parent cascades, before the write resolves; unrelated usage and download writes do not invalidate admission; rollback does not advance it. Admissions capture it before asynchronous reads and recheck during registration and after the account transaction; mismatches undo reversible registration. No plugin configurations or credentials are cached |
@@ -671,7 +676,7 @@ settings and plugin installation use the user's writable profile. Host initializ
 rejects linked profile directories and patches before reading them; the prior carrier
 is removed and startup is serialized, so native processes cannot race those checks.
 A damaged profile fails entry with a repairable 503. Missing default
-legacy model rows remain in the writable profile for upgrade compatibility. The final managed include disables ordinary native provider settings and supplies shared models through the exported generic adapter. Each member space gets its own derived catalog and watcher directory, mounted read-only only in that member's container; HMR updates volatile adapter/default configuration and announces directory changes. Members retain unrelated settings, terminals and their own plugins.
+legacy model rows remain in the writable profile for upgrade compatibility. The final managed include disables ordinary native provider settings and supplies shared models through the exported generic adapter. Each member space gets its own derived catalog and watcher directory, mounted read-only only in that member's container; HMR updates volatile adapter/default configuration and announces directory changes. Members retain unrelated settings, terminals and their own plugins. Before native prompt interpolation, the watcher resolves each assembly’s provider and model variables against the current managed catalog and substitutes the readable model name. Stable IDs continue to identify routes, sessions and diagnostics; native persona templates and saved message history retain their original content.
 
 The rootless container is the integrity boundary for each user's private home,
 workspace and configuration. Process mode is development and diagnostic mode

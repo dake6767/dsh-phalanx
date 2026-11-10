@@ -48,7 +48,7 @@ export class SkillLibrary {
     private readonly packs?: SkillPackState,
     private readonly work?: SkillUnitOfWork,
     private readonly runtimeDependencies?: Pick<RuntimeDependencies, 'readReady'> & Partial<Pick<RuntimeDependencies, 'list'>>,
-    private readonly executionSources?: { sourceVersions(): readonly string[] },
+    private readonly executionSources?: { sourceVersions(): readonly string[]; hasPlatformCredential?(owner: string): Promise<boolean> },
     private readonly expertReferences?: ExpertReferencesPort,
   ) {
     this.removal = new SkillLibraryRemoval(expertReferences, store, membership, packs, operation => this.transaction(operation))
@@ -264,7 +264,6 @@ export class SkillLibrary {
       await this.assertAdmin(actor)
       this.assertOpen()
       const row = await this.required(name)
-      this.assertNotSuite(row)
       if (revision !== (await this.removal.revision(name)))
         throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
       if (published && row.conflict) throw new BusinessRuleError('conflict', 'Skills are unavailable.', 'skill-unavailable')
@@ -480,6 +479,7 @@ export class SkillLibrary {
     return {
       ...view,
       maintenanceRevision: this.maintenanceRevision(row),
+      hasPlatformCredential: (await this.executionSources?.hasPlatformCredential?.('skill:' + row.name)) ?? false,
       ...(await this.impact(row.name)),
       ...((presentation ?? (await this.presentation())).get(row.name) ?? { packs: [], topLevel: true }),
     }

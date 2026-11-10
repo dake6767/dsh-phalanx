@@ -253,6 +253,7 @@ export function createCommunityCapabilities(input: {
     bundledSkillNames,
     skillSelections,
     expertStorage.references,
+    executionPreparation,
   )
 
   return {

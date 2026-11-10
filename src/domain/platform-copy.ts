@@ -1,3 +1,5 @@
+import { en as publicationEn, zhCN as publicationZh } from './publication-messages.js'
+import { en as initialModelEn, zhCN as initialModelZh } from './initial-model-messages.js'
 import { en as nativeEn, zhCN as nativeZh } from './native-feature-messages.js'
 import { en as statusEn, zhCN as statusZh } from './system-status-messages.js'
 import { en as databaseEn, zhCN as databaseZh } from './database-onboarding-messages.js'
@@ -22,6 +24,8 @@ import { enErrorMessages, zhErrorMessages } from './platform-error-messages.js'
 import type { PlatformLocale } from './platform-language.js'
 import type { CommunityErrorParams } from './admin-contract.js'
 const en = {
+  ...publicationEn,
+  ...initialModelEn,
   ...nativeEn,
   ...statusEn,
   ...databaseEn,
@@ -44,6 +48,8 @@ const en = {
   ...importEn,
 }
 const zhCN = {
+  ...publicationZh,
+  ...initialModelZh,
   ...nativeZh,
   ...statusZh,
   ...databaseZh,

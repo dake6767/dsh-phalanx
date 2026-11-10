@@ -122,6 +122,7 @@ it('marks top-level skills from global direct grants and selections without remo
     revision: packs.packs.find((pack: { name: string }) => pack.name === 'research').revision,
     pack: { name: 'research', description: 'Research', skills: ['child', 'shared'], instructions: '', published: true },
   })
+  await post('/admin/api/skill-packs', { action: 'publish', name: 'research', published: true, revision: (await get('skill-packs')).revision })
   await post('/admin/api/accounts', { username: 'member', password: 'password', email: '' })
   const login = await fetch(origin + '/login', {
     method: 'POST',
@@ -180,18 +181,7 @@ it('folds member skills under visible packs while retaining hidden-parent entry 
   }
   const publishPack = async (published: boolean) => {
     const pack = await get('skill-packs/detail?name=visible-parent')
-    await post('/admin/api/skill-packs', {
-      action: 'save',
-      previousName: pack.name,
-      revision: pack.revision,
-      pack: {
-        name: pack.name,
-        description: pack.description,
-        skills: pack.skills,
-        instructions: '',
-        published,
-      },
-    })
+    await post('/admin/api/skill-packs', { action: 'publish', name: pack.name, published, revision: pack.revision })
   }
   await post('/admin/api/accounts', { username: 'member', password: 'password', email: '' })
   const login = await fetch(origin + '/login', {

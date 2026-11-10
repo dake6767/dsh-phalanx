@@ -59,6 +59,51 @@ class Bootstrap(unittest.TestCase):
                     self.assertTrue(any(call[:3]==['systemctl','restart','--no-block'] and call[-1]=='dsh-phalanx-updater.service' for call in machine.calls))
                     self.assertEqual(json.loads(output.getvalue())['status'],'updater-ready')
 
+    def test_bootstrap_can_replace_only_the_executor_for_an_authenticated_legacy_initialization_failure(self):
+        from installer_executor_bootstrap import bootstrap_executor
+        from installer_operations import JOURNAL,MARKER
+        from types import SimpleNamespace
+        import os,uuid
+        scripts=Path(__file__).resolve().parents[2]/'scripts/install'
+        names=json.loads((scripts/'executor-files.json').read_text())+['updater.service.in','executor-files.json']
+        files={name:(scripts/name).read_text() for name in names}
+        raw=json.dumps({'schema':1,'sourceCommit':'d'*40,'files':{name:hashlib.sha256(text.encode()).hexdigest() for name,text in files.items()}})
+        body=json.dumps(files).encode()
+        target={'version':'v0.1.33','manifest':{'schema':2,'commit':'d'*40,'targetVersion':'0.1.33','compatibility':{**CONTRACT,'protocol':3},'storage':{key:1024 for key in ('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')},'updater':raw,'updaterAsset':{'name':'updater.json','sha256':hashlib.sha256(body).hexdigest()}}}
+        for scenario in ('legacy','foreign-marker','new-job','initialized','changed-source'):
+            with self.subTest(scenario=scenario),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);calls=[]
+                source={'uid':os.geteuid(),'gid':os.getegid(),'target':str(root/'release'),'values':{'DSH_PHALANX_DATA_ROOT':'/data','DSH_PHALANX_DATABASE_CONFIG_FILE':'/keys/database.json'}}
+                (root/'release').mkdir();(root/'release/start').touch()
+                marker='legacy marker\n';job={'schema':1,'id':str(uuid.uuid4()),'action':'master-key-rotate','phase':'working','source':source,'deploymentId':'deployment-fixture','configFile':'/keys/database.json','marker':marker}
+                if scenario=='new-job':job['rotationCheck']={}
+                if scenario=='changed-source':job['source']={**source,'target':'/different'}
+                def command(args,**kwargs):
+                    calls.append(args)
+                    if kwargs.get('stdin'):
+                        self.assertEqual(json.load(kwargs['stdin'])['fact'],'rotation')
+                        ready=scenario=='initialized'
+                        return SimpleNamespace(returncode=0,stdout=json.dumps({'ready':ready,'initializationPending':not ready,'deploymentId':'deployment-fixture','fingerprint':'sha256:'+'f'*64,'identity':[]}),stderr='')
+                    return SimpleNamespace(returncode=0,stdout='',stderr='')
+                host=installer.Host(root,command,system='Linux',machine='x86_64',uid=0)
+                host.atomic(JOURNAL,json.dumps(job)+'\n');host.atomic(MARKER,'foreign' if scenario=='foreign-marker' else marker,0o644)
+                original={path:host.path(path).read_bytes() for path in (JOURNAL,MARKER)}
+                host.request=lambda *args,**kwargs:body
+                class Port:
+                    def check_fresh_install(self,target):pass
+                    def operation(self):return None
+                    def source(self):return source
+                    def check_compatibility(self,*args):pass
+                    def verify_source(self,*args):raise AssertionError('The old platform is stopped')
+                with tempfile.TemporaryDirectory(dir=root) as temporary:
+                    if scenario=='legacy':
+                        result=bootstrap_executor(host,Port(),target,Path(temporary))
+                        self.assertEqual(result['sourceCommit'],'d'*40)
+                    else:
+                        with self.assertRaises(installer.InstallError):bootstrap_executor(host,Port(),target,Path(temporary))
+                self.assertEqual({path:host.path(path).read_bytes() for path in (JOURNAL,MARKER)},original)
+                self.assertFalse(any('stop' in call or 'pull' in call or 'load' in call for call in calls))
+
     def test_capacity_protocol_requires_finite_positive_storage_before_preparation(self):
         base={'schema':2,'targetVersion':'0.1.13','compatibility':{**CONTRACT,'protocol':3},'acceptancePolicy':POLICY,'updater':'{}'}
         for value in (None,{}, {'platformArchiveBytes':0}, {'platformArchiveBytes':float('nan')}):

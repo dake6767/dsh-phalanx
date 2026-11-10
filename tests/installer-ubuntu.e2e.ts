@@ -236,6 +236,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     await admin.getByLabel('Username').fill('installer-admin')
     await admin.getByLabel('Password', { exact: true }).fill('installer-admin-password')
     await admin.getByRole('button', { name: 'Create administrator' }).click()
+    await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await admin.waitForURL(`${origin}/admin`)
     await admin.getByRole('heading', { name: 'Account management' }).waitFor()
     expect(

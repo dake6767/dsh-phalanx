@@ -57,7 +57,7 @@ export function communityAccountRoutes(deps: {
       return
     }
     response.writeHead(303, {
-      location: account.admin ? '/admin' : communitySpacePath(account.spaceId),
+      location: remember === 'bootstrap' ? '/admin/initial-model' : account.admin ? '/admin' : communitySpacePath(account.spaceId),
       'cache-control': 'no-store',
       ...loginStorageHeaders(request, deps.sessions, account.spaceId, origin, [
         platformSessionCookie(token, deps.sessions.maxAgeSeconds, origin),

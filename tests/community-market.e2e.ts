@@ -103,6 +103,7 @@ it('keeps accepted native work alive, retries failures and preserves shared-key 
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
     const post = (path: string, data: object) => page.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
     expect((await post('accounts', { username: 'member', password: 'password', email: '' })).status()).toBe(201)
@@ -110,7 +111,12 @@ it('keeps accepted native work alive, retries failures and preserves shared-key 
     await page.getByRole('link', { name: 'Plugin library', exact: true }).click()
     await page.getByRole('button', { name: 'View plugin useful-plugin', exact: true }).click()
     await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()
+    await page
+      .getByRole('region', { name: 'Platform App Center', exact: true })
+      .getByText('Installed member copies are kept. Group grants remain.', { exact: true })
+      .waitFor()
     await page.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Confirm publication', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
     await page.getByRole('button', { name: 'Unpublish', exact: true }).waitFor()
     let market = await browser.newPage({ locale: 'en' })
     market.setDefaultTimeout(15000)
@@ -178,7 +184,7 @@ it('keeps accepted native work alive, retries failures and preserves shared-key 
     await page.getByText('This affects 1 members who selected this plugin.', { exact: true }).waitFor()
     await page
       .getByRole('dialog', { name: 'Confirm unpublishing', exact: true })
-      .getByText('Installed member copies are kept. Group grants remain; shared-key selections stop loading after restart.', { exact: true })
+      .getByText('Shared-key member selections stop loading after restart. Group grants remain.', { exact: true })
       .waitFor()
     const unpublished = page.waitForResponse(
       response => new URL(response.url()).pathname === '/admin/api/plugins/publication' && response.request().method() === 'POST',

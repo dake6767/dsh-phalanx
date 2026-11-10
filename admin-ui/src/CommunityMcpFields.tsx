@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Button } from '@heroui/react/button'
 import { Chip } from '@heroui/react/chip'
-import type { CommunityMcpInput, CommunityMcpSettings, CommunityMcpTemplate } from '../../src/domain/admin-contract'
+import type { CommunityMcpInput, CommunityMcpSettings, CommunityMcpTemplate, CommunityMcpDisplay } from '../../src/domain/admin-contract'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityField from './CommunityField'
 import CommunityMessage from './CommunityMessage'
@@ -103,5 +103,74 @@ export function McpEditorSection({ title, children }: { title: string; children:
       <h2>{title}</h2>
       {children}
     </section>
+  )
+}
+
+export function McpBasicFields({
+  draft,
+  settings,
+  busy,
+  onChange,
+}: {
+  draft: CommunityMcpInput
+  settings?: CommunityMcpSettings
+  busy: boolean
+  onChange: (value: CommunityMcpInput) => void
+}) {
+  const { t } = usePlatformLanguage()
+  return (
+    <McpEditorSection title={t('Basic information')}>
+      <CommunityField
+        label={t('MCP service name')}
+        value={draft.name}
+        onChange={name => onChange({ ...draft, name })}
+        required
+        disabled={busy}
+        autoFocus
+        pattern="p-[A-Za-z0-9_-]{1,30}"
+        description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}
+      />
+      <McpDisplayFields
+        value={draft.display}
+        defaults={settings?.display?.defaults}
+        fallback={{ name: draft.name, description: draft.description }}
+        busy={busy}
+        onChange={display => onChange({ ...draft, display })}
+      />
+    </McpEditorSection>
+  )
+}
+
+/** Form values preserve field overrides separately from localized catalog defaults. */
+export function McpDisplayFields({
+  value,
+  defaults,
+  fallback,
+  busy,
+  onChange,
+}: {
+  value?: Pick<CommunityMcpDisplay, 'name' | 'description'>
+  defaults?: CommunityMcpDisplay['defaults']
+  fallback: { name: string; description: string }
+  busy: boolean
+  onChange: (value: Pick<CommunityMcpDisplay, 'name' | 'description'>) => void
+}) {
+  const { t, locale } = usePlatformLanguage()
+  return (
+    <>
+      <CommunityField
+        label={t('Display name')}
+        value={value?.name ?? defaults?.name[locale] ?? fallback.name}
+        onChange={name => onChange({ ...value, name })}
+        disabled={busy}
+        required
+      />
+      <CommunityField
+        label={t('Function description')}
+        value={value?.description ?? defaults?.description[locale] ?? fallback.description}
+        onChange={description => onChange({ ...value, description })}
+        disabled={busy}
+      />
+    </>
   )
 }

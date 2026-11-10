@@ -79,6 +79,7 @@ it('resets through the native recovery link while preserving projects and chat, 
   await admin.getByLabel('Username', { exact: true }).fill('admin')
   await admin.getByLabel('Password', { exact: true }).fill('password')
   await admin.getByRole('button', { name: 'Create administrator', exact: true }).click()
+  await admin.getByRole('button', { name: 'Continue to administration', exact: true }).click()
   await admin.waitForURL(`${origin}/admin`)
   expect(
     (

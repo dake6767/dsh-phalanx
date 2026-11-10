@@ -1,3 +1,4 @@
+import { CommunityPublicationStatus } from './CommunityPublicationSection'
 import { useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
@@ -76,21 +77,18 @@ export default function CommunitySkillPackRow({
         </div>
         <Card.Description>{pack.description}</Card.Description>
       </Card.Header>
-      {pack.conflict ? <p className="plugin-card-error">{t('Conflicts with a bundled runtime skill. Distribution is paused.')}</p> : null}
-      {pack.suiteOrigin || pack.published ? (
-        <Card.Footer className="plugin-card-status">
-          {pack.suiteOrigin ? (
-            <Chip size="sm" variant="soft" color="accent">
-              {t('From “{name}”', { name: originName(pack.suiteOrigin) })}
-            </Chip>
-          ) : null}
-          {pack.published ? (
-            <Chip size="sm" variant="soft" color="success">
-              {t('Published')}
-            </Chip>
-          ) : null}
-        </Card.Footer>
+      {pack.unavailable === 'conflict' ? (
+        <p className="plugin-card-error">{t('All pack skills conflict with the runtime and are temporarily unavailable.')}</p>
       ) : null}
+      {pack.conflict ? <p className="plugin-card-error">{t('Conflicts with a bundled runtime skill. Distribution is paused.')}</p> : null}
+      <Card.Footer className="plugin-card-status">
+        {pack.suiteOrigin ? (
+          <Chip size="sm" variant="soft" color="accent">
+            {t('From “{name}”', { name: originName(pack.suiteOrigin) })}
+          </Chip>
+        ) : null}
+        <CommunityPublicationStatus published={pack.published} unavailable={!!pack.unavailable} />
+      </Card.Footer>
       <Button
         variant="tertiary"
         size="sm"

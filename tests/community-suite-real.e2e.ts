@@ -271,7 +271,6 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
         // Publication and self-selection are captured through their HTTP boundaries, rather than inferred from storage.
         await admin.goto(origin + '/admin/skills?locale=en')
         await admin.getByRole('button', { name: 'View skill lark-shared', exact: true }).click()
-        await admin.getByRole('tab', { name: 'Publication', exact: true }).click()
         await admin.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).click()
         await admin.getByRole('button', { name: 'Confirm', exact: true }).click()
         await admin.getByRole('button', { name: 'Unpublish', exact: true }).waitFor()

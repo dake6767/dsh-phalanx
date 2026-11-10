@@ -87,7 +87,9 @@ export class PostgresCommunityAccountStore implements CommunityAccountStorePort,
   }
   async getState(username: string): Promise<CommunityAccountState | undefined> {
     const row = await this.row(this.database, username)
-    return row ? { username: row.username, spaceId: row.space_id, disabled: row.disabled, sessionEpoch: Number(row.session_epoch) } : undefined
+    return row
+      ? { username: row.username, admin: row.admin, spaceId: row.space_id, disabled: row.disabled, sessionEpoch: Number(row.session_epoch) }
+      : undefined
   }
   async authenticate(username: string, password: string): Promise<CommunityAccountRecord | undefined> {
     const row = await this.row(this.database, username)

@@ -21,6 +21,11 @@ it('reopens MCP credentials, templates and process environment from encrypted Po
         name: 'p-remote',
         generation: 1,
         description: 'Remote service',
+        display: {
+          name: '资料助手',
+          description: '',
+          defaults: { name: { en: 'Docs', 'zh-CN': '文档' }, description: { en: 'Read documents', 'zh-CN': '读取文档' } },
+        },
         url: 'https://remote.example.test/mcp',
         credential: 'fictional-mcp-key',
         headers: [
@@ -413,6 +418,7 @@ it('returns only configured summaries for every MCP secret field through managem
       url: 'https://example.test/mcp?key=' + key,
       credential: key,
       credentials: { second: key },
+      display: { name: 'Tool ' + key, description: key },
       headers: [{ name: 'X-Key', value: key }],
       query: [{ name: 'key', value: key }],
     })
@@ -424,6 +430,11 @@ it('returns only configured summaries for every MCP secret field through managem
       headers: [{ name: 'X-Key', configured: true, last4: '-key' }],
       query: [{ name: 'key', configured: true, last4: '-key' }],
     })
+    const admission = management.captureLocalPolicy()
+    await management.save(actor, { ...mcpWriteInput(view), display: { name: '工具', description: '' } })
+    expect(() => admission()).not.toThrow()
+    await management.save(actor, { ...mcpWriteInput((await management.list(actor))[0]!), credential: 'fictional-new-key' })
+    expect(() => admission()).toThrow(expect.objectContaining({ code: 'mcp-service-unavailable' }))
     expect(JSON.stringify(await management.group(actor, actor.groupId))).not.toContain(key)
   } finally {
     await store.close()

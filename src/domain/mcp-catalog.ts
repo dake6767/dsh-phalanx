@@ -1,3 +1,4 @@
+import { mergeMcpDisplay } from './mcp-display.js'
 import type { CommunityMcpCatalogEntry, CommunityMcpCatalogInput, CommunityMcpInput } from './admin-contract.js'
 import { BusinessRuleError } from './business-error.js'
 
@@ -51,7 +52,7 @@ export function catalogInput(input: CommunityMcpCatalogInput, presets: readonly 
   if (
     !input ||
     typeof input !== 'object' ||
-    Object.keys(input).some(key => !['presetId', 'name', 'credential', 'requestId'].includes(key)) ||
+    Object.keys(input).some(key => !['presetId', 'name', 'credential', 'requestId', 'display'].includes(key)) ||
     !preset ||
     typeof input.requestId !== 'string' ||
     !/^[A-Za-z0-9_-]{16,128}$/u.test(input.requestId) ||
@@ -65,6 +66,9 @@ export function catalogInput(input: CommunityMcpCatalogInput, presets: readonly 
     query: [],
     ...preset.configuration,
     name: input.name,
+    display: mergeMcpDisplay(input.display, {
+      defaults: { name: structuredClone(preset.entry.title), description: structuredClone(preset.entry.description) },
+    })!,
     ...(preset.entry.credentialLabel ? { credential: input.credential } : {}),
   }
 }

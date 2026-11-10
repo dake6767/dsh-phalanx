@@ -66,9 +66,11 @@ export async function mcpAdminRoute(
       200,
       group
         ? await services.group(actor, group[1]!)
-        : url.searchParams.has('impact')
-          ? await services.removalImpact(actor, url.searchParams.get('impact')!)
-          : await services.list(actor),
+        : url.searchParams.has('publication')
+          ? await services.publicationImpact(actor, url.searchParams.get('publication')!)
+          : url.searchParams.has('impact')
+            ? await services.removalImpact(actor, url.searchParams.get('impact')!)
+            : await services.list(actor),
     )
     return true
   }
@@ -106,8 +108,8 @@ export async function mcpAdminRoute(
     (value.originalName === undefined || typeof value.originalName === 'string')
   )
     await services.save(actor, value.service, value.create, value.originalName)
-  else if (!group && value.action === 'publish' && typeof value.name === 'string' && typeof value.published === 'boolean')
-    await services.publish(actor, value.name, value.published)
+  else if (!group && value.action === 'publish' && typeof value.name === 'string' && typeof value.published === 'boolean' && typeof value.revision === 'string')
+    await services.publish(actor, value.name, value.published, value.revision)
   else if (!group && value.action === 'prepare' && typeof value.name === 'string') await services.reprepare(actor, value.name)
   else if (!group && value.action === 'remove' && typeof value.name === 'string' && (value.revision === undefined || typeof value.revision === 'string'))
     await services.remove(actor, value.name, value.revision)

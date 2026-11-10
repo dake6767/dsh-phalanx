@@ -1,3 +1,4 @@
+import { CommunityPublicationStatus } from './CommunityPublicationSection'
 import { featureVisible } from '../../src/domain/release-visibility'
 import CommunitySuitesPage from './CommunitySuitesPage'
 import CommunitySkillDependencies from './CommunitySkillDependencies'
@@ -236,32 +237,26 @@ export default function CommunitySkillsPage() {
                       <Card.Description>{skill.description}</Card.Description>
                     </Card.Header>
                     {skill.conflict ? <p className="plugin-card-error">{t('Conflicts with a bundled runtime skill. Distribution is paused.')}</p> : null}
-                    {skill.published || skill.suiteOrigin || skill.packs?.length || skill.conflict ? (
-                      <Card.Footer className="plugin-card-status">
-                        <div className="flex flex-wrap gap-2">
-                          {skill.conflict ? (
-                            <Chip size="sm" variant="soft" color="danger">
-                              {t('Distribution paused')}
-                            </Chip>
-                          ) : null}
-                          {skill.suiteOrigin ? (
-                            <Chip size="sm" variant="soft" color="accent">
-                              {t('From “{name}”', { name: originName(skill.suiteOrigin) })}
-                            </Chip>
-                          ) : null}
-                          {skill.packs?.map(name => (
-                            <Chip key={name} size="sm" variant="soft">
-                              {name}
-                            </Chip>
-                          ))}
-                        </div>
-                        {skill.published ? (
-                          <Chip size="sm" variant="soft" color="success">
-                            {t('Published')}
+                    <Card.Footer className="plugin-card-status">
+                      <div className="flex flex-wrap gap-2">
+                        {skill.conflict ? (
+                          <Chip size="sm" variant="soft" color="danger">
+                            {t('Distribution paused')}
                           </Chip>
                         ) : null}
-                      </Card.Footer>
-                    ) : null}
+                        {skill.suiteOrigin ? (
+                          <Chip size="sm" variant="soft" color="accent">
+                            {t('From “{name}”', { name: originName(skill.suiteOrigin) })}
+                          </Chip>
+                        ) : null}
+                        {skill.packs?.map(name => (
+                          <Chip key={name} size="sm" variant="soft">
+                            {name}
+                          </Chip>
+                        ))}
+                      </div>
+                      <CommunityPublicationStatus published={skill.published} unavailable={skill.conflict} />
+                    </Card.Footer>
                     <Button
                       variant="tertiary"
                       size="sm"
@@ -345,9 +340,7 @@ export default function CommunitySkillsPage() {
                     {t('Imported')} · {date(detail.importedAt)}
                   </span>
                 </div>
-                <Chip size="sm" variant="soft" color={detail.published ? 'success' : 'default'}>
-                  {t(detail.published ? 'Published' : 'Not published')}
-                </Chip>
+                <CommunityPublicationStatus published={detail.published} unavailable={detail.conflict} />
               </div>
               <p className="plugin-summary-description">{detail.description}</p>
               <p>{t('{managed} managed members · {selected} member selections', { managed: detail.managedMembers, selected: detail.selectedMembers })}</p>
@@ -361,10 +354,6 @@ export default function CommunitySkillsPage() {
                   <Tabs.List aria-label={t('Skill details')}>
                     <Tabs.Tab id="contents">
                       {t('Skill contents')}
-                      <Tabs.Indicator />
-                    </Tabs.Tab>
-                    <Tabs.Tab id="publication">
-                      {t('Publication')}
                       <Tabs.Indicator />
                     </Tabs.Tab>
                     <Tabs.Tab id="dependencies">
@@ -382,10 +371,8 @@ export default function CommunitySkillsPage() {
                   </Tabs.List>
                 </Tabs.ListContainer>
                 <Tabs.Panel id="contents" className="plugin-settings-panel">
-                  <CommunitySkillContent markdown={detail.markdown} files={detail.files} />
-                </Tabs.Panel>
-                <Tabs.Panel id="publication" className="plugin-settings-panel">
                   <CommunitySkillPublication detail={detail} />
+                  <CommunitySkillContent markdown={detail.markdown} files={detail.files} />
                 </Tabs.Panel>
                 <Tabs.Panel id="dependencies" className="plugin-settings-panel">
                   <CommunitySkillDependencies key={detail.name} detail={detail} onChanged={refresh} onCloseGuard={onExecutionGuard} />

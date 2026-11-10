@@ -125,6 +125,7 @@ it('opens the skill catalog in both languages, hides dependencies and preserves 
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
     // A standalone catalog dependency installed before the entry-point change keeps its record and artifact.
     await page.request.get(origin + '/admin/api/suites')

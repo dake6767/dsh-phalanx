@@ -42,6 +42,11 @@ export async function skillPackRoute(
     return true
   }
   if (typeof body.revision !== 'string') throw invalid()
+  if (body.action === 'publish' && Object.keys(body).length === 4 && typeof body.name === 'string' && typeof body.published === 'boolean') {
+    await packs.publish(actor, body.name, body.published, body.revision)
+    sendCommunityJson(response, 200, { applied: true })
+    return true
+  }
   if (body.action === 'remove' && Object.keys(body).length === 4 && typeof body.name === 'string' && typeof body.deleteSkills === 'boolean') {
     await packs.remove(actor, body.name, body.deleteSkills, body.revision)
     sendCommunityJson(response, 200, { removed: true })

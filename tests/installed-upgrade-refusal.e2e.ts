@@ -79,6 +79,7 @@ it('refuses the formal legacy deployment through its unchanged updater and the c
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator', exact: true }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(origin + '/admin')
     const post = (path: string, data: object) => context.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
     const sources = (await (await context.request.get(origin + '/admin/api/download-sources')).json()) as { preset: string; overrides: Record<string, string> }

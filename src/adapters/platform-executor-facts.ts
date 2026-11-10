@@ -1,8 +1,9 @@
-import { lstatSync } from 'node:fs'
+import { lstatSync, readdirSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import type { Pool, PoolClient } from 'pg'
 import { FilePlatformDatabaseConfig } from './platform-database-config.js'
 import { FilePlatformSecrets } from './platform-secrets.js'
-import { platformDatabasePool } from './platform-database-inspection.js'
+import { inspectPlatformDatabase, platformDatabasePool } from './platform-database-inspection.js'
 import { readRegisteredSchemaVersions } from './platform-schema-versions.js'
 import { readSavedDownloadSources } from './postgres-download-sources.js'
 
@@ -55,12 +56,18 @@ async function checkFacts(sql: Pool, schemas: readonly string[]) {
 }
 
 /** Read selected source facts without preparing stores, migrations or a platform runtime. */
-export async function readExecutorFacts(configFile: string, dataRoot: string, fact: 'schemas' | 'download-sources' | 'check', schemas: readonly string[]) {
+export async function readExecutorFacts(
+  configFile: string,
+  dataRoot: string,
+  fact: 'schemas' | 'download-sources' | 'check' | 'rotation',
+  schemas: readonly string[],
+) {
   const before = fileIdentity(configFile),
     selected = FilePlatformDatabaseConfig.open(configFile, dataRoot),
     key = fileIdentity(selected.security.masterKeyPath),
     verifiedKey = FilePlatformSecrets.open(selected.security.masterKeyPath, selected.security.registry)
   verifiedKey.close()
+  if (fact === 'rotation') return rotationFacts(configFile, dataRoot, selected, [before, key])
   const sql = platformDatabasePool(selected.connection)
   try {
     if (fact === 'check') {
@@ -81,5 +88,46 @@ export async function readExecutorFacts(configFile: string, dataRoot: string, fa
     return { selection: row?.selection ?? null }
   } finally {
     await sql.end()
+  }
+}
+
+/** A live-service probe never takes maintenance locks or prepares schema or key files. */
+async function rotationFacts(
+  configFile: string,
+  dataRoot: string,
+  selected: ReturnType<typeof FilePlatformDatabaseConfig.open>,
+  identity: ReturnType<typeof fileIdentity>[],
+) {
+  const builtinFile = join(dirname(configFile), 'builtin-database.json')
+  identity.push(fileIdentity(builtinFile))
+  const builtin = FilePlatformDatabaseConfig.open(builtinFile, dataRoot)
+  if (!selected.deploymentId || builtin.deploymentId !== selected.deploymentId || builtin.security.masterKeyPath !== selected.security.masterKeyPath)
+    throw Error('Rotation requires matching protected deployment configurations')
+  const clear = () => {
+    for (const path of [configFile, builtinFile, selected.security.masterKeyPath]) {
+      const name = basename(path)
+      if (readdirSync(dirname(path)).some(entry => entry.startsWith(name + '.next-') || entry.startsWith(name + '.tmp-key-')))
+        throw Error('A staged key operation must be recovered first')
+    }
+    const entries = readdirSync(dirname(configFile))
+    if (entries.includes('platform-key-operation.json') || entries.includes('platform-database-operation.json'))
+      throw Error('A product maintenance journal must be recovered first')
+  }
+  clear()
+  let ready = false
+  if (selected.selection !== undefined) {
+    const checked = await inspectPlatformDatabase(selected.connection, selected.security.registry.masterFingerprint, selected.deploymentId)
+    if (!checked.ok) throw Error('Rotation readiness requires a reachable matching platform database')
+    ready = checked.schema === 'platform'
+  }
+  clear()
+  if (identity.some(before => JSON.stringify(before) !== JSON.stringify(fileIdentity(before.path))))
+    throw Error('The protected configuration or key changed during rotation readiness checks')
+  return {
+    ready,
+    initializationPending: !ready,
+    deploymentId: selected.deploymentId,
+    fingerprint: selected.security.registry.masterFingerprint,
+    identity,
   }
 }

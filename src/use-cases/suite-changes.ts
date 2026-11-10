@@ -110,7 +110,8 @@ export class SuiteChanges {
           if (item.kind !== 'skill' || pluginDetached) continue
           const names = item.names.filter(name => !skip('skill', name))
           if (!names.length) continue
-          const stage = `${origin}:change:${position}`
+          // A committed task can still be cleaning up when the next task starts.
+          const stage = `${origin}:change:${position}:${installed.revision}`
           // Register before preparation so rejection also releases partially accepted staging.
           stages.push(stage)
           await log(`Importing skills from ${item.source.url} @ ${item.source.commit.slice(0, 7)}…`)

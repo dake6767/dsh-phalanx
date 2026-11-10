@@ -75,6 +75,27 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
       { missingTree: true, status: 'passed' },
     ],
   })
+  const rotationData = join(root, 'rotation-data')
+  await mkdir(rotationData, { mode: 0o700 })
+  const rotation = JSON.parse(
+    await execFileText('python3', [
+      '-B',
+      resolve('tests/fixtures/installed-rotation.py'),
+      installed,
+      testDatabaseConfigFile(rotationData),
+      rotationData,
+      join(root, 'rotation-contract'),
+    ]),
+  )
+  expect(rotation).toMatchObject({
+    status: 'passed',
+    source: expectedCommit,
+    preInitializationRejected: true,
+    processGroupsRegistered: true,
+    legacyRecovery: ['unselected', 'empty-schema'],
+    initializedWithoutAdminRotation: true,
+    identitiesPreserved: true,
+  })
   model = await startCommunityModel()
   const environment = {
     DSH_PHALANX_MAINTENANCE_FILE: join(root, 'maintenance'),
@@ -101,6 +122,7 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   await admin.getByLabel('Username').fill('admin')
   await admin.getByLabel('Password', { exact: true }).fill('admin-password')
   await admin.getByRole('button', { name: 'Create administrator' }).click()
+  await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await admin.waitForURL(`${origin}/admin`)
   await admin.getByRole('heading', { name: 'Account management' }).waitFor()
   expect(

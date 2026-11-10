@@ -5,7 +5,8 @@ import { pluginDeliveries } from './support/plugin-facts.js'
 import { lstat, mkdir, mkdtemp, open, readFile, readdir, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
+import { outboundProxyEnvironment } from '../src/adapters/outbound-proxy.js'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it, onTestFinished } from 'vitest'
@@ -22,6 +23,42 @@ const phaseTimeoutMs = 240_000
 // Two preparations, three market jobs and native removal retain their individual
 // budgets; allow bounded time for the intervening UI assertions and cleanup.
 const scenarioTimeoutMs = 6 * phaseTimeoutMs + 180_000
+
+/** Optional test-account input reaches trusted preparation through the existing private stdin seam. */
+async function useValidationPreparationProxy(): Promise<() => void> {
+  const path = join(homedir(), '.config/dsh-phalanx-validation/preparation-proxy.json')
+  let file
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return () => {}
+    throw new Error('Validation preparation proxy configuration is unavailable')
+  }
+  let proxy: string
+  try {
+    const info = await file.stat()
+    if (!info.isFile() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o600 || info.size > 4096)
+      throw new Error('Invalid validation proxy input')
+    const input = JSON.parse(await file.readFile('utf8')) as { httpsProxy?: unknown }
+    if (typeof input?.httpsProxy !== 'string') throw new Error('Invalid validation proxy input')
+    proxy = input.httpsProxy
+  } catch {
+    throw new Error('Validation preparation proxy configuration is invalid')
+  } finally {
+    await file.close()
+  }
+  const environment = outboundProxyEnvironment({ ...process.env, HTTPS_PROXY: proxy, https_proxy: proxy })
+  // NODE_USE_ENV_PROXY belongs only to trusted child preparation, where the product adds it itself.
+  const keys = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy'] as const
+  const previous = keys.map(key => [key, process.env[key]] as const)
+  for (const key of keys) process.env[key] = environment[key]
+  return () => {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
 
 it.skipIf(!runtimeSettings.containerImage)(
   'installs Better Sidebar from the app center, retains real settings, and removes the native dependency from either interface while shelf changes retain installed copies',
@@ -40,6 +77,7 @@ it.skipIf(!runtimeSettings.containerImage)(
     const packageName = 'dsh-better-sidebar',
       version = '0.28.0',
       rpc = createRealDshRpc()
+    let restoreProxy = () => {}
     let primaryFailure: unknown
     const cleanupErrors: unknown[] = []
     let phase = 'startup',
@@ -144,10 +182,15 @@ it.skipIf(!runtimeSettings.containerImage)(
         if (stopped && rebuilt) await attempt(() => removeCommunityFixture(root))
       })())
     onTestFinished(async () => {
-      await cleanup()
-      if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Native market cleanup failed')
+      try {
+        await cleanup()
+        if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Native market cleanup failed')
+      } finally {
+        restoreProxy()
+      }
     })
     try {
+      restoreProxy = await useValidationPreparationProxy()
       const origin = await app.start()
       const bootstrap = await admin.request.post(origin + '/bootstrap', {
         headers: { origin },
@@ -215,10 +258,16 @@ it.skipIf(!runtimeSettings.containerImage)(
         return (await response.json()).job.requestId as string
       }
       const waitJob = async (requestId: string) => {
+        let previousState: string | undefined
         await expect
           .poll(
             async () => {
               const job = (await data()).plugins[0]?.job
+              const state = job ? [job.requestId === requestId ? 'expected-job' : 'different-job', job.status, job.phase].join(':') : 'missing-job'
+              if (state !== previousState) {
+                previousState = state
+                mark(phase, state, job?.failure?.code)
+              }
               return job?.requestId === requestId && job.status !== 'running'
             },
             { timeout: phaseTimeoutMs },
@@ -379,7 +428,11 @@ it.skipIf(!runtimeSettings.containerImage)(
     } catch (error) {
       primaryFailure = error
     } finally {
-      await cleanup()
+      try {
+        await cleanup()
+      } finally {
+        restoreProxy()
+      }
     }
     if (cleanupErrors.length)
       throw new AggregateError(primaryFailure === undefined ? cleanupErrors : [primaryFailure, ...cleanupErrors], 'Native market cleanup failed')

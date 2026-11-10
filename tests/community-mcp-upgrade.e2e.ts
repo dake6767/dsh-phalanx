@@ -145,6 +145,7 @@ it.skipIf(!baselineRoot || !baselineImage || !runtimeSettings.containerImage)(
           revision: (await get('skill-packs')).revision,
           pack: { name: mode + '-pack', description: 'Retain ' + mode, skills: [mode + '-child'], instructions: 'Keep this orchestration.', published: true },
         })
+        await post('skill-packs', { action: 'publish', name: mode + '-pack', published: true, revision: (await get('skill-packs')).revision })
       }
       await post(`groups/${group.id}/plugins`, {
         action: 'save',
@@ -211,10 +212,9 @@ it.skipIf(!baselineRoot || !baselineImage || !runtimeSettings.containerImage)(
       expect(new URL(upgraded.url()).pathname).toBe(memberEntry)
       await assertPlugins()
       await upgraded.getByRole('button', { name: 'Platform App Center', exact: true }).click()
-      for (const name of ['Plugins', 'Skills', 'Skill packs', 'MCP services']) await upgraded.getByRole('tab', { name, exact: true }).waitFor()
+      for (const name of ['Plugins', 'Skills', 'MCP services']) await upgraded.getByRole('tab', { name, exact: true }).waitFor()
       await upgraded.getByRole('tab', { name: 'Skills', exact: true }).click()
       await upgraded.getByRole('heading', { name: 'selected-direct', exact: true }).waitFor()
-      await upgraded.getByRole('tab', { name: 'Skill packs', exact: true }).click()
       await upgraded.getByText('Installed (self-selected pack)', { exact: true }).waitFor()
       await upgraded.getByText('Installed (platform preinstalled)', { exact: true }).waitFor()
       expect((await member.request.get(origin + '/market')).status()).toBe(404)

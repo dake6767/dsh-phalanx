@@ -41,7 +41,8 @@ export function createCommunityMemberRoute(deps: {
         return
       }
       try {
-        const identity: CommunitySelfIdentity = { username: (await deps.entry.account(username)).username }
+        const account = await deps.entry.account(username)
+        const identity: CommunitySelfIdentity = { username: account.username, admin: account.admin }
         sendCommunityJson(response, 200, identity)
       } catch (error) {
         handleCommunityFailure(response, error, true)

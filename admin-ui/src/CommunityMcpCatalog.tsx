@@ -1,8 +1,9 @@
+import { McpDisplayFields } from './CommunityMcpFields'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
 import { Chip } from '@heroui/react/chip'
-import type { CommunityMcpCatalogEntry, CommunityMcpSettings } from '../../src/domain/admin-contract'
+import type { CommunityMcpCatalogEntry, CommunityMcpSettings, CommunityMcpCatalogInput } from '../../src/domain/admin-contract'
 import { communityMcpCatalog, importCommunityMcp } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
@@ -132,6 +133,7 @@ function CatalogImport({
     [credential, setCredential] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState<unknown>()
+  const [display, setDisplay] = useState<CommunityMcpCatalogInput['display']>()
   const [requestId] = useState(communityRequestId),
     pending = useRef(false)
   const submit = async () => {
@@ -140,7 +142,7 @@ function CatalogImport({
     setBusy(true)
     setError(undefined)
     try {
-      const rows = await importCommunityMcp({ name, credential, presetId: entry.id, requestId })
+      const rows = await importCommunityMcp({ name, credential, presetId: entry.id, requestId, ...(display ? { display } : {}) })
       setCredential('')
       onImported(rows)
     } catch (failure) {
@@ -204,6 +206,13 @@ function CatalogImport({
             autoFocus
             pattern="p-[A-Za-z0-9_-]{1,30}"
             description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}
+          />
+          <McpDisplayFields
+            value={display}
+            defaults={{ name: entry.title, description: entry.description }}
+            fallback={{ name, description: '' }}
+            busy={busy}
+            onChange={setDisplay}
           />
           {entry.credentialLabel ? (
             <CommunityField

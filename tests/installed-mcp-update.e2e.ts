@@ -115,7 +115,16 @@ it('updates an installed prior-preset fixture without replacing the live credent
       disabledTools = original.tools.filter((tool: { name: string }) => tool.name !== 'maps_weather').map((tool: { name: string }) => tool.name)
     expect((await post('mcp', { action: 'save', service: { ...mcpWriteInput(original), disabledTools } })).status()).toBe(200)
     expect((await (await post('mcp/test', { name: 'p-amap' })).json()).testStatus).toBe('passed')
-    expect((await post('mcp', { action: 'publish', name: 'p-amap', published: true })).status()).toBe(200)
+    expect(
+      (
+        await post('mcp', {
+          action: 'publish',
+          name: 'p-amap',
+          published: true,
+          revision: (await get('mcp?publication=' + encodeURIComponent('p-amap'))).revision,
+        })
+      ).status(),
+    ).toBe(200)
     await signInCommunity(member, origin, 'member', 'password')
     expect((await member.request.post(origin + '/market/api/mcp', { headers: { origin }, data: { name: 'p-amap', action: 'enable' } })).status()).toBe(200)
     await app.stop()

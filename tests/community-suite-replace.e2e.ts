@@ -101,6 +101,7 @@ it('replaces confirmed manual entries in place, reuses a manual shared tool and 
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
     const post = async (path: string, data: unknown) => {
       const response = await page.request.post(origin + path, { headers: { origin }, data })

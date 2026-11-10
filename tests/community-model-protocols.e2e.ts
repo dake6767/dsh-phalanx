@@ -117,13 +117,29 @@ describe('shared model gateway protocols through native DSH', () => {
         instanceWorkspacePath(defaultWorkspacePath(root, 'member'), runtime.container !== undefined),
         runtime.container !== undefined,
       )
-      await sendCommunityPrompt(page, 'Return the deterministic fixture marker.')
+      const prompt = 'Return the deterministic fixture marker.'
+      await sendCommunityPrompt(page, prompt)
       const marker = upstream.marker(entry.protocol)
       await page.locator('p').filter({ hasText: marker }).first().waitFor({ timeout: 120_000 })
       // The forwarded request keeps the supplier base URL prefix, replaces only the model identity and keeps the body shape.
-      const request = upstream.requests.find(row => row.protocol === entry.protocol)!
+      const request = upstream.requests.find(row => {
+        if (row.protocol !== entry.protocol || row.body.stream !== true) return false
+        const messages = row.body[entry.bodyKey]
+        return (
+          Array.isArray(messages) &&
+          messages.some(
+            message =>
+              message?.role === 'user' &&
+              (message.content === prompt ||
+                (Array.isArray(message.content) &&
+                  message.content.some((block: unknown) => typeof block === 'object' && block !== null && 'text' in block && block.text === prompt))),
+          )
+        )
+      })!
       expect(request.path).toBe(`${prefix}${entry.endpoint}`)
       expect(request.body).toMatchObject({ model: upstreamModel, stream: true })
+      expect(JSON.stringify(request.body)).toContain(`You are a coding agent powered by the ${upstreamModel} model.`)
+      expect(JSON.stringify(request.body)).not.toContain(`powered by the ${platformModelId} model.`)
       expect(Array.isArray(request.body[entry.bodyKey]) || typeof request.body[entry.bodyKey] === 'string').toBe(true)
       if (entry.protocol === 'anthropic-messages') {
         expect(request.apiKey).toBe(apiKey)

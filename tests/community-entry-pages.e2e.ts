@@ -1,21 +1,91 @@
 // Validation: T2; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser, type CDPSession } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
+import { loopbackPort } from '../src/adapters/loopback-port.js'
 import { issueBootstrapCredential, readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { cleanupOwned, removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { createCommunityApplication } from './support/community-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
-let app: CommunityApplication | undefined, browser: Browser | undefined, root: string | undefined
+let app: CommunityApplication | undefined, browser: Browser | undefined, root: string | undefined, navigationSource: Server | undefined
 
 afterEach(async () => {
   await browser?.close()
+  if (navigationSource) {
+    navigationSource.closeAllConnections()
+    await new Promise<void>(resolve => navigationSource!.close(() => resolve()))
+    navigationSource = undefined
+  }
   await app?.stop()
   if (root) await removeCommunityFixture(root)
 })
+it('allows external bootstrap document links while rejecting cross-origin actions and subresources', async () => {
+  root = await mkdtemp(join(tmpdir(), 'bootstrap-navigation-'))
+  const port = await loopbackPort()
+  const origin = `http://app.example.localhost:${port}`
+  app = createCommunityApplication({
+    listen: { host: '127.0.0.1', port, publicOrigin: origin },
+    sessionSecret: 'bootstrap-navigation-session-secret-32bytes',
+    runtime: {
+      command: '/unavailable-dsh',
+      args: [],
+      dataRoot: root,
+      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://api.deepseek.com' } },
+    },
+  })
+  await app.start()
+  browser = await chromium.launch({ headless: true, args: ['--proxy-server=direct://', '--host-resolver-rules=MAP *.localhost 127.0.0.1'] })
+  const context = await browser.newContext({ locale: 'en' })
+  const page = await context.newPage()
+  navigationSource = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html' })
+    response.end(`<a href="${origin}/bootstrap">Initialize</a>`)
+  })
+  await new Promise<void>(resolve => navigationSource!.listen(0, '127.0.0.1', resolve))
+  const sourcePort = (navigationSource.address() as { port: number }).port
+  for (const [source, site] of [
+    [`http://outside.localhost:${sourcePort}`, 'cross-site'],
+    [`http://other.example.localhost:${sourcePort}`, 'same-site'],
+  ] as const) {
+    await page.goto(source)
+    const navigation = page.waitForResponse(response => response.url() === origin + '/bootstrap' && response.request().isNavigationRequest())
+    await page.getByRole('link', { name: 'Initialize', exact: true }).click()
+    const opened = await navigation
+    expect(opened.status()).toBe(200)
+    expect((await opened.request().allHeaders())['sec-fetch-site']).toBe(site)
+    await page.getByRole('heading', { name: 'Create the first administrator', exact: true }).waitFor()
+    expect(await page.getByRole('button', { name: 'Create administrator', exact: true }).count()).toBe(0)
+    await page.goto(source)
+    const deniedFrame = page.waitForResponse(response => response.url() === origin + '/bootstrap')
+    await page.evaluate(url => {
+      const frame = document.createElement('iframe')
+      frame.src = url
+      document.body.appendChild(frame)
+    }, origin + '/bootstrap')
+    expect((await deniedFrame).status()).toBe(403)
+    const deniedFetch = page.waitForResponse(response => response.url() === origin + '/bootstrap' && response.request().resourceType() === 'fetch')
+    await page.evaluate(url => {
+      void fetch(url, { mode: 'no-cors' })
+    }, origin + '/bootstrap')
+    expect((await deniedFetch).status()).toBe(403)
+    const postNavigation = page.waitForURL(origin + '/bootstrap')
+    const deniedPost = page.waitForResponse(response => response.url() === origin + '/bootstrap' && response.request().method() === 'POST')
+    await page.evaluate(url => {
+      const form = document.createElement('form')
+      form.action = url
+      form.method = 'post'
+      document.body.appendChild(form)
+      form.submit()
+    }, origin + '/bootstrap')
+    expect((await deniedPost).status()).toBe(403)
+    await postNavigation
+  }
+})
+
 it('keeps themed entry and complete error pages independent of management assets', async () => {
   root = await mkdtemp(join(tmpdir(), 'community-page-browser-'))
   app = createCommunityApplication({
@@ -332,6 +402,7 @@ it('keeps confirmed self reset and translated cooldown available without managem
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator', exact: true }).click()
+  await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await page.waitForURL(`${origin}/admin`)
   expect(
     (
@@ -462,4 +533,139 @@ it('keeps the bilingual maintenance page independent and refreshes only after a 
     }
     if (failures.length) throw new AggregateError(failures, 'Maintenance browser acceptance failed')
   }
+})
+
+it('configures one initial default for all three protocols without exposing preset keys and recovers committed publication by revision', async () => {
+  browser = await chromium.launch({ headless: true })
+  for (const protocol of ['openai-completions', 'openai-responses', 'anthropic-messages'] as const) {
+    root = await mkdtemp(join(tmpdir(), 'initial-model-entry-'))
+    const defaults = join(root, 'initial-model.json')
+    const contents = JSON.stringify({ name: 'Suggested provider', apiKey: 'fictional-initial-preset-key' })
+    await writeFile(defaults, contents, { mode: 0o600 })
+    app = createCommunityApplication({
+      initialModelDefaultsFile: defaults,
+      listen: { host: '127.0.0.1', port: 0 },
+      runtime: {
+        command: '/unavailable-dsh',
+        args: [],
+        dataRoot: root,
+        defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } },
+      },
+    })
+    const origin = await app.start(),
+      context = await browser.newContext({ locale: 'en', viewport: { width: 390, height: 844 } }),
+      page = await context.newPage()
+    await page.goto(origin + '/bootstrap#credential=' + readBootstrapCredential(root)!.credential)
+    await selectBuiltinDatabase(page)
+    await page.getByLabel('Username', { exact: true }).fill('admin')
+    await page.getByLabel('Password', { exact: true }).fill('password')
+    await page.getByRole('button', { name: 'Create administrator', exact: true }).click()
+    await page.waitForURL(origin + '/admin/initial-model')
+    const anonymous = await browser.newContext()
+    expect((await anonymous.request.get(origin + '/admin/api/initial-model')).status()).toBe(401)
+    await anonymous.close()
+    await page.getByRole('heading', { name: 'Configure your first model', exact: true }).waitFor()
+    expect(readBootstrapCredential(root)).toBeUndefined()
+    expect(await page.getByLabel('Provider name', { exact: true }).inputValue()).toBe('Suggested provider')
+    expect(await page.getByLabel('API key', { exact: true }).inputValue()).toBe('')
+    expect(await page.content()).not.toContain('fictional-initial-preset-key')
+    expect(await (await context.request.get(origin + '/admin/api/initial-model')).text()).not.toContain('fictional-initial-preset-key')
+    expect(
+      (await context.request.post(origin + '/admin/api/initial-model', { headers: { origin: 'https://other.example.test' }, data: { revision: 0 } })).status(),
+    ).toBe(403)
+    await page.getByLabel('Protocol', { exact: true }).selectOption(protocol)
+    await page.locator('[name="baseUrl"]').fill('https://models.example.test/v1')
+    await page.getByLabel('Model identifier 1', { exact: true }).fill('first-model')
+    if (protocol === 'openai-responses') await page.getByLabel('API key', { exact: true }).fill('fictional-replaced-new')
+    const catalog = join(root, 'managed-models/catalog.json')
+    if (protocol === 'openai-completions') {
+      await rm(catalog)
+      await mkdir(catalog)
+    }
+    await page.getByRole('button', { name: 'Save model configuration and finish installation', exact: true }).click()
+    if (protocol === 'openai-completions') {
+      await page.getByRole('button', { name: 'Retry model publication', exact: true }).waitFor()
+      await page.reload()
+      const committed = await (await context.request.get(origin + '/admin/api/models')).json()
+      expect(committed.revision).toBe(1)
+      expect(committed.providers).toHaveLength(1)
+      await rm(catalog, { recursive: true })
+      await page.getByRole('button', { name: 'Retry model publication', exact: true }).click()
+    }
+    await page.getByRole('status').filter({ hasText: 'Configuration saved. The model has not been tested.' }).waitFor()
+    const saved = await (await context.request.get(origin + '/admin/api/models')).json()
+    expect(saved.revision).toBe(1)
+    expect(saved.providers).toHaveLength(1)
+    expect(saved.providers[0].apiFormat).toBe(protocol)
+    expect(saved.providers[0].apiKey.last4).toBe(protocol === 'openai-responses' ? '-new' : '-key')
+    expect(saved.providers[0].enabled).toBe(true)
+    expect(saved.providers[0].models).toHaveLength(1)
+    expect(saved.providers[0].models[0]).toMatchObject({ name: 'first-model', enabled: true })
+    expect(saved.defaultModelId).toBe(saved.providers[0].models[0].id)
+    expect(JSON.stringify(saved)).not.toContain('fictional-initial-preset-key')
+    expect(JSON.stringify(saved)).not.toContain('fictional-replaced-new')
+    const duplicate = await context.request.post(origin + '/admin/api/initial-model', { headers: { origin }, data: { revision: 0 } })
+    expect(duplicate.status()).toBe(200)
+    expect(await duplicate.json()).toEqual(saved)
+    expect(await readFile(defaults, 'utf8')).toBe(contents)
+    await page.getByRole('button', { name: 'Continue to administration', exact: true }).click()
+    await page.waitForURL(origin + '/admin')
+    expect(
+      (
+        await context.request.post(origin + '/admin/api/accounts', { headers: { origin }, data: { username: 'member', password: 'password', email: '' } })
+      ).status(),
+    ).toBe(201)
+    await context.request.post(origin + '/login', { headers: { origin }, form: { username: 'member', password: 'password' }, maxRedirects: 0 })
+    expect((await context.request.get(origin + '/admin/api/initial-model')).status()).toBe(403)
+    await context.close()
+    await app.stop()
+    app = undefined
+    await removeCommunityFixture(root)
+    root = undefined
+  }
+})
+
+it('allows manual configuration or skipping invalid initialization defaults and does not resume setup on later sign-in', async () => {
+  root = await mkdtemp(join(tmpdir(), 'initial-model-skip-'))
+  const defaults = join(root, 'initial-model.json')
+  await writeFile(defaults, 'invalid fictional-private-value', { mode: 0o600 })
+  app = createCommunityApplication({
+    initialModelDefaultsFile: defaults,
+    listen: { host: '127.0.0.1', port: 0 },
+    runtime: {
+      command: '/unavailable-dsh',
+      args: [],
+      dataRoot: root,
+      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } },
+    },
+  })
+  const origin = await app.start()
+  browser = await chromium.launch({ headless: true })
+  const context = await browser.newContext({ locale: 'en' }),
+    page = await context.newPage()
+  await page.goto(origin + '/bootstrap#credential=' + readBootstrapCredential(root)!.credential)
+  await selectBuiltinDatabase(page)
+  await page.getByLabel('Username', { exact: true }).fill('admin')
+  await page.getByLabel('Password', { exact: true }).fill('password')
+  await page.getByRole('button', { name: 'Create administrator', exact: true }).click()
+  await page.getByRole('alert').filter({ hasText: 'Initialization defaults could not be read.' }).waitFor()
+  expect(await page.getByLabel('API key', { exact: true }).getAttribute('required')).not.toBeNull()
+  expect(await page.content()).not.toContain('fictional-private-value')
+  await page.getByRole('button', { name: 'Skip for now and finish installation', exact: true }).click()
+  await page.waitForURL(origin + '/admin')
+  expect((await (await context.request.get(origin + '/admin/api/models')).json()).providers).toEqual([])
+  const signed = await context.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })
+  expect(signed.headers().location).toBe('/admin')
+  expect(await readFile(defaults, 'utf8')).toBe('invalid fictional-private-value')
+  await rm(defaults)
+  await page.goto(origin + '/admin/initial-model')
+  await page.getByLabel('Provider name', { exact: true }).fill('Manual provider')
+  await page.locator('[name="baseUrl"]').fill('https://manual.example.test/v1')
+  await page.getByLabel('API key', { exact: true }).fill('fictional-manual-key')
+  await page.getByLabel('Model identifier 1', { exact: true }).fill('manual-model')
+  await page.getByRole('button', { name: 'Save model configuration and finish installation', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: 'Configuration saved. The model has not been tested.' }).waitFor()
+  const manual = await (await context.request.get(origin + '/admin/api/models')).json()
+  expect(manual.providers).toHaveLength(1)
+  expect(manual.providers[0].name).toBe('Manual provider')
 })

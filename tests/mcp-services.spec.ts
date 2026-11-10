@@ -417,3 +417,141 @@ it('keeps reset services out of runtime projection until a valid configuration i
   expect(state.services[0]?.configurationRequired).toBeUndefined()
   expect((await service.effective('admin')).map(row => row.name)).toEqual(['p-reset'])
 })
+
+it('binds publication confirmation to current service and member impact without exposing credentials', async () => {
+  const { service, actor } = fixture()
+  const member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  await service.save(actor, { name: 'p-reviewed', description: '', url: 'https://example.test/mcp', credential: 'fictional-review-secret' })
+  await service.recordTest(actor, 'p-reviewed', (await service.diagnostic('admin', 'p-reviewed')).generation, [])
+  const initial = await service.publicationImpact(actor, 'p-reviewed')
+  expect(initial).toMatchObject({ published: false, selectedMembers: 0, hasPlatformCredential: true })
+  expect(JSON.stringify(initial)).not.toContain('fictional-review-secret')
+  await service.save(actor, { name: 'p-reviewed', description: 'Edited', url: 'https://example.test/mcp' })
+  await expect(service.publish(actor, 'p-reviewed', true, initial.revision)).rejects.toMatchObject({ code: 'mcp-impact-changed' })
+  await service.recordTest(actor, 'p-reviewed', (await service.diagnostic('admin', 'p-reviewed')).generation, [])
+  await service.publish(actor, 'p-reviewed', true, (await service.publicationImpact(actor, 'p-reviewed')).revision)
+  const beforeSelection = await service.publicationImpact(actor, 'p-reviewed')
+  await service.toggle(member, 'p-reviewed', true)
+  await expect(service.publish(actor, 'p-reviewed', false, beforeSelection.revision)).rejects.toMatchObject({ code: 'mcp-impact-changed' })
+  const current = await service.publicationImpact(actor, 'p-reviewed')
+  expect(current.selectedMembers).toBe(1)
+  await service.publish(actor, 'p-reviewed', false, current.revision)
+  expect(await service.market(member)).toEqual([])
+  await service.publish(actor, 'p-reviewed', true, (await service.publicationImpact(actor, 'p-reviewed')).revision)
+  expect((await service.market(member))[0]).toMatchObject({ enabled: false })
+  await expect(service.publicationImpact(member, 'p-reviewed')).rejects.toMatchObject({ code: 'admin-required' })
+})
+
+it('distinguishes platform credentials from public header, query and environment values in publication impact', async () => {
+  const { service, actor } = fixture()
+  const inputs: import('../src/domain/admin-contract.js').CommunityMcpInput[] = [
+    { name: 'p-header', description: '', url: 'https://example.test/mcp', headers: [{ name: 'X-Format', value: 'application/json' }] },
+    { name: 'p-query', description: '', url: 'https://example.test/mcp', query: [{ name: 'locale', value: 'en' }] },
+    { name: 'p-env', description: '', url: '', run: { location: 'shared', command: 'node', args: [], env: [{ name: 'LANG', value: 'en_US.UTF-8' }] } },
+  ]
+  for (const input of inputs) {
+    await service.save(actor, input)
+    expect((await service.publicationImpact(actor, input.name)).hasPlatformCredential).toBe(false)
+  }
+  await service.save(actor, {
+    name: 'p-named',
+    description: '',
+    url: 'https://example.test/mcp',
+    credentials: { token: 'fictional-named-secret' },
+    headers: [{ name: 'Authorization', value: 'Bearer {credential:token}' }],
+  })
+  expect((await service.publicationImpact(actor, 'p-named')).hasPlatformCredential).toBe(true)
+  const retained = {
+    name: 'p-retained',
+    description: '',
+    url: 'https://example.test/mcp',
+    headers: [{ name: 'Authorization', value: 'Bearer fictional-retained-secret' }],
+  }
+  await service.save(actor, { ...retained, credential: 'fictional-retained-secret' })
+  await service.save(actor, { ...retained, clearCredential: true })
+  const impact = await service.publicationImpact(actor, 'p-retained')
+  expect((await service.list(actor)).find(row => row.name === 'p-retained')?.credentialConfigured).toBe(false)
+  expect(impact.hasPlatformCredential).toBe(true)
+  expect(JSON.stringify(impact)).not.toContain('fictional-retained-secret')
+})
+
+it('previews publication only after an accepted management operation finishes dependency reconciliation', async () => {
+  let entered!: () => void, release!: () => void
+  const reconciling = new Promise<void>(resolve => {
+      entered = resolve
+    }),
+    gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+  const { service, actor } = fixture({
+    ready: () => ({ directory: '/dependencies/frozen' }),
+    view: () => ({ stage: 'ready', updatedAt: 0, log: '' }),
+    changed: async () => {},
+    restart: () => {},
+    configure: async row => {
+      if (!row.run?.runtimeDependencies?.includes('candidate')) return row
+      entered()
+      await gate
+      return { ...row, run: { ...row.run, runtimeDependencies: ['canonical'] } }
+    },
+  })
+  const saving = service.save(actor, {
+    name: 'p-reconciling',
+    description: '',
+    url: '',
+    run: { location: 'shared', command: 'node', args: [], env: [], runtimeDependencies: ['candidate'] },
+  })
+  await reconciling
+  let settled = false
+  const preview = service.publicationImpact(actor, 'p-reconciling').then(value => {
+    settled = true
+    return value
+  })
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(settled).toBe(false)
+  } finally {
+    release()
+  }
+  await saving
+  const impact = await preview
+  expect((await service.list(actor))[0]?.run?.runtimeDependencies).toEqual(['canonical'])
+  expect(impact.revision).toBe((await service.publicationImpact(actor, 'p-reconciling')).revision)
+  await service.recordTest(actor, 'p-reconciling', (await service.diagnostic('admin', 'p-reconciling')).generation, [])
+  await service.publish(actor, 'p-reconciling', true, (await service.publicationImpact(actor, 'p-reconciling')).revision)
+})
+
+it('saves member-facing MCP text without changing tested runtime identity or acquisition', async () => {
+  const { service, actor } = fixture()
+  const input = { name: 'p-display', description: 'Legacy connection description', url: 'https://example.test/mcp' }
+  await service.save(actor, input)
+  await service.recordTest(actor, input.name, (await service.diagnostic('admin', input.name)).generation, [
+    { name: 'read', description: 'Read tool', inputSchema: {} },
+  ])
+  await service.publish(actor, input.name, true)
+  const member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  await service.toggle(member, input.name, true)
+  const before = (await service.list(actor))[0]!
+  expect(before).not.toHaveProperty('display')
+  const admission = service.captureLocalPolicy()
+  const edited = { ...input, display: { name: '资料助手', description: '' } }
+  await service.save(actor, edited)
+  expect(() => admission()).not.toThrow()
+  expect((await service.list(actor))[0]).toMatchObject({
+    display: { name: '资料助手', description: '' },
+    generation: before.generation,
+    testStatus: 'passed',
+    tools: before.tools,
+    published: true,
+    url: before.url,
+  })
+  expect((await service.market(member))[0]).toMatchObject({ name: input.name, enabled: true, display: { name: '资料助手', description: '' } })
+  const selectedAdmission = service.captureLocalPolicy()
+  await service.toggle(member, input.name, false)
+  expect(() => selectedAdmission()).toThrow(expect.objectContaining({ code: 'mcp-service-unavailable' }))
+  await service.save(actor, { ...input, required: true })
+  expect((await service.list(actor))[0]).toMatchObject({ display: { name: '资料助手', description: '' } })
+  await expect(service.save(actor, { ...input, display: { name: '' } })).rejects.toMatchObject({ code: 'mcp-display-invalid' })
+  const forged = { ...input, display: { name: 'Forged', defaults: { name: { en: 'Forged', 'zh-CN': '伪造' }, description: { en: '', 'zh-CN': '' } } } }
+  await expect(service.save(actor, forged)).rejects.toMatchObject({ code: 'mcp-display-invalid' })
+})

@@ -42,6 +42,7 @@ it('shows bilingual database and key facts and shares an offline-backup confirma
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await page.waitForURL(`${origin}/admin`)
   let sessionUnavailable = true
   await page.route('**/admin/api/session', async route => {
@@ -138,6 +139,7 @@ it('automatically restores a fresh administration page after an actual database 
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
     await page.goto(origin + '/admin/settings')
     await page.getByText('Connected', { exact: true }).waitFor()

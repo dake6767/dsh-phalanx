@@ -79,7 +79,14 @@ it('toggles granted and published MCP through the native app center and preserve
   page.on('pageerror', error => errors.push(error.message))
   const post = (path: string, body: object) =>
     fetch(origin + '/admin/api/' + path, { method: 'POST', headers: { cookie: admin, origin, 'content-type': 'application/json' }, body: JSON.stringify(body) })
-  const service = (name: string, required = false) => ({ name, required, description: name + ' tools', url: upstreamUrl, disabledTools: ['write'] })
+  const service = (name: string, required = false) => ({
+    name,
+    required,
+    description: name + ' tools',
+    display: { name: '资料助手', description: '可读工具说明' },
+    url: upstreamUrl,
+    disabledTools: ['write'],
+  })
   const rpc = createRealDshRpc()
   try {
     origin = await app.start()
@@ -116,11 +123,31 @@ it('toggles granted and published MCP through the native app center and preserve
     const account = (await created.json()) as { groupId: string }
     for (const name of ['p-team', 'p-store']) {
       expect((await post('mcp', { action: 'save', service: service(name) })).status).toBe(200)
-      expect((await post('mcp', { action: 'publish', name, published: true })).status).toBe(409)
+      expect(
+        (
+          await post('mcp', {
+            action: 'publish',
+            name,
+            published: true,
+            revision: (await (await fetch(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent(name), { headers: { cookie: admin } })).json())
+              .revision,
+          })
+        ).status,
+      ).toBe(409)
       expect((await (await post('mcp/test', { name })).json()).testStatus).toBe('passed')
     }
     expect((await post('groups/' + account.groupId + '/mcp', { names: ['p-team'] })).status).toBe(200)
-    expect((await post('mcp', { action: 'publish', name: 'p-store', published: true })).status).toBe(200)
+    expect(
+      (
+        await post('mcp', {
+          action: 'publish',
+          name: 'p-store',
+          published: true,
+          revision: (await (await fetch(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent('p-store'), { headers: { cookie: admin } })).json())
+            .revision,
+        })
+      ).status,
+    ).toBe(200)
     await signInCommunity(page, origin, 'member', 'password')
     const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
     carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim()
@@ -150,18 +177,34 @@ it('toggles granted and published MCP through the native app center and preserve
       await page.getByRole('tab', { name: 'MCP services', exact: true }).click()
     }
     await open()
+    await expect.poll(() => page.getByRole('heading', { name: '资料助手', exact: true }).count()).toBe(2)
+    for (const name of ['p-team', 'p-store']) await page.getByText(name, { exact: true }).waitFor()
     const team = page.getByRole('switch', { name: 'Enable MCP service p-team', exact: true }),
       store = page.getByRole('switch', { name: 'Enable MCP service p-store', exact: true })
     await expect.poll(() => team.getAttribute('aria-checked')).toBe('true')
     expect(await store.getAttribute('aria-checked')).toBe('false')
     expect(await prompt('GRANTED')).toEqual(['mcp__p-team__read'])
     const market = await (await page.request.get(origin + '/market/api/mcp')).json()
-    expect(Object.keys(market[0]).sort()).toEqual(['description', 'enabled', 'granted', 'name', 'required', 'tools'])
+    expect(Object.keys(market[0]).sort()).toEqual(['description', 'display', 'enabled', 'granted', 'name', 'required', 'tools'])
     expect(market.flatMap((row: { tools: { name: string }[] }) => row.tools).every((tool: { name: string }) => tool.name === 'read')).toBe(true)
     await page.getByRole('button', { name: 'View MCP tools for p-team', exact: true }).click()
-    await page.getByRole('dialog').getByText('read', { exact: true }).waitFor()
+    await page.getByRole('dialog', { name: '资料助手', exact: true }).getByText('read', { exact: true }).waitFor()
+    await page.getByRole('dialog').getByText('Service identifier: p-team', { exact: true }).waitFor()
     expect(await page.getByRole('dialog').getByText('write', { exact: true }).count()).toBe(0)
     await page.getByRole('button', { name: 'Close MCP tools', exact: true }).click()
+    const settingsBeforeDisplay = (await (await fetch(origin + '/admin/api/mcp', { headers: { cookie: admin } })).json()).find(
+      (row: { name: string }) => row.name === 'p-team',
+    )
+    expect((await post('mcp', { action: 'save', service: { ...service('p-team'), display: { name: '新资料助手', description: '更新说明' } } })).status).toBe(
+      200,
+    )
+    const settingsAfterDisplay = (await (await fetch(origin + '/admin/api/mcp', { headers: { cookie: admin } })).json()).find(
+      (row: { name: string }) => row.name === 'p-team',
+    )
+    expect(settingsAfterDisplay).toMatchObject({ generation: settingsBeforeDisplay.generation, testStatus: 'passed', tools: settingsBeforeDisplay.tools })
+    await page.getByRole('button', { name: 'Reload MCP services', exact: true }).click()
+    await page.getByRole('heading', { name: '新资料助手', exact: true }).waitFor()
+    expect(await prompt('DISPLAY_CHANGED')).toEqual(['mcp__p-team__read'])
     await team.click()
     await expect.poll(() => team.getAttribute('aria-checked')).toBe('false')
     expect(await prompt('DISABLED')).toEqual([])
@@ -194,11 +237,31 @@ it('toggles granted and published MCP through the native app center and preserve
     await expect.poll(() => store.getAttribute('aria-checked')).toBe('true')
     expect(await prompt('ROTATED')).toEqual(['mcp__p-store__read'])
     expect((await (await post('mcp/test', { name: 'p-store' })).json()).testStatus).toBe('passed')
-    expect((await post('mcp', { action: 'publish', name: 'p-store', published: false })).status).toBe(200)
+    expect(
+      (
+        await post('mcp', {
+          action: 'publish',
+          name: 'p-store',
+          published: false,
+          revision: (await (await fetch(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent('p-store'), { headers: { cookie: admin } })).json())
+            .revision,
+        })
+      ).status,
+    ).toBe(200)
     await page.getByRole('button', { name: 'Reload MCP services', exact: true }).click()
     await expect.poll(() => store.count()).toBe(0)
     expect(await prompt('UNPUBLISHED')).toEqual([])
-    expect((await post('mcp', { action: 'publish', name: 'p-store', published: true })).status).toBe(200)
+    expect(
+      (
+        await post('mcp', {
+          action: 'publish',
+          name: 'p-store',
+          published: true,
+          revision: (await (await fetch(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent('p-store'), { headers: { cookie: admin } })).json())
+            .revision,
+        })
+      ).status,
+    ).toBe(200)
     await page.getByRole('button', { name: 'Reload MCP services', exact: true }).click()
     await expect.poll(() => store.getAttribute('aria-checked')).toBe('false')
     await store.click()

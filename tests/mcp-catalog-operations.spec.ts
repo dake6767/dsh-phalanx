@@ -1,3 +1,4 @@
+import { mcpDisplayText } from '../src/domain/mcp-display.js'
 import { expect, it } from 'vitest'
 import type { McpPreset } from '../src/domain/mcp-catalog.js'
 import type { McpState } from '../src/domain/mcp-service.js'
@@ -269,4 +270,29 @@ it('keeps an already committed update candidate when its initial projection cann
     await f.service.finishCatalogUpdate(f.actor, operation.name, [{ name: 'weather', inputSchema: {} }])
     expect((await f.service.list(f.actor))[0]?.catalogUpdate?.status).toBe('applied')
   }
+})
+
+it('freezes bilingual catalog display defaults and preserves current field overrides through an in-flight service update', async () => {
+  const f = fixture()
+  await ready(f)
+  const before = (await f.service.list(f.actor))[0]!
+  expect(mcpDisplayText(before, 'en')).toEqual({ name: 'Fixture', description: 'Fixture' })
+  expect(mcpDisplayText(before, 'zh-CN')).toEqual({ name: '夹具', description: '夹具' })
+  f.presets[0] = {
+    ...f.presets[0]!,
+    entry: { ...f.presets[0]!.entry, title: { en: 'Updated fixture', 'zh-CN': '新版夹具' }, description: { en: 'New functions', 'zh-CN': '新版功能' } },
+  }
+  expect(mcpDisplayText((await f.service.list(f.actor))[0]!, 'zh-CN').name).toBe('夹具')
+  const candidate = await f.service.beginCatalogUpdate(f.actor, update)
+  await f.service.testCatalogUpdate(f.actor, candidate.name)
+  await f.service.save(f.actor, { ...mcpWriteInput(before), display: { name: '我的工具' } })
+  const editing = (await f.service.list(f.actor))[0]!
+  expect(editing).toMatchObject({ generation: before.generation, testStatus: 'passed', catalogUpdate: { status: 'testing' } })
+  await f.service.finishCatalogUpdate(f.actor, candidate.name, [{ name: 'new_tool', inputSchema: {} }])
+  const updated = (await f.service.list(f.actor))[0]!
+  expect(mcpDisplayText(updated, 'zh-CN')).toEqual({ name: '我的工具', description: '新版功能' })
+  expect(mcpDisplayText(updated, 'en')).toEqual({ name: '我的工具', description: 'New functions' })
+  expect(updated.display).not.toHaveProperty('description')
+  await f.service.save(f.actor, { ...mcpWriteInput(updated), display: { description: '' } })
+  expect(mcpDisplayText((await f.service.list(f.actor))[0]!, 'en')).toEqual({ name: '我的工具', description: '' })
 })

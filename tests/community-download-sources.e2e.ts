@@ -62,6 +62,7 @@ it('keeps prepared dependencies across download-source changes and restart until
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
     await page.getByRole('link', { name: 'System settings', exact: true }).click()
     await page.getByRole('tab', { name: 'Download sources', exact: true }).click()

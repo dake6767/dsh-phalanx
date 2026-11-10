@@ -80,6 +80,7 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
     await admin.getByLabel('Username', { exact: true }).fill('admin')
     await admin.getByLabel('Password', { exact: true }).fill('password')
     await admin.getByRole('button', { name: 'Create administrator', exact: true }).click()
+    await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await admin.waitForURL(origin + '/admin')
     const api = async (path: string, input?: object) => {
       const response = input

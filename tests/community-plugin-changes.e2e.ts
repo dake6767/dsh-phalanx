@@ -98,6 +98,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(origin + '/admin')
     const post = async (path: string, data: object) => page.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
     const list = async () => (await (await page.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[]

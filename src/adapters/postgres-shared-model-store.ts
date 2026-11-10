@@ -43,6 +43,14 @@ export class PostgresSharedModelStore implements SharedModelStorePort {
     const next = structuredClone(state)
     return this.lifecycle.write(() => this.persist(next))
   }
+  /** Republish committed bytes without creating a new provider or revision. */
+  retry(revision: number): Promise<void> {
+    return this.lifecycle.write(async () => {
+      this.state = await this.loadCommitted()
+      if (this.read().revision !== revision) throw new BusinessRuleError('conflict', 'Model settings changed. Reload before saving.', 'model-revision-conflict')
+      this.publishCommitted()
+    })
+  }
   private async load(): Promise<void> {
     this.state = await this.loadCommitted()
     this.publishCommitted()

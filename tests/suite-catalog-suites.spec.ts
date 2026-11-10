@@ -65,12 +65,13 @@ it('rolls back the CLI dependency when the Git import fails, and reports mismatc
   expect(conflicted.dependencyRows.size).toBe(0)
 })
 
-it('keeps suite-owned skills and packs read-only', async () => {
+it('keeps suite-owned contents read-only while allowing independent publication', async () => {
   const f = fixture()
   await f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa1' })
   await f.settled('installed')
   const detail = await f.library.detail(actor, 'one')
-  await expect(f.library.publish(actor, 'one', true, detail.revision)).rejects.toMatchObject({ code: 'suite-entry-locked' })
+  await f.library.publish(actor, 'one', true, detail.revision)
+  expect((await f.library.detail(actor, 'one')).published).toBe(true)
   await expect(f.library.remove(actor, 'one', detail.revision)).rejects.toMatchObject({ code: 'suite-entry-locked' })
   await expect(f.library.setRuntimeDependencies(actor, 'one', [], detail.revision)).rejects.toMatchObject({ code: 'suite-entry-locked' })
   const packRevision = await f.packs.revision(actor)
@@ -80,6 +81,8 @@ it('keeps suite-owned skills and packs read-only', async () => {
   await expect(f.packs.remove(actor, 'fixture-suite', false, (await f.packs.detail(actor, 'fixture-suite')).revision)).rejects.toMatchObject({
     code: 'suite-entry-locked',
   })
+  await f.packs.publish(actor, 'fixture-suite', true, await f.packs.revision(actor))
+  expect((await f.packs.detail(actor, 'fixture-suite')).published).toBe(true)
 })
 
 it('previews and completes uninstalls, revoking grants and selections, and blocks manual pack references', async () => {
@@ -313,12 +316,12 @@ it('detaches a skill together with its delegated execution, keeping grants, publ
   const f = fixture(delegatedPreset())
   await f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa1', credentials: { SUITE_KEY: 'team-secret-value' } })
   await f.settled('installed')
-  await f.library.publish(actor, 'one', true, (await f.library.detail(actor, 'one')).revision).catch(() => {})
+  await f.library.publish(actor, 'one', true, (await f.library.detail(actor, 'one')).revision)
   await f.suites.detach(actor, 'fixture-suite', { kind: 'skill', name: 'one' })
   expect(f.record()?.entries.map(entry => `${entry.kind}:${entry.name}`)).toEqual(['runtime-dependency:suite-cli', 'skill-pack:fixture-suite'])
   expect(f.libraryRows.get('one')?.suiteOrigin).toBeUndefined()
   expect(f.executionRows.get('skill:one')?.suiteOrigin).toBeUndefined()
-  // Once detached the skill is an ordinary entry: it can be published directly.
+  // Detachment preserves the publication decision while releasing content ownership.
   await f.library.publish(actor, 'one', true, (await f.library.detail(actor, 'one')).revision)
   expect(f.libraryRows.get('one')?.published).toBe(true)
   // A second attempt reports the entry is gone from the suite rather than half-applying.

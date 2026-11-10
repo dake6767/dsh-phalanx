@@ -14,6 +14,7 @@ import { startCommunityModel } from './fixtures/community-model.js'
 import { runCommunityTerminal, selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
+import { latestHumanText } from './support/real-dsh-model.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
 import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
@@ -175,6 +176,29 @@ it('declares shared model image input and enforces it for prompts and image read
   const sessionIds = async () =>
     (await rpc.remoteRpc<{ items: { sessionId: string }[] }>(origin, cookie, 'session/list', { _request: {} })).items.map(row => row.sessionId)
   const beforeSpawn = await sessionIds()
+  const alternate = await admin.request.post(`${origin}/admin/api/models`, {
+    headers: { origin },
+    data: {
+      revision: settings.revision,
+      action: 'save-provider',
+      provider: {
+        name: 'Default only',
+        baseUrl: fixture.origin + '/anthropic',
+        apiFormat: 'anthropic-messages',
+        apiKey: 'community-provider-fixture-key',
+        enabled: true,
+        models: [{ name: 'global-default-only', enabled: true, input: 'text' }],
+      },
+    },
+  })
+  expect(alternate.status()).toBe(200)
+  settings = (await alternate.json()) as CommunityModelSettings
+  const changedDefault = await admin.request.post(`${origin}/admin/api/models`, {
+    headers: { origin },
+    data: { revision: settings.revision, action: 'set-default', defaultModelId: settings.providers.find(row => row.name === 'Default only')!.models[0]!.id },
+  })
+  expect(changedDefault.status()).toBe(200)
+  settings = (await changedDefault.json()) as CommunityModelSettings
   await send('SPAWN_SUBAGENT_TASK')
   const parentConversation = page.locator(`[data-conversation-content][data-conversation-session=${JSON.stringify(parentSessionId)}]`)
   const parentDone = parentConversation.locator('p').filter({ hasText: 'PARENT_DONE' }).last()
@@ -195,6 +219,16 @@ it('declares shared model image input and enforces it for prompts and image read
     )
     .toBe(true)
   await expect.poll(async () => await page.getByRole('button', { name: 'Stop generating', exact: true }).count(), { timeout: 120_000 }).toBe(0)
+  const childRequests = fixture.requests.filter(body => {
+    const human = latestHumanText(body)
+    return body.max_tokens !== 64 && human.includes('CHILD_TASK') && !human.startsWith('Generate the session title from this JSON array of human messages:')
+  })
+  expect(childRequests.length).toBeGreaterThan(0)
+  for (const request of childRequests) {
+    expect(request.model).toBe('deepseek-flash')
+    expect(JSON.stringify(request.system)).toContain('You are a coding agent powered by the deepseek-flash model.')
+    expect(JSON.stringify(request.system)).not.toContain('powered by the global-default-only model.')
+  }
   const childSessionId = (await sessionIds()).find(id => !beforeSpawn.includes(id))!
   const childPrompt = async () =>
     await rpc.remoteRpcResult(origin, cookie, 'subagents/prompt', {

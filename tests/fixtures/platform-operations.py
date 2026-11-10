@@ -4,6 +4,7 @@ import http.client
 import socket
 import threading
 import os
+import uuid
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +13,102 @@ from installer_host import Host,InstallError
 from installer_executor_protocol import validated_request,ControlError
 
 class ManagedOperations(unittest.TestCase):
+    def test_restores_only_a_legacy_rotation_stopped_before_initialization_without_running_the_key_worker(self):
+        for scenario in ('restore','foreign-marker','changed-key','pending-product','prepared','new-job','reset','interrupted-start','interrupted-preparation','changed-during-preparation','changed-during-start','changed-during-ready','interrupted-open'):
+            with self.subTest(scenario=scenario):self.legacy_initialization_recovery(scenario)
+
+    def legacy_initialization_recovery(self,scenario):
+        from installer_operations import PlatformOperations,JOURNAL,MARKER
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);events=[];changed=[False];interrupted=[False]
+            target=root/'release';target.mkdir();(target/'start').touch()
+            source={'uid':os.geteuid(),'target':str(target),'values':{'DSH_PHALANX_DATA_ROOT':'/data','DSH_PHALANX_DATABASE_CONFIG_FILE':'/keys/database.json','DSH_PHALANX_HOST':'127.0.0.1','DSH_PHALANX_PORT':'3080'}}
+            identity=str(uuid.uuid4())
+            marker=json.dumps({'schema':1,'ports':[3080],'operation':identity,'operationKind':'master-key-rotate','deploymentId':'deployment-fixture'})+'\n'
+            job={'schema':1,'id':identity,'action':'master-key-rotate','phase':'working','source':source,'deploymentId':'deployment-fixture','configFile':'/keys/database.json','marker':marker}
+            if scenario=='prepared':job['phase']='prepared'
+            if scenario=='new-job':job['rotationCheck']={}
+            if scenario=='reset':job['action']='master-key-reset'
+            if scenario=='pending-product':
+                journal=root/'keys/platform-key-operation.json';journal.parent.mkdir();journal.write_text('pending')
+            def command(args,**kwargs):
+                if kwargs.get('stdin'):
+                    request=json.load(kwargs['stdin'])
+                    if 'storage' in request:
+                        self.assertTrue(host.path(MARKER).exists());self.assertIn('stopped',events)
+                        if scenario=='interrupted-preparation' and not interrupted[0]:
+                            interrupted[0]=True;return SimpleNamespace(returncode=1,stdout='{}',stderr='Controlled preparation interruption')
+                        if scenario=='changed-during-preparation':changed[0]=True
+                        return SimpleNamespace(returncode=0,stdout=json.dumps({'prepared':True}),stderr='')
+                    self.assertEqual(request['fact'],'rotation')
+                    if scenario=='changed-key':return SimpleNamespace(returncode=2,stdout='',stderr='Key authentication failed')
+                    ready=scenario=='changed-during-ready' and 'started' in events
+                    return SimpleNamespace(returncode=0,stdout=json.dumps({'ready':ready,'initializationPending':not ready,'deploymentId':'deployment-fixture','fingerprint':'sha256:'+('e' if changed[0] else 'f')*64,'identity':[]}),stderr='')
+                return SimpleNamespace(returncode=0,stdout='',stderr='')
+            host=Host(root,command)
+            class Port:
+                def source(self):return source
+                def stop(self,job):
+                    if job.get('initializationRejection') is None:raise InstallError('Unmatched operation must use its original worker recovery')
+                    events.append('stopped')
+                def start(self,job):
+                    if scenario=='interrupted-start' and not interrupted[0]:
+                        interrupted[0]=True;raise InstallError('Controlled service interruption')
+                    if scenario=='changed-during-start':changed[0]=True
+                    events.append('started')
+                def verify_source(self,source,path):
+                    if path=='/readyz' and scenario=='changed-during-ready':changed[0]=True
+                    elif path!='/healthz':raise InstallError('Unselected bootstrap has no ready platform records')
+                    events.append('verified')
+                class admission:
+                    @staticmethod
+                    def close(ports):events.append('closed')
+                    @staticmethod
+                    def open():
+                        if scenario=='interrupted-open' and not interrupted[0]:
+                            interrupted[0]=True;raise InstallError('Controlled admission interruption')
+                        events.append('opened')
+            owner=PlatformOperations(host,Port());host.atomic(JOURNAL,json.dumps(job)+'\n');host.atomic(MARKER,'foreign' if scenario=='foreign-marker' else marker,0o644)
+            if scenario!='restore':
+                with self.assertRaises(InstallError):owner.recover()
+                self.assertNotIn('opened',events)
+                self.assertTrue(host.path(MARKER).exists() or scenario=='interrupted-open')
+                if scenario=='changed-during-preparation':self.assertNotIn('started',events)
+                if not scenario.startswith('interrupted-'):return
+                # Reconstruct from the durable opening proof, not an in-memory decision.
+                owner=PlatformOperations(host,Port())
+            self.assertEqual(owner.recover()['phase'],'restored')
+            self.assertFalse(host.path(MARKER).exists())
+            self.assertLess(events.index('started'),events.index('verified'))
+            self.assertLess(events.index('verified'),events.index('opened'))
+
+    def test_rotation_refuses_initialization_before_recording_maintenance_or_stopping_services(self):
+        from installer_operations import PlatformOperations
+        for initialized in (False,True):
+            with self.subTest(initialized=initialized),tempfile.TemporaryDirectory() as temporary:
+                root=Path(temporary);events=[]
+                config=root/'keys/database.json';config.parent.mkdir()
+                config.write_text(json.dumps({'deploymentId':'deployment-fixture'}));config.chmod(0o600)
+                target=root/'release';target.mkdir();(target/'start').touch()
+                source={'uid':os.geteuid(),'target':str(target),'values':{'DSH_PHALANX_DATA_ROOT':'/data','DSH_PHALANX_DATABASE_CONFIG_FILE':'/keys/database.json','DSH_PHALANX_HOST':'127.0.0.1','DSH_PHALANX_PORT':'3080'}}
+                def command(args,**kwargs):
+                    request=json.load(kwargs['stdin'])
+                    self.assertEqual(request['fact'],'rotation')
+                    return SimpleNamespace(returncode=0,stdout=json.dumps({'ready':initialized,'initializationPending':not initialized,'deploymentId':'deployment-fixture','fingerprint':'sha256:'+'f'*64,'identity':[]}),stderr='')
+                class Port:
+                    def source(self):return source
+                    def operation(self):return None
+                    class admission:
+                        @staticmethod
+                        def preflight(ports):events.append('preflight')
+                owner=PlatformOperations(Host(root,command),Port())
+                if initialized:self.assertEqual(owner.begin('master-key-rotate')['phase'],'prepared')
+                else:
+                    with self.assertRaisesRegex(InstallError,'initialized'):owner.begin('master-key-rotate')
+                    self.assertIsNone(owner.status())
+                    self.assertEqual(events,[])
+                self.assertFalse((root/'etc/dsh-phalanx/maintenance').exists())
+
     def test_closed_rotation_protocol_never_accepts_commands_or_paths(self):
         self.assertEqual(validated_request({'action':'master-key-rotate'}),{'action':'master-key-rotate'})
         self.assertEqual(validated_request({'action':'database-switch','target':'external'}),{'action':'database-switch','target':'external'})
@@ -38,7 +135,11 @@ class ManagedOperations(unittest.TestCase):
             config=root/'keys/database.json';config.parent.mkdir()
             config.write_text(json.dumps({'deploymentId':'deployment-fixture'}));config.chmod(0o600)
             source={'uid':os.geteuid(),'gid':os.getegid(),'target':str(root/'release'),'values':{'DSH_PHALANX_DATA_ROOT':'/data','DSH_PHALANX_DATABASE_CONFIG_FILE':'/keys/database.json','DSH_PHALANX_HOST':'127.0.0.1','DSH_PHALANX_PORT':'3080'}}
+            (root/'release').mkdir();(root/'release/start').touch()
             def command(args,**kwargs):
+                if kwargs.get('stdin'):
+                    self.assertEqual(json.load(kwargs['stdin'])['fact'],'rotation')
+                    return SimpleNamespace(returncode=0,stdout=json.dumps({'ready':True,'initializationPending':False,'deploymentId':'deployment-fixture','fingerprint':'sha256:'+'f'*64,'identity':[]}),stderr='')
                 if 'systemctl' in args and 'dsh-phalanx-postgres.service' in args:
                     if 'reset-failed' in args:starts[0]=0
                     elif 'start' in args:

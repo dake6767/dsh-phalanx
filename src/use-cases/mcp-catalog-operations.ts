@@ -164,6 +164,11 @@ export class McpCatalogOperations {
         ...service,
         ...selected,
         name: service.name,
+        display: {
+          ...(selected.display?.defaults ? { defaults: selected.display.defaults } : {}),
+          ...(service.display?.name === undefined ? {} : { name: service.display.name }),
+          ...(service.display?.description === undefined ? {} : { description: service.display.description }),
+        },
         published: service.published ?? false,
         required: service.required ?? false,
         disabledTools: service.disabledTools ?? [],

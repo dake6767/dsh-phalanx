@@ -50,6 +50,7 @@ it('uses the built service and admin UI through bootstrap, member entry, HTTP an
   await admin.getByLabel('Username').fill('admin')
   await admin.getByLabel('Password', { exact: true }).fill('admin-password')
   await admin.getByRole('button', { name: 'Create administrator' }).click()
+  await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await admin.waitForURL(`${origin}/admin`)
   await admin.getByRole('heading', { name: 'Account management' }).waitFor()
   await admin.getByRole('button', { name: 'Add account', exact: true }).click()

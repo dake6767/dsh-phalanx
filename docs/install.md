@@ -89,6 +89,19 @@ sudo /opt/dsh-phalanx/current/start maintenance-status
 
 Run one operation at a time during a maintenance window. Switching copies and verifies platform facts before selecting the target; source data is retained. Rotation rewraps data keys. Both operations interrupt member tasks and have independent maintenance receipts. Inspect the result, use `maintenance-recover` for a recoverable interrupted operation, and follow its recovery instructions instead of manually editing connection files or deleting the maintenance marker. Preserve the source database and recovery files until the new deployment has been verified.
 
+Rotation requires a selected database with an initialized platform schema; a first administrator is not required. Before selection or schema initialization, the command refuses before entering maintenance, closing admission or stopping services. It does not change the deployment identity, database password or data keys.
+
+If an old executor failed rotation before initialization and `maintenance-status` reports `master-key-rotate` in phase `working`, first update the independent executor with a verified installer that supports this recovery, then recover:
+
+```sh
+sudo bash install.sh --upgrade bootstrap
+sudo /opt/dsh-phalanx/current/start maintenance-status
+sudo /opt/dsh-phalanx/current/start maintenance-recover
+sudo /opt/dsh-phalanx/current/start maintenance-status
+```
+
+This keeps the installed platform version. The initialization recovery requires the same deployment and source, a matching maintenance marker, authenticated protected configuration and master key, an unselected database or empty schema, and no product maintenance journal or staged key files. For a selected empty schema, the executor first uses the installed source database and storage owners to prepare its initial storage identity while maintenance and admission remain closed. This preparation is retryable and retains existing external-storage protections. An unselected database is not initialized. It then starts the original service, verifies the healthy entry and rechecks protected file identities, and also verifies `/readyz` when the schema is ready, before opening admission, returning `restored`. An interrupted recovery can be retried. Changed files, other phases and other maintenance actions cannot use this shortcut; an existing product journal follows its original operation recovery. On failure, retain maintenance state and diagnostics; do not remove the marker manually.
+
 ### Consistent backup and whole-host migration
 
 Stop the platform and confirm member containers have stopped before taking a consistent backup. For a cold built-in database backup, stop its PostgreSQL service too; for external PostgreSQL, obtain a matching consistent database backup. Keep the database, master key, connection files, `/etc/dsh-phalanx/environment` and actual user root together as one deployment set, retaining ownership and permissions.
@@ -231,8 +244,8 @@ No model key is required. Confirm the proposed browser address (or
 supply `--public-origin`) and the complete public IPv4 inventory, including NAT
 aliases. Submit an empty inventory only when the host has no public IPv4 addresses.
 The installer prints an `initializationUrl`. Open it in a browser, enter an
-administrator username and password, and go directly to `/admin`. Email is optional.
-The management page shows the unconfigured model state; terminals and workspaces
+administrator username and password, and sign in automatically to the optional first-model form. Email is optional. Save one provider and one enabled default model, or choose **Skip for now and finish installation** to enter `/admin`. Only configuration format is checked; saving does not verify that the model can answer. Existing deployments are not redirected into this step.
+If you skip, the management page shows the unconfigured model state; terminals and workspaces
 remain available. Open Model management at `/admin/models`, choose the provider protocol, add individual model rows and save the provider explicitly. The base URL keeps the prefix that protocol expects. For Anthropic Messages, DeepSeek uses `https://api.deepseek.com/anthropic` and Volcengine Coding Plan uses `https://ark.cn-beijing.volces.com/api/coding`; the gateway appends `/v1/messages`. For OpenAI Chat Completions or OpenAI Responses, keep any version prefix the provider requires, such as `https://api.deepseek.com/v1`; the gateway appends `/chat/completions` or `/responses`. Choose a replacement default before disabling or deleting its current model or provider. Existing member catalogs update without a platform restart.
 
 Each model row has a **Supports images** switch. Known vision models such as
@@ -243,11 +256,12 @@ images before model admission. New rows use the same known-model defaults; saved
 unchanged. This switch declares upstream capability; it cannot add image support
 to an upstream model that lacks it.
 
-**Supports reasoning** is off by default for every model, including existing models.
-Enable it only for an upstream that supports reasoning. DSH then offers Off, Low,
-Medium and High in the conversation's model picker; turning it off removes the
-Effort control. The member or provider chooses the default. The platform passes
-reasoning fields through without choosing a default effort.
+**Supports reasoning effort** is off by default for every model, including existing
+models. Enable it only when the upstream supports selecting reasoning intensity.
+This declaration exposes Off, Low, Medium and High in DSH's conversation model
+picker; disabling it hides the Effort control. It does not turn the model's own
+reasoning on or off. The member or provider chooses the default. The platform
+passes reasoning fields through without choosing a default effort.
 
 
 Configure provider credentials in administration after signup. The platform generates
@@ -423,8 +437,20 @@ together with the account database and member storage.
 
 ## Platform app center and MCP
 
-Open **Platform apps** from the DSH sidebar. Its tabs are **Plugins | Skills | Skill
-packs | MCP services**, in that order. The account menu and recovery page also link
+In administration, plugin, skill, skill-pack and MCP details begin with a **Platform
+App Center** section. It shows publication separately from availability and provides
+independent publish/unpublish actions with an impact confirmation. Save a new resource
+first; save or discard pending edits before changing publication. Catalog content stays
+read-only while its publication remains an administrator choice. Updates preserve that
+choice. A plugin paused for incompatibility explains automatic republication and lets
+you cancel it. Published empty or conflicting packs show why members cannot use them.
+When platform credentials are involved, confirmation explains that all members may use
+them through the resource. Unpublishing retains group grants; republishing does not
+restore cleared self-selections. Native plugin copies remain installed, while shared-key
+plugin selections stop loading after restart. Skill, pack and MCP selections are cleared
+for the resource being unpublished.
+
+Open **Platform apps** from the DSH sidebar. Its tabs are **Plugins | Skills | MCP services**, in that order. The account menu and recovery page also link
 to this entry. The standalone `/market` page is unavailable; replace old bookmarks
 with the DSH sidebar entry. This does not remove the native DSH plugin manager.
 
@@ -479,6 +505,12 @@ and optional orchestration instructions. Packs do not nest or duplicate skill
 files. Group grants and published member selections work for whole packs; effective
 access is the union of direct and pack access, with managed access taking priority.
 An orchestration skill appears only while the pack has an available child.
+
+New packs start unpublished. Saving content preserves publication; use the independent
+action in the detail's **Platform App Center** section to publish or unpublish. Empty
+packs can remain published while unavailable to members; no new publication prerequisite
+is imposed. Unpublishing a pack clears that pack's selections and retains its group
+grants and individual skill selections.
 
 The skill library, group grants and member skill choices show packs
 as expandable entries. Packed skills remain inside their packs unless a direct
@@ -612,6 +644,11 @@ forward the full path and WebSocket upgrades to the platform.
 
 ## Switching accounts in this browser
 
+Administrators see **Go to admin console** as the first item in the DSH sidebar
+account menu. It opens the same deployment's `/admin` home in a new tab and keeps
+DSH open. Ordinary members do not see this item. Refresh DSH after a role change
+to update the menu; management pages always check the current permission.
+
 Choose **Switch accounts** in the DSH sidebar account menu or the management
 sidebar account area. The recovery page at `/recovery` also lists accounts,
 even when DSH cannot start. Select an available account to enter its default
@@ -658,6 +695,22 @@ HTTP is supported. A [public HTTPS proxy](#https-on-a-custom-port) is deployer-m
 `--listen-address`, `--port` and `--public-origin` select deployment facts on first
 installation. For a loopback deployment, forward the port through SSH and supply
 the corresponding browser origin explicitly.
+
+Deployers may optionally prefill the first-model form with `/etc/dsh-phalanx/initial-model.json`, a UTF-8 JSON object of at most 16 KiB. Accepted fields are `name` (provider name), `baseUrl`, `apiFormat` (`anthropic-messages`, `openai-completions` or `openai-responses`), `model` (upstream identifier) and `apiKey`. Every field is optional; the administrator fills missing values. For example:
+
+```json
+{
+  "name": "Example provider",
+  "baseUrl": "https://models.example.com/v1",
+  "apiFormat": "openai-completions",
+  "model": "example-model",
+  "apiKey": "<credential>"
+}
+```
+
+The file may contain a real key. Make it a regular file, mode `0600`, owned by the platform service's runtime user (normally `dsh-phalanx`), with parent directories that user can traverse. Root ownership alone is insufficient. The platform checks ownership, mode and size on the same descriptor it reads; symlinks and special files are refused. Missing files leave a blank form. Invalid or unreadable files show a safe notice and allow manual configuration or skipping. The browser receives only a preset/masked key status: leaving the key field empty keeps the server-side value, while entering a key replaces it. Other suggestions remain editable. Never pass defaults or keys through URL parameters.
+
+Saving makes the database configuration authoritative; the file does not continuously override it. Skipping imports nothing. The platform never deletes this deployer-managed file. If runtime publication fails after the database commits, reload the first-model page and choose **Retry model publication**; the saved provider and revision are reused. Further configuration belongs in Model management, with no automatic setup resumption on later sign-in.
 
 The initialization link expires after 24 hours and survives ordinary service
 restart. Successful account creation consumes it and signs the administrator in.

@@ -1,3 +1,4 @@
+import { CommunityPublicationStatus } from './CommunityPublicationSection'
 import { useEffect, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
@@ -82,21 +83,18 @@ export default function CommunitySkillPacks() {
                 <p className="plugin-summary-meta">{pack.empty ? t('Empty pack — hidden from members') : t('{count} skills', { count: pack.skills.length })}</p>
                 <Card.Description>{pack.description}</Card.Description>
               </Card.Header>
-              {pack.conflict ? <CommunityMessage status="warning" title={t('Conflicts with a bundled runtime skill. Distribution is paused.')} /> : null}
-              {pack.published || pack.suiteOrigin ? (
-                <Card.Footer className="plugin-card-status">
-                  {pack.suiteOrigin ? (
-                    <Chip variant="soft" size="sm" color="accent">
-                      {t('From “{name}”', { name: originName(pack.suiteOrigin) })}
-                    </Chip>
-                  ) : null}
-                  {pack.published ? (
-                    <Chip variant="soft" size="sm" color="success">
-                      {t('Published')}
-                    </Chip>
-                  ) : null}
-                </Card.Footer>
+              {pack.unavailable === 'conflict' ? (
+                <p className="plugin-card-error">{t('All pack skills conflict with the runtime and are temporarily unavailable.')}</p>
               ) : null}
+              {pack.conflict ? <CommunityMessage status="warning" title={t('Conflicts with a bundled runtime skill. Distribution is paused.')} /> : null}
+              <Card.Footer className="plugin-card-status">
+                {pack.suiteOrigin ? (
+                  <Chip variant="soft" size="sm" color="accent">
+                    {t('From “{name}”', { name: originName(pack.suiteOrigin) })}
+                  </Chip>
+                ) : null}
+                <CommunityPublicationStatus published={pack.published} unavailable={!!pack.unavailable} />
+              </Card.Footer>
               <Button
                 variant="tertiary"
                 size="sm"

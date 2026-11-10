@@ -85,6 +85,7 @@ describe('community account lifecycle through real DSH', () => {
     await admin.getByLabel('Username').fill('admin')
     await admin.getByLabel('Password', { exact: true }).fill('admin-password')
     await admin.getByRole('button', { name: 'Create administrator' }).click()
+    await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await admin.waitForURL(`${origin}/admin`)
     for (const username of ['member', 'other']) {
       await admin.getByRole('button', { name: 'Add account', exact: true }).click()

@@ -132,25 +132,53 @@ it('drains an accepted candidate waiting for collection and refuses new candidat
 
 it('retains the next runtime version through Git preparation during catalog update', async () => {
   const f = await postgresSuiteService()
-  let survived = false
+  let survived = false,
+    firstCleanup = true,
+    cleanupStarted = false,
+    release!: () => void,
+    queued!: () => void
+  const gate = new Promise<void>(resolve => {
+      release = resolve
+    }),
+    enqueued = new Promise<void>(resolve => {
+      queued = resolve
+    }),
+    discard = f.library.discardSuiteImport.bind(f.library)
+  f.library.discardSuiteImport = async stage => {
+    if (!firstCleanup) return discard(stage)
+    firstCleanup = false
+    cleanupStarted = true
+    await gate
+    const pending = discard(stage)
+    queued()
+    await pending
+  }
   try {
     await f.suites.install(f.actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa1', credentials: { SUITE_KEY: 'fictional-suite-key' } })
     await f.settled()
+    await expect.poll(() => cleanupStarted, { timeout: 10000 }).toBe(true)
     f.hooks.beforeGit = async () => {
       const prepared = [...f.preparedArtifacts]
       expect(prepared).toHaveLength(2)
       await f.dependencies.collectUnretained()
       survived = prepared.every(id => f.preparedArtifacts.has(id))
+      // Queue the previous task's cleanup behind this Git preparation, so it
+      // cannot accidentally release the new task's staging owner.
+      release()
+      await enqueued
     }
     f.upgrade(suiteVersion(2))
     await f.suites.update(f.actor, 'fixture-suite')
     await f.settled()
     await f.suites.stop()
-    expect((await f.record())?.version).toBe('2')
+    const record = await f.record()
+    expect(record?.version, JSON.stringify(record)).toBe('2')
+    expect(record?.failureCode).toBeUndefined()
     expect(survived).toBe(true)
     const current = (await f.runtime.store.list())[0]!.current!
     expect(await readFile(join(current.directory, 'prepared'), 'utf8')).toBe('prepared runtime fixture')
   } finally {
+    release()
     await f.close()
   }
 })

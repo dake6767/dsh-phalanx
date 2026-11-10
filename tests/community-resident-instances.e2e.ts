@@ -63,6 +63,7 @@ it('automatically starts resident members before navigation, restores them after
   await admin.getByLabel('Username', { exact: true }).fill('admin')
   await admin.getByLabel('Password', { exact: true }).fill('password')
   await admin.getByRole('button', { name: 'Create administrator', exact: true }).click()
+  await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await admin.waitForURL(`${origin}/admin`)
   expect(
     (

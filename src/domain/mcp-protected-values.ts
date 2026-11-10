@@ -63,10 +63,10 @@ export interface McpSecretContext {
 }
 
 function sanitizeDisplay(service: McpService, known: readonly string[]): McpService {
-  const display = redactMcpValue({ description: service.description, ...(service.tools ? { tools: service.tools } : {}) }, known) as Pick<
-    McpService,
-    'description' | 'tools'
-  >
+  const display = redactMcpValue(
+    { description: service.description, ...(service.display ? { display: service.display } : {}), ...(service.tools ? { tools: service.tools } : {}) },
+    known,
+  ) as Pick<McpService, 'description' | 'tools' | 'display'>
   return {
     ...structuredClone(service),
     ...display,

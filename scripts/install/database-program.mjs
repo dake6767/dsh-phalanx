@@ -84,3 +84,25 @@ try {
 }
 `
 }
+
+/** Explicit write operation; read-only facts remain independent. */
+export async function initializationRecoveryProgram() {
+  const module = moduleCompiler([
+    'platform-initialization-recovery',
+    'platform-executor-facts',
+    'postgres-download-sources',
+    'platform-schema-versions',
+    'platform-schema-registry',
+  ])
+  return `// Generated recovery program. All writes use the installed source owners.
+import { readFileSync } from 'node:fs';
+try {
+  const request = JSON.parse(readFileSync(0, 'utf8'));
+  const { prepareInitializationRecovery } = await import(${JSON.stringify(await module('platform-initialization-recovery'))});
+  console.log(JSON.stringify(await prepareInitializationRecovery(request)));
+} catch {
+  console.error('Initialization recovery preparation failed; keep admission closed and inspect the protected database and user storage');
+  process.exitCode = 1;
+}
+`
+}

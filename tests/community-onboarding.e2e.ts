@@ -61,6 +61,7 @@ describe('community onboarding through the native DSH product entry', () => {
     await admin.getByLabel('Username').fill('admin')
     await admin.getByLabel('Password', { exact: true }).fill('admin-password')
     await admin.getByRole('button', { name: 'Create administrator' }).click()
+    await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await admin.waitForURL(`${origin}/admin`)
     expect(readBootstrapCredential(root)).toBeUndefined()
     await admin.getByRole('heading', { name: 'Account management' }).waitFor()

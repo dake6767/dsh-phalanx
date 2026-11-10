@@ -6,6 +6,7 @@ export interface CommunitySkillImpact {
   readonly revision: string
 }
 export interface CommunitySkillView {
+  readonly hasPlatformCredential?: boolean
   readonly topLevel: boolean
   readonly runtimeDependencies?: readonly string[]
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
@@ -142,9 +143,12 @@ export interface CommunitySkillPackInput {
   readonly description: string
   readonly skills: readonly string[]
   readonly instructions: string
+  /** Saving preserves publication; new packs start unpublished. Use the independent publish action. */
   readonly published: boolean
 }
 export interface CommunitySkillPackView extends CommunitySkillPackInput {
+  readonly hasPlatformCredential?: boolean
+  readonly unavailable?: 'empty' | 'conflict'
   readonly suiteOrigin?: string
   readonly empty: boolean
   readonly conflict: boolean

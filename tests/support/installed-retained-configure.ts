@@ -61,7 +61,9 @@ export async function configureRetainedUpgrade(input: {
       ).status(),
     ).toBe(200)
     expect((await (await post('mcp/test', { name })).json()).testStatus).toBe('passed')
-    expect((await post('mcp', { action: 'publish', name, published: true })).status()).toBe(200)
+    expect(
+      (await post('mcp', { action: 'publish', name, published: true, revision: (await get('mcp?publication=' + encodeURIComponent(name))).revision })).status(),
+    ).toBe(200)
   }
   expect((await post(`groups/${groupId}/mcp`, { names: ['p-managed'] })).status()).toBe(200)
   await signInCommunity(member, origin, 'member', 'password')

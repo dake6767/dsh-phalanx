@@ -1,6 +1,7 @@
 import type { CommunityErrorCode, CommunityErrorParams } from './admin-contract.js'
 /** Current identity facts needed by entry and default model authorization. */
 export interface CommunityAccountState {
+  readonly admin: boolean
   readonly username: string
   readonly spaceId: string
   readonly disabled: boolean
@@ -13,7 +14,6 @@ export type CommunityAccountActor = Pick<CommunityAccountState, 'username' | 'sp
 /** Public account facts. Password hashes remain private to the store adapter. */
 export interface CommunityAccountRecord extends CommunityAccountState {
   readonly email: string
-  readonly admin: boolean
   readonly groupId: string
   readonly createdAt: number
   readonly updatedAt: number

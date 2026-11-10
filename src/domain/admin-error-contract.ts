@@ -64,6 +64,7 @@ export type CommunityErrorCode =
   | 'mcp-impact-changed'
   | 'mcp-service-unavailable'
   | 'mcp-service-invalid'
+  | 'mcp-display-invalid'
   | 'mcp-grant-invalid'
   | 'runtime-dependency-invalid'
   | 'runtime-dependency-name-conflict'

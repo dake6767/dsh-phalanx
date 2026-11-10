@@ -217,6 +217,8 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)(
           revision: current.revision,
           pack: { name: 'runtime-pack', description: 'PACK_INSTRUCTIONS', skills: names, instructions: 'Use runtime-skill, then pack-extra.', published: true },
         })
+        const saved = (await (await request('skill-packs')).json()) as { revision: string }
+        await request('skill-packs', { action: 'publish', name: 'runtime-pack', published: true, revision: saved.revision })
       }
       const grantPack = async (packs: string[]) => {
         const view = (await (await request(endpoint)).json()) as CommunitySkillGroupView

@@ -15,6 +15,11 @@ export class ExecutionDependencies {
   sourceVersions(): readonly string[] {
     return [...this.sources.keys()]
   }
+  async hasPlatformCredential(owner: string): Promise<boolean> {
+    if (!this.owners.identities().includes(owner)) return false
+    const configuration = await this.configurations.get(owner)
+    return !!configuration?.enabled && configuration.variables.some(row => row.secret && row.value !== '')
+  }
   async recover(): Promise<void> {
     await this.changed()
   }

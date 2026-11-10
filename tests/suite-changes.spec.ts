@@ -47,7 +47,7 @@ it('prepares and commits a catalog install and update while holding candidate ar
     expect((await f.storage.library.list()).map(row => row.name)).toEqual(['one', 'two'])
     expect(await f.runtime.execution.get('skill:one')).toMatchObject({ variables: [{ name: 'SUITE_KEY', value: 'fictional-suite-key', secret: true }] })
     for (const row of await f.storage.library.list()) expect(await readFile(f.skillArtifactPath(row.hash), 'utf8')).toBe('prepared skill fixture')
-    expect(() => f.library.preparedSuiteImport('suite:fixture-suite:change:1')).toThrow()
+    for (const task of [installed, current]) expect(() => f.library.preparedSuiteImport(`suite:fixture-suite:change:1:${task.revision}`)).toThrow()
   } finally {
     await f.close()
   }

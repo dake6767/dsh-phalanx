@@ -1,3 +1,4 @@
+import { mergeMcpDisplay, validateMcpDisplay } from './mcp-display.js'
 import { MAX_EXECUTION_TIMEOUT_SECONDS } from './execution-control.js'
 import type { CommunityMcpService, CommunityMcpInput, CommunityMcpTemplate, CommunityMcpTool, CommunityMcpSettings } from './admin-contract.js'
 import { HOP_HEADERS } from './plugin-upstream.js'
@@ -72,6 +73,7 @@ export function mcpSettings(service: McpService): CommunityMcpSettings {
   return {
     ...(service.catalogUpdate ? { catalogUpdate: { version: service.catalogUpdate.version, status: service.catalogUpdate.status } } : {}),
     ...(service.catalog ? { catalog: service.catalog } : {}),
+    ...(service.display ? { display: redactMcpValue(service.display, known) as NonNullable<McpService['display']> } : {}),
     generation: service.generation,
     protectedFields,
     credential: secretStatus(service.credential),
@@ -103,6 +105,14 @@ export function mcpSettings(service: McpService): CommunityMcpSettings {
 export function mcpWriteInput(view: CommunityMcpSettings): CommunityMcpInput {
   const blank = (rows: readonly { name: string }[]) => rows.map(row => ({ name: row.name, value: '' }))
   return {
+    ...(view.display
+      ? {
+          display: {
+            ...(view.display.name === undefined ? {} : { name: view.display.name }),
+            ...(view.display.description === undefined ? {} : { description: view.display.description }),
+          },
+        }
+      : {}),
     name: view.name,
     description: view.description,
     url: view.url,
@@ -186,8 +196,10 @@ export function mergeMcpInput(
   const supplied = { ...input } as CommunityMcpInput & { protectedValues?: readonly string[]; protectedCredentials?: readonly string[] }
   delete supplied.protectedValues
   delete supplied.protectedCredentials
+  const display = mergeMcpDisplay(input.display, previous?.display)
   const merged = {
     ...supplied,
+    ...(display ? { display } : {}),
     url: (input.url === '' || input.url === undefined) && fields.url ? previous!.url : input.url,
     run,
     credentials,
@@ -259,6 +271,7 @@ export function validateMcpService(value: CommunityMcpService): void {
 
 export function validateMcpSettings(value: CommunityMcpInput & Pick<McpService, 'protectedValues' | 'protectedCredentials'>): void {
   validateMcpService(value)
+  validateMcpDisplay(value.display)
   const invalid = () => new BusinessRuleError('invalid', 'Invalid MCP credential, templates or disabled tools.', 'mcp-service-invalid')
   if (
     value.credentials !== undefined &&

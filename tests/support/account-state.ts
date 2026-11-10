@@ -11,7 +11,7 @@ export function accountState(
     withCurrentState: async (username, register) => {
       const state = await read(username),
         undo: (() => void)[] = []
-      const record = state ? ({ admin: false, email: '', groupId: 'members', createdAt: 0, updatedAt: 0, ...state } as CommunityAccountRecord) : undefined
+      const record = state ? ({ email: '', groupId: 'members', createdAt: 0, updatedAt: 0, ...state } as CommunityAccountRecord) : undefined
       try {
         return register(record, cleanup => {
           undo.push(cleanup)

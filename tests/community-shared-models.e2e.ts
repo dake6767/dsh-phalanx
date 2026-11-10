@@ -14,6 +14,7 @@ import { openNativeSettings, runCommunityTerminal, selectCommunityWorkspace, sig
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
+import { latestHumanText } from './support/real-dsh-model.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
 import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
@@ -23,12 +24,16 @@ let browser: Browser | undefined
 let root: string | undefined
 let model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 let runtime: CommunityRuntimeConfig | undefined
+let secondModel: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 afterEach(async () => {
   model?.release()
+  secondModel?.release()
   await browser?.close()
   await app?.stop()
   if (runtime) await new CommunityRuntimeDriver(runtime).rebuild()
   await model?.close()
+  await secondModel?.close()
+  secondModel = undefined
   if (root) await removeCommunityFixture(root)
   root = undefined
   app = undefined
@@ -63,6 +68,7 @@ it('administers shared providers and a replacement default through the managemen
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await page.waitForURL(`${origin}/admin`)
   await page.getByRole('link', { name: 'Model management', exact: true }).click()
   await page.getByRole('button', { name: 'Add provider', exact: true }).click()
@@ -326,7 +332,17 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
   await composer.fill('STREAM_MODEL_TASK')
   await composer.press('Enter')
   await alice.page.getByText('COMMUNITY_', { exact: true }).waitFor()
-  settings = await save({ revision: settings.revision, action: 'save-provider', provider: { ...provider, name: 'Second' } })
+  secondModel = await startCommunityModel()
+  settings = await save({
+    revision: settings.revision,
+    action: 'save-provider',
+    provider: {
+      ...provider,
+      name: 'Second',
+      baseUrl: secondModel.origin + '/anthropic',
+      models: [...provider.models, { name: 'other-chat', enabled: true, input: 'text' }],
+    },
+  })
   const secondId = settings.providers.find(row => row.name === 'Second')!.models[0]!.id
   for (const world of [alice, bob]) {
     await expect
@@ -342,8 +358,27 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
   await bob.page.locator('[data-composer-input]').fill('STREAM_MODEL_TASK')
   await bob.page.locator('[data-composer-input]').press('Enter')
   await bob.page.getByText('COMMUNITY_', { exact: true }).waitFor()
-  model.release()
+  secondModel.release()
   await bob.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
+  for (const upstream of [model, secondModel]) {
+    const requests = upstream.requests.filter(body => latestHumanText(body) === 'STREAM_MODEL_TASK')
+    expect(requests.length).toBeGreaterThan(0)
+    for (const request of requests) {
+      expect(request.model).toBe('deepseek-chat')
+      expect(JSON.stringify(request.system)).toContain('You are a coding agent powered by the deepseek-chat model.')
+    }
+  }
+  await bob.page.getByRole('button', { name: /current deepseek-chat$/u }).click()
+  await bob.page.getByRole('menuitem', { name: /^Model/u }).click()
+  await bob.page.getByRole('group', { name: 'Second' }).getByRole('menuitemradio', { name: 'other-chat', exact: true }).click()
+  await bob.page.locator('[data-composer-input]').fill('STREAM_MODEL_TASK')
+  await bob.page.locator('[data-composer-input]').press('Enter')
+  await bob.page.getByText('COMMUNITY_', { exact: true }).waitFor()
+  secondModel.release()
+  await bob.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).nth(1).waitFor()
+  const switched = secondModel.requests.filter(body => latestHumanText(body) === 'STREAM_MODEL_TASK').at(-1)!
+  expect(switched.model).toBe('other-chat')
+  expect(JSON.stringify(switched.system)).toContain('You are a coding agent powered by the other-chat model.')
   settings = await save({ revision: settings.revision, action: 'set-default', defaultModelId: secondId })
   const catalog = await rpc.remoteRpc<{ default: { model: string } }>(origin, alice.cookie, 'session/modelCatalog', {})
   expect(catalog.default.model).toBe(secondId)

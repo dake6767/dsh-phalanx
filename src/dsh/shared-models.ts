@@ -91,6 +91,13 @@ export async function apply(ctx, config) {
     updates = update
     return update
   }
+  ctx.on('system-prompt/assemble', async (_presentation, _context, next) => {
+    const presentation = await next()
+    const providers = sharedRow().config.providers
+    const provider = Object.hasOwn(providers, presentation.variables.provider) ? providers[presentation.variables.provider] : undefined
+    const model = provider?.models.find(row => row.id === presentation.variables.model)
+    return model ? { ...presentation, variables: { ...presentation.variables, model: model.name } } : presentation
+  })
   ctx.on('agent/request', async (_payload, next) => {
     await refresh()
     const request = await next()

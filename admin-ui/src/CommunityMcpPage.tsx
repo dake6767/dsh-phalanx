@@ -1,3 +1,5 @@
+import { mcpDisplayText } from '../../src/domain/mcp-display'
+import { CommunityPublicationStatus } from './CommunityPublicationSection'
 import { featureVisible } from '../../src/domain/release-visibility'
 import { Tabs } from '@heroui/react/tabs'
 import CommunityMcpCatalog from './CommunityMcpCatalog'
@@ -15,7 +17,7 @@ import CommunityIcon from './CommunityIcon'
 import CommunityMessage from './CommunityMessage'
 
 export default function CommunityMcpPage() {
-  const { t, errorText } = usePlatformLanguage()
+  const { t, locale, errorText } = usePlatformLanguage()
   const [rows, setRows] = useState<readonly CommunityMcpSettings[]>()
   const [editing, setEditing] = useState<CommunityMcpSettings | 'new'>()
   const [updating, setUpdating] = useState<CommunityMcpSettings>()
@@ -143,10 +145,11 @@ export default function CommunityMcpPage() {
                   <Card key={row.name} className="plugin-library-card mcp-service-card">
                     <Card.Header>
                       <div className="library-card-heading">
-                        <Card.Title>{row.name}</Card.Title>
+                        <Card.Title>{mcpDisplayText(row, locale).name}</Card.Title>
                         <CommunityIcon name="chevron" size={14} />
                       </div>
-                      {row.description ? <Card.Description>{row.description}</Card.Description> : null}
+                      {mcpDisplayText(row, locale).name !== row.name ? <Card.Description>{row.name}</Card.Description> : null}
+                      {mcpDisplayText(row, locale).description ? <Card.Description>{mcpDisplayText(row, locale).description}</Card.Description> : null}
                     </Card.Header>
                     {row.catalog || row.catalogUpdate ? (
                       <Card.Content>
@@ -178,7 +181,21 @@ export default function CommunityMcpPage() {
                         ) : null}
                       </Card.Content>
                     ) : null}
+                    {row.published &&
+                    (row.testStatus !== 'passed' ||
+                      (row.catalog !== undefined && row.catalog.status !== 'ready') ||
+                      (row.preparation !== undefined && row.preparation.stage !== 'ready')) ? (
+                      <p className="plugin-card-error">{t('Service preparation or connection is not ready.')}</p>
+                    ) : null}
                     <Card.Footer className="plugin-card-status">
+                      <CommunityPublicationStatus
+                        published={row.published}
+                        unavailable={
+                          row.testStatus !== 'passed' ||
+                          (row.catalog !== undefined && row.catalog.status !== 'ready') ||
+                          (row.preparation !== undefined && row.preparation.stage !== 'ready')
+                        }
+                      />
                       {row.availableCatalogVersion ? (
                         <Button
                           className="relative z-10"

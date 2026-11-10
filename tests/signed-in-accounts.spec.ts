@@ -311,7 +311,7 @@ it('drops expired, invalidated, recreated and tampered entries instead of switch
     expect(browser.value('dsh-phalanx_session')).toBe(currentToken)
     const retainedIdentity = await request('/account/identity')
     expect(retainedIdentity.status).toBe(200)
-    expect(await retainedIdentity.json()).toEqual({ username: 'bob' })
+    expect(await retainedIdentity.json()).toEqual({ username: 'bob', admin: false })
 
     // Logging in to a recreated same-name account does not replace the old space identity.
     expect((await login('carol')).status).toBe(303)

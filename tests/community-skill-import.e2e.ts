@@ -57,6 +57,7 @@ it('reviews multiple import candidates, confirms replacements and keeps orchestr
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await page.waitForURL(`${origin}/admin`)
   const existing = await (
     await page.request.post(origin + '/admin/api/skills/upload', {

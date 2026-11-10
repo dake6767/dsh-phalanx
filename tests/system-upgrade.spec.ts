@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { expect, it } from 'vitest'
 
-function pythonFixtureCases(fixture: 'upgrade-core' | 'upgrade-cleanup'): string[] {
+function pythonFixtureCases(fixture: 'upgrade-core' | 'upgrade-cleanup' | 'upgrade-channels'): string[] {
   const result = spawnSync(
     'python3',
     [
@@ -63,12 +63,24 @@ it('serves installed bilingual maintenance pages and closes their socket before 
   expect(result.status, result.stderr).toBe(0)
 })
 
-it('shares installed candidate-to-formal channel decisions through CLI and Unix HTTP', () => {
-  const result = spawnSync('python3', ['tests/fixtures/upgrade-channels.py'], {
+it.each(pythonFixtureCases('upgrade-channels'))('public upgrade channel seam: %s', testCase => {
+  const started = performance.now()
+  const result = spawnSync('python3', ['tests/fixtures/upgrade-channels.py', testCase], {
     encoding: 'utf8',
     timeout: 30000,
     env: { ...process.env, PYTHONPATH: 'scripts/install' },
   })
+  console.info(
+    'Upgrade channel fixture completed:',
+    JSON.stringify({
+      testCase,
+      elapsedMs: Math.round(performance.now() - started),
+      status: result.status,
+      signal: result.signal,
+      error: result.error?.message,
+      stderr: result.stderr?.slice(-1000),
+    }),
+  )
   expect(result.status, result.stderr).toBe(0)
 })
 

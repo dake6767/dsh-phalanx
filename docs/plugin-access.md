@@ -217,6 +217,19 @@ The platform does not rewrite URLs in upstream responses.
 MCP services provide tool definitions to the agent. They are managed separately from
 plugins in **MCP library**. Adding a service does not grant or publish it.
 
+Display names and function descriptions are separate from the unique `p-` service
+identifier. Configure them when adding, importing or editing a service; Chinese text
+and duplicate display names are supported. Member lists show the identifier beside
+duplicate names, and tool details always include it. Editing only display text preserves
+the tested connection, runtime identity, tools and member access.
+
+Catalog imports save both languages of the catalog title and description. Untouched
+fields follow the saved catalog defaults for the viewing language. An explicit service
+update refreshes those defaults while retaining each administrator override, including
+an intentionally empty description. Platform upgrades do not silently replace adopted
+text. Existing services are not backfilled automatically; reimporting supplies new display
+defaults. There is no reset to catalog defaults action.
+
 ### Import from the MCP catalog
 
 Open **MCP library → MCP catalog** to browse platform-maintained MCP services. For Amap,
@@ -316,6 +329,13 @@ Concurrency, CPU, memory and PID limits still apply. The tool view records remot
 6. Grant the service in group details, or publish it for member selection. Publishing
    a service with platform credentials grants all members the ability to use those
    credentials through the service; review that audience before confirming.
+
+The first detail tab separates **Platform App Center** publication from **Use rules**.
+Save or discard pending edits before publishing or unpublishing, then review the
+confirmation's current member impact. A changed review must be reloaded. Required-service
+rules apply only to members with a group grant; self-selecting members without a group
+grant can still turn the service off. Unpublishing clears self-selections and retains
+group grants; publishing again does not restore cleared selections.
 
 **Import MCP JSON** previews `mcpServers` entries with `url`/`type`/`headers` or
 `command`/`args`/`env`. Each entry must be reviewed and saved separately. Suspected

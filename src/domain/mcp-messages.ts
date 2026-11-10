@@ -1,4 +1,7 @@
 export const en = {
+  'Display name': 'Display name',
+  'Function description': 'Function description',
+  'Service identifier': 'Service identifier',
   'Review catalog update': 'Review catalog update',
   'Validate and update': 'Validate and update',
   'The current service remains available until the new catalog version passes preparation and connection testing.':
@@ -130,6 +133,9 @@ export const en = {
   'MCP service removed.': 'MCP service removed.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  'Display name': '展示名称',
+  'Function description': '功能说明',
+  'Service identifier': '服务标识',
   'Review catalog update': '查看广场更新',
   'Validate and update': '验证并更新',
   'The current service remains available until the new catalog version passes preparation and connection testing.':
@@ -209,7 +215,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Required MCP service': '必选 MCP 服务',
   'Members with a grant cannot disable a required service, including administrators.': '获得授权的成员不能停用必选服务，管理员同样适用。',
   'Publish MCP service': '上架 MCP 服务',
-  'Unpublish MCP service': '取消上架 MCP 服务',
+  'Unpublish MCP service': '下架 MCP 服务',
   'MCP service is published.': 'MCP 服务已上架。',
   'MCP service is not published.': 'MCP 服务未上架。',
   'Save changes before publishing.': '上架前请先保存变更。',

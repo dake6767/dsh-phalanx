@@ -59,6 +59,7 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
       await page.getByLabel('Username').fill(access.administrator.username)
       await page.getByLabel('Password', { exact: true }).fill(access.administrator.password)
       await page.getByRole('button', { name: 'Create administrator' }).click()
+      await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
       await page.waitForURL(`${origin}/admin`)
     } else expect(bootstrapPage?.status()).toBe(404)
   }

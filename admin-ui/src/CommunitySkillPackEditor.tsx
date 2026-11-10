@@ -1,3 +1,5 @@
+import { publishCommunitySkillPack } from './community-publication-api'
+import CommunityPublicationSection from './CommunityPublicationSection'
 import { featureVisible } from '../../src/domain/release-visibility'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
@@ -32,7 +34,9 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
     [error, setError] = useState<unknown>(),
     [removing, setRemoving] = useState(false),
     [deleteSkills, setDeleteSkills] = useState(false)
+  const [confirmation, setConfirmation] = useState<CommunitySkillPackDetail>()
   const pending = useRef(false)
+  const readOnly = !!detail?.suiteOrigin
   useEffect(() => {
     const controller = new AbortController()
     void Promise.all([communitySkills(controller.signal), name ? communitySkillPackDetail(name, controller.signal) : communitySkillPacks(controller.signal)])
@@ -53,7 +57,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
   }, [name])
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
   const save = async () => {
-    if (pending.current || !skills) return false
+    if (pending.current || !skills || readOnly) return false
     pending.current = true
     setBusy(true)
     setError(undefined)
@@ -86,6 +90,40 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
       setBusy(false)
     }
   }
+  const reviewPublication = async () => {
+    if (!detail || pending.current || dirty) return
+    pending.current = true
+    setBusy(true)
+    setError(undefined)
+    try {
+      setConfirmation(await communitySkillPackDetail(detail.name))
+    } catch (failure) {
+      setError(failure)
+    } finally {
+      pending.current = false
+      setBusy(false)
+    }
+  }
+  const publish = async () => {
+    if (!confirmation || pending.current || dirty) return
+    pending.current = true
+    setBusy(true)
+    setError(undefined)
+    try {
+      await publishCommunitySkillPack(confirmation.name, !confirmation.published, confirmation.revision)
+      const next = await communitySkillPackDetail(confirmation.name)
+      setDetail(next)
+      setDraft(input(next))
+      setSaved(input(next))
+      setRevision(next.revision)
+    } catch (failure) {
+      setError(failure)
+    } finally {
+      setConfirmation(undefined)
+      pending.current = false
+      setBusy(false)
+    }
+  }
   const move = (index: number, direction: number) => {
     const names = [...draft.skills]
     ;[names[index], names[index + direction]] = [names[index + direction]!, names[index]!]
@@ -106,7 +144,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
               {t('Cancel')}
             </Button>
             <Button
-              isDisabled={busy || !skills || !dirty || !draft.name || !draft.description}
+              isDisabled={busy || readOnly || !skills || !dirty || !draft.name || !draft.description}
               onPress={() => {
                 void save()
               }}
@@ -121,11 +159,58 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
           <p role="status">{t('Loading…')}</p>
         ) : (
           <div className="plugin-access-template">
-            <CommunityField label={t('Pack name')} value={draft.name} disabled={busy} onChange={value => setDraft({ ...draft, name: value })} required />
+            <CommunityPublicationSection
+              published={detail?.published ?? false}
+              unavailable={!!detail?.unavailable}
+              reason={
+                detail?.unavailable
+                  ? t(
+                      detail.unavailable === 'empty'
+                        ? 'Empty packs are temporarily unavailable to members.'
+                        : 'All pack skills conflict with the runtime and are temporarily unavailable.',
+                    )
+                  : undefined
+              }
+            >
+              <p>{t('Publishing lets all members select this resource when it is available.')}</p>
+              <p>{t('Unpublishing clears selections of this pack. Group grants and individual skill selections are kept.')}</p>
+              <p>{t('Republishing does not restore removed member selections.')}</p>
+              {detail ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    isDisabled={busy || dirty}
+                    onPress={() => {
+                      void reviewPublication()
+                    }}
+                  >
+                    {t(detail.published ? 'Unpublish resource' : 'Publish resource')}
+                  </Button>
+                  {dirty ? (
+                    <>
+                      <p>{t('Save or discard changes before publishing.')}</p>
+                      <Button variant="tertiary" isDisabled={busy} onPress={() => setDraft(saved)}>
+                        {t('Discard changes')}
+                      </Button>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <p>{t('Save this resource before publishing.')}</p>
+              )}
+            </CommunityPublicationSection>
+
+            <CommunityField
+              label={t('Pack name')}
+              value={draft.name}
+              disabled={busy || readOnly}
+              onChange={value => setDraft({ ...draft, name: value })}
+              required
+            />
             <CommunityField
               label={t('Pack description')}
               value={draft.description}
-              disabled={busy}
+              disabled={busy || readOnly}
               onChange={value => setDraft({ ...draft, description: value })}
               required
             />
@@ -139,7 +224,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
                   <div className="group-grant-item" key={skill.name}>
                     <Checkbox
                       isSelected={draft.skills.includes(skill.name)}
-                      isDisabled={busy || (!!skill.conflict && !draft.skills.includes(skill.name))}
+                      isDisabled={busy || readOnly || (!!skill.conflict && !draft.skills.includes(skill.name))}
                       onChange={checked =>
                         setDraft({ ...draft, skills: checked ? [...draft.skills, skill.name] : draft.skills.filter(name => name !== skill.name) })
                       }
@@ -167,7 +252,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
                     <Button
                       size="sm"
                       variant="tertiary"
-                      isDisabled={busy || index === 0}
+                      isDisabled={busy || readOnly || index === 0}
                       aria-label={t('Move {name} up', { name: skill })}
                       onPress={() => move(index, -1)}
                     >
@@ -176,7 +261,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
                     <Button
                       size="sm"
                       variant="tertiary"
-                      isDisabled={busy || index === draft.skills.length - 1}
+                      isDisabled={busy || readOnly || index === draft.skills.length - 1}
                       aria-label={t('Move {name} down', { name: skill })}
                       onPress={() => move(index, 1)}
                     >
@@ -186,20 +271,12 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
                 ))}
               </section>
             ) : null}
-            <TextField value={draft.instructions} onChange={value => setDraft({ ...draft, instructions: value })} isDisabled={busy} fullWidth>
+            <TextField value={draft.instructions} onChange={value => setDraft({ ...draft, instructions: value })} isDisabled={busy || readOnly} fullWidth>
               <Label>{t('Orchestration instructions (optional)')}</Label>
               <TextArea rows={8} />
             </TextField>
             <p>{t('Instructions become an additional skill named after this pack. The name must be unique.')}</p>
-            <Checkbox isSelected={draft.published} isDisabled={busy} onChange={published => setDraft({ ...draft, published })}>
-              <Checkbox.Content>
-                <Checkbox.Control>
-                  <Checkbox.Indicator />
-                </Checkbox.Control>
-                {t('Published to marketplace')}
-              </Checkbox.Content>
-            </Checkbox>
-            {name ? (
+            {name && !readOnly ? (
               <Button variant="danger" isDisabled={busy || dirty} onPress={() => setRemoving(true)}>
                 {t('Remove skill pack')}
               </Button>
@@ -262,6 +339,39 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
             </>
           ) : null}
           <CommunityMessage status="warning" title={t('Changes apply to new sessions. Running tasks using this skill may fail.')} />
+        </CommunityDialog>
+      ) : null}
+      {confirmation ? (
+        <CommunityDialog
+          title={t(confirmation.published ? 'Confirm skill pack unpublication' : 'Confirm skill pack publication')}
+          busy={busy}
+          onClose={() => setConfirmation(undefined)}
+          footer={
+            <>
+              <Button variant="tertiary" isDisabled={busy} onPress={() => setConfirmation(undefined)}>
+                {t('Cancel')}
+              </Button>
+              <Button
+                isDisabled={busy}
+                onPress={() => {
+                  void publish()
+                }}
+              >
+                {t('Confirm')}
+              </Button>
+            </>
+          }
+        >
+          <p>{t('{count} member selections', { count: confirmation.removal.selectedMembers })}</p>
+          <p>
+            {t(
+              confirmation.published
+                ? 'Unpublishing clears selections of this pack. Group grants and individual skill selections are kept.'
+                : 'Publishing lets all members select this resource when it is available.',
+            )}
+          </p>
+          {confirmation.hasPlatformCredential ? <p>{t('All members can use the platform credentials through this resource.')}</p> : null}
+          <p>{t('Republishing does not restore removed member selections.')}</p>
         </CommunityDialog>
       ) : null}
       {guard.dialog}

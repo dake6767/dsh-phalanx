@@ -1,6 +1,6 @@
 import { readFile, writeFile, chmod } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
-import { databaseProgram, executorFactsProgram } from './database-program.mjs'
+import { databaseProgram, executorFactsProgram, initializationRecoveryProgram } from './database-program.mjs'
 
 // One source owner per language; the committed standalone entry is generated data.
 const directory = new URL('./', import.meta.url)
@@ -20,6 +20,7 @@ const [
   executorInstall,
   storage,
   executorBootstrap,
+  operations,
   cleanup,
   database,
 ] = await Promise.all([
@@ -38,6 +39,7 @@ const [
   readFile(new URL('installer_executor_install.py', directory), 'utf8'),
   readFile(new URL('installer_storage.py', directory), 'utf8'),
   readFile(new URL('installer_executor_bootstrap.py', directory), 'utf8'),
+  readFile(new URL('installer_operations.py', directory), 'utf8'),
   readFile(new URL('installer_cleanup.py', directory), 'utf8'),
   readFile(new URL('installer_database.py', directory), 'utf8'),
 ])
@@ -45,6 +47,10 @@ const [
 const upgradeBackup = upgradeBackupSource.replace(
   /# BEGIN GENERATED DATABASE PROGRAM[\s\S]*?# END GENERATED DATABASE PROGRAM/u,
   `# BEGIN GENERATED DATABASE PROGRAM\nDATABASE_PROGRAM = ${JSON.stringify(await databaseProgram())}\n# END GENERATED DATABASE PROGRAM`,
+)
+const preparedOperations = operations.replace(
+  /# BEGIN GENERATED INITIALIZATION RECOVERY PROGRAM[\s\S]*?# END GENERATED INITIALIZATION RECOVERY PROGRAM/u,
+  `# BEGIN GENERATED INITIALIZATION RECOVERY PROGRAM\nINITIALIZATION_RECOVERY_PROGRAM = ${JSON.stringify(await initializationRecoveryProgram())}\n# END GENERATED INITIALIZATION RECOVERY PROGRAM`,
 )
 const downloadPresets = await readFile(new URL('../../src/domain/download-source-presets.json', directory), 'utf8')
 // Keep raw updater files byte-identical to the release-bound bootstrap URLs.
@@ -81,6 +87,7 @@ const generated =
     storage,
     cleanup,
     upgradeHost,
+    preparedOperations,
     executorBootstrap,
     upgradeCli,
     database,
@@ -88,13 +95,14 @@ const generated =
   ]
     .map(source =>
       source.replace(
-        /^[ \t]*from installer_(?:config|host|progress|compatibility|release|upgrade_core|upgrade_backup|upgrade_host|upgrade_cli|upgrade_gate|executor_install|storage|executor_bootstrap|cleanup|database) import .*# embedded-(?:config|host|progress|compatibility|release|upgrade-core|upgrade-backup|upgrade-host|upgrade-cli|upgrade-gate|executor-install|storage|executor-bootstrap|cleanup|database)\n/gmu,
+        /^[ \t]*from installer_(?:config|host|progress|compatibility|release|upgrade_core|upgrade_backup|upgrade_host|upgrade_cli|upgrade_gate|executor_install|storage|executor_bootstrap|operations|cleanup|database) import .*# embedded-(?:config|host|progress|compatibility|release|upgrade-core|upgrade-backup|upgrade-host|upgrade-cli|upgrade-gate|executor-install|storage|executor-bootstrap|operations|cleanup|database)\n/gmu,
         '',
       ),
     )
     .join('\n') +
   '\nDSH_PHALANX_INSTALLER_PYTHON\n'
 export async function checkInstaller() {
+  if (operations !== preparedOperations) throw new Error('Initialization recovery program is stale; run node scripts/install/build-installer.mjs')
   if (progressSource !== progress) throw new Error('Installer update codes are stale; run node scripts/install/build-installer.mjs')
   if (upgradeBackupSource !== upgradeBackup) throw new Error('Upgrade database adapter is stale; run node scripts/install/build-installer.mjs')
   if (configurationSource !== configuration) throw new Error('Installer presets are stale; run node scripts/install/build-installer.mjs')
@@ -103,6 +111,7 @@ export async function checkInstaller() {
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
   if (process.argv.includes('--check')) await checkInstaller()
   else {
+    await writeFile(new URL('installer_operations.py', directory), preparedOperations)
     await writeFile(new URL('installer_progress.py', directory), progress)
     await writeFile(new URL('installer_config.py', directory), configuration)
     await writeFile(new URL('installer_upgrade_backup.py', directory), upgradeBackup)

@@ -29,6 +29,7 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     throw new Error('Actual rootless installed Linux DSH is required')
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'native-presets-'))
+  const modelRequests: Record<string, unknown>[] = []
   let fetchProbeHits = 0,
     mcpProbeCalls = 0
   const model = createServer(async (request, response) => {
@@ -67,7 +68,22 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
       response.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }))
       return
     }
-    for await (const _chunk of request) void _chunk
+    let raw = ''
+    for await (const chunk of request) raw += chunk
+    const body = JSON.parse(raw) as Record<string, unknown>
+    // Native presets can append synthetic skill catalog messages after the
+    // human prompt. Select this exact fixture task rather than the last user role.
+    const messages = Array.isArray(body.messages) ? body.messages : []
+    if (
+      messages.some(
+        (message: { role?: string; content?: unknown }) =>
+          message.role === 'user' &&
+          (message.content === 'BUILTIN_HISTORY_REQUEST' ||
+            (Array.isArray(message.content) &&
+              message.content.some((block: { type?: string; text?: string }) => block.type === 'text' && block.text === 'BUILTIN_HISTORY_REQUEST'))),
+      )
+    )
+      modelRequests.push(body)
     response.setHeader('content-type', 'text/event-stream')
     streamText(response, 'BUILTIN_HISTORY_RESPONSE')
   })
@@ -91,6 +107,7 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     await admin.getByLabel('Username', { exact: true }).fill('admin')
     await admin.getByLabel('Password', { exact: true }).fill('password')
     await admin.getByRole('button', { name: 'Create administrator', exact: true }).click()
+    await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await admin.waitForURL(origin + '/admin')
     const api = async (path: string, body?: object) => {
       const response = body
@@ -206,10 +223,29 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
       return conversation
     }
     const completeTurn = async (sessionId: string) => {
+      const before = modelRequests.length
       await remote('session/prompt', {
         request: { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: 'BUILTIN_HISTORY_REQUEST' }] },
       })
-      await expect.poll(async () => JSON.stringify(await observe('inspect', sessionId)).includes('BUILTIN_HISTORY_RESPONSE'), { timeout: 60000 }).toBe(true)
+      // The title request uses the same fixture response; only the actual
+      // assistant message proves this session's prompted turn has completed.
+      await expect
+        .poll(
+          async () => {
+            const snapshot = (await observe('inspect', sessionId)) as { events: { type: string; event: { type: string; data: unknown } }[] }
+            return snapshot.events.some(
+              record =>
+                record.type === 'event' && record.event.type === 'assistant/message' && JSON.stringify(record.event.data).includes('BUILTIN_HISTORY_RESPONSE'),
+            )
+          },
+          { timeout: 60000 },
+        )
+        .toBe(true)
+      expect(modelRequests.length).toBeGreaterThan(before)
+      for (const request of modelRequests.slice(before)) {
+        expect(request.model).toBe('preset-fixture')
+        expect(JSON.stringify(request.system)).toContain('You are a coding agent powered by the preset-fixture model.')
+      }
     }
     for (const id of ['standard', 'ptc', 'minimal', 'cordis']) {
       expect((await roster()).find(row => row.id === id)?.broken).toBeUndefined()
@@ -222,6 +258,7 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
       expect(probe.attempted).toBe(false)
       expect(JSON.stringify(probe.outcome)).toContain('Web fetch is unavailable in this deployment.')
       expect(fetchProbeHits).toBe(0)
+      if (id === 'standard' || id === 'cordis') await completeTurn(session.sessionId)
     }
     const admission = await create('standard')
     expect(await observe('writer-lock-resolve', admission.sessionId)).toEqual({ hmrReleasedBeforeWriter: true })

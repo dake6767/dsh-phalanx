@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { access, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm } from 'node:fs/promises'
+import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -66,6 +67,48 @@ describe('community public product entry', () => {
     if (response.headers.get('location') !== '/admin' || enter) cookie = (await openCommunityHttpEntry(origin, cookie)).cookie
     return cookie
   }
+  it('admits only top-level bootstrap GET navigation across sites and preserves initialization protection', async () => {
+    const origin = await start()
+    const status = (path: string, method: string, headers: Record<string, string>) =>
+      new Promise<number>((resolve, reject) => {
+        const pending = request(origin + path, { method, headers }, response => {
+          response.resume()
+          resolve(response.statusCode!)
+        })
+        pending.on('error', reject)
+        pending.end()
+      })
+    const navigation = { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' }
+    for (const site of ['cross-site', 'same-site']) {
+      const headers = { ...navigation, 'sec-fetch-site': site, origin: 'https://other.example.test' }
+      expect(await status('/bootstrap', 'GET', headers)).toBe(200)
+      for (const [path, method, metadata] of [
+        ['/bootstrap', 'POST', navigation],
+        ['/bootstrap', 'GET', { 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' }],
+        ['/bootstrap', 'GET', { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'iframe' }],
+        ['/bootstrap', 'GET', { 'sec-fetch-mode': 'no-cors', 'sec-fetch-dest': 'image' }],
+        ['/bootstrap', 'GET', {}],
+        ['/admin/api/session', 'GET', navigation],
+        ['/bootstrap/other', 'GET', navigation],
+      ] as const) {
+        expect(
+          await status(path, method, { origin: headers.origin, 'sec-fetch-site': site, ...metadata }),
+          `${site} ${method} ${path} ${JSON.stringify(metadata)}`,
+        ).toBe(403)
+      }
+    }
+    const submit = (credential: string) =>
+      fetch(`${origin}/bootstrap`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { origin, 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ credential, username: 'admin', password: 'password' }),
+      })
+    expect((await submit('invalid')).status).toBe(403)
+    expect((await submit(readBootstrapCredential(root!)!.credential)).status).toBe(303)
+    expect(await status('/bootstrap', 'GET', { ...navigation, 'sec-fetch-site': 'cross-site' })).toBe(404)
+    expect(await (await fetch(`${origin}/bootstrap`)).text()).toContain('Initialization unavailable')
+  })
   it('creates the first administrator without email and immediately admits the issued login to management', async () => {
     const origin = await start(undefined, undefined, '/nonexistent-dsh-command')
     expect(await (await fetch(`${origin}/bootstrap`)).text()).not.toContain('name="email"')
@@ -77,7 +120,7 @@ describe('community public product entry', () => {
       body: new URLSearchParams({ credential, username: 'admin', password: 'password' }),
     })
     expect(response.status).toBe(303)
-    expect(response.headers.get('location')).toBe('/admin')
+    expect(response.headers.get('location')).toBe('/admin/initial-model')
     const cookie = response.headers
       .getSetCookie()
       .map(value => value.split(';')[0])
@@ -133,7 +176,7 @@ describe('community public product entry', () => {
       body: new URLSearchParams({ credential: invitation.credential, username: 'admin', password: 'password' }),
     })
     expect(response.status).toBe(303)
-    expect(response.headers.get('location')).toBe('/admin')
+    expect(response.headers.get('location')).toBe('/admin/initial-model')
   })
   it('finds the installed operator database in the service home without service environment variables', async () => {
     const origin = await start(),

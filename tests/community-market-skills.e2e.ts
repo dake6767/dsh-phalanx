@@ -33,6 +33,7 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     await admin.getByLabel('Username', { exact: true }).fill('admin')
     await admin.getByLabel('Password', { exact: true }).fill('password')
     await admin.getByRole('button', { name: 'Create administrator' }).click()
+    await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await admin.waitForURL(origin + '/admin')
     const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
     expect((await post('accounts', { username: 'member', password: 'password', email: '' })).status()).toBe(201)
@@ -45,7 +46,6 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     expect((await post('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })).status()).toBe(200)
     await admin.getByRole('link', { name: 'Skill library', exact: true }).click()
     await admin.getByRole('button', { name: 'View skill example-skill', exact: true }).click()
-    await admin.getByRole('tab', { name: 'Publication', exact: true }).click()
     await admin.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).click()
     await admin.getByText('0 members selected this skill.', { exact: true }).waitFor()
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
@@ -93,7 +93,6 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     // Refresh the admin detail before confirming the now-current member impact.
     await admin.getByRole('button', { name: 'Close skill details', exact: true }).click()
     await admin.getByRole('button', { name: 'View skill example-skill', exact: true }).click()
-    await admin.getByRole('tab', { name: 'Publication', exact: true }).click()
     await admin.getByRole('button', { name: 'Unpublish', exact: true }).click()
     await admin.getByText('1 members selected this skill.', { exact: true }).waitFor()
     await admin.getByRole('button', { name: 'Confirm', exact: true }).click()

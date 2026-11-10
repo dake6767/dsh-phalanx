@@ -13,7 +13,7 @@ afterEach(async () => {
   await app?.stop()
   if (root) await removeCommunityFixture(root)
 })
-it('returns only the authenticated platform username without exposing administrator identity or requiring a DSH instance', async () => {
+it('returns the authenticated display identity and current administrator role without requiring a DSH instance', async () => {
   root = await mkdtemp(join(tmpdir(), 'community-identity-'))
   app = createCommunityApplication({
     listen: { host: '127.0.0.1', port: 0 },
@@ -41,7 +41,7 @@ it('returns only the authenticated platform username without exposing administra
     .getSetCookie()
     .map(value => value.split(';')[0])
     .join('; ')
-  expect(await (await call(admin)).json()).toEqual({ username: 'admin' })
+  expect(await (await call(admin)).json()).toEqual({ username: 'admin', admin: true })
   expect(
     (
       await fetch(`${origin}/admin/api/accounts`, {
@@ -61,7 +61,19 @@ it('returns only the authenticated platform username without exposing administra
     .getSetCookie()
     .map(value => value.split(';')[0])
     .join('; ')
-  expect(await (await call(member)).json()).toEqual({ username: 'member' })
+  expect(await (await call(member)).json()).toEqual({ username: 'member', admin: false })
+  const records = await (await fetch(`${origin}/admin/api/accounts`, { headers: { cookie: admin } })).json()
+  const groupId = records.items.find((row: { username: string }) => row.username === 'member').groupId
+  const role = (value: object) =>
+    fetch(`${origin}/admin/api/accounts/member/actions`, {
+      method: 'POST',
+      headers: { cookie: admin, origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'set-admin', ...value }),
+    })
+  expect((await role({ admin: true })).status).toBe(200)
+  expect(await (await call(member)).json()).toEqual({ username: 'member', admin: true })
+  expect((await role({ admin: false, groupId })).status).toBe(200)
+  expect(await (await call(member)).json()).toEqual({ username: 'member', admin: false })
   expect((await call(member)).headers.get('cache-control')).toBe('no-store')
   expect((await call(member, 'POST')).status).toBe(405)
   expect((await fetch(`${origin}/admin/api/session`, { headers: { cookie: member } })).status).toBe(403)

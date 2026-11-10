@@ -90,3 +90,20 @@ it('requires current contribution approval before leasing dependencies and remov
     await service.stop()
   }
 })
+
+it('reports configured platform credentials without returning secret values', async () => {
+  let configuration: ExecutionConfiguration = { enabled: true, commands: [], variables: [{ name: 'TOKEN', value: 'fictional-private-value', secret: true }] }
+  const service = new ExecutionDependencies(
+    { identities: () => ['skill:reports'], get: () => undefined, owns: async () => true },
+    { get: async () => configuration, list: async () => [], save: async () => {}, remove: async () => {} },
+    { state: () => ({ stage: 'ready', updatedAt: 0, log: '' }), ready: () => [], withPrepared: async (_, run) => run([]) },
+  )
+  expect(await service.hasPlatformCredential('skill:reports')).toBe(true)
+  expect(await service.hasPlatformCredential('skill:missing')).toBe(false)
+  configuration = { ...configuration, enabled: false }
+  expect(await service.hasPlatformCredential('skill:reports')).toBe(false)
+  configuration = { ...configuration, enabled: true, variables: [{ name: 'MODE', value: 'public-value', secret: false }] }
+  expect(await service.hasPlatformCredential('skill:reports')).toBe(false)
+  configuration = { ...configuration, variables: [{ name: 'TOKEN', value: '', secret: true }] }
+  expect(await service.hasPlatformCredential('skill:reports')).toBe(false)
+})

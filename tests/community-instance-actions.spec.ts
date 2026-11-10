@@ -3,7 +3,7 @@ import { CommunityInstanceActions } from '../src/use-cases/community-instance-ac
 import { CommunityAuthenticationError, type CommunityAccountState } from '../src/domain/community-account.js'
 
 it('restarts only the fresh authenticated space, shares concurrent requests and permits retry after failure', async () => {
-  const account: CommunityAccountState = { username: 'alice', spaceId: 'alice-space', sessionEpoch: 0, disabled: false }
+  const account: CommunityAccountState = { username: 'alice', admin: false, spaceId: 'alice-space', sessionEpoch: 0, disabled: false }
   let current: CommunityAccountState | undefined = account
   let release!: () => void
   const gate = new Promise<void>(resolve => {

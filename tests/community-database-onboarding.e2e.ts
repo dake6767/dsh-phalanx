@@ -38,6 +38,7 @@ it('authorizes the invitation before showing the database step and keeps the def
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('fictional-admin-password')
     await page.getByRole('button', { name: 'Create administrator', exact: true }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(origin + '/admin')
     expect(readBootstrapCredential(root)).toBeUndefined()
     expect((await context.request.get(origin + '/admin/api/session')).status()).toBe(200)
@@ -92,6 +93,7 @@ it('reports external connection failures in Chinese and requires an explicit suc
     await page.getByLabel('用户名', { exact: true }).fill('admin')
     await page.getByLabel('密码', { exact: true }).fill('fictional-admin-password')
     await page.getByRole('button', { name: '创建管理员', exact: true }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(origin + '/admin')
   } finally {
     await browser.close()

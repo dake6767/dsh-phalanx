@@ -34,6 +34,8 @@ export interface CommunityRuntimeConfig {
 export interface CommunityConfig {
   /** Protected bootstrap connection file, outside mutable platform data. */
   readonly platformDatabaseConfigFile?: string
+  /** Optional first-model suggestions; defaults to /etc/dsh-phalanx/initial-model.json. */
+  readonly initialModelDefaultsFile?: string
   readonly downloadSources?: DownloadSourceSelection
   /** Online suite-catalog service; the default address goes through the download source's GitHub prefix. */
   readonly suiteCatalog?: { readonly address: string }

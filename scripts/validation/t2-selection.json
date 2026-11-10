@@ -73,7 +73,7 @@
     "tests/usage-skills-container.e2e.ts",
     "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 93,
+  "regularCases": 96,
   "smoke": [
     "tests/installed-candidate.e2e.ts",
     "tests/community-user-storage.e2e.ts",
@@ -101,7 +101,7 @@
     "tests/community-account-switching.e2e.ts": 1,
     "tests/community-artifacts.e2e.ts": 1,
     "tests/community-container-recovery.e2e.ts": 1,
-    "tests/community-entry-pages.e2e.ts": 4,
+    "tests/community-entry-pages.e2e.ts": 7,
     "tests/community-environment-reset.e2e.ts": 1,
     "tests/community-expert-mcp.e2e.ts": 1,
     "tests/community-experts.e2e.ts": 1,

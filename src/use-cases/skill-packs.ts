@@ -25,6 +25,7 @@ export class SkillPacks {
     private readonly bundled: readonly string[] = [],
     private readonly selections?: Pick<SkillAssignmentsPort, 'get'>,
     private readonly expertReferences?: ExpertReferencesPort,
+    private readonly execution?: { hasPlatformCredential(owner: string): Promise<boolean> },
   ) {}
   async list(actor: CommunityAccountActor): Promise<readonly CommunitySkillPackView[]> {
     await this.admin(actor)
@@ -117,6 +118,7 @@ export class SkillPacks {
         await this.admin(actor)
         const pack: SkillPack = {
           ...input,
+          published: packs.find(row => row.name === previousName)?.published ?? false,
           ...(packs.find(row => row.name === previousName)?.rowRevision !== undefined
             ? { rowRevision: packs.find(row => row.name === previousName)!.rowRevision }
             : {}),
@@ -131,6 +133,14 @@ export class SkillPacks {
         })
       })
       .then(async () => await this.view(actor, await this.required(input.name)))
+  }
+  publish(actor: CommunityAccountActor, name: string, published: boolean, revision: string): Promise<void> {
+    return this.queue.mutate(async () => {
+      await this.admin(actor)
+      await this.fresh(actor, name, revision)
+      const pack = await this.required(name)
+      await this.queue.transaction(repositories => repositories.packs.store.save({ ...pack, published }))
+    })
   }
   remove(actor: CommunityAccountActor, name: string, deleteSkills: boolean, revision: string): Promise<void> {
     return this.queue.mutate(async () => {
@@ -320,7 +330,15 @@ export class SkillPacks {
     })
   }
   private async view(actor: CommunityAccountActor, pack: SkillPack, revision?: string): Promise<CommunitySkillPackView> {
+    const library = await this.library.list()
+    const unavailable = !pack.skills.length
+      ? 'empty'
+      : !pack.skills.some(name => library.some(skill => skill.name === name && !skill.conflict))
+        ? 'conflict'
+        : undefined
     return {
+      ...(unavailable ? { unavailable } : {}),
+      hasPlatformCredential: (await Promise.all(pack.skills.map(name => this.execution?.hasPlatformCredential('skill:' + name) ?? false))).some(Boolean),
       name: pack.name,
       description: pack.description,
       skills: pack.skills,

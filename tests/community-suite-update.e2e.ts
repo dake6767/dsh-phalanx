@@ -89,6 +89,7 @@ it('offers an update after a platform upgrade, previews the differences and swit
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
     // Opening the catalog loads the signed document; install actions never fetch it themselves.
     expect((await page.request.get(origin + '/admin/api/suites')).status()).toBe(200)

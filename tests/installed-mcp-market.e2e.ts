@@ -107,6 +107,7 @@ it('serves both shipped market presets to two installed DSH members and recovers
     await admin.getByLabel('Username', { exact: true }).fill('admin')
     await admin.getByLabel('Password', { exact: true }).fill('password')
     await admin.getByRole('button', { name: 'Create administrator', exact: true }).click()
+    await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await admin.waitForURL(origin + '/admin')
     const post = (path: string, body: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data: body })
     const get = async (path: string) => (await admin.request.get(origin + '/admin/api/' + path)).json()
@@ -151,7 +152,11 @@ it('serves both shipped market presets to two installed DSH members and recovers
       expect(row.testStatus).toBe('passed')
       expect(JSON.stringify(row).includes(secret)).toBe(false)
       discoveries[name!] = row.tools.length
-      expect((await post('mcp', { action: 'publish', name, published: true })).status()).toBe(200)
+      expect(
+        (
+          await post('mcp', { action: 'publish', name, published: true, revision: (await get('mcp?publication=' + encodeURIComponent(name!))).revision })
+        ).status(),
+      ).toBe(200)
     }
     expect((await post(`groups/${groupIds.alice}/mcp`, { names: ['p-amap'] })).status()).toBe(200)
     const members: { name: string; cookie: string; sessionId: string }[] = []

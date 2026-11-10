@@ -85,6 +85,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       await admin.getByLabel('Username', { exact: true }).fill('admin')
       await admin.getByLabel('Password', { exact: true }).fill('password')
       await admin.getByRole('button', { name: 'Create administrator', exact: true }).click()
+      await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
       await admin.waitForURL(origin + '/admin')
       const api = async (path: string, data?: object) => {
         const result = data

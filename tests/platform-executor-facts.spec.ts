@@ -1,5 +1,5 @@
 import { PLATFORM_SCHEMA_VERSION } from '../src/adapters/platform-schema.js'
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { once } from 'node:events'
 import { tmpdir } from 'node:os'
@@ -11,6 +11,79 @@ import { platformDatabasePool } from '../src/adapters/platform-database-inspecti
 import { PostgresDownloadSources } from '../src/adapters/postgres-download-sources.js'
 import { readExecutorFacts } from '../src/adapters/platform-executor-facts.js'
 import { postgresConnection } from './support/postgres.js'
+
+it('reports rotation readiness before maintenance without initializing the database or requiring a first administrator', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rotation-facts-')),
+    data = join(root, 'data'),
+    config = join(root, 'database.json'),
+    builtin = join(root, 'builtin-database.json'),
+    connection = postgresConnection()
+  mkdirSync(data, { mode: 0o700 })
+  FilePlatformDatabaseConfig.create(config, join(root, 'master.key'), connection)
+  copyFileSync(config, builtin)
+  const saved = FilePlatformDatabaseConfig.open(config, data),
+    database = new PlatformDatabase(connection, saved.security),
+    sql = platformDatabasePool(connection)
+  try {
+    const untouched = readFileSync(config)
+    expect(await readExecutorFacts(config, data, 'rotation', [])).toMatchObject({ ready: false, initializationPending: true })
+    expect(readFileSync(config)).toEqual(untouched)
+    FilePlatformDatabaseConfig.select(config, data, connection, 'builtin')
+    expect(await readExecutorFacts(config, data, 'rotation', [])).toMatchObject({ ready: false, initializationPending: true })
+    expect((await sql.query("SELECT to_regnamespace('dsh_phalanx')::text AS namespace")).rows).toEqual([{ namespace: null }])
+    // Pending product operations and staged files are never treated as an old initialization failure.
+    for (const pending of ['platform-key-operation.json', 'platform-database-operation.json', 'database.json.next-fixture', 'master.key.tmp-key-fixture']) {
+      writeFileSync(join(root, pending), 'pending')
+      await expect(readExecutorFacts(config, data, 'rotation', [])).rejects.toThrow()
+      unlinkSync(join(root, pending))
+    }
+    await database.initialize()
+    const protectedFiles = [config, builtin, saved.security.masterKeyPath],
+      before = protectedFiles.map(path => readFileSync(path))
+    const result = await readExecutorFacts(config, data, 'rotation', [])
+    expect(result).toMatchObject({
+      ready: true,
+      initializationPending: false,
+      deploymentId: saved.deploymentId,
+      fingerprint: saved.security.registry.masterFingerprint,
+    })
+    const serialized = JSON.stringify(result)
+    expect(serialized).not.toContain(connection.password)
+    expect(serialized).not.toContain(readFileSync(saved.security.masterKeyPath, 'utf8').trim())
+    expect(protectedFiles.map(path => readFileSync(path))).toEqual(before)
+    await sql.query('CREATE TABLE dsh_phalanx.unrelated_product (id integer)')
+    await expect(readExecutorFacts(config, data, 'rotation', [])).rejects.toThrow('reachable matching')
+    await sql.query('DROP TABLE dsh_phalanx.unrelated_product')
+    const key = readFileSync(saved.security.masterKeyPath)
+    writeFileSync(saved.security.masterKeyPath, Buffer.alloc(key.length, 0))
+    await expect(readExecutorFacts(config, data, 'rotation', [])).rejects.toThrow()
+    writeFileSync(saved.security.masterKeyPath, key)
+    const unavailable = createServer(socket => socket.destroy())
+    unavailable.listen(0, '127.0.0.1')
+    await once(unavailable, 'listening')
+    try {
+      const address = unavailable.address()
+      if (!address || typeof address === 'string') throw Error('No controlled unavailable database endpoint')
+      const staging = join(root, 'unavailable.json')
+      FilePlatformDatabaseConfig.stageSelection(
+        config,
+        data,
+        { ...connection, host: '127.0.0.1', port: address.port },
+        'external',
+        saved.security.registry,
+        staging,
+      )
+      renameSync(staging, config)
+      await expect(readExecutorFacts(config, data, 'rotation', [])).rejects.toThrow('reachable matching')
+    } finally {
+      await new Promise<void>(resolve => unavailable.close(() => resolve()))
+    }
+  } finally {
+    await database.close()
+    await sql.end()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 it('reads only the source schema inventory without preparing it and observes each committed download choice', async () => {
   const root = mkdtempSync(join(tmpdir(), 'executor-facts-')),

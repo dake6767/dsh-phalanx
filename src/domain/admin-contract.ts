@@ -37,8 +37,9 @@ export interface CommunitySessionInfo {
   readonly username: string
   readonly admin: boolean
 }
-/** Ordinary members may read only their own platform display identity. */
+/** Accounts may read only their own display identity and current administrator role. */
 export interface CommunitySelfIdentity {
+  readonly admin: boolean
   readonly username: string
 }
 
@@ -212,3 +213,24 @@ export type CommunityReportedUsage = import('./usage-record.js').UsageReportedVi
 export type CommunityReportedUsageQuery = import('./usage-record.js').UsageReportedQuery
 
 export type { SignedInAccountStatus, SignedInAccountView } from './account-switching-contract.js'
+
+/** Initialization suggestions never expose the deployer's key to a browser. */
+export interface InitialModelView {
+  readonly settings: CommunityModelSettings
+  readonly defaultsStatus: 'absent' | 'invalid' | 'ready'
+  readonly defaults: {
+    readonly name?: string
+    readonly baseUrl?: string
+    readonly apiFormat?: CommunityProviderProtocol
+    readonly model?: string
+    readonly apiKey: { readonly configured: boolean }
+  }
+}
+export interface InitialModelInput {
+  readonly revision: number
+  readonly name: string
+  readonly baseUrl: string
+  readonly apiFormat: CommunityProviderProtocol
+  readonly model: string
+  readonly apiKey: string
+}

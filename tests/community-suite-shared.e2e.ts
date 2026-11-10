@@ -101,6 +101,7 @@ it('installs a shared dependency with the first suite, keeps it for the second a
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
     await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click()
     await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()

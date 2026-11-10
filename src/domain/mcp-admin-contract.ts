@@ -8,7 +8,17 @@ export interface CommunityMcpRun {
   readonly prepareCommand?: string
   readonly runtimeDependencies?: readonly string[]
 }
+export interface CommunityMcpDisplay {
+  readonly name?: string
+  readonly description?: string
+  /** Frozen on catalog import or an explicit service update. */
+  readonly defaults?: {
+    readonly name: Readonly<Record<'en' | 'zh-CN', string>>
+    readonly description: Readonly<Record<'en' | 'zh-CN', string>>
+  }
+}
 export interface CommunityMcpService {
+  readonly display?: CommunityMcpDisplay
   readonly run?: CommunityMcpRun | null
   readonly name: string
   readonly description: string
@@ -23,7 +33,7 @@ export type CommunityMcpAction =
   | { readonly action: 'prepare'; readonly name: string }
   | { readonly action: 'save'; readonly service: CommunityMcpInput; readonly create?: boolean; readonly originalName?: string }
   | { readonly action: 'remove'; readonly name: string; readonly revision?: string }
-  | { readonly action: 'publish'; readonly name: string; readonly published: boolean }
+  | { readonly action: 'publish'; readonly name: string; readonly published: boolean; readonly revision: string }
 
 export interface CommunityMcpTemplate {
   readonly name: string
@@ -51,6 +61,7 @@ export interface CommunityMcpCatalogEntry {
   readonly imported: number
 }
 export interface CommunityMcpCatalogInput {
+  readonly display?: Pick<CommunityMcpDisplay, 'name' | 'description'>
   readonly presetId: string
   readonly name: string
   readonly credential: string
@@ -100,6 +111,7 @@ export interface CommunityMcpSettings extends Omit<CommunityMcpService, 'run'> {
   readonly testStatus: 'untested' | 'passed' | 'failed'
 }
 export interface CommunityMcpInput extends CommunityMcpService {
+  readonly display?: Pick<CommunityMcpDisplay, 'name' | 'description'>
   readonly clearCredential?: boolean
   readonly removeCredentials?: readonly string[]
   /** Retain a protected argument from this service's current generation, independently of its new position. */
@@ -113,6 +125,7 @@ export interface CommunityMcpInput extends CommunityMcpService {
 }
 
 export interface CommunityMarketMcp {
+  readonly display?: CommunityMcpDisplay
   readonly name: string
   readonly description: string
   readonly granted: boolean
@@ -123,4 +136,12 @@ export interface CommunityMarketMcp {
 export interface CommunityMarketMcpAction {
   readonly name: string
   readonly action: 'enable' | 'disable'
+}
+
+export interface CommunityMcpPublicationImpact {
+  readonly name: string
+  readonly published: boolean
+  readonly selectedMembers: number
+  readonly hasPlatformCredential: boolean
+  readonly revision: string
 }

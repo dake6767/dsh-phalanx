@@ -200,7 +200,16 @@ it.skipIf(keyFiles.some(path => !path) || !runtimeSettings.containerImage)(
           expect((await post('mcp', { action: 'save', service: { ...input, disabledTools, credential: undefined } })).status).toBe(200)
           expect((await (await post('mcp/test', { name: input.name })).json()).testStatus).toBe('passed')
         }
-        expect((await post('mcp', { action: 'publish', name: input.name, published: true })).status).toBe(200)
+        expect(
+          (
+            await post('mcp', {
+              action: 'publish',
+              name: input.name,
+              published: true,
+              revision: (await get('mcp?publication=' + encodeURIComponent(input.name))).revision,
+            })
+          ).status,
+        ).toBe(200)
       }
       const names = inputs.map(input => input.name),
         alice = members[0]!,

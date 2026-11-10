@@ -8,6 +8,7 @@ import CommunityLibraryMaintenance from './CommunityLibraryMaintenance'
 import CommunityContributions from './CommunityContributions'
 import CommunityPluginAccess from './CommunityPluginAccess'
 import CommunityPluginPublication from './CommunityPluginPublication'
+import { CommunityPublicationStatus } from './CommunityPublicationSection'
 import CommunityPluginUpstreams from './CommunityPluginUpstreams'
 import CommunityPluginChanges from './CommunityPluginChanges'
 import CommunityPluginUploadDialog from './CommunityPluginUploadDialog'
@@ -37,8 +38,7 @@ export default function CommunityPluginsPage() {
   const [adding, setAdding] = useState(false)
   const accessCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined)
   const dependencyCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined)
-  const closeDetails = () => {
-    const close = () => setSelected(undefined)
+  const guarded = (close: () => void) => {
     const access = () => {
       if (accessCloseGuard.current) accessCloseGuard.current(close)
       else close()
@@ -46,6 +46,7 @@ export default function CommunityPluginsPage() {
     if (dependencyCloseGuard.current) dependencyCloseGuard.current(access)
     else access()
   }
+  const closeDetails = () => guarded(() => setSelected(undefined))
   const [selected, setSelected] = useState<string>()
   const [detailTab, setDetailTab] = useState('basic')
   const [revision, setRevision] = useState(0)
@@ -257,11 +258,11 @@ export default function CommunityPluginsPage() {
                         <span aria-hidden="true" />
                         {stageText(plugin)}
                       </span>
-                      {plugin.published ? (
-                        <Chip size="sm" variant="soft" color="success">
-                          {t('Published')}
-                        </Chip>
-                      ) : null}
+                      <CommunityPublicationStatus
+                        published={plugin.published}
+                        paused={plugin.publicationPaused}
+                        unavailable={plugin.incompatible || plugin.stage !== 'available'}
+                      />
                     </Card.Footer>
                     <Button
                       variant="tertiary"
@@ -399,17 +400,7 @@ export default function CommunityPluginsPage() {
                 />
               </Tabs.Panel>
               <Tabs.Panel id="basic" className="plugin-settings-panel" shouldForceMount>
-                <section className="plugin-detail-section" aria-label={t('Publication')}>
-                  <div className="plugin-section-heading">
-                    <h2>{t('Publication')}</h2>
-                    <Chip size="sm" variant="soft" color={detail.published ? 'success' : 'default'}>
-                      {t(detail.published ? 'Published' : 'Not published')}
-                    </Chip>
-                  </div>
-                  <p>{t('{count} member selections', { count: detail.selectedMembers ?? 0 })}</p>
-                  {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
-                  <CommunityPluginPublication plugin={detail} onChanged={refresh} />
-                </section>
+                <CommunityPluginPublication plugin={detail} onChanged={refresh} onRequest={guarded} />
                 {detail.suiteOrigin ? (
                   <>
                     <p className="plugin-catalog-origin">

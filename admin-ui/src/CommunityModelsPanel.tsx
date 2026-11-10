@@ -432,7 +432,7 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
                             </Switch.Content>
                           </Switch>
                           <Switch
-                            aria-label={t('Model {index} supports reasoning', { index: index + 1 })}
+                            aria-label={t('Model {index} supports reasoning effort', { index: index + 1 })}
                             isSelected={model.reasoning}
                             onChange={reasoning => update({ models: draft.models.map(row => (row.row === model.row ? { ...row, reasoning } : row)) })}
                             isDisabled={busy}
@@ -441,7 +441,7 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
                               <Switch.Control>
                                 <Switch.Thumb />
                               </Switch.Control>
-                              {t('Supports reasoning')}
+                              {t('Supports reasoning effort')}
                             </Switch.Content>
                           </Switch>
                           <Button

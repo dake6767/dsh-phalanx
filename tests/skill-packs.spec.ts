@@ -14,6 +14,7 @@ it('creates ordered references and a note, previews conservative cascading delet
     await f.storage.grants.set('default', ['two'])
     const input = { name: 'research', description: 'Research', skills: ['three', 'one', 'two'], instructions: 'Read one then two', published: true }
     await service.save(actor, input, await service.revision(actor))
+    await service.publish(actor, input.name, true, await service.revision(actor))
     expect((await service.list(actor))[0]).toMatchObject({ ...input, empty: false })
     expect((await service.market(actor))[0]?.source).toBeNull()
     expect((await service.detail(actor, 'research')).removal.groups).toEqual([])
@@ -22,6 +23,7 @@ it('creates ordered references and a note, previews conservative cascading delet
     expect((await service.detail(actor, 'research')).removal.groups.map(row => row.id)).toEqual(['admin'])
     await packs.grants.set('admin', [])
     await service.save(actor, { ...input, name: 'other', skills: ['one'], instructions: '' }, await service.revision(actor))
+    await service.publish(actor, 'other', true, await service.revision(actor))
     await packs.grants.set('default', ['research', 'other'])
     await packs.selections.set(f.member.spaceId, ['research', 'other'])
     f.fault.commit = true
@@ -70,6 +72,55 @@ it('creates ordered references and a note, previews conservative cascading delet
     await library.remove(actor, 'one', one.revision)
     expect((await service.list(actor))[0]).toMatchObject({ name: 'renamed', skills: [], empty: true })
     await expect(service.save(f.member, input, '')).rejects.toMatchObject({ code: 'admin-required' })
+  } finally {
+    await f.close()
+  }
+})
+
+it('keeps pack publication independent from saving content', async () => {
+  const f = await postgresSkillService()
+  try {
+    const input = { name: 'workflow', description: 'A workflow', skills: [], instructions: '', published: true }
+    await f.packs.save(f.actor, input, await f.packs.revision(f.actor))
+    expect((await f.packs.detail(f.actor, 'workflow')).published).toBe(false)
+    await f.packs.publish(f.actor, 'workflow', true, await f.packs.revision(f.actor))
+    expect((await f.packs.detail(f.actor, 'workflow')).published).toBe(true)
+    await f.packs.save(f.actor, { ...input, description: 'Edited', published: false }, await f.packs.revision(f.actor))
+    expect((await f.packs.detail(f.actor, 'workflow')).published).toBe(true)
+    const stale = await f.packs.revision(f.actor)
+    await f.storage.packs.selections.set(f.member.spaceId, ['workflow'])
+    await expect(f.packs.publish(f.actor, 'workflow', false, stale)).rejects.toMatchObject({ code: 'skill-preview-changed' })
+    await f.packs.publish(f.actor, 'workflow', false, await f.packs.revision(f.actor))
+    expect((await f.packs.detail(f.actor, 'workflow')).published).toBe(false)
+    await f.packs.save(f.actor, input, await f.packs.revision(f.actor))
+    expect((await f.packs.detail(f.actor, 'workflow')).published).toBe(false)
+  } finally {
+    await f.close()
+  }
+})
+
+it('unpublishes catalog packs without dropping grants, restores no selections and explains unavailable contents', async () => {
+  const f = await postgresSkillService()
+  try {
+    await f.storage.library.save({ name: 'child', description: 'Child', hash: 'child', importedAt: 0, published: false })
+    await f.packs.commitSuitePack('suite:test', { name: 'catalog-pack', description: 'Catalog pack', skills: ['child'], instructions: '' })
+    await f.packs.publish(f.actor, 'catalog-pack', true, await f.packs.revision(f.actor))
+    await f.storage.packs.grants.set('admin', ['catalog-pack'])
+    await f.packs.select(f.member, 'catalog-pack', true)
+    const detail = await f.packs.detail(f.actor, 'catalog-pack')
+    expect(detail.removal.selectedMembers).toBe(1)
+    await expect(f.packs.save(f.actor, detail, detail.revision)).rejects.toMatchObject({ code: 'suite-entry-locked' })
+    await f.packs.publish(f.actor, 'catalog-pack', false, detail.revision)
+    expect(await f.storage.packs.grants.get('admin')).toEqual(['catalog-pack'])
+    expect(await f.storage.packs.selections.get(f.member.spaceId)).toEqual([])
+    await f.packs.updateSuitePack('suite:test', { name: 'catalog-pack', description: 'Updated', skills: ['child'], instructions: '' }, [])
+    expect((await f.packs.detail(f.actor, 'catalog-pack')).published).toBe(false)
+    await f.packs.publish(f.actor, 'catalog-pack', true, await f.packs.revision(f.actor))
+    expect(await f.storage.packs.selections.get(f.member.spaceId)).toEqual([])
+    await f.storage.library.save({ ...(await f.storage.library.list())[0]!, conflict: true })
+    expect(await f.packs.detail(f.actor, 'catalog-pack')).toMatchObject({ published: true, unavailable: 'conflict', empty: false })
+    expect(await f.packs.market(f.member)).toEqual([])
+    await expect(f.packs.publish(f.member, 'catalog-pack', false, await f.packs.revision(f.actor))).rejects.toMatchObject({ code: 'admin-required' })
   } finally {
     await f.close()
   }

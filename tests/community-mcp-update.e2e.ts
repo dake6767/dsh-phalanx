@@ -8,11 +8,12 @@ import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import { mcpWriteInput } from '../src/domain/mcp-service.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { NodePluginUpstreamTransport } from '../src/adapters/plugin-upstream-transport.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import type { McpPreset } from '../src/domain/mcp-catalog.js'
-import { signInCommunity } from './fixtures/community-native-browser.js'
+import { openNativeSettings, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { createCommunityApplication, withTestMcpStore, withTestRuntimeDependencies } from './support/community-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
@@ -122,6 +123,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       await admin.getByLabel('Username', { exact: true }).fill('admin')
       await admin.getByLabel('Password', { exact: true }).fill('password')
       await admin.getByRole('button', { name: 'Create administrator', exact: true }).click()
+      await admin.getByRole('button', { name: 'Continue to administration', exact: true }).click()
       await admin.waitForURL(origin + '/admin')
       const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
       const settings = await (await admin.request.get(origin + '/admin/api/models')).json()
@@ -152,13 +154,32 @@ it.skipIf(!runtimeSettings.containerImage)(
       ).toBe(202)
       const row = async () => (await (await admin.request.get(origin + '/admin/api/mcp')).json())[0]
       await expect.poll(async () => (await row()).catalog.status, { timeout: 60000 }).toBe('ready')
-      expect((await post('mcp', { action: 'publish', name: 'p-fixture', published: true })).status()).toBe(200)
+      expect(
+        (
+          await post('mcp', {
+            action: 'publish',
+            name: 'p-fixture',
+            published: true,
+            revision: (await (await admin.request.get(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent('p-fixture'))).json()).revision,
+          })
+        ).status(),
+      ).toBe(200)
       const context = await browser.newContext({ locale: 'en' }),
         member = await context.newPage()
       member.setDefaultTimeout(60000)
       await signInCommunity(member, origin, 'alice', 'password')
       await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
       await member.getByRole('tab', { name: 'MCP services', exact: true }).click()
+      await member.getByRole('heading', { name: 'Fixture', exact: true }).waitFor()
+      await openNativeSettings(member)
+      await member.getByRole('button', { name: 'English', exact: true }).click()
+      await member.getByRole('menuitem', { name: '中文', exact: true }).click()
+      await member.keyboard.press('Escape')
+      await member.getByRole('heading', { name: '夹具', exact: true }).waitFor()
+      await openNativeSettings(member, 'zh')
+      await member.getByRole('button', { name: '中文', exact: true }).click()
+      await member.getByRole('menuitem', { name: 'English', exact: true }).click()
+      await member.keyboard.press('Escape')
       const toggle = member.getByRole('switch', { name: 'Enable MCP service p-fixture', exact: true })
       await toggle.click()
       await expect.poll(() => toggle.getAttribute('aria-checked')).toBe('true')
@@ -231,14 +252,25 @@ it.skipIf(!runtimeSettings.containerImage)(
       await admin.reload()
       await start()
       await probing
+      const pendingDisplay = await row()
+      expect((await post('mcp', { action: 'save', service: { ...mcpWriteInput(pendingDisplay), display: { name: '运行中的工具' } } })).status()).toBe(200)
+      expect(await row()).toMatchObject({ generation: pendingDisplay.generation, testStatus: 'passed', catalogUpdate: { status: 'testing' } })
       await call('PENDING_UPDATE', 'VERSION_OLD')
       hold = false
       release()
       await expect.poll(async () => (await row()).catalogUpdate?.status, { timeout: 60000 }).toBe('applied')
       // Catalog completion records desired state before its queued projection finishes.
       // An acknowledged idempotent management operation drains that public mutation queue.
-      expect((await post('mcp', { action: 'publish', name: 'p-fixture', published: true })).status()).toBe(200)
+      const synchronized = await post('mcp', {
+        action: 'publish',
+        name: 'p-fixture',
+        published: true,
+        revision: (await (await admin.request.get(origin + '/admin/api/mcp?publication=p-fixture')).json()).revision,
+      })
+      const synchronizationFailure = synchronized.status() === 200 ? undefined : await synchronized.json()
+      expect(synchronized.status(), synchronizationFailure?.code).toBe(200)
       await call('APPLIED_UPDATE', 'VERSION_NEW')
+      expect(await row()).toMatchObject({ display: { name: '运行中的工具', defaults: { name: { en: 'Fixture', 'zh-CN': '夹具' } } } })
       expect(await row()).toMatchObject({ name: 'p-fixture', published: true, catalog: { version: '2' } })
       await member.reload()
       await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()

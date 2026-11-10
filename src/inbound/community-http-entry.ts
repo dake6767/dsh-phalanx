@@ -21,7 +21,11 @@ export function protectCommunityEntry(dispatch: (request: IncomingMessage, respo
         request.method === 'GET' &&
         request.headers['sec-fetch-mode'] === 'navigate' &&
         request.headers['sec-fetch-dest'] === 'document' &&
-        (url.pathname === '/' || url.pathname === '/recovery' || url.pathname.startsWith('/service-preview/') || /^\/app\/[a-f0-9]{32}\/$/u.test(url.pathname))
+        (url.pathname === '/' ||
+          url.pathname === '/bootstrap' ||
+          url.pathname === '/recovery' ||
+          url.pathname.startsWith('/service-preview/') ||
+          /^\/app\/[a-f0-9]{32}\/$/u.test(url.pathname))
       if (!externalEntry && (!['/login', '/healthz', '/readyz'].includes(url.pathname) || request.method !== 'GET')) assertCommunityOrigin(request, origin())
       await dispatch(request, response)
     } catch (error) {

@@ -78,6 +78,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       await admin.getByLabel('Username', { exact: true }).fill('admin')
       await admin.getByLabel('Password', { exact: true }).fill('password')
       await admin.getByRole('button', { name: 'Create administrator', exact: true }).click()
+      await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
       await admin.waitForURL(origin + '/admin')
       const post = (path: string, body: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data: body })
       const settings = await (await admin.request.get(origin + '/admin/api/models')).json()
@@ -120,7 +121,16 @@ it.skipIf(!runtimeSettings.containerImage)(
       expect(row.catalog.status, JSON.stringify(diagnostics)).toBe('ready')
       expect(tools).toContain('get-tickets')
       expect(row.credentialConfigured).toBe(false)
-      expect((await post('mcp', { action: 'publish', name: 'p-12306', published: true })).status()).toBe(200)
+      expect(
+        (
+          await post('mcp', {
+            action: 'publish',
+            name: 'p-12306',
+            published: true,
+            revision: (await (await admin.request.get(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent('p-12306'))).json()).revision,
+          })
+        ).status(),
+      ).toBe(200)
       const owner = createHash('sha256').update(root).digest('hex')
       for (const username of ['alice', 'bob']) {
         const context = await browser.newContext({ locale: 'en', viewport: { width: 1440, height: 1000 } }),

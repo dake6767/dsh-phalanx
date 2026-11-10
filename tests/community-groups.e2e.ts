@@ -53,6 +53,7 @@ it('manages groups, membership, defaults and administrator transitions through H
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await page.waitForURL(`${origin}/admin`)
   await page.getByRole('link', { name: 'Group management', exact: true }).click()
   await page.getByRole('button', { name: 'Create group', exact: true }).click()
@@ -201,6 +202,7 @@ it('edits native feature defaults with dirty guards, unavailable explanations an
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await page.waitForURL(`${origin}/admin`)
   await page.getByRole('link', { name: 'Group management', exact: true }).click()
   const row = page.getByRole('row').filter({ hasText: 'Default group' })
@@ -272,6 +274,7 @@ it('folds group grants and expert choices without dropping selected children', a
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await page.waitForURL(`${origin}/admin`)
   const preview = await (
     await page.request.post(origin + '/admin/api/skills/import', {

@@ -107,6 +107,7 @@ it('projects remote, shared and member MCP into an expert, isolates failed servi
     await admin.getByLabel('Username', { exact: true }).fill('admin')
     await admin.getByLabel('Password', { exact: true }).fill('password')
     await admin.getByRole('button', { name: 'Create administrator' }).click()
+    await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await admin.waitForURL(origin + '/admin')
     const api = async (path: string, data?: object) => {
       const response = data

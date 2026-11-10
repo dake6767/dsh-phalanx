@@ -11,8 +11,8 @@ import { tmpdir } from 'node:os'
 describe('community default model authorization', () => {
   it('uses current account state for scoped access, preserving another member', async () => {
     const states = new Map<string, CommunityAccountState>([
-      ['alice', { username: 'alice', spaceId: 'space-alice', disabled: false, sessionEpoch: 0 }],
-      ['bob', { username: 'bob', spaceId: 'space-bob', disabled: false, sessionEpoch: 0 }],
+      ['alice', { username: 'alice', admin: false, spaceId: 'space-alice', disabled: false, sessionEpoch: 0 }],
+      ['bob', { username: 'bob', admin: false, spaceId: 'space-bob', disabled: false, sessionEpoch: 0 }],
     ])
     const access = new Map([
       ['opaque-alice', { username: 'alice', spaceId: 'space-alice' }],
@@ -71,7 +71,7 @@ it('refuses registration when a token is revoked while the account read is pendi
 it('rechecks durable state for every boundary without a storage revision cache', async () => {
   let disabled = false
   const authorization = new CommunityModelAuthorization(
-    accountState(username => ({ username, spaceId: 'space', disabled, sessionEpoch: 0 })),
+    accountState(username => ({ username, admin: false, spaceId: 'space', disabled, sessionEpoch: 0 })),
     { resolve: () => ({ username: 'alice', spaceId: 'space' }) },
   )
   const admission = await admitCommunityModel(authorization, 'opaque')

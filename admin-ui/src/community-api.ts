@@ -220,7 +220,7 @@ export function saveCommunityGroupSkills(
 }
 
 export const skillSynchronizationEvent = 'community-skill-synchronization'
-function skillSynchronizationChanged() {
+export function skillSynchronizationChanged() {
   window.dispatchEvent(new Event(skillSynchronizationEvent))
 }
 export function communitySkillSynchronization(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySkillSynchronization> {

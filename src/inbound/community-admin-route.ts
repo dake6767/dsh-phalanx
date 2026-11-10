@@ -1,3 +1,5 @@
+import type { InitialModelSetup } from '../use-cases/initial-model-setup.js'
+import { initialModelRoute } from './initial-model-route.js'
 import type { PluginIntake } from '../use-cases/plugin-intake.js'
 import type { PluginUpdates } from '../use-cases/plugin-updates.js'
 import { pluginIntakeRoute } from './plugin-intake-route.js'
@@ -63,7 +65,7 @@ import { sendText } from './http-response.js'
 import type { CommunityEnvironmentRecovery } from '../use-cases/community-environment-recovery.js'
 import type { SharedModelAdministration } from '../use-cases/shared-model-administration.js'
 import { communityGroupInput } from './community-group-request.js'
-import type { CommunityModelAction } from '../domain/admin-contract.js'
+import { modelAdminRoute } from './model-admin-route.js'
 
 export function createCommunityAdminRoute(deps: {
   readonly authenticate: (request: IncomingMessage) => Promise<string | undefined>
@@ -94,6 +96,7 @@ export function createCommunityAdminRoute(deps: {
   readonly upstreams?: PluginUpstreamAdministration
   readonly upstreamTest?: PluginUpstreamTest
   readonly usage?: UsagePolicy
+  readonly initialModel?: InitialModelSetup
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
   readonly downloads?: DownloadSources
@@ -119,6 +122,8 @@ export function createCommunityAdminRoute(deps: {
       }
       const viewer = await deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
+      if (await modelAdminRoute(request, response, url, caller, deps.models, deps.origin())) return
+      if (deps.initialModel && (await initialModelRoute(request, response, url, caller, deps.initialModel, deps.origin()))) return
       if (deps.pluginIntake && (await pluginIntakeRoute(request, response, url, caller, deps.pluginIntake, deps.origin()))) return
       if (deps.pluginUpdates && (await pluginUpdateRoute(request, response, url, caller, deps.pluginUpdates))) return
       if (deps.instanceResources && (await instanceResourceRoute(request, response, url, caller, deps.instanceResources, deps.origin()))) return
@@ -189,30 +194,6 @@ export function createCommunityAdminRoute(deps: {
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
           sendCommunityJson(response, 200, await deps.updates.execute(caller, communitySystemUpdateInput(await readCommunityJson(request))))
-          return
-        }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
-        return
-      }
-      if (url.pathname === '/admin/api/models') {
-        if (request.method === 'GET') {
-          sendCommunityJson(response, 200, await deps.models.list(caller))
-          return
-        }
-        if (request.method === 'POST') {
-          assertCommunityOrigin(request, deps.origin())
-          const input = (await readCommunityJson(request)) as CommunityModelAction
-          if (
-            input === null ||
-            typeof input !== 'object' ||
-            !['save-provider', 'delete-provider', 'set-default'].includes(input.action) ||
-            !Number.isSafeInteger(input.revision) ||
-            (input.action === 'set-default' && typeof input.defaultModelId !== 'string') ||
-            (input.action === 'delete-provider' && typeof input.providerId !== 'string') ||
-            (input.action === 'save-provider' && (input.provider === null || typeof input.provider !== 'object'))
-          )
-            throw new CommunityRequestError(400, 'Invalid model settings action', 'model-action-invalid')
-          sendCommunityJson(response, 200, await deps.models.execute(caller, input))
           return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })

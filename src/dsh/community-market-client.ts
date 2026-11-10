@@ -3,7 +3,6 @@ import { nativeExpertsTab } from './community-market-experts-client.js'
 import { nativeMcpTab } from './community-market-mcp-client.js'
 import { nativeMarketHelpers } from './community-market-shared-client.js'
 import { nativeSkillsTab } from './community-market-skills-client.js'
-import { nativePacksTab } from './community-market-packs-client.js'
 import { nativePluginsTab } from './community-market-plugins-client.js'
 import { platformMessages, platformErrorMessages, type PlatformMessageKey } from '../domain/platform-copy.js'
 
@@ -38,6 +37,7 @@ const keys = [
   'Contributed anonymously',
   'MCP services',
   'MCP tools',
+  'Service identifier',
   'MCP services take effect immediately.',
   'Reload MCP services',
   'Granted MCP services',
@@ -186,8 +186,6 @@ isolated(()=>{
 });
 isolated(()=>{${nativeSkillsTab}
 marketTabs.skills=SkillsPanel;});
-isolated(()=>{${nativePacksTab}
-marketTabs.packs=PacksPanel;});
 isolated(()=>{${nativeMcpTab}
 marketTabs.mcp=McpPanel;});
 ${
@@ -200,7 +198,7 @@ function MarketPanel(){
  const locale=React.useSyncExternalStore(subscribe,snapshot)==='zh'?'zh-CN':'en';
  const text=key=>marketCopy[locale][key]||key;
  const [selected,setSelected]=React.useState('plugins');
- const items=[['plugins','Plugins'],['skills','Skills'],['packs','Skill packs'],['mcp','MCP services']${featureVisible('experts') ? ",['experts','Experts']" : ''}].map(([value,label])=>({value,label:text(label),id:'phalanx-tab-'+value,panelId:'phalanx-panel-'+value}));
+ const items=[['plugins','Plugins'],['skills','Skills'],['mcp','MCP services']${featureVisible('experts') ? ",['experts','Experts']" : ''}].map(([value,label])=>({value,label:text(label),id:'phalanx-tab-'+value,panelId:'phalanx-panel-'+value}));
  const Tab=marketTabs[selected]||UnavailableMarket;
  return h('section',{className:'phalanx-market','aria-label':text('Platform apps')},
   h('header',{className:'phalanx-market-head'},h('h1',null,text('Platform apps'))),

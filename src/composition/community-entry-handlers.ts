@@ -1,3 +1,5 @@
+import { FileInitialModelDefaults } from '../adapters/initial-model-defaults.js'
+import { InitialModelSetup } from '../use-cases/initial-model-setup.js'
 import type { PluginIntake } from '../use-cases/plugin-intake.js'
 import { createNativePluginHistoryGateway } from '../inbound/native-plugin-history-gateway.js'
 import type { NativeFeatures } from '../use-cases/native-features.js'
@@ -323,6 +325,7 @@ export function createCommunityEntryHandlers(input: {
     upstreams,
     upstreamTest,
     models: modelAdministration,
+    initialModel: new InitialModelSetup(modelAdministration, new FileInitialModelDefaults(config.initialModelDefaultsFile), modelStore),
     plugins,
     pluginIntake,
     pluginUpdates,

@@ -1,6 +1,6 @@
 # dsh-phalanx admin UI design
 
-Updated: 2026-11-06. Applies to the admin app in `admin-ui/src` and the server-rendered
+Updated: 2026-11-09. Applies to the admin app in `admin-ui/src` and the server-rendered
 entry pages in `src/inbound` (sign in, account chooser, first-run setup, recovery).
 
 Phalanx surfaces inside native DSH follow the separate
@@ -49,6 +49,11 @@ Use these before writing new markup.
 - Drawers: [`admin-ui/src/CommunityDialog.tsx`](src/CommunityDialog.tsx) with `drawer`; body is
   `.plugin-settings-panel` > `.plugin-detail-section`. The header shows the title once; no eyebrow, no repeated identity.
 - Bordered section with optional action: [`admin-ui/src/CommunityGrantSection.tsx`](src/CommunityGrantSection.tsx).
+- Publication: [`admin-ui/src/CommunityPublicationSection.tsx`](src/CommunityPublicationSection.tsx)
+  presents the first detail section and shared list status for plugins, skills, packs
+  and MCP services. Each resource owns its impact confirmation and mutation. Publication
+  and availability remain separate; MCP required-service policy uses a separate Use rules section.
+- MCP display fields share `McpDisplayFields`; localized catalog defaults remain separate from administrator overrides. Cards use the display title and retain a secondary technical identifier. (user-confirmed)
 - Grants: [`admin-ui/src/CommunityGrantList.tsx`](src/CommunityGrantList.tsx), a granted list plus an "Add" picker.
 - Dependency choice: [`admin-ui/src/CommunityDependencyPicker.tsx`](src/CommunityDependencyPicker.tsx), title-only checkboxes.
 - Fields: [`admin-ui/src/CommunityField.tsx`](src/CommunityField.tsx) and [`admin-ui/src/CommunitySelect.tsx`](src/CommunitySelect.tsx) with the default variant.

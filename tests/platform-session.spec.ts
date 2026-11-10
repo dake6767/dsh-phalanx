@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 it('waits for durable account lookup before accepting a signed session', async () => {
-  const account = { username: 'member', spaceId: 'member-space', disabled: false, sessionEpoch: 3 }
+  const account = { username: 'member', admin: false, spaceId: 'member-space', disabled: false, sessionEpoch: 3 }
   const sessions = new PlatformSessionCodec('fictional-session-signing-key-with-32-bytes')
   const request = { headers: { cookie: `dsh-phalanx_session=${sessions.issue(account)}` } } as IncomingMessage
   let complete!: (account: CommunityAccountState) => void

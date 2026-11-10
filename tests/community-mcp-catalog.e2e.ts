@@ -83,6 +83,7 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     await page.getByLabel('Username', { exact: true }).fill('admin')
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
     await page.getByRole('link', { name: 'MCP library', exact: true }).click()
     await page.getByRole('tab', { name: 'MCP catalog', exact: true }).click()
@@ -90,6 +91,8 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     await preset.focus()
     await page.keyboard.press('Enter')
     await page.getByLabel('MCP service name', { exact: true }).fill('p-map')
+    expect(await page.getByLabel('Display name', { exact: true }).inputValue()).toBe('Amap')
+    await page.getByLabel('Display name', { exact: true }).fill('地图助手')
     await page.getByLabel('Amap Web Service Key', { exact: true }).fill('fixture-key')
     await page.getByRole('button', { name: 'Import MCP service', exact: true }).click()
     const row = page.locator('.mcp-service-card').filter({ hasText: 'p-map' })
@@ -98,6 +101,8 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     await row.getByText('Import failed', { exact: true }).waitFor()
     const settings = async () => (await page.request.get(origin + '/admin/api/mcp')).json()
     const saved = (await settings())[0]
+    expect(saved.display).toMatchObject({ name: '地图助手', defaults: { name: { en: 'Amap', 'zh-CN': '高德地图' } } })
+    expect(saved.display).not.toHaveProperty('description')
     expect(JSON.stringify(saved)).not.toContain('fixture-key')
     expect(
       (
@@ -108,7 +113,17 @@ it('imports a preset through the skill-pack style market, persists failure, retr
       ).status(),
     ).toBe(400)
     expect(
-      (await page.request.post(origin + '/admin/api/mcp', { data: { action: 'publish', name: 'p-map', published: true }, headers: { origin } })).status(),
+      (
+        await page.request.post(origin + '/admin/api/mcp', {
+          data: {
+            action: 'publish',
+            name: 'p-map',
+            published: true,
+            revision: (await (await page.request.get(origin + '/admin/api/mcp?publication=p-map')).json()).revision,
+          },
+          headers: { origin },
+        })
+      ).status(),
     ).toBe(409)
     fail = false
     await row.getByRole('button', { name: 'Retry import', exact: true }).click()
@@ -127,7 +142,8 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     expect(await page.getByRole('button', { name: 'Add parameter', exact: true }).count()).toBe(0)
     await page.getByRole('tab', { name: 'Basic information', exact: true }).click()
     await page.getByRole('button', { name: 'Publish MCP service', exact: true }).click()
-    await page.getByText('MCP service is published.', { exact: true }).waitFor()
+    await page.getByRole('dialog', { name: 'Confirm MCP publication', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
+    await page.getByRole('region', { name: 'Platform App Center', exact: true }).getByRole('button', { name: 'Unpublish MCP service', exact: true }).waitFor()
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     // Render the public development-fallback state without starting a host process.
     await page.route('**/admin/api/mcp', async route => {

@@ -71,7 +71,7 @@ describe('community default model gateway HTTP seam', () => {
     })
     servers.push(upstream)
     const authorization = new CommunityModelAuthorization(
-      accountState(username => ({ username, spaceId: `space-${username}`, disabled: false, sessionEpoch: 0 })),
+      accountState(username => ({ username, admin: false, spaceId: `space-${username}`, disabled: false, sessionEpoch: 0 })),
       { resolve: token => (token === 'opaque-member' ? { username: 'member', spaceId: 'space-member' } : undefined) },
     )
     const origin = await hostGateway({
@@ -174,7 +174,7 @@ describe('community default model gateway HTTP seam', () => {
     const authorization = new CommunityModelAuthorization(
       accountState(username => {
         admitted()
-        return { username, spaceId: `space-${username}`, disabled, sessionEpoch: 0 }
+        return { username, admin: false, spaceId: `space-${username}`, disabled, sessionEpoch: 0 }
       }),
       { resolve: token => (token === 'opaque-member' ? { username: 'member', spaceId: 'space-member' } : undefined) },
     )

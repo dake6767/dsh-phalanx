@@ -165,7 +165,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     expect(identityRequests.every(request => request.url === `${origin}/account/identity` && request.method === 'GET')).toBe(true)
     const identity = await context.request.get(`${origin}/account/identity`)
     expect(identity.status()).toBe(200)
-    expect(await identity.json()).toEqual({ username })
+    expect(await identity.json()).toEqual({ username, admin: username === adminUsername })
     const cdp = await context.newCDPSession(page)
     const manifest = (await cdp.send('Page.getAppManifest')) as { manifest?: { id?: string; scope?: string; startUrl?: string } }
     expect([manifest.manifest?.id, manifest.manifest?.scope, manifest.manifest?.startUrl]).toEqual([entry, entry, entry])

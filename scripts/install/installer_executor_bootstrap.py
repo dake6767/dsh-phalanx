@@ -8,6 +8,7 @@ from installer_compatibility import supports_capacity  # embedded-compatibility
 from installer_release import RELEASE_BASE, CANDIDATE_RELEASE_BASE  # embedded-release
 from installer_executor_install import REQUIRED,executor_package,install_executor,activate_executor,BANKS  # embedded-executor-install
 from installer_upgrade_core import ACTIVE  # embedded-upgrade-core
+from installer_operations import PlatformOperations  # embedded-operations
 from installer_storage import capacity_plan,filesystem_capacity,MIB  # embedded-storage
 
 
@@ -15,11 +16,12 @@ def bootstrap_executor(host,port,target,temporary):
     port.check_fresh_install(target)
     job=port.operation()
     if job and job['phase'] in (*ACTIVE,'prepared'):raise InstallError('Finish or recover the existing update before executor bootstrap')
-    if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Recover the interrupted update before executor bootstrap')
     source=port.source();manifest=target['manifest']
+    marker=host.path('/etc/dsh-phalanx/maintenance');recovery=None
+    if marker.exists() or marker.is_symlink():recovery=PlatformOperations(host,port).bootstrap_recovery_proof(source)
     port.check_compatibility(source,target)
     if not supports_capacity(manifest):raise InstallError('This release does not support a capacity-aware executor bootstrap')
-    port.verify_source(source)
+    if recovery is None:port.verify_source(source)
     raw=manifest['updater'];inventory=json.loads(raw)
     files=inventory.get('files')
     if (inventory.get('schema')!=1 or inventory.get('sourceCommit')!=manifest['commit'] or
@@ -50,7 +52,9 @@ def bootstrap_executor(host,port,target,temporary):
         (updater/name).write_bytes(body)
     (updater/'manifest.json').write_text(raw)
     executor_package(updater,manifest['commit'])
+    if recovery is not None and PlatformOperations(host,port).bootstrap_recovery_proof(port.source())!=recovery:
+        raise InstallError('Legacy rotation evidence changed during executor bootstrap')
     result=install_executor(host,source['uid'],source['gid'],package,manifest['commit'])
     activate_executor(host,restart=True)
-    host.tell('Capacity-aware updater installed. The platform remains running; return to System update to download the selected release.')
+    host.tell('Updater installed; run maintenance-recover to restore the interrupted initialization.' if recovery is not None else 'Capacity-aware updater installed. The platform remains running; return to System update to download the selected release.')
     return result

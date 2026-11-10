@@ -1,16 +1,26 @@
+import { mcpPolicySnapshot } from './mcp-policy-snapshot.js'
+import { mcpDisplayUpdate } from '../domain/mcp-display.js'
+import { mcpPlatformCredentials } from '../domain/mcp-protected-values.js'
 import { McpCatalogOperations } from './mcp-catalog-operations.js'
 import { setTimeout as delay } from 'node:timers/promises'
 import { PlatformDatabaseError } from '../domain/platform-database.js'
 import { mcpSecrets, redactMcpValue } from '../domain/mcp-protocol.js'
 import { combineAcquisitionSources } from '../domain/acquisition-sources.js'
 import { assertCatalogConfiguration, mcpPresets, type McpPreset } from '../domain/mcp-catalog.js'
-import type { CommunityMarketMcp, CommunityMcpTool, CommunityMcpInput, CommunityMcpSettings, CommunityMcpGroup } from '../domain/admin-contract.js'
+import type {
+  CommunityMarketMcp,
+  CommunityMcpTool,
+  CommunityMcpInput,
+  CommunityMcpSettings,
+  CommunityMcpGroup,
+  CommunityMcpPublicationImpact,
+} from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { requiredCommunityGroup } from '../domain/community-group.js'
 import { mergeMcpInput, mcpSettings, type McpService } from '../domain/mcp-service.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
-import type { McpStatePort, McpProjectionPort, MemberMcpPort, McpRuntimePort } from '../ports/mcp-services.js'
+import type { McpStatePort, McpProjectionPort, MemberMcpPort, McpRuntimePort, McpSnapshot } from '../ports/mcp-services.js'
 import type { ExpertMcpPort } from '../ports/experts.js'
 import { McpServiceRemoval } from './mcp-service-removal.js'
 import type { McpRemovalImpact } from '../domain/mcp-removal.js'
@@ -88,7 +98,7 @@ export class McpServices implements MemberMcpPort {
       const prepared = state.services
         .flatMap(service => [service, ...(service.catalogUpdate?.candidate ? [service.catalogUpdate.candidate] : [])])
         .map(service => this.runtime?.ready(service) ?? null)
-      return JSON.stringify([state, this.store.view.version(), experts, prepared])
+      return JSON.stringify([mcpPolicySnapshot(state), experts, prepared])
     }
     const initial = snapshot()
     return () => {
@@ -154,6 +164,7 @@ export class McpServices implements MemberMcpPort {
     return (await this.available(actor.username)).map(({ service, granted, enabled, required }) => ({
       name: service.name,
       description: mcpSettings(service).description,
+      ...(service.display ? { display: mcpSettings(service).display } : {}),
       granted,
       enabled,
       required,
@@ -181,11 +192,31 @@ export class McpServices implements MemberMcpPort {
       await this.synchronize()
     })
   }
-  publish(actor: CommunityAccountActor, name: string, published: boolean): Promise<void> {
+  async publicationImpact(actor: CommunityAccountActor, name: string): Promise<CommunityMcpPublicationImpact> {
+    // Accepted mutations may still be canonicalizing promoted dependencies.
+    await this.pending
+    await this.assertAdmin(actor)
+    return this.capturePublication(await this.store.read(), name)
+  }
+  private async capturePublication(state: McpSnapshot, name: string): Promise<CommunityMcpPublicationImpact> {
+    const service = state.services.find(row => row.name === name)
+    if (!service) throw new BusinessRuleError('missing', 'MCP service was not found.', 'not-found')
+    const accounts = await this.accounts.list()
+    return {
+      name,
+      published: service.published ?? false,
+      selectedMembers: accounts.filter(row => state.selections?.[row.spaceId]?.includes(name)).length,
+      hasPlatformCredential: mcpPlatformCredentials(service).length > 0,
+      revision: JSON.stringify([mcpSettings(service), state.grants, state.selections, accounts.map(row => [row.spaceId, row.groupId, row.disabled])]),
+    }
+  }
+  publish(actor: CommunityAccountActor, name: string, published: boolean, revision?: string): Promise<void> {
     return this.mutate(actor, async () => {
       const state = await this.store.read(),
         service = state.services.find(row => row.name === name)
       if (!service) throw new BusinessRuleError('missing', 'MCP service was not found.', 'not-found')
+      if (revision !== undefined && revision !== (await this.capturePublication(state, name)).revision)
+        throw new BusinessRuleError('conflict', 'MCP publication impact changed. Review it again.', 'mcp-impact-changed')
       if (published && (service.testStatus !== 'passed' || (service.catalog && service.catalog.status !== 'ready')))
         throw new BusinessRuleError('conflict', 'Test this MCP service successfully before publishing.', 'mcp-test-required')
       await this.store.update(state, {
@@ -255,6 +286,8 @@ export class McpServices implements MemberMcpPort {
         merged.credential !== (previous.credential ?? '') ||
         JSON.stringify(merged.headers) !== JSON.stringify(previous.headers ?? []) ||
         JSON.stringify(merged.query) !== JSON.stringify(previous.query ?? [])
+      const displayUpdate = input.display === undefined ? undefined : mcpDisplayUpdate(previous, merged, connectionChanged)
+      if (displayUpdate) return this.store.update(state, { ...state, services: state.services.map(row => (row === previous ? displayUpdate : row)) })
       const previousFields = { ...previous }
       delete previousFields.protectedValues
       delete previousFields.protectedCredentials
@@ -270,6 +303,7 @@ export class McpServices implements MemberMcpPort {
         published: previous?.published ?? false,
         name: merged.name,
         description: merged.description,
+        ...(merged.display ? { display: merged.display } : {}),
         url: merged.url,
         generation: (state.revision ?? Math.max(0, ...state.services.map(service => service.generation))) + 1,
         credential: merged.credential ?? '',

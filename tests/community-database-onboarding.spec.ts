@@ -58,7 +58,7 @@ it('listens for first-install authorization without writing any platform busines
     })
 
     expect(created.status).toBe(303)
-    expect(created.headers.get('location')).toBe('/admin')
+    expect(created.headers.get('location')).toBe('/admin/initial-model')
     expect(FilePlatformDatabaseConfig.open(path, root).selection).toBe('builtin')
     expect((await fetch(origin + '/readyz')).status).toBe(200)
     const cookie = created.headers

@@ -205,11 +205,33 @@ export function apply(ctx) { ctx.on('app-boot/config-reload', () => {
     expect(await prompt('MEMBER_DISABLED')).toEqual(['mcp__p-collision__personal_echo', 'mcp__personal-other__personal_echo'])
     expect((await toggle(true)).status).toBe(200)
     expect((await post('mcp/test', { name: 'p-collision' })).status).toBe(200)
-    expect((await post('mcp', { action: 'publish', name: 'p-collision', published: true })).status).toBe(200)
+    expect(
+      (
+        await post('mcp', {
+          action: 'publish',
+          name: 'p-collision',
+          published: true,
+          revision: (
+            await (await fetch(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent('p-collision'), { headers: { cookie: admin } })).json()
+          ).revision,
+        })
+      ).status,
+    ).toBe(200)
     expect((await grant([])).status).toBe(200)
     expect((await toggle(true)).status).toBe(200)
     expect(await prompt('MARKET_SELECTED')).toEqual(['mcp__p-collision__platform_echo', 'mcp__personal-other__personal_echo'])
-    expect((await post('mcp', { action: 'publish', name: 'p-collision', published: false })).status).toBe(200)
+    expect(
+      (
+        await post('mcp', {
+          action: 'publish',
+          name: 'p-collision',
+          published: false,
+          revision: (
+            await (await fetch(origin + '/admin/api/' + 'mcp?publication=' + encodeURIComponent('p-collision'), { headers: { cookie: admin } })).json()
+          ).revision,
+        })
+      ).status,
+    ).toBe(200)
     expect(await prompt('UNPUBLISHED')).toEqual(['mcp__p-collision__personal_echo', 'mcp__personal-other__personal_echo'])
     expect((await grant(['p-collision'])).status).toBe(200)
     expect(await prompt('GRANT_REMAINS')).toEqual(['mcp__p-collision__platform_echo', 'mcp__personal-other__personal_echo'])

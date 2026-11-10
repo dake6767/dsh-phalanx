@@ -3,12 +3,13 @@
     "protocol": 3,
     "source": {
       "min": "0.1.26",
-      "maxExclusive": "0.1.32"
+      "maxExclusive": "0.1.33"
     },
     "environmentEpoch": 1,
     "sourceDshRevisions": [
       "687f282e8625c6b8d11ff58211a90524be2e4317",
-      "b830ec950faba0a46dda564be3e2d854afed94f1"
+      "b830ec950faba0a46dda564be3e2d854afed94f1",
+      "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db"
     ],
     "freshInstallThrough": "0.1.25",
     "schemas": [
@@ -23,7 +24,7 @@
     "breakpoints": []
   },
   "acceptancePolicy": {
-    "ticket": 6,
+    "ticket": 10,
     "checks": [
       "ci",
       "linux",

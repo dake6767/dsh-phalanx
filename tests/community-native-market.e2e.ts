@@ -6,7 +6,7 @@ import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityMarketPluginView, CommunityNativePluginJob } from '../src/domain/admin-contract.js'
-import { openNativeSettings, signInCommunity } from './fixtures/community-native-browser.js'
+import { openCommunitySidebar, openNativeSettings, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { openTestAccounts } from './support/community-application.js'
@@ -73,6 +73,30 @@ it('renders the platform market with native DSH controls, theme and locale while
         },
       })
     })
+    await page.route('**/market/api/mcp', route =>
+      route.fulfill({
+        json: [
+          {
+            name: 'p-localized',
+            description: '',
+            display: { defaults: { name: { en: 'Docs', 'zh-CN': '文档' }, description: { en: 'Read documents', 'zh-CN': '读取文档' } } },
+            granted: false,
+            enabled: false,
+            required: false,
+            tools: [{ name: 'read' }],
+          },
+          {
+            name: 'p-override',
+            description: 'Legacy text',
+            display: { name: 'Docs', description: '' },
+            granted: true,
+            enabled: true,
+            required: false,
+            tools: [],
+          },
+        ],
+      }),
+    )
     await signInCommunity(page, origin, 'member', 'password')
     for (const reload of [false, true]) {
       if (reload) await page.reload()
@@ -111,15 +135,37 @@ it('renders the platform market with native DSH controls, theme and locale while
       await adminPage.getByRole('button', { name: /^Platform account:/u }).waitFor()
       expect(await adminPage.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
       await adminPage.getByRole('button', { name: /^Platform account:/u }).click()
+      await expect.poll(() => adminPage.getByRole('menuitem').first().textContent()).toBe('Go to admin console')
       await adminPage.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
       await adminPage.getByRole('menuitem', { name: 'Log out', exact: true }).waitFor()
-      await adminPage.keyboard.press('Escape')
+      await adminPage.keyboard.press('Home')
+      const originalUrl = adminPage.url()
+      const [consolePage] = await Promise.all([adminPage.waitForEvent('popup'), adminPage.keyboard.press('Enter')])
+      await consolePage.waitForURL(origin + '/admin')
+      await consolePage.locator('#admin-sidebar').waitFor()
+      expect(await consolePage.evaluate(() => window.opener === null)).toBe(true)
+      expect(adminPage.url()).toBe(originalUrl)
+      await consolePage.close()
     }
     await adminContext.close()
     await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
     await market.getByRole('tab', { name: 'Plugins', exact: true }).waitFor()
-    expect(await market.getByRole('tab').allTextContents()).toEqual(['Plugins', 'Skills', 'Skill packs', 'MCP services'])
+    expect(await market.getByRole('tab').allTextContents()).toEqual(['Plugins', 'Skills', 'MCP services'])
+    await market.getByRole('tab', { name: 'Plugins', exact: true }).focus()
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => market.getByRole('tab', { name: 'Skills', exact: true }).getAttribute('aria-selected')).toBe('true')
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => market.getByRole('tab', { name: 'MCP services', exact: true }).getAttribute('aria-selected')).toBe('true')
+    await expect.poll(() => market.getByRole('heading', { name: 'Docs', exact: true }).count()).toBe(2)
+    for (const name of ['p-localized', 'p-override']) await market.getByText(name, { exact: true }).waitFor()
+    expect(await market.getByText('Legacy text', { exact: true }).count()).toBe(0)
+    await market.getByRole('button', { name: 'View MCP tools for p-localized', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Docs', exact: true }).getByText('Service identifier: p-localized', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Close MCP tools', exact: true }).click()
+    await market.getByRole('tab', { name: 'MCP services', exact: true }).focus()
+    await page.keyboard.press('Home')
+    await expect.poll(() => market.getByRole('tab', { name: 'Plugins', exact: true }).getAttribute('aria-selected')).toBe('true')
     await market.getByRole('heading', { name: 'Useful sidebar', exact: true }).waitFor()
     expect(await market.locator('iframe').count()).toBe(0)
     const button = market.getByRole('button', { name: 'Install', exact: true })
@@ -180,6 +226,15 @@ it('renders the platform market with native DSH controls, theme and locale while
     await page.getByRole('menuitem', { name: '中文', exact: true }).click()
     await page.keyboard.press('Escape')
     await page.getByRole('heading', { name: '平台应用中心', exact: true }).waitFor()
+    expect(await page.getByRole('region', { name: '平台应用中心', exact: true }).getByRole('tab').allTextContents()).toEqual(['插件', '技能', 'MCP 服务'])
+    const chineseMarket = page.getByRole('region', { name: '平台应用中心', exact: true })
+    await chineseMarket.getByRole('tab', { name: 'MCP 服务', exact: true }).click()
+    await chineseMarket.getByRole('heading', { name: '文档', exact: true }).waitFor()
+    await chineseMarket.getByText('读取文档', { exact: true }).waitFor()
+    await chineseMarket.getByRole('heading', { name: 'Docs', exact: true }).waitFor()
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
+      await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-display-native-zh.png'), fullPage: true, animations: 'disabled' })
+    await chineseMarket.getByRole('tab', { name: '插件', exact: true }).click()
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) {
       await mkdir(evidence, { recursive: true })
@@ -188,8 +243,11 @@ it('renders the platform market with native DSH controls, theme and locale while
     await page.emulateMedia({ colorScheme: 'light' })
     if (evidence) await page.screenshot({ path: join(evidence, 'native-market-light.png'), fullPage: true })
     await page.setViewportSize({ width: 390, height: 844 })
+    await openCommunitySidebar(page)
+    await page.locator('[data-sidebar-toggle]').click()
+    await expect.poll(() => page.locator('[data-sidebar-drawer][data-sidebar-collapsed]').count()).toBe(1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    if (evidence) await page.screenshot({ path: join(evidence, 'native-market-mobile.png'), fullPage: true })
+    if (evidence) await page.screenshot({ path: join(evidence, 'native-market-mobile.png'), fullPage: true, animations: 'disabled' })
     empty = true
     await page.getByRole('button', { name: '重新加载插件', exact: true }).click()
     await page.getByText('暂无已发布的插件', { exact: true }).waitFor()
@@ -250,7 +308,6 @@ it('renders the platform market with native DSH controls, theme and locale while
     for (const tab of [
       { label: 'Plugins', component: 'PluginsPanel', path: '/market/api/plugins' },
       { label: 'Skills', component: 'SkillsPanel', path: '/market/api/skills' },
-      { label: 'Skill packs', component: 'PacksPanel', path: '/market/api/skill-packs' },
       { label: 'MCP services', component: 'McpPanel', path: '/market/api/mcp' },
     ]) {
       for (const phase of ['initialization', 'render', 'request']) {
@@ -286,14 +343,14 @@ it('renders the platform market with native DSH controls, theme and locale while
           const center = isolatedPage.getByRole('region', { name: 'Platform App Center', exact: true })
           await center.getByRole('tab', { name: tab.label, exact: true }).click()
           await center.getByRole('alert').waitFor()
-          for (const other of ['Plugins', 'Skills', 'Skill packs', 'MCP services'].filter(label => label !== tab.label)) {
+          for (const other of ['Plugins', 'Skills', 'MCP services'].filter(label => label !== tab.label)) {
             await center.getByRole('tab', { name: other, exact: true }).click()
             if (other === 'MCP services') {
               for (const group of ['Granted MCP services', 'Available MCP services'])
                 await center.getByRole('region', { name: group, exact: true }).getByText('No MCP services yet', { exact: true }).waitFor()
             } else
               await center
-                .getByText(other === 'Plugins' ? 'No published plugins' : other === 'Skills' ? 'No published skills' : 'No published skill packs', {
+                .getByText(other === 'Plugins' ? 'No published plugins' : 'No published skills', {
                   exact: true,
                 })
                 .waitFor()

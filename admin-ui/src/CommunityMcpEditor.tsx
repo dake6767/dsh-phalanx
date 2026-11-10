@@ -1,3 +1,5 @@
+import { communityMcpPublicationImpact } from './community-publication-api'
+import { CommunityMcpPublicationSection, CommunityMcpPublicationConfirmation } from './CommunityMcpPublication'
 import { mcpWriteInput } from '../../src/domain/mcp-service'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
@@ -5,7 +7,7 @@ import { Tabs } from '@heroui/react/tabs'
 import { Checkbox } from '@heroui/react/checkbox'
 import { Chip } from '@heroui/react/chip'
 import { Label } from '@heroui/react/label'
-import type { CommunityMcpInput, CommunityMcpSettings } from '../../src/domain/admin-contract'
+import type { CommunityMcpInput, CommunityMcpSettings, CommunityMcpPublicationImpact } from '../../src/domain/admin-contract'
 import { communityMcp, retryCommunityMcp, testCommunityMcp, updateCommunityMcp } from './community-api'
 import { CommunityCopyError, usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
@@ -15,7 +17,7 @@ import CommunitySelect from './CommunitySelect'
 import type { McpImportDraft } from '../../src/domain/mcp-import'
 import CommunityMessage from './CommunityMessage'
 import { useDraftGuard } from './useDraftGuard'
-import { TemplateFields, McpPreparation, McpEditorSection } from './CommunityMcpFields'
+import { TemplateFields, McpPreparation, McpEditorSection, McpBasicFields } from './CommunityMcpFields'
 
 const inputOf = (value?: CommunityMcpSettings): CommunityMcpInput =>
   value ? mcpWriteInput(value) : { run: null, required: false, name: 'p-', description: '', url: '', headers: [], query: [], disabledTools: [] }
@@ -35,6 +37,7 @@ export default function McpEditor({
   onSaved: (rows: readonly CommunityMcpSettings[]) => void
 }) {
   const { t, errorText } = usePlatformLanguage()
+  const [publication, setPublication] = useState<CommunityMcpPublicationImpact>()
   const [settings, setSettings] = useState(value === 'new' ? undefined : value)
   const [initial, setInitial] = useState(() =>
     seed ? { ...seed.input, credential: undefined, credentials: undefined } : inputOf(value === 'new' ? undefined : value),
@@ -162,16 +165,13 @@ export default function McpEditor({
       setBusy(false)
     }
   }
-  const publish = async () => {
+  const reviewPublication = async () => {
     if (!settings || pending.current || dirty) return
     pending.current = true
     setBusy(true)
     setError(undefined)
     try {
-      const rows = await updateCommunityMcp({ action: 'publish', name: settings.name, published: !settings.published })
-      const next = rows.find(row => row.name === settings.name)!
-      setSettings(next)
-      onSaved(rows)
+      setPublication(await communityMcpPublicationImpact(settings.name))
     } catch (failure) {
       setError(failure)
     } finally {
@@ -179,16 +179,31 @@ export default function McpEditor({
       setBusy(false)
     }
   }
-  const guard = useDraftGuard(
-    dirty,
-    () => save(),
-    () => {
-      setDraft(initial)
-      setCredential('')
-      setClearCredential(false)
-    },
-    busy,
-  )
+  const publish = async () => {
+    if (!publication || pending.current || dirty) return
+    pending.current = true
+    setBusy(true)
+    setError(undefined)
+    try {
+      const rows = await updateCommunityMcp({ action: 'publish', name: publication.name, published: !publication.published, revision: publication.revision })
+      const next = rows.find(row => row.name === publication.name)!
+      setSettings(next)
+      onSaved(rows)
+    } catch (failure) {
+      setError(failure)
+    } finally {
+      setPublication(undefined)
+      pending.current = false
+      setBusy(false)
+    }
+  }
+  const discard = () => {
+    setDraft(initial)
+    setCredentials({})
+    setCredential('')
+    setClearCredential(false)
+  }
+  const guard = useDraftGuard(dirty, () => save(), discard, busy)
   return (
     <>
       <CommunityDialog
@@ -239,26 +254,17 @@ export default function McpEditor({
               </Tabs.List>
             </Tabs.ListContainer>
             <Tabs.Panel id="basic" className="plugin-settings-panel mcp-editor-panel" shouldForceMount data-editor-tab="basic">
-              <McpEditorSection title={t('Basic information')}>
-                <CommunityField
-                  label={t('MCP service name')}
-                  value={draft.name}
-                  onChange={name => setDraft({ ...draft, name })}
-                  required
-                  disabled={busy}
-                  autoFocus
-                  pattern="p-[A-Za-z0-9_-]{1,30}"
-                  description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}
-                />
-                {!settings?.catalog ? (
-                  <CommunityField
-                    label={t('Description')}
-                    value={draft.description}
-                    onChange={description => setDraft({ ...draft, description })}
-                    disabled={busy}
-                  />
-                ) : null}
-              </McpEditorSection>
+              <CommunityMcpPublicationSection
+                settings={settings}
+                busy={busy}
+                dirty={dirty}
+                onReview={() => {
+                  void reviewPublication()
+                }}
+                onDiscard={discard}
+              />
+
+              <McpBasicFields draft={draft} settings={settings} busy={busy} onChange={setDraft} />
               <McpEditorSection title={t('Run location')}>
                 {!settings?.catalog ? (
                   <>
@@ -395,7 +401,7 @@ export default function McpEditor({
                   )}
                 </McpEditorSection>
               ) : null}
-              <McpEditorSection title={t('Publication')}>
+              <McpEditorSection title={t('Use rules')}>
                 <Checkbox isSelected={draft.required ?? false} isDisabled={busy} onChange={required => setDraft({ ...draft, required })}>
                   <Checkbox.Content>
                     <Checkbox.Control>
@@ -404,22 +410,7 @@ export default function McpEditor({
                     {t('Required MCP service')}
                   </Checkbox.Content>
                 </Checkbox>
-                <p>{t('Members with a grant cannot disable a required service, including administrators.')}</p>
-                {settings ? (
-                  <>
-                    <p role="status">{t(settings.published ? 'MCP service is published.' : 'MCP service is not published.')}</p>
-                    <Button
-                      variant="secondary"
-                      isDisabled={busy || dirty || (!settings.published && settings.testStatus !== 'passed')}
-                      onPress={() => {
-                        void publish()
-                      }}
-                    >
-                      {t(settings.published ? 'Unpublish MCP service' : 'Publish MCP service')}
-                    </Button>
-                    {dirty ? <p>{t('Save changes before publishing.')}</p> : null}
-                  </>
-                ) : null}
+                <p>{t('Required applies only to members with a group grant. Self-selecting members without a group grant can still turn the service off.')}</p>
               </McpEditorSection>
             </Tabs.Panel>
             <Tabs.Panel id="access" className="plugin-settings-panel mcp-editor-panel" shouldForceMount data-editor-tab="access">
@@ -594,6 +585,14 @@ export default function McpEditor({
           </Tabs>
         </form>
       </CommunityDialog>
+      <CommunityMcpPublicationConfirmation
+        publication={publication}
+        busy={busy}
+        onConfirm={() => {
+          void publish()
+        }}
+        onCancel={() => setPublication(undefined)}
+      />
       {guard.dialog}
     </>
   )

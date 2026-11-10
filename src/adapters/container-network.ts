@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 import { PASTA_HOST_LOOPBACK_OPTION } from '../dsh/container.js'
 import { CommunityRuntimeUnavailableError } from '../ports/community-runtime.js'
@@ -24,21 +24,44 @@ export async function readPastaLoopbackMapping(
         ? { command: '/usr/bin/script', args: ['--quiet', '--return', '--command', `exec ${quotedHelper} --help`, '/dev/null'] }
         : { command: helper, args: ['--help'] }
     const help = await new Promise<string>((resolveHelp, reject) => {
-      let outcome: { error: Error | null; help: string } | undefined
-      const child = execFile(
-        invocation.command,
-        invocation.args,
-        { env: { ...containerClientEnvironment(), SHELL: '/bin/sh' }, signal, timeout: 10000, maxBuffer: 256 * 1024, encoding: 'utf8' },
-        (error, stdout, stderr) => {
-          outcome = { error, help: `${stdout}\n${stderr}` }
-        },
-      )
-      // Abort can report an error before script has reaped its helper.
-      child.once('close', () => {
-        if (!outcome) reject(new Error('Pasta help did not complete'))
-        else if (outcome.error) reject(outcome.error)
-        else resolveHelp(outcome.help)
+      signal.throwIfAborted()
+      const child = spawn(invocation.command, invocation.args, { env: { ...containerClientEnvironment(), SHELL: '/bin/sh' } })
+      let failure: Error | undefined,
+        stopping = false
+      const stop = (error: Error) => {
+        failure ??= error
+        if (stopping) return
+        stopping = true
+        child.kill('SIGTERM')
+      }
+      const streams = [child.stdout, child.stderr].map(stream => {
+        const chunks: Buffer[] = []
+        let bytes = 0
+        stream.on('data', (chunk: Buffer) => {
+          // Keep draining after cancellation or a limit. Closing the pipe can
+          // make the terminal exit while its helper is still alive.
+          if (failure) return
+          bytes += chunk.length
+          if (bytes > 256 * 1024) stop(new Error('Pasta help exceeded its output limit'))
+          else chunks.push(chunk)
+        })
+        stream.once('error', stop)
+        return chunks
       })
+      const abort = () => stop(new Error('Pasta help cancelled')),
+        timer = setTimeout(() => stop(new Error('Pasta help timed out')), 10000)
+      child.once('error', error => {
+        failure ??= error
+      })
+      child.once('close', code => {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', abort)
+        if (failure) reject(failure)
+        else if (code !== 0) reject(new Error('Pasta help did not complete'))
+        else resolveHelp(streams.map(chunks => Buffer.concat(chunks).toString('utf8')).join('\n'))
+      })
+      signal.addEventListener('abort', abort, { once: true })
+      if (signal.aborted) abort()
       child.stdin?.on('error', () => {})
       child.stdin?.end()
     })

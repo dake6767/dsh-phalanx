@@ -38,6 +38,7 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await page.waitForURL(`${origin}/admin`)
   await page.getByRole('heading', { name: 'Account management', exact: true }).waitFor()
   expect(await page.locator('html').getAttribute('data-theme')).toBe('dark')
@@ -150,6 +151,7 @@ it('creates and edits accounts in drawers, keeps failed drafts, and protects ind
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
   await page.waitForURL(`${origin}/admin`)
   for (const username of ['member', 'other']) {
     await page.getByRole('button', { name: 'Add account', exact: true }).click()

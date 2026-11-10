@@ -5,6 +5,7 @@ import type {
   CommunityNativeFeatureGroup,
   CommunityRuntimeDependencyView,
   CommunitySkillView,
+  CommunitySkillPackLibrary,
   CommunityUsageRecords,
 } from '../../src/domain/admin-contract.js'
 import type { UsageModelView } from '../../src/domain/usage-record.js'
@@ -51,7 +52,7 @@ export async function assertRetainedUpgradeAfter(input: {
   beforeAdministratorSkills: unknown
   groupId: string
   beforeSkillGrants: unknown
-  beforePacks: unknown
+  beforePacks: CommunitySkillPackLibrary
   beforePackSelections: unknown
   retainedApi: Parameters<typeof retainedContributionSnapshot>[0]
   retainedCatalog: Awaited<ReturnType<typeof retainedOfficialCatalog>>
@@ -147,9 +148,14 @@ export async function assertRetainedUpgradeAfter(input: {
   const administratorGroup = groups.find(row => row.kind === 'admin')!
   const administratorSkills = await get(`groups/${administratorGroup.id}/skills`)
   expect(administratorSkills).toEqual(beforeAdministratorSkills)
-  expect(await get('skills')).toEqual(beforeSkills)
+  // These fixtures configure no skill execution secrets. The new display flag
+  // is false; every previously returned field must still match exactly.
+  expect(await get('skills')).toEqual(beforeSkills.map(skill => ({ ...skill, hasPlatformCredential: false })))
   expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
-  expect(await get('skill-packs')).toEqual(beforePacks)
+  expect(await get('skill-packs')).toEqual({
+    ...beforePacks,
+    packs: beforePacks.packs.map(pack => ({ ...pack, hasPlatformCredential: false })),
+  })
   expect(await (await member.request.get(origin + '/market/api/skill-packs')).json()).toEqual(beforePackSelections)
   const { plugins, access, grants, selections, ...beforeCatalog } = beforeContributions
   const retainedCatalogState = await retainedCatalogSnapshot(retainedApi, remote, retainedCatalog.contentHash)

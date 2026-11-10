@@ -475,9 +475,11 @@ configuration, not for shared test support. Unlisted paths conservatively
 trigger every stage. The report is advice for the acceptance run and does not
 skip anything itself.
 
-Each formal promotion installs one pristine baseline of that release on the
-isolated validation host and keeps it as a read-only qcow2 snapshot plus a
+Optional environment acceptance may install a pristine formal-release baseline
+on an isolated validation host and keep it as a read-only qcow2 snapshot plus a
 creation receipt (`node scripts/validation/t4-baseline.mjs prepare|stage|end|verify`).
+This baseline does not replace the hosted Candidate formal-upgrade gate and is
+not required for every promotion.
 The receipt records the Ubuntu cloud image sha256, the download preset, the
 formal platform sha256, the image digest, the install duration and exit code,
 and the harness commit that made it. The snapshot is never evidence. It holds no
