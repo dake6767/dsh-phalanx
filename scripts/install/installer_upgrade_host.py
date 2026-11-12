@@ -19,9 +19,10 @@ from installer_config import effective_user_data_root, platform_facts, executor_
 from installer_release import release_channel, installed_channel, asset_names, acquire, digest, supply_image, stage_platform, verify_image, select_release  # embedded-release
 from installer_compatibility import compatible, upgrade_outcome, plugin_readiness_budget, require_upgrade_source, validate_contract, version_parts, STABLE, CANDIDATE, supports_capacity  # embedded-compatibility
 from installer_upgrade_gate import LinuxAdmissionGate, MaintenanceUnit, ListenerPinUnit, maintenance_token, process_started, maintenance_pages, protected_json, MARK, protected_ports  # embedded-upgrade-gate
-from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT  # embedded-executor-install
+from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT,GLOBAL_CLI  # embedded-executor-install
 from installer_upgrade_backup import PlatformBackup, UpgradeDatabaseBackup, rebuildable_paths, sync_directory  # embedded-upgrade-backup
 from installer_storage import UpgradeStorage  # embedded-storage
+from installer_operations import read_owned  # embedded-operations
 from installer_cleanup import UpgradeCleanup  # embedded-cleanup
 
 UPGRADE_ROOT='/var/lib/dsh-phalanx-updater'
@@ -31,6 +32,37 @@ STATE='/etc/dsh-phalanx/install-state.json'
 MANIFEST='/etc/dsh-phalanx/installed-manifest.json'
 CURRENT='/opt/dsh-phalanx/current'
 UNIT='/var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service'
+
+
+def read_upgrade_operation(host,operation=None):
+    pointer=host.path(UPGRADE_ROOT)/'current'
+    if operation is None:
+        if not pointer.exists():return None
+        operation=pointer.read_text().strip()
+    path=host.path(UPGRADE_ROOT)/operation_id(operation)/'operation.json'
+    if path.is_symlink():raise InstallError('Upgrade journal cannot be a symbolic link')
+    if not path.exists():return None
+    value=json.loads(read_owned(path,os.geteuid()))
+    if not isinstance(value,dict) or value.get('id')!=operation or not isinstance(value.get('phase'),str):raise InstallError('Invalid protected upgrade operation')
+    return value
+
+
+def installed_source(host,manifest=None):
+    state=installed_state(host)
+    if state is None:raise InstallError('A successful managed installation is required',code='release.identity-mismatch')
+    if manifest is None:manifest=json.loads(host.path(MANIFEST).read_text())
+    if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][asset_names(manifest)[0]]:
+        raise InstallError('Installed release manifest and receipt disagree',code='release.identity-mismatch')
+    values=read_configuration(host)
+    account=host.run(['getent','passwd','dsh-phalanx']).stdout.strip().split(':')
+    if len(account)!=7 or account[5]!='/var/lib/dsh-phalanx' or account[6]!='/usr/sbin/nologin' or int(account[2])==0:
+        raise InstallError('Managed service identity is incompatible',code='release.identity-mismatch')
+    current=host.path(CURRENT)
+    if not current.is_symlink():raise InstallError('Current release must be a managed symbolic link',code='release.identity-mismatch')
+    target=current.resolve()
+    if target.parent!=host.path('/opt/dsh-phalanx/releases') or (target/'.artifact-sha256').read_text()!=state['platformSha256']:
+        raise InstallError('Running release path or artifact identity is inconsistent',code='release.identity-mismatch')
+    return {'receipt':state,'manifest':manifest,'channel':installed_channel(state),'values':values,'target':str(target),'uid':int(account[2]),'gid':int(account[3])}
 
 
 def plugin_startup_timeout(host,values,manifest):
@@ -65,13 +97,7 @@ class UpgradeHost:
     def path(self,job):return self.root/operation_id(job['id'])
 
     def operation(self,operation=None):
-        pointer=self.root/'current'
-        if operation is None:
-            if not pointer.exists():return None
-            operation=pointer.read_text().strip()
-        path=self.root/operation_id(operation)/'operation.json'
-        if path.is_symlink():raise InstallError('Upgrade journal cannot be a symbolic link')
-        return json.loads(path.read_text()) if path.exists() else None
+        return read_upgrade_operation(self.host,operation)
 
     def save(self,job):
         directory=self.path(job); directory.mkdir(mode=0o700,exist_ok=True)
@@ -118,21 +144,7 @@ class UpgradeHost:
         sync_directory(self.host.path('/etc/dsh-phalanx'))
 
     def source(self,manifest=None):
-        state=installed_state(self.host)
-        if state is None:raise InstallError('A successful managed installation is required',code='release.identity-mismatch')
-        if manifest is None:manifest=json.loads(self.host.path(MANIFEST).read_text())
-        if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][asset_names(manifest)[0]]:
-            raise InstallError('Installed release manifest and receipt disagree',code='release.identity-mismatch')
-        values=read_configuration(self.host)
-        account=self.host.run(['getent','passwd','dsh-phalanx']).stdout.strip().split(':')
-        if len(account)!=7 or account[5]!='/var/lib/dsh-phalanx' or account[6]!='/usr/sbin/nologin' or int(account[2])==0:
-            raise InstallError('Managed service identity is incompatible',code='release.identity-mismatch')
-        current=self.host.path(CURRENT)
-        if not current.is_symlink():raise InstallError('Current release must be a managed symbolic link',code='release.identity-mismatch')
-        target=current.resolve()
-        if target.parent!=self.host.path('/opt/dsh-phalanx/releases') or (target/'.artifact-sha256').read_text()!=state['platformSha256']:
-            raise InstallError('Running release path or artifact identity is inconsistent',code='release.identity-mismatch')
-        return {'receipt':state,'manifest':manifest,'channel':installed_channel(state),'values':values,'target':str(target),'uid':int(account[2]),'gid':int(account[3])}
+        return installed_source(self.host,manifest)
 
     def begin(self,target):
         source=self.source();previous=previous_downtime(self.operation(),self.time_point())
@@ -252,7 +264,7 @@ class UpgradeHost:
             target=stage_platform(self.host,directory,manifest)
             command=supply_image(self.host,job['source']['uid'],directory,manifest,self.bundle is not None)
         engine=install_executor(self.host,job['source']['uid'],job['source']['gid'],self.host.path(target),manifest['commit'],initial_only=True,activate=True)
-        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256'],'executor':executor_package(self.host.path(target)/'updater',manifest['commit']),'currentExecutor':engine}
+        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256'],'executor':executor_package(self.host.path(target)/'updater',manifest['commit']),'currentExecutor':engine,'managementCli':(self.host.path(target)/'updater/installer_deployment_cli.py').is_file()}
 
     @install_failure('admission.failed')
     def close_admission(self,source):self.admission.close(self.ports(source))
@@ -347,6 +359,7 @@ class UpgradeHost:
                           admissionProgram=self.host.path('/opt/dsh-phalanx/maintenance/gate.py'),
                           admissionUnit=self.host.path('/etc/systemd/system/dsh-phalanx-maintenance.service'),
                           admissionOrder=self.host.path('/etc/systemd/system/user@'+str(job['source']['uid'])+'.service.d/dsh-phalanx-maintenance.conf'))
+            if job['prepared'].get('managementCli') is True:result['globalCli']=self.host.path(GLOBAL_CLI)
         master=job.get('database',{}).get('facts',{}).get('masterKeyPath')
         config=job['source']['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE')
         for key,path in [('databaseMaster',master),('databaseConfiguration',str(self.host.path(config)) if config else None)]:

@@ -234,3 +234,12 @@ export interface InitialModelInput {
   readonly model: string
   readonly apiKey: string
 }
+
+export interface CommunityMemberInstanceRequest {
+  readonly action: 'start' | 'restart'
+  readonly spaceId: string
+  readonly confirmed: boolean
+}
+export interface CommunityMemberInstanceResult {
+  readonly completed: true
+}

@@ -34,6 +34,14 @@ class InstallError(Exception):
         super().__init__(message);self.code=code
 
 
+def origin_authority(value):
+    public=urllib.parse.urlsplit(value)
+    hostname=ipaddress.ip_address(public.hostname).compressed if ':' in public.hostname else public.hostname.encode('idna').decode('ascii')
+    authority='['+hostname+']' if ':' in hostname else hostname
+    if public.port is not None and public.port!={'http':80,'https':443}[public.scheme]:authority+=':'+str(public.port)
+    return authority
+
+
 def install_failure(code):
     """Classify an effect without changing exception types or HTTP fallback status."""
     def decorate(work):
@@ -240,6 +248,7 @@ class Host:
         self.command = command or subprocess.run
         self.injected_command = command is not None
         self.progress = None
+        self.non_interactive = False
         self.system = system or platform.system()
         self.machine = machine or platform.machine()
         self.uid = os.geteuid() if uid is None else uid
@@ -298,7 +307,7 @@ class Host:
             raise InstallError(f"{arguments[0]} failed (exit {result.returncode}): {result.stderr[:1500]}")
         return result
 
-    def request(self, url, *, authority=None, socket_mark=None, max_bytes=None):
+    def request(self, url, *, authority=None, socket_mark=None, max_bytes=None, timeout=60):
         category = None
         if authority is None:
             address = urllib.parse.urlsplit(url)
@@ -325,7 +334,7 @@ class Host:
             handlers.append(ReadinessHandler())
         opener=urllib.request.build_opener(*handlers)
         try:
-            with opener.open(request,timeout=60) as response:
+            with opener.open(request,timeout=timeout) as response:
                 chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
                 while True:
                     block=response.read(65536)
@@ -408,10 +417,19 @@ class Host:
         from installer_release import OwnedImageInspector  # embedded-release
         return OwnedImageInspector(self,uid)
 
+    def operator(self, text):
+        if self.progress:
+            with self.progress.input():
+                print(self.progress.safe(text), file=sys.stderr)
+        else:
+            print(text, file=sys.stderr)
+
     def tell(self, text, **facts):
         self.progress.emit('info', message=text, **facts) if self.progress else print(text, file=sys.stderr)
 
     def terminal_available(self):
+        if self.non_interactive:
+            return False
         try:
             with open('/dev/tty', 'r') as terminal:
                 return terminal.isatty()
@@ -441,13 +459,18 @@ class Host:
         return None
 
     def prompt(self, label, secret=False):
+        if self.non_interactive:
+            raise InstallError('Noninteractive input requires explicit configuration and confirmation flags')
         try:
             with (self.progress.input() if self.progress else contextlib.nullcontext()), open("/dev/tty", "r") as terminal, open("/dev/tty", "w") as display:
                 if secret:
                     return getpass.getpass(label, stream=display)
                 display.write(label)
                 display.flush()
-                return terminal.readline().strip()
+                answer = terminal.readline()
+                if not answer:
+                    raise InstallError('Terminal input closed; retry with explicit noninteractive configuration')
+                return answer.strip()
         except OSError:
             raise InstallError("No terminal available; provide --public-origin and --host-public-addresses")
 
@@ -484,11 +507,7 @@ class Host:
     def ready(self, uid, port, listen_address, public_origin, *, path="/login", socket_mark=None, timeout=90, on_listener=None):
         entry = entry_url(port, listen_address)
         address = ipaddress.ip_address(urllib.parse.urlparse(entry).hostname)
-        public = urllib.parse.urlparse(public_origin)
-        hostname = ipaddress.ip_address(public.hostname).compressed if ":" in public.hostname else public.hostname.encode("idna").decode("ascii")
-        authority = f"[{hostname}]" if ":" in hostname else hostname
-        if public.port is not None and public.port != {"http": 80, "https": 443}[public.scheme]:
-            authority += f":{public.port}"
+        authority = origin_authority(public_origin)
         deadline = self.clock()+timeout
         http_failed = False
         while True:

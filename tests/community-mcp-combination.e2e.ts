@@ -10,14 +10,13 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import type { CommunityMcpInput, CommunityMcpSettings } from '../src/domain/admin-contract.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { hasToolResult, latestHumanText, streamText, streamToolCall } from './support/real-dsh-model.js'
 import { createRealDshRpc } from './support/real-dsh-rpc.js'
-import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
+import { assertPinnedDshRevision, memberSpacePath, runtimeSection } from './support/real-dsh-runtime.js'
 import { memberExposesMcpCredentials, readPrivateMcpCredential } from './support/real-mcp-credentials.js'
 import { amapSample, bochaSample, context7Sample, githubSample, playwrightSample } from './support/real-mcp-samples.js'
 import { readUsageRecords } from './support/usage-records.js'
@@ -147,7 +146,7 @@ it.skipIf(keyFiles.some(path => !path) || !runtimeSettings.containerImage)(
         const { cookie: member } = await openCommunityHttpEntry(origin, cookie(login), 300000)
         const session = await rpc.remoteRpc<{ sessionId: string }>(origin, member, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
         members.push({ name, groupId, cookie: member, sessionId: session.sessionId })
-        await writeFile(join(effectiveUserDataRoot({ dataRoot: root }), name, 'workspace/input.html'), `<h1>COMBINATION_${name}</h1>`)
+        await writeFile(join(await memberSpacePath(root, name), 'workspace/input.html'), `<h1>COMBINATION_${name}</h1>`)
       }
       const prompt = async (member: (typeof members)[number], marker: string) => {
         await rpc.remoteRpc(origin, member.cookie, 'session/prompt', {
@@ -223,7 +222,7 @@ it.skipIf(keyFiles.some(path => !path) || !runtimeSettings.containerImage)(
           expect(result).toMatchObject({ success: true, failed: false, semantic: true })
           expect(result.tools.filter(tool => tool.startsWith('mcp__p-github__'))).toEqual(['mcp__p-github__get_me'])
         }
-        const workspace = join(effectiveUserDataRoot({ dataRoot: root }), member.name, 'workspace')
+        const workspace = join(await memberSpacePath(root, member.name), 'workspace')
         const snapshots = await Promise.all(
           (await readdir(workspace)).filter(name => /^page-.*\.yml$/u.test(name)).map(name => readFile(join(workspace, name), 'utf8')),
         )

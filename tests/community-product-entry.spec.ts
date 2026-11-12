@@ -1,3 +1,4 @@
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { execFile } from 'node:child_process'
 import { access, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm } from 'node:fs/promises'
 import { request } from 'node:http'
@@ -370,7 +371,8 @@ describe('community public product entry', () => {
       'runtime-dependencies',
       'skills',
     ])
-    expect(await readdir(effectiveUserDataRoot({ dataRoot: root! }))).toContain('member')
+    expect(await readdir(effectiveUserDataRoot({ dataRoot: root! }))).toContain('_spaces')
+    expect(await readdir(join(effectiveUserDataRoot({ dataRoot: root! }), '_spaces'))).toContain(memberAccount.spaceId)
   })
 
   it('persists both members’ home and workspace under the configured user data root', async () => {
@@ -403,7 +405,9 @@ describe('community public product entry', () => {
               })
             ).status,
           ).toBe(200)
-          expect(await readFile(join(userDataRoot, username, location, 'fixture-note.txt'), 'utf8')).toBe(`${username}-${location}`)
+          expect(await readFile(join(await memberSpacePath(root!, username, userDataRoot), location, 'fixture-note.txt'), 'utf8')).toBe(
+            `${username}-${location}`,
+          )
         }
       }
       expect(await readdir(root!)).not.toContain('users')
@@ -441,6 +445,7 @@ describe('community public product entry', () => {
         body: new URLSearchParams({ credential, username: 'admin', email: 'admin@example.test', password: 'password' }),
       })
       const cookie = await signIn(origin, 'admin', 'password', true)
+      const retainedHome = join(await memberSpacePath(root!, 'admin', userDataRoot), 'home')
       expect(
         (await fetch(`${communityEntryUrl(origin, cookie)}fixture/home-note`, { method: 'POST', headers: { cookie, origin }, body: 'original private file' }))
           .status,
@@ -461,7 +466,7 @@ describe('community public product entry', () => {
       }
       await rm(root!, { recursive: true, force: true })
       await expect(start(undefined, userDataRoot)).rejects.toThrow(/storage/iu)
-      expect(await readFile(join(userDataRoot, 'admin', 'home', 'fixture-note.txt'), 'utf8')).toBe('original private file')
+      expect(await readFile(join(retainedHome, 'fixture-note.txt'), 'utf8')).toBe('original private file')
     } finally {
       await application?.stop()
       await rm(userDataRoot, { recursive: true, force: true })

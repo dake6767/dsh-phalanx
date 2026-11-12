@@ -75,7 +75,6 @@ export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.str
   ${artifactDownloadClient}
   ${htmlPreviewClient}
   function SafeMarket(){return h(ModuleBoundary,{fallback:h(UnavailableMarket)},h(Market))}
-  slot('main',()=>ctx.slots.register({name:'main',key:'phalanx-market',locale:namespace},SafeMarket));
   function MarketIcon({size=16,className}){
    return h('svg',{width:size,height:size,viewBox:'0 0 16 16',className,fill:'none',stroke:'currentColor',strokeWidth:1,'aria-hidden':true},
     h('rect',{x:2.25,y:2.25,width:4,height:4,rx:1}),
@@ -83,7 +82,20 @@ export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.str
     h('rect',{x:2.25,y:9.75,width:4,height:4,rx:1}),
     h('rect',{x:9.75,y:9.75,width:4,height:4,rx:1}));
   }
-  slot('sidebar.panellist',()=>ctx.slots.register({name:'sidebar.panellist',id:'phalanx-market',order:10,label:()=>t('market'),locale:namespace},MarketIcon));
+  ctx.effect(()=>{
+    const controller=new AbortController();
+    let panel, entry;
+    async function showMarket(){
+      const response=await fetch('/account/platform-features',{credentials:'same-origin',cache:'no-store',signal:controller.signal});
+      if(!response.ok)return;
+      const settings=await response.json();
+      if(controller.signal.aborted || settings?.showAppCenter!==true)return;
+      panel=slot('main',()=>ctx.slots.register({name:'main',key:'phalanx-market',locale:namespace},SafeMarket));
+      entry=slot('sidebar.panellist',()=>ctx.slots.register({name:'sidebar.panellist',id:'phalanx-market',order:10,label:()=>t('market'),locale:namespace},MarketIcon));
+    }
+    void showMarket().catch(()=>{});
+    return()=>{controller.abort();entry?.();panel?.()};
+  });
  }catch { /* A platform action must not block the native UI. */ }} };
  }catch {return {name:'phalanx-platform-client',apply(){}}}
 }});`

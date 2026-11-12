@@ -93,7 +93,12 @@ export function createHttpEntry(deps: {
     const userId = route.identity === 'platform-user' ? await deps.session.authenticate(request) : undefined
     if (route.identity === 'platform-user' && userId === undefined) {
       deps.connections.untrack(request.socket)
-      if (route.id === 'identity' || route.id === 'startup' || (route.id === 'market' && url.pathname.startsWith('/market/api/')))
+      if (
+        route.id === 'identity' ||
+        route.id === 'startup' ||
+        route.id === 'platform-features' ||
+        (route.id === 'market' && url.pathname.startsWith('/market/api/'))
+      )
         sendCommunityJson(response, 401, { error: 'Sign in is required', code: 'sign-in-required' })
       else redirectToLogin(response)
       return
@@ -184,7 +189,7 @@ export function createHttpEntry(deps: {
       await deps.enter(request, response, userId, origin)
       return
     }
-    if (route.id === 'recovery' || route.id === 'identity' || route.id === 'startup') {
+    if (route.id === 'recovery' || route.id === 'identity' || route.id === 'startup' || route.id === 'platform-features') {
       await deps.recovery(request, response, userId, origin)
       return
     }

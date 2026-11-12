@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { chromium, request, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import type { CommunityAccountsPageData, CommunityAccountView } from '../src/domain/admin-contract.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import {
@@ -20,7 +21,7 @@ import {
   sendCommunityPrompt,
   openCommunitySession,
 } from './fixtures/community-native-browser.js'
-import { defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
+import { instanceWorkspacePath } from './support/real-dsh-runtime.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { acceptanceProgress } from './support/acceptance-progress.js'
 import { PLATFORM_SCHEMA_VERSION } from '../src/adapters/platform-schema.js'
@@ -228,7 +229,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   browser = await chromium.launch({ headless: true })
   const adminContext = await newValidationContext(browser),
     admin = await adminContext.newPage()
-  await progress.step('accounts', async () => {
+  const { adminSpace, memberSpace } = await progress.step('accounts', async () => {
     await writeFile(join(scratch!, 'bootstrap-credential'), await successful('sudo -n cat /var/lib/dsh-phalanx/data/bootstrap-credential'), { mode: 0o600 })
     const credential = readBootstrapCredential(scratch!)!.credential
     await admin.goto(`${origin}/bootstrap#credential=${encodeURIComponent(credential)}`)
@@ -239,15 +240,20 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     await admin.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await admin.waitForURL(`${origin}/admin`)
     await admin.getByRole('heading', { name: 'Account management' }).waitFor()
-    expect(
-      (
-        await adminContext.request.post(`${origin}/admin/api/accounts`, {
-          headers: { origin },
-          data: { username: 'installer-member', email: 'member@example.test', password: 'installer-member-password' },
-        })
-      ).status(),
-    ).toBe(201)
-    return null
+    const created = await adminContext.request.post(`${origin}/admin/api/accounts`, {
+      headers: { origin },
+      data: { username: 'installer-member', email: 'member@example.test', password: 'installer-member-password' },
+    })
+    expect(created.status()).toBe(201)
+    const { spaceId: memberSpace } = (await created.json()) as CommunityAccountView
+    const accounts = await adminContext.request.get(`${origin}/admin/api/accounts`)
+    expect(accounts.status()).toBe(200)
+    const { items } = (await accounts.json()) as CommunityAccountsPageData
+    const adminSpace = items.find(account => account.username === 'installer-admin' && account.admin)?.spaceId ?? ''
+    expect(adminSpace).toMatch(/^[a-f0-9]{32}$/u)
+    expect(memberSpace).toMatch(/^[a-f0-9]{32}$/u)
+    expect(adminSpace).not.toBe(memberSpace)
+    return { adminSpace, memberSpace }
   })
   const loginAdmin = async () => {
     expect(
@@ -264,13 +270,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     member = await memberContext.newPage()
   const enter = async () => {
     await signInCommunity(member, origin, 'installer-member', 'installer-member-password')
-    await selectCommunityWorkspace(
-      memberContext,
-      member,
-      origin,
-      instanceWorkspacePath(defaultWorkspacePath('/var/lib/dsh-phalanx/data', 'installer-member'), true),
-      true,
-    )
+    await selectCommunityWorkspace(memberContext, member, origin, instanceWorkspacePath('', true), true)
   }
   const stream = async () => {
     const replies = member.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' })
@@ -453,12 +453,23 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
       filesystems: dataMount.filesystems,
     })
     const storedFiles = (await successful('sudo -n find /mnt/data/dsh-phalanx-users -type f -name installer-notes.txt')).trim().split('\n')
-    expect(storedFiles).toHaveLength(1)
-    expect(storedFiles[0]).toMatch(
-      /^\/mnt\/data\/dsh-phalanx-users\/(?:[a-z0-9][a-z0-9_-]{0,63}|_spaces\/[a-f0-9]{32})\/home\/Documents\/deepseek-harness\/default-workspace\/installer-notes\.txt$/u,
-    )
+    expect(storedFiles).toEqual([`/mnt/data/dsh-phalanx-users/_spaces/${memberSpace}/home/Documents/deepseek-harness/default-workspace/installer-notes.txt`])
     expect((await successful(`sudo -n cat ${storedFiles[0]}`)).trim()).toBe('INSTALLER_USER_FILE')
     await stream()
+    await loginAdmin()
+    const adminDsh = await adminContext.newPage()
+    try {
+      await adminDsh.goto(`${origin}/app/${adminSpace}/`, { timeout: 300_000 })
+      await adminDsh.locator('#root').waitFor({ state: 'attached', timeout: 300_000 })
+      await selectCommunityWorkspace(adminContext, adminDsh, origin, instanceWorkspacePath('', true), true)
+      await runCommunityTerminal(adminDsh, "printf INSTALLER_ADMIN_FILE > installer-admin.txt; printf 'ADMIN_%s' 'SPACE_READY'", 'ADMIN_SPACE_READY')
+      const adminMarker = `/mnt/data/dsh-phalanx-users/_spaces/${adminSpace}/home/Documents/deepseek-harness/default-workspace/installer-admin.txt`
+      expect(await successful(`sudo -n cat ${adminMarker}`)).toBe('INSTALLER_ADMIN_FILE')
+    } finally {
+      await adminDsh.close()
+    }
+    const deployment = JSON.parse(await successful('sudo -n dsh-phalanx status --language en --output json'))
+    expect(deployment).toMatchObject({ state: 'running' })
     const service = await successful(
       'sudo -n -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user is-enabled dsh-phalanx.service; sudo -n -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user is-active dsh-phalanx.service',
     )
@@ -496,6 +507,8 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
           defaultModel: 'real DSH native streaming via controlled upstream',
           nativeIdentity: 'non-root, provider secret absent',
           userFile: 'preserved across repeat/failure/reboot',
+          freshSpaceDirectories: { administrator: true, member: true },
+          globalDeploymentStatus: deployment.state,
         },
         null,
         2,

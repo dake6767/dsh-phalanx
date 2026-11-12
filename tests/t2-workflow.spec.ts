@@ -417,3 +417,15 @@ it('runs the existing installed reply case with the same Ubuntu verification arc
   )
   expect(argv).not.toContain('--smoke')
 })
+
+it('runs checks and Linux in parallel while every publication step still requires both', () => {
+  const jobs = parse(readFileSync('.github/workflows/candidate.yml', 'utf8')).jobs
+  expect(jobs.checks.needs).toBe('trust')
+  expect(jobs.t2.needs).toBe('trust')
+  for (const name of ['development_image', 'build']) {
+    expect(jobs[name].needs).toEqual(expect.arrayContaining(['trust', 'checks', 't2']))
+    expect(jobs[name].if).toBeUndefined()
+  }
+  expect(jobs.image.needs).toBe('build')
+  expect(jobs.release.needs).toEqual(expect.arrayContaining(['build', 'image']))
+})

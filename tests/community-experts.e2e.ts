@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual DSH through installed candidate CLI on Linux.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, copyFile, mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises'
@@ -13,7 +14,6 @@ import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { skillZip } from './fixtures/skills/archive.js'
@@ -55,14 +55,8 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
   await once(model, 'listening')
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
   const runtime: CommunityRuntimeConfig = runtimeSection(root, modelOrigin, runtimeSettings)
-  const home = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home')
   const overlay = join(root, 'expert-test-overlay.json')
-  await writeFile(
-    overlay,
-    JSON.stringify([
-      { insert: [{ id: 'expert-observer', name: runtime.container ? '/dsh-phalanx/home/expert-observer.mjs' : join(home, 'expert-observer.mjs') }] },
-    ]),
-  )
+  await writeFile(overlay, '[]')
   const app = candidateApplication({
     listen: { host: '127.0.0.1', port: 0 },
     sessionSecret: 'expert-acceptance-fixture-session-secret',
@@ -103,6 +97,13 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
       },
     })
     const memberAccount = await api('accounts', { username: 'member', password: 'password', email: '' })
+    const home = join(await memberSpacePath(root, 'member'), 'home')
+    await writeFile(
+      overlay,
+      JSON.stringify([
+        { insert: [{ id: 'expert-observer', name: runtime.container ? '/dsh-phalanx/home/expert-observer.mjs' : join(home, 'expert-observer.mjs') }] },
+      ]),
+    )
     await mkdir(home, { recursive: true })
     for (const name of ['skill-observer.mjs', 'expert-observer.mjs']) await copyFile(`tests/fixtures/${name}`, join(home, name))
 
@@ -183,7 +184,7 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
       (
         await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', {
           request: {
-            cwd: runtime.container ? '/dsh-phalanx/workspace' : join(effectiveUserDataRoot({ dataRoot: root }), 'member/workspace'),
+            cwd: runtime.container ? '/dsh-phalanx/workspace' : join(await memberSpacePath(root, 'member'), 'workspace'),
             ...(agentPreset ? { agentPreset } : {}),
           },
         })

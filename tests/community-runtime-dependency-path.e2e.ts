@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,7 +11,6 @@ import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { runCommunityTerminal, selectCommunityWorkspace } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
@@ -20,15 +20,14 @@ import { openTestAccounts } from './support/community-application.js'
 import { communityEntryUrl } from './support/community-space.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { cookieHeader } from './support/real-dsh-rpc.js'
-import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
+import { assertPinnedDshRevision, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 
 it.skipIf(!runtimeSettings.containerImage)(
   'hot grants, updates and revokes dependency commands in real agent bash and terminals while retaining running processes',
   async () => {
     assertPinnedDshRevision(runtimeSettings)
-    const root = await mkdtemp(join(tmpdir(), 'dependency-member-')),
-      home = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home'),
-      workspace = join(effectiveUserDataRoot({ dataRoot: root }), 'member/workspace')
+    const root = await mkdtemp(join(tmpdir(), 'dependency-member-'))
+
     const overlay = join(root, 'observer.json')
     await writeFile(
       overlay,
@@ -58,6 +57,8 @@ it.skipIf(!runtimeSettings.containerImage)(
       await accounts.createFirstAdmin({ username: 'admin', password: 'password', email: '' })
       await accounts.create({ username: 'member', password: 'password', email: '' })
       const origin = await app.start()
+      const home = join(await memberSpacePath(root, 'member'), 'home')
+      const workspace = join(await memberSpacePath(root, 'member'), 'workspace')
       await mkdir(home, { recursive: true, mode: 0o700 })
       await copyFile(fileURLToPath(new URL('./fixtures/skill-observer.mjs', import.meta.url)), join(home, 'skills-observer.mjs'))
       const page = await browser.newPage({ locale: 'en' })
@@ -100,7 +101,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       expect(memberLogin.status(), await memberLogin.text()).toBe(303)
       expect(memberLogin.headers().location, String(startupFailure)).not.toBe('/recovery')
       await page.goto(origin + memberLogin.headers().location)
-      await selectCommunityWorkspace(page.context(), page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'member'), true), true)
+      await selectCommunityWorkspace(page.context(), page, origin, instanceWorkspacePath('', true), true)
       await page.locator('[data-composer-input]').fill('Create a terminal session.')
       await page.locator('[data-composer-input]').press('Enter')
       await page.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 30000 })

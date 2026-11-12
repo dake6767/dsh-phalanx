@@ -24,12 +24,17 @@ it('persists successful deliveries by immutable member space and keeps independe
     ])
     expect(await reopened.get(spaceB)).toEqual([{ packageName: 'plugin', source: 'selected', version: '3.0.0' }])
     expect(await reopened.get('new-space')).toEqual([])
-    await reopened.save(spaceA, { packageName: 'plugin', source: 'selected', version: '1.2.0' })
-    expect(await new PostgresPluginInstallations(database).get(spaceA)).toContainEqual({ packageName: 'plugin', source: 'selected', version: '1.2.0' })
+    await reopened.save(spaceA, { packageName: 'plugin', source: 'selected', version: '1.2.0', integrity: 'sha512-checked-member-delivery' })
+    expect(await new PostgresPluginInstallations(database).get(spaceA)).toContainEqual({
+      packageName: 'plugin',
+      source: 'selected',
+      version: '1.2.0',
+      integrity: 'sha512-checked-member-delivery',
+    })
     await reopened.clearPreinstalls(spaceA)
     expect(await new PostgresPluginInstallations(database).get(spaceA)).toEqual([
       { packageName: 'other', source: 'selected', version: '2.0.0' },
-      { packageName: 'plugin', source: 'selected', version: '1.2.0' },
+      { packageName: 'plugin', source: 'selected', version: '1.2.0', integrity: 'sha512-checked-member-delivery' },
     ])
     await reopened.save(spaceA, { packageName: 'preinstalled', source: 'preinstall', version: '1.0.0' })
     await reopened.clearPreinstalls(spaceA)

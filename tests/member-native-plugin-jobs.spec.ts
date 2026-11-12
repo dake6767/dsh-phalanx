@@ -103,7 +103,7 @@ it('delivers preinstalls on the captured ready carrier and records restart-requi
   await expect(f.jobs.install(f.actor, 'sample', f.origin, 'manual')).rejects.toThrow()
   f.finish()
   expect(await task).toBe('succeeded')
-  expect(f.history).toEqual([{ packageName: 'sample', source: 'preinstall', version: '1.0.0' }])
+  expect(f.history).toEqual([{ packageName: 'sample', source: 'preinstall', version: '1.0.0', integrity: 'sha512-fixture' }])
   await f.jobs.stop()
 })
 
@@ -204,7 +204,7 @@ it('keeps accepted installation alive independently of the requesting page and r
   finish()
   await jobs.drain()
   expect(await jobs.get(actor, 'sample')).toMatchObject({ requestId: 'request-1', status: 'succeeded', application: 'restart-required' })
-  expect(await records.get()).toEqual([{ packageName: 'sample', source: 'selected', version: '1.0.0' }])
+  expect(await records.get()).toEqual([{ packageName: 'sample', source: 'selected', version: '1.0.0', integrity: 'sha512-fixture' }])
   expect(await jobs.get(actor, 'sample', { userId: 'alice', processId: 2, origin: 'http://localhost', launchUrl: 'http://localhost' })).toMatchObject({
     application: 'applied',
   })
@@ -278,10 +278,10 @@ it('retains prior successful history on failure, permits a fresh retry, and neve
   await jobs.install(actor, 'sample', origin, 'retry')
   await jobs.drain()
   expect(await jobs.get(actor, 'sample')).toMatchObject({ status: 'succeeded' })
-  expect(history).toEqual([{ packageName: 'sample', source: 'selected', version: '2.0.0' }])
+  expect(history).toEqual([{ packageName: 'sample', source: 'selected', version: '2.0.0', integrity: 'sha512-fixture' }])
   await jobs.remove(actor, 'sample', origin, 'remove')
   await jobs.drain()
-  expect(history).toEqual([{ packageName: 'sample', source: 'selected', version: '2.0.0' }])
+  expect(history).toEqual([{ packageName: 'sample', source: 'selected', version: '2.0.0', integrity: 'sha512-fixture' }])
   account.spaceId = 'replacement'
   await expect(jobs.get(actor, 'sample')).rejects.toThrow()
   expect(await jobs.get({ ...actor, spaceId: 'replacement' }, 'sample')).toBeUndefined()

@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { showAppCenterForFixture } from './support/app-center-visibility.js'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
@@ -44,6 +45,7 @@ it.each([false, true])(
     const containerCommand = (container: string, ...args: string[]) => execFileSync('podman', ['exec', container, ...args], { encoding: 'utf8' })
     const sample = await readFile(new URL('./fixtures/preview-service.mjs', import.meta.url))
     try {
+      await showAppCenterForFixture(origin, 'fixtureadmin', 'password')
       for (const username of ['alice', 'bob']) {
         const context = await browser.newContext({ locale: 'en' }),
           page = await context.newPage()

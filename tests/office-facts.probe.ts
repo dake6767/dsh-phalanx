@@ -1,4 +1,3 @@
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 // Manual credentialed facts probe. It is deliberately outside every required credential-free inventory.
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -297,7 +296,7 @@ it('measures real single and small-manifest image generation through delegated e
   assert(ready.preparation.stage === 'ready', 'Image generation broker is not ready')
   const imageSize = input.imageBackend.backend === 'minimax' ? '512px' : '2K'
   const cwd = '/dsh-phalanx/workspace/office-cwd',
-    host = join(effectiveUserDataRoot({ dataRoot: tool().root }), 'member/workspace/office-cwd')
+    host = join(await tool().spacePath('member'), 'workspace/office-cwd')
   await mkdir(join(host, 'batch'), { recursive: true, mode: 0o700 })
   if (!input.imageResumeReport)
     await writeFile(

@@ -1,5 +1,5 @@
 // Validation: T2; real credentials: none; controlled browser/process fixtures.
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -191,3 +191,117 @@ it('lists remembered accounts, switches without passwords and keeps instances an
   await page.waitForURL(aliceEntry)
   await page.locator('#root').waitFor({ state: 'attached' })
 }, 300_000)
+
+it('operates a member from the ordered menu and requires its password before switching to DSH', async () => {
+  root = await mkdtemp(join(tmpdir(), 'member-menu-'))
+  const failureMarker = join(root, 'fail-instance'),
+    runtimeFixture = join(root, 'runtime.mjs')
+  await writeFile(
+    runtimeFixture,
+    `import {existsSync} from 'node:fs'; if (existsSync(${JSON.stringify(failureMarker)}) && !process.argv.includes('--dump-config')) process.exit(1); await import(${JSON.stringify(new URL('./fixtures/runtime.mjs', import.meta.url).href)});`,
+  )
+  app = createCommunityApplication({
+    listen: { host: '127.0.0.1', port: 0 },
+    sessionSecret: 'member-menu-fixture-secret-32-bytes',
+    runtime: {
+      command: process.execPath,
+      args: [runtimeFixture],
+      dataRoot: root,
+      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } },
+    },
+  })
+  const origin = await app.start()
+  browser = await chromium.launch({ headless: true })
+  const context = await browser.newContext({ locale: 'en' }),
+    page = await context.newPage()
+  await context.request.post(origin + '/bootstrap', {
+    headers: { origin },
+    form: { credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' },
+    maxRedirects: 0,
+  })
+  const created = await context.request.post(origin + '/admin/api/accounts', {
+    headers: { origin },
+    data: { username: 'member', email: '', password: 'member-password' },
+  })
+  const member = (await created.json()) as { spaceId: string }
+  const operate = (client: typeof context.request, username = 'member', spaceId = member.spaceId) =>
+    client.post(origin + `/admin/api/accounts/${username}/instance`, { headers: { origin }, data: { action: 'start', confirmed: true, spaceId } })
+  expect((await operate(context.request, 'missing')).status()).toBe(400)
+  expect((await operate(context.request, 'member', '0'.repeat(32))).status()).toBe(400)
+  const memberContext = await browser.newContext()
+  await memberContext.request.post(origin + '/login', { headers: { origin }, form: { username: 'member', password: 'member-password' }, maxRedirects: 0 })
+  expect((await operate(memberContext.request)).status()).toBe(403)
+  await memberContext.close()
+  const action = (username: string, data: object) => context.request.post(origin + `/admin/api/accounts/${username}/actions`, { headers: { origin }, data })
+  expect((await action('member', { action: 'set-disabled', disabled: true })).status()).toBe(200)
+  expect((await operate(context.request)).status()).toBe(400)
+  expect((await action('member', { action: 'set-disabled', disabled: false })).status()).toBe(200)
+  expect(
+    (
+      await context.request.post(origin + '/admin/api/accounts', { headers: { origin }, data: { username: 'other', email: '', password: 'password' } })
+    ).status(),
+  ).toBe(201)
+  expect((await action('other', { action: 'set-admin', admin: true })).status()).toBe(200)
+  const revoked = await browser.newContext()
+  await revoked.request.post(origin + '/login', { headers: { origin }, form: { username: 'other', password: 'password' }, maxRedirects: 0 })
+  expect((await action('other', { action: 'set-admin', admin: false, groupId: 'default' })).status()).toBe(200)
+  expect((await operate(revoked.request)).status()).toBe(403)
+  await revoked.close()
+  const menu = async () => {
+    await page.getByRole('button', { name: 'More actions for member', exact: true }).click()
+  }
+  await page.goto(origin + '/admin')
+  await menu()
+  const labels = await page.getByRole('menuitem').allTextContents()
+  expect(labels[0]).toBe('Switch to this member’s DSH')
+  expect(labels.indexOf('Start instance')).toBe(labels.indexOf('Reset DSH environment for member') - 1)
+  expect(await page.getByRole('separator').count()).toBe(0)
+  await page.getByRole('menuitem', { name: 'Start instance', exact: true }).click()
+  await page.getByText('Instance operation completed.', { exact: true }).waitFor()
+  await menu()
+  await page.getByRole('menuitem', { name: 'Restart instance', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Restart instance', exact: true })
+  expect(await dialog.textContent()).toContain('Running tasks and terminal commands will be interrupted.')
+  await writeFile(failureMarker, 'controlled startup failure')
+  await dialog.getByRole('button', { name: 'Restart instance', exact: true }).click()
+  await dialog.getByRole('alert').waitFor()
+  expect(await dialog.getByRole('alert').textContent()).not.toBe('')
+  expect(await page.getByText('Instance operation completed.', { exact: true }).count()).toBe(0)
+  await expect
+    .poll(
+      async () =>
+        (await (await context.request.get(origin + '/admin/api/accounts')).json()).items.find((row: { username: string }) => row.username === 'member').instance
+          .state,
+    )
+    .toBe('stopped')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await menu()
+  await page.getByRole('menuitem', { name: 'Start instance', exact: true }).waitFor()
+  await rm(failureMarker)
+  await page.getByRole('menuitem', { name: 'Start instance', exact: true }).click()
+  await page.getByText('Instance operation completed.', { exact: true }).waitFor()
+  await menu()
+  await page.getByRole('menuitem', { name: 'Restart instance', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Restart instance', exact: true }).click()
+  await dialog.waitFor({ state: 'detached' })
+  await menu()
+  await page.getByRole('menuitem', { name: 'Switch to this member’s DSH', exact: true }).click()
+  expect(await page.getByLabel('Username', { exact: true }).getAttribute('readonly')).not.toBeNull()
+  expect(await page.getByLabel('Username', { exact: true }).inputValue()).toBe('member')
+  await page.getByRole('link', { name: 'Cancel', exact: true }).click()
+  await page.waitForURL(origin + '/admin')
+  await menu()
+  await page.getByRole('menuitem', { name: 'Switch to this member’s DSH', exact: true }).click()
+  await page.getByLabel('Password', { exact: true }).fill('wrong-password')
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await page.getByRole('alert').waitFor()
+  expect(await page.getByLabel('Username', { exact: true }).inputValue()).toBe('member')
+  expect((await context.request.get(origin + '/admin/api/accounts')).status()).toBe(200)
+  await page.getByLabel('Password', { exact: true }).fill('member-password')
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await page.waitForURL(origin + `/app/${member.spaceId}/`)
+  await page.locator('#root').waitFor()
+  await page.goto(origin + '/login')
+  await page.getByRole('button', { name: 'adminAdministrator', exact: true }).click()
+  await page.waitForURL(origin + '/admin')
+})

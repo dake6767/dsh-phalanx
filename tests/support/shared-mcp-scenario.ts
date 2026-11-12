@@ -6,6 +6,7 @@ import { mcpWriteInput } from '../../src/domain/mcp-service.js'
 import type { CommunityMcpSettings } from '../../src/domain/admin-contract.js'
 import type { CommunityRuntimeConfig } from '../../src/domain/community-config.js'
 import { createServer } from 'node:http'
+import { channel } from 'node:diagnostics_channel'
 import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, writeFile, readdir, chmod, lstat } from 'node:fs/promises'
@@ -227,7 +228,51 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       if (marker.startsWith('CALL_')) expect(outcome.result).toBe(success)
       return outcome
     }
-    const alice = await prompt(members[0]!, 'CALL_ALICE')
+    // In-process scenarios only: record outbound transport errors and upstream 5xx during the
+    // first prompt so a gateway 502 names its hop and cause.
+    type OutboundRequest = {
+      method?: string
+      path?: string
+      reusedSocket?: boolean
+      getHeader?: (name: string) => unknown
+      agent?: { sockets?: Record<string, unknown[] | undefined> }
+      once?: (event: 'socket', listener: (socket: unknown) => void) => void
+    }
+    // The proxy keeps the client's Host header, and a failed socket is already destroyed, so name
+    // the hop by the agent's host:port key for the socket assigned to this request.
+    const hops = new WeakMap<object, string | undefined>()
+    const created = channel('http.client.request.created')
+    const recordCreated = (message: unknown) => {
+      const request = (message as { request?: OutboundRequest }).request
+      request?.once?.('socket', socket => hops.set(request, Object.entries(request.agent?.sockets ?? {}).find(([, list]) => list?.includes(socket))?.[0]))
+    }
+    const outbound = (request?: OutboundRequest) => ({
+      method: request?.method,
+      host: request?.getHeader?.('host'),
+      hop: request ? hops.get(request) : undefined,
+      path: request?.path?.split('?')[0],
+      reusedSocket: request?.reusedSocket,
+    })
+    const failures = channel('http.client.request.error')
+    const recordFailure = (message: unknown) => {
+      const event = message as { request?: OutboundRequest; error?: NodeJS.ErrnoException }
+      console.info('[mcp-first-prompt-transport]', { ...outbound(event.request), code: event.error?.code })
+    }
+    const responses = channel('http.client.response.finish')
+    const recordResponse = (message: unknown) => {
+      const event = message as { request?: OutboundRequest; response?: { statusCode?: number } }
+      if ((event.response?.statusCode ?? 0) >= 500) {
+        console.info('[mcp-first-prompt-transport]', { ...outbound(event.request), upstreamStatus: event.response?.statusCode })
+      }
+    }
+    created.subscribe(recordCreated)
+    failures.subscribe(recordFailure)
+    responses.subscribe(recordResponse)
+    const alice = await prompt(members[0]!, 'CALL_ALICE').finally(() => {
+      created.unsubscribe(recordCreated)
+      failures.unsubscribe(recordFailure)
+      responses.unsubscribe(recordResponse)
+    })
     const bob = await prompt(members[1]!, 'CALL_BOB')
     for (const row of [alice, bob]) {
       expect(row.tools).toContain('mcp__p-search__search')

@@ -46,7 +46,17 @@ jobs:
       - name: Management UI build
         run: corepack pnpm build:admin-ui
       - name: Browser dependencies
-        run: corepack pnpm exec playwright install --with-deps chromium
+        run: |
+          mirrors=/etc/apt/apt-mirrors.txt
+          # Keep the image's signed Ubuntu archives when its Azure mirror cannot resolve.
+          if [[ -r "$mirrors" ]] &&
+            grep -qE '^http://azure\.archive\.ubuntu\.com/ubuntu/[[:space:]]' "$mirrors" &&
+            grep -qE '^https://archive\.ubuntu\.com/ubuntu/[[:space:]]' "$mirrors" &&
+            ! timeout 10s getent ahosts azure.archive.ubuntu.com >/dev/null; then
+            echo "::notice::Azure Ubuntu mirror DNS unavailable; using the runner's existing Ubuntu archives"
+            sudo sed -i '\|^http://azure\.archive\.ubuntu\.com/ubuntu/[[:space:]]|d' "$mirrors"
+          fi
+          corepack pnpm exec playwright install --with-deps chromium
       # Native app-center skills require real DSH and belong to installed Linux release acceptance.
       - name: Controlled public-entry HTTP and WebSocket browser smoke
         env:

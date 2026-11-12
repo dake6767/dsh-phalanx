@@ -1,3 +1,6 @@
+import type { CommunityMemberInstanceRequest, CommunityMemberInstanceResult } from '../../src/domain/admin-contract'
+import CommunityDialog from './CommunityDialog'
+import { request } from './community-api'
 import type { CommunityGroupView } from '../../src/domain/admin-contract'
 import { communityGroups } from './community-api'
 import CommunitySelect from './CommunitySelect'
@@ -40,6 +43,7 @@ export default function CommunityAccountsPage({ session }: { session?: Community
   const [notice, setNotice] = useState<PlatformMessage>()
   const [selection, setSelection] = useState<AccountSelection>()
   const [resetSelection, setResetSelection] = useState<CommunityAccountView>()
+  const [instanceSelection, setInstanceSelection] = useState<{ account: CommunityAccountView; action: 'start' | 'restart' }>()
   const [backup, setBackup] = useState<CommunityEnvironmentBackup>()
   const visibleAccounts = accounts?.items.filter(account => groupFilter === 'all' || account.groupId === groupFilter) ?? []
   const groupLabels = new Map(groups.map(group => [group.id, communityGroupLabel(group, t)]))
@@ -116,6 +120,36 @@ export default function CommunityAccountsPage({ session }: { session?: Community
       setBusy(false)
     }
   }
+  const operateInstance = async (account: CommunityAccountView, action: 'start' | 'restart') => {
+    if (submitting.current) return
+    submitting.current = true
+    setBusy(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      await request<CommunityMemberInstanceResult>(
+        `/admin/api/accounts/${encodeURIComponent(account.username)}/instance`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action, confirmed: true, spaceId: account.spaceId } satisfies CommunityMemberInstanceRequest),
+        },
+        true,
+      )
+      setInstanceSelection(undefined)
+      setNotice({ key: 'Instance operation completed.' })
+    } catch (failure) {
+      setError(failure)
+    } finally {
+      try {
+        setAccounts(await communityAccounts())
+      } catch (failure) {
+        setError(failure)
+      }
+      submitting.current = false
+      setBusy(false)
+    }
+  }
   return (
     <div className="community-page">
       <section className="page-heading accounts-title">
@@ -135,7 +169,7 @@ export default function CommunityAccountsPage({ session }: { session?: Community
           {t('Add account')}
         </Button>
       </section>
-      {error !== undefined && !selection && !resetSelection && <CommunityMessage role="alert" status="danger" title={errorText(error)} />}
+      {error !== undefined && !selection && !resetSelection && !instanceSelection && <CommunityMessage role="alert" status="danger" title={errorText(error)} />}
       {notice && <CommunityMessage role="status" status="success" title={t(notice.key, notice.params)} />}
       {backup && (
         <section className="panel" aria-label={t('Environment backup')}>
@@ -277,7 +311,16 @@ export default function CommunityAccountsPage({ session }: { session?: Community
                                 <Dropdown.Menu
                                   aria-label={t('Actions for {username}', { username: account.username })}
                                   onAction={key => {
-                                    if (key === 'disabled') choose(account, { action: 'set-disabled', disabled: !account.disabled })
+                                    if (key === 'switch-dsh')
+                                      window.location.assign(
+                                        `/login?member=${encodeURIComponent(account.username)}&space=${encodeURIComponent(account.spaceId)}`,
+                                      )
+                                    else if (key === 'instance') {
+                                      setError(undefined)
+                                      setNotice(undefined)
+                                      if (account.instance.state === 'ready') setInstanceSelection({ account, action: 'restart' })
+                                      else void operateInstance(account, 'start')
+                                    } else if (key === 'disabled') choose(account, { action: 'set-disabled', disabled: !account.disabled })
                                     else if (key === 'password') choose(account, { action: 'reset-password', password: '' })
                                     else if (key === 'role') choose(account, { action: 'set-admin', admin: !account.admin })
                                     else if (key === 'delete') choose(account, { action: 'delete' })
@@ -289,6 +332,9 @@ export default function CommunityAccountsPage({ session }: { session?: Community
                                     }
                                   }}
                                 >
+                                  <Dropdown.Item id="switch-dsh" isDisabled={account.disabled} textValue={t('Switch to this member’s DSH')}>
+                                    <Label>{t('Switch to this member’s DSH')}</Label>
+                                  </Dropdown.Item>
                                   <Dropdown.Item
                                     id="disabled"
                                     isDisabled={lastAdmin}
@@ -313,6 +359,13 @@ export default function CommunityAccountsPage({ session }: { session?: Community
                                         ? t('Remove administrator role from {username}', { username: account.username })
                                         : t('Make {username} an administrator', { username: account.username })}
                                     </Label>
+                                  </Dropdown.Item>
+                                  <Dropdown.Item
+                                    id="instance"
+                                    isDisabled={account.disabled || !['ready', 'stopped'].includes(account.instance.state)}
+                                    textValue={t(account.instance.state === 'ready' ? 'Restart instance' : 'Start instance')}
+                                  >
+                                    <Label>{t(account.instance.state === 'ready' ? 'Restart instance' : 'Start instance')}</Label>
                                   </Dropdown.Item>
                                   <Dropdown.Item
                                     id="environment"
@@ -395,6 +448,43 @@ export default function CommunityAccountsPage({ session }: { session?: Community
           }}
         />
       ) : null}
+      {instanceSelection && (
+        <CommunityDialog
+          title={t('Restart instance')}
+          busy={busy}
+          onClose={() => {
+            setInstanceSelection(undefined)
+            setError(undefined)
+          }}
+          footer={
+            <>
+              <Button
+                variant="tertiary"
+                isDisabled={busy}
+                onPress={() => {
+                  setInstanceSelection(undefined)
+                  setError(undefined)
+                }}
+              >
+                {t('Cancel')}
+              </Button>
+              <Button
+                isDisabled={busy}
+                onPress={() => {
+                  void operateInstance(instanceSelection.account, instanceSelection.action)
+                }}
+              >
+                {t('Restart instance')}
+              </Button>
+            </>
+          }
+        >
+          <p>{instanceSelection.account.username}</p>
+          <p>{t('Running tasks and terminal commands will be interrupted. Other members keep working.')}</p>
+          <p>{t('Configuration, plugins and persistent files are preserved.')}</p>
+          {error !== undefined && <CommunityMessage role="alert" status="danger" title={errorText(error)} />}
+        </CommunityDialog>
+      )}
       {resetSelection && (
         <CommunityEnvironmentResetDialog
           account={resetSelection}

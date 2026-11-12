@@ -1,4 +1,7 @@
 import type { CommunityMarketPageData, CommunityPluginContributionInfo } from '../domain/admin-contract.js'
+import { nativeUpdateChoice } from '../domain/member-plugin-update.js'
+import type { InstalledMarketPlugin } from '../ports/plugin-market.js'
+import type { PreparedPlugin } from '../domain/plugin-library.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
@@ -10,7 +13,7 @@ import { usesSharedPluginCredential } from '../domain/plugin-upstream.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
 import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
-import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
+import type { PluginAuthorizationViewPort, PluginLibraryStorePort } from '../ports/plugin-library.js'
 import type { MemberPluginManagerPort } from '../ports/plugin-market.js'
 import type { PluginSelectionsPort } from '../ports/plugin-selections.js'
 import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
@@ -25,15 +28,15 @@ export class PluginMarket {
 
   constructor(
     private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list'>,
-    private readonly library: PluginLibraryStorePort,
-    private readonly manager: Pick<MemberPluginManagerPort, 'list'>,
-    private readonly runtime: Pick<CommunityRuntimePort, 'ensure'>,
+    private readonly library: PluginLibraryStorePort & Partial<PluginAuthorizationViewPort>,
+    private readonly manager: MemberPluginManagerPort,
+    private readonly runtime: Pick<CommunityRuntimePort, 'ensure'> & Partial<Pick<CommunityRuntimePort, 'status'>>,
     private readonly selections: PluginSelectionsPort,
     private readonly managed: Pick<MemberManagedPlugins, 'effective' | 'granted'>,
     private readonly runtimeRevision: string,
     private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>,
-    private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>,
-    private readonly localCopies?: Pick<PluginLocalCopies, 'view' | 'set'>,
+    private readonly upstreams?: Pick<PluginUpstreamsPort, 'list' | 'authorizationRevision'>,
+    private readonly localCopies?: Pick<PluginLocalCopies, 'view' | 'set'> & Partial<Pick<PluginLocalCopies, 'revision'>>,
     private readonly native?: MemberNativePluginJobs,
     private readonly libraryOperations = new KeyedOperations(),
   ) {}
@@ -102,27 +105,41 @@ export class PluginMarket {
           ? ('managed' as const)
           : shared && selected.has(plugin.packageName)
             ? ('selected' as const)
-            : actual?.retainedArchive
-              ? ('installed' as const)
-              : actual
-                ? ('native' as const)
-                : ('install' as const)
+            : actual
+              ? !actual.version
+                ? ('unknown' as const)
+                : actual.retainedArchive
+                  ? ('installed' as const)
+                  : ('native' as const)
+              : ('install' as const)
         const contribution = libraryContributionCredit((await this.library.list()).find(row => row.packageName === plugin.packageName)?.provenance)
-        const candidate = await this.native?.get(actor, plugin.packageName, instance)
-        const job = candidate?.status === 'running' || status === 'installed' || (status === 'install' && !shared) ? candidate : undefined
+        const candidate = await this.native?.get(actor, plugin.packageName, instance, actual)
+        const choice = status === 'installed' && actual ? await this.updateChoice(actor, actual, plugin) : undefined
+        const update = choice && actual && (await this.verifyArchive(instance, actual, signal)) ? choice : undefined
+        const job =
+          candidate?.status === 'running' ||
+          status === 'installed' ||
+          (status === 'install' && !shared) ||
+          (candidate?.action === 'update' && candidate.status === 'failed')
+            ? candidate
+            : undefined
         return {
           packageName: plugin.packageName,
           title: plugin.title,
           description: plugin.description,
           version: plugin.version,
           status,
+          ...(actual?.version && (status === 'installed' || status === 'native') ? { installedVersion: actual.version } : {}),
+          ...(update ? { update } : {}),
           ...(contribution ? { contribution } : {}),
           ...(shared && status !== 'native' && status !== 'installed' ? { sharedCredential: true as const } : {}),
           ...(job ? { job } : {}),
         }
       }),
     )
+    const unlistedUpdates = await this.native?.unlistedUpdates(actor, new Set(plugins.map(plugin => plugin.packageName)), instance, installed)
     return {
+      ...(unlistedUpdates?.length ? { unlistedUpdates } : {}),
       pending:
         (await this.pending(
           actor.username,
@@ -155,6 +172,72 @@ export class PluginMarket {
       }
       await this.selections.set(account.spaceId, [...selected, packageName])
       return { application: (await this.pending(actor.username, instance)) ? ('restart-required' as const) : ('applied' as const) }
+    })
+  }
+  async update(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal, requestId: string, target: string) {
+    return await this.operations.run(actor.spaceId, async () => {
+      const jobs = this.native
+      if (!jobs) throw this.updateChanged()
+      const previous = await jobs.previousUpdate(actor, packageName, requestId, target)
+      if (previous) return { job: previous }
+      const instance = await this.runtime.ensure(actor.username, origin.href)
+      const instanceCurrent = () => {
+        const status = this.runtime.status?.(actor.username)
+        return !status || (status.state === 'ready' && status.instance === instance)
+      }
+      const policyRevision = () =>
+        JSON.stringify([this.library.authorizationRevision?.(), this.localCopies?.revision?.(), this.upstreams?.authorizationRevision?.(packageName)])
+      const resolve = async (checkSignal: AbortSignal, verify: boolean) => {
+        const revision = policyRevision()
+        const current = () => instanceCurrent() && policyRevision() === revision
+        await this.current(actor)
+        if (!current()) throw this.updateChanged()
+        const installed = await this.manager.list(instance, origin, checkSignal)
+        const actual = installed.find(row => row.packageName === packageName)
+        if (
+          !actual?.version ||
+          !actual.archiveIntegrity ||
+          actual.enabled === undefined ||
+          (verify && !(await this.verifyArchive(instance, actual, checkSignal)))
+        )
+          throw this.updateChanged()
+        const plugin = (await this.available(actor.username)).find(entry => entry.packageName === packageName)
+        const delivery = await jobs.delivery(actor, packageName)
+        if (
+          !plugin ||
+          !delivery ||
+          (await this.managed.granted(actor.username)).includes(packageName) ||
+          ((await this.shared(packageName)) && (await this.selections.get(actor.spaceId)).includes(packageName)) ||
+          (await this.updateChoice(actor, actual, plugin))?.target !== target
+        )
+          throw this.updateChanged()
+        checkSignal.throwIfAborted()
+        if (!current()) throw this.updateChanged()
+        return {
+          current,
+          source: delivery.source,
+          replacement: {
+            packageName,
+            previous: { version: actual.version, integrity: actual.archiveIntegrity, enabled: actual.enabled },
+            next: { version: plugin.version, integrity: plugin.integrity },
+          },
+        }
+      }
+      const admitted = await resolve(signal, true)
+      if (!admitted.current()) throw this.updateChanged()
+      return {
+        job: await jobs.update(actor, packageName, origin, requestId, {
+          source: admitted.source,
+          replacement: admitted.replacement,
+          instance,
+          target,
+          assertCurrent: async () => {
+            const fresh = await resolve(AbortSignal.timeout(15000), false)
+            if (fresh.source !== admitted.source || fresh.replacement.previous.enabled !== admitted.replacement.previous.enabled) throw this.updateChanged()
+            return fresh.current
+          },
+        }),
+      }
     })
   }
   async uninstall(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal, requestId?: string) {
@@ -239,8 +322,30 @@ export class PluginMarket {
         : [],
     )
   }
+  private async verifyArchive(instance: CommunityUserInstance, actual: InstalledMarketPlugin, signal: AbortSignal) {
+    return actual.archiveIntegrity && (await this.manager.verifyArchive?.(instance, actual.packageName, actual.archiveIntegrity, signal))
+  }
+  private async updateChoice(actor: CommunityAccountActor, actual: InstalledMarketPlugin, plugin: PreparedPlugin) {
+    const row = (await this.library.list()).find(row => row.packageName === actual.packageName)
+    const delivery = await this.native?.delivery(actor, actual.packageName)
+    return row &&
+      !row.removing &&
+      !row.incompatible &&
+      row.stage === 'available' &&
+      row.current?.runtimeRevision === this.runtimeRevision &&
+      row.current.version === plugin.version &&
+      row.current.integrity === plugin.integrity &&
+      row.current.artifact === plugin.artifact &&
+      row.current.preparationId === plugin.preparationId &&
+      row.current.sourceCommit === plugin.sourceCommit
+      ? nativeUpdateChoice(actual, plugin, row, delivery)
+      : undefined
+  }
   private async shared(packageName: string) {
     return usesSharedPluginCredential((await this.upstreams?.list(packageName)) ?? [])
+  }
+  private updateChanged() {
+    return new BusinessRuleError('conflict', 'The installed copy or available update changed.', 'plugin-update-changed')
   }
   private unavailable() {
     return new BusinessRuleError('conflict', 'This plugin is not available in the marketplace.', 'plugin-market-unavailable')

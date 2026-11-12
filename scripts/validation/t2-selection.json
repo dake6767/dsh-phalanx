@@ -23,6 +23,7 @@
     "tests/community-mcp-shared.e2e.ts",
     "tests/community-mcp-update.e2e.ts",
     "tests/community-member-actions.e2e.ts",
+    "tests/community-member-instance-control.e2e.ts",
     "tests/community-model-protocols.e2e.ts",
     "tests/community-native-customization.e2e.ts",
     "tests/community-native-features.e2e.ts",
@@ -47,6 +48,7 @@
     "tests/execution-runtime-modules-container.e2e.ts",
     "tests/expert-plugins-container.e2e.ts",
     "tests/installed-candidate.e2e.ts",
+    "tests/installed-deployment-lifecycle.e2e.ts",
     "tests/installed-image-reuse.e2e.ts",
     "tests/installed-mcp-lifecycle.e2e.ts",
     "tests/managed-plugins-container.e2e.ts",
@@ -73,7 +75,7 @@
     "tests/usage-skills-container.e2e.ts",
     "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 96,
+  "regularCases": 100,
   "smoke": [
     "tests/installed-candidate.e2e.ts",
     "tests/community-user-storage.e2e.ts",
@@ -98,7 +100,7 @@
   },
   "regularFileCases": {
     "tests/catalog-skill-limits-container.e2e.ts": 1,
-    "tests/community-account-switching.e2e.ts": 1,
+    "tests/community-account-switching.e2e.ts": 2,
     "tests/community-artifacts.e2e.ts": 1,
     "tests/community-container-recovery.e2e.ts": 1,
     "tests/community-entry-pages.e2e.ts": 7,
@@ -158,7 +160,7 @@
     "tests/plugin-library-container.e2e.ts": 3,
     "tests/plugin-maintainer-local-copy-container.e2e.ts": 1,
     "tests/plugin-market-container.e2e.ts": 1,
-    "tests/plugin-preinstall-container.e2e.ts": 3,
+    "tests/plugin-preinstall-container.e2e.ts": 4,
     "tests/plugin-upload-container.e2e.ts": 1,
     "tests/runtime-dependency-container.e2e.ts": 2,
     "tests/runtime-dependency-recovery-container.e2e.ts": 2,
@@ -168,7 +170,9 @@
     "tests/usage-records-container.e2e.ts": 1,
     "tests/usage-skills-container.e2e.ts": 1,
     "tests/usage-web-tools-container.e2e.ts": 1,
-    "tests/community-launch-visibility.e2e.ts": 1
+    "tests/community-launch-visibility.e2e.ts": 1,
+    "tests/installed-deployment-lifecycle.e2e.ts": 1,
+    "tests/community-member-instance-control.e2e.ts": 1
   },
   "hiddenCases": [
     {

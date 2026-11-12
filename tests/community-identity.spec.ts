@@ -28,9 +28,12 @@ it('returns the authenticated display identity and current administrator role wi
   const origin = await app.start()
   const call = async (cookie?: string, method = 'GET') =>
     await fetch(`${origin}/account/identity?username=admin`, { method, redirect: 'manual', headers: { ...(cookie ? { cookie } : {}), origin } })
+  const features = (cookie?: string, method = 'GET') =>
+    fetch(`${origin}/account/platform-features?groupId=admin`, { method, redirect: 'manual', headers: { ...(cookie ? { cookie } : {}), origin } })
   const absent = await call()
   expect(absent.status).toBe(401)
   expect(await absent.json()).toEqual({ error: 'Sign in is required', code: 'sign-in-required' })
+  expect((await features()).status).toBe(401)
   const bootstrap = await fetch(`${origin}/bootstrap`, {
     method: 'POST',
     redirect: 'manual',
@@ -42,6 +45,18 @@ it('returns the authenticated display identity and current administrator role wi
     .map(value => value.split(';')[0])
     .join('; ')
   expect(await (await call(admin)).json()).toEqual({ username: 'admin', admin: true })
+  expect(await (await features(admin)).json()).toEqual({ showAppCenter: false })
+  const adminFeatures = origin + '/admin/api/groups/admin/native-features'
+  const revision = (await (await fetch(adminFeatures, { headers: { cookie: admin } })).json()).revision
+  expect(
+    (
+      await fetch(adminFeatures, {
+        method: 'POST',
+        headers: { cookie: admin, origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ revision, disabledIds: [], showAppCenter: true }),
+      })
+    ).status,
+  ).toBe(200)
   expect(
     (
       await fetch(`${origin}/admin/api/accounts`, {
@@ -62,6 +77,7 @@ it('returns the authenticated display identity and current administrator role wi
     .map(value => value.split(';')[0])
     .join('; ')
   expect(await (await call(member)).json()).toEqual({ username: 'member', admin: false })
+  expect(await (await features(member)).json()).toEqual({ showAppCenter: false })
   const records = await (await fetch(`${origin}/admin/api/accounts`, { headers: { cookie: admin } })).json()
   const groupId = records.items.find((row: { username: string }) => row.username === 'member').groupId
   const role = (value: object) =>
@@ -72,10 +88,13 @@ it('returns the authenticated display identity and current administrator role wi
     })
   expect((await role({ admin: true })).status).toBe(200)
   expect(await (await call(member)).json()).toEqual({ username: 'member', admin: true })
+  expect(await (await features(member)).json()).toEqual({ showAppCenter: true })
   expect((await role({ admin: false, groupId })).status).toBe(200)
   expect(await (await call(member)).json()).toEqual({ username: 'member', admin: false })
   expect((await call(member)).headers.get('cache-control')).toBe('no-store')
   expect((await call(member, 'POST')).status).toBe(405)
+  expect(await (await features(member)).json()).toEqual({ showAppCenter: false })
+  expect((await features(member, 'POST')).status).toBe(405)
   expect((await fetch(`${origin}/admin/api/session`, { headers: { cookie: member } })).status).toBe(403)
   expect(
     (
@@ -87,4 +106,5 @@ it('returns the authenticated display identity and current administrator role wi
     ).status,
   ).toBe(200)
   expect((await call(member)).status).toBe(401)
+  expect((await features(member)).status).toBe(401)
 })

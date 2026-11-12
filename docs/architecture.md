@@ -28,7 +28,7 @@ and behavior at official seams.
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
 | Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
 | Uploaded package manifest inspection | `dsh/plugin-archive.ts` | `adapters/plugin-archive-inspector.ts` |
-| Native bundle inventory, install and removal RPCs | `dsh/plugin-manager-protocol.ts` | `adapters/member-plugin-manager.ts`, `adapters/dsh-plugin-rpc.ts` |
+| Native bundle inventory, install, replacement and removal RPCs | `dsh/plugin-manager-protocol.ts` | `adapters/member-plugin-manager.ts`, `adapters/dsh-plugin-rpc.ts` |
 | Access entry identities, lazy values and startup config merge | `dsh/managed-plugin-access.ts` | `adapters/plugin-access-syntax.ts`, `adapters/managed-plugins.ts` |
 | Managed bundle patch conversion and protected includes | `dsh/managed-plugin-patch.ts` | `dsh/plugin-preparation.ts`, `adapters/managed-plugins.ts` |
 | Self-installed bundle entry discovery and owned yielding patches | `dsh/plugin-coordination.ts` | `adapters/plugin-coordination.ts` |
@@ -47,7 +47,7 @@ and behavior at official seams.
 | Per-member final native-feature patch and build-time entry bindings | `dsh/native-features.ts` | `adapters/member-native-features.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Built-in preset declarations, effective default reads, revisioned repair and Creator entry slots | `dsh/native-presets.ts`, `dsh/native-preset-client.ts` | `adapters/community-runtime-driver.ts`, `adapters/member-native-features.ts` |
 | Creator and fetch tool policy from official composed configuration | `dsh/native-creator-tools.ts` | `adapters/native-config-dump.ts`, `adapters/member-native-feature-launch.ts` |
-| Native bundle access policy, platform install proof and localized refusals | `dsh/native-plugin-policy.ts`, `dsh/native-plugin-install.ts`, `dsh/native-feature-locale.ts` | `adapters/member-native-features.ts`, `adapters/native-install-transport.ts` |
+| Native bundle access policy, platform install proof and localized refusals | `dsh/native-plugin-policy.ts`, `dsh/native-plugin-install.ts`, `dsh/native-plugin-replacement.ts`, `dsh/native-feature-locale.ts` | `adapters/member-native-features.ts`, `adapters/native-install-transport.ts` |
 
 DSH remains an external frozen dependency. Upgrade these seam owners against its
 official interfaces before changing transport. Unrelated native Settings, account-login surfaces and user plugins belong to each member. Shared model supply belongs to platform administration through the official managed include in `dsh/shared-models.ts`.
@@ -60,6 +60,11 @@ browser installation and first-time official optional bundles, while preserving
 existing bundle management and platform App Center deliveries. Unconfined `web_fetch` is disabled in composed root and preset configuration, with a deployment tool guard refusing later same-name registrations. The public tool service composition waits for platform MCP refresh before resolving each step; obsolete registrations remain subject to native admission identity checks. Creator tools are
 removed through a complete preset configuration derived from the official CLI's
 composed configuration output; lazy expressions remain unevaluated.
+
+The group App Center setting is a separate positive flag that defaults to off.
+The platform client reads it for the current authenticated member on page load.
+An unavailable read leaves both App Center slots unregistered. Market APIs and
+resource grants use their existing authorization rules.
 
 `NativePluginHistory` owns append-only optional-bundle eligibility in PostgreSQL,
 scoped to the active account space. Its first baseline uses currently enabled or
@@ -480,7 +485,7 @@ The store protects the last enabled administrator inside a write transaction, wi
 Stopping failures keep the target account disabled and visible for retry; deletion
 retires the space only after confirmed termination and leaves its directory intact. Reused
 usernames receive a new space, session binding and model access token. Account storage retains durable directory mappings and optional email. Sessions bind cookies
-to both username and space ID.
+to both username and space ID. Directed member sign-in fixes the username and space, requires the target password even for a remembered account, and enters its DSH regardless of administrator role. The original valid administrator token is retained, including when its remembered-list entry was missing; both identities count against the ten-account limit before cookies change.
 
 `PluginLibrary` owns durable plugin additions, exact npm identities, administrator
 admission, progress, retry and shutdown. Library mutations, background preparation writes, catalog fact transactions and `PluginMarket` publication share one package-keyed operation owner supplied by composition; publication cannot write a stale row over another completed edit. `PostgresPluginLibraryStore` reads library rows on demand and records current/replacement upload references in the same transaction. `PluginLibraryCatalog` owns catalog staging; `PluginLibraryAdministration` owns administrator edits. Both share the library package queue. Plugin removal is one use-case unit of work: the parent deletion cascades to grants, preinstalls, receipts, selections, local-copy preferences, access settings and upstreams. Successful native delivery history remains until its account is deleted. No removal intent or startup removal recovery is needed. Failed additions have no current
@@ -498,11 +503,11 @@ container reads the archive manifest; the host never extracts or executes upload
 content. Accepted originals remain available for retry, duplicate uploads discard
 their incoming copy, and the same version with different content is rejected.
 Intake cancellation removes incomplete files after container exit is confirmed.
-`NativePluginDownloads` binds short-lived retained-archive access to the current member, space, session epoch and checked artifact. The private gateway terminates only the synthetic archive destination before ordinary HTTP/CONNECT forwarding; it rechecks eligibility after opening the archive. `MemberNativePlugins` refuses to replace an existing native copy. Its native manager downloads and verifies the main archive inside the member container, retains it under the web profile, then supplies that local path to the official install RPC. The call uses the platform npm registry for transitive dependencies without changing the member’s saved registry or approving build scripts. Removal calls the official native bundle RPC independently of the library shelf.
+`NativePluginDownloads` binds short-lived retained-archive access to the current member, space, session epoch and checked artifact. The private gateway terminates only the synthetic archive destination before ordinary HTTP/CONNECT forwarding; it rechecks eligibility after opening the archive. `MemberNativePlugins` refuses to replace an existing native copy through ordinary installation. Its native manager downloads and verifies the main archive inside the member container, retains it under the web profile, then supplies that local path to the official install RPC. The call uses the platform npm registry for transitive dependencies without changing the member’s saved registry or approving build scripts. Removal calls the official native bundle RPC independently of the library shelf.
 Replacement preparation has separate durable candidate state; the checked current
 version remains selected until an administrator confirms the fresh group/member
 impact. Known version integrities survive replacement, preventing changed uploads
-from reusing an earlier version identity. Removal first persists an unpublished
+from reusing an earlier version identity. A checked GitHub commit can provide new content at the same package version; the old archive identity stays available for native comparison. Removal first persists an unpublished
 removal intent, which excludes the package from selection and distribution, then
 clears all grants and deletes the library row. Startup resumes interrupted removals
 before accepting requests. Immutable artifacts remain available to running mounts.
@@ -548,11 +553,20 @@ marker. Lazy expressions are parsed without evaluation. Marketplace actions inst
 `MemberNativePluginJobs` owns accepted request IDs, per-member/package exclusion,
 real download/install phases, safe failures and shutdown draining. Closing a panel
 stops observation, not the operation. `PostgresPluginInstallations` keeps successful
-delivery source and version by immutable member space plus package; native removal,
-upgrade and disabling do not rewrite history. Cards read the actual native inventory:
+delivery source, version and checked archive digest by immutable member space plus package; native removal and disabling do not rewrite history. Cards read the actual native inventory:
 a current dependency on a retained platform archive can be removed here, while an
 independent native copy is preserved. Missing source metadata remains independent;
-no durable history is used to infer the current copy or its version.
+no durable history is used to infer the current copy or its version. An explicit
+update matches the current DSH version and source, package lock, and retained
+archive bytes with a successful platform delivery and checked library identity.
+Downlisting removes the update action even for preinstalled copies; their group
+assignment and installed files remain.
+The signed route stages the selected archive and confirms the live update grant
+through the private download gateway before changing the profile. It preserves
+compatible overrides and bundle selection. After a failure it attempts to restore
+the affected overrides and reinstall the verified prior archive. If recovery cannot be confirmed,
+the profile retains the old archive and recovery files. The runtime keeps the
+same carrier through replacement and recovery.
 Credential-bearing market choices retain readonly loading; explicit group grants
 remain readonly regardless of credentials. Those cards alone show the shared KEY
 and controlled labels. Native copies carry no source label. Pending changes link to
@@ -615,6 +629,8 @@ HTTPS URL never changes those private transports into public model endpoints.
 Public account facts and community management DTOs exclude credentials and private state. The community entry is the sole product composition. Deployment configuration retains
 `DSH_PHALANX_REGISTRATION_ENABLED`, defaulting to `false`. Open registration is unsupported: `true` is rejected during configuration validation and public registration
 URLs remain closed.
+`CommunityMemberInstances` binds administrator operations to the displayed target space and rechecks current authority before stopping, before starting and after startup. The lifecycle atomically refuses conflicting states and removes a newly started carrier if its authorization changed. These operations preserve native configuration and files.
+
 `CommunityInstanceActions` checks the admitted member’s fresh space identity and session epoch and coalesces concurrent restart requests. `/recovery` is served by the platform without entering DSH; its restart exchanges new native cookies only after successful startup. The protected include in `dsh/community-platform-plugin.ts` owns the two native action entries and manifest credential configuration.
 
 `CommunityInstanceLifecycle` owns per-user admission, pending starts, liveness
@@ -666,8 +682,10 @@ boundary and keeps that credential outside user spaces. The composition connects
 
 `CommunityNetworkAccess` authorizes fresh per-user tokens and pins public IPv4
 DNS results through an injected resolver. `NodeNetworkResolver` owns DNS and
-host-interface/configured-public-origin facts and the explicitly declared complete
-public IPv4 host inventory; missing inventory fails external access closed. `NodeNetworkTransport` owns pinned
+host-interface/configured-public-origin facts and the declaration of additional
+public IPv4 ingress aliases. A missing declaration fails external access closed;
+an explicit empty list permits normal public egress while all known host, private,
+loopback and declared aliases remain denied. `NodeNetworkTransport` owns pinned
 TCP/HTTP I/O with a connection/header deadline and no platform-imposed idle deadline
 once connected. The authenticated HTTP/CONNECT handler shares the private gateway,
 and tracked connections close with account revocation. Container proxy variables
@@ -692,7 +710,7 @@ A stable SQL owner precedes external marker creation, followed by a compare-and-
 Canonical root separation, mount identity, private ownership and marker checks remain filesystem responsibilities in `user-storage-files.ts`.
 Only physical mount inspection has the documented 250 ms cache. Entry and new carrier startup await availability before accessing a space.
 Omitted default storage remains distinct from an explicit external volume; omitting a previously bound volume fails closed.
-Default durable storage is `resolve(dataRoot) + ".durable"`, with `users` and built-in `postgres` as siblings below it; and retired username reuse uses the reserved `_spaces/<spaceId>` namespace under the user root.
+Default durable storage is `resolve(dataRoot) + ".durable"`, with `users` and built-in `postgres` as siblings below it; and every newly created account uses the reserved `_spaces/<spaceId>` namespace under the user root. Existing accounts retain their persisted storage keys; login, restart and environment reset do not migrate directories.
 External storage changes require explicit migration.
 
 `CommunityEnvironmentRecovery` authorizes a current administrator or the current member resetting their own stable space. A synchronous per-space promise registration precedes asynchronous admission, preserving the first initiator for joined requests. A short unit of work locks fresh actor and target account rows, checks the persisted cooldown and writes the latest initiation before side effects. History is keyed by stable space and cascades on account deletion; the initiator username remains historical credit. Identity is rechecked through stop/backup/reset/start; member requests have a ten-minute window that survives restart, while administrator requests preserve that member window and remain exempt. The history records initiation. The lifecycle's separate `recover` operation prevents a pending restart from skipping preparation. `FileCommunityEnvironment` copies only official web-profile/home configuration carriers into private `<userDataRoot>/_environment-backups/<spaceId>/` backups on the user-space volume after carrier removal; links are copied as links and special files fail closed. Complete manifests describe present and absent carriers for manual restoration. After publication, retention keeps the current copy and two newest verified copies in that exact platform space; unknown/incomplete/linked directories are preserved and cleanup failures only log. Backup manifests use a stable user-root-relative home so volume copying preserves scope and retention; restoration instructions resolve the current configured user root. Manifests without a completion timestamp use their final write time. Home, workspace and sessions remain intact. Only administrator responses contain backup locations and restoration instructions; self-service success and failure responses exclude them. The standalone recovery page requires no management or native plugin assets.
@@ -782,7 +800,7 @@ Preview lifecycle changes do not cancel accepted native agent tasks.
 
 **Independent community codebase.** This repository owns its source history, release inputs and supported interfaces. DSH stays external and pinned, with one owner per official seam. Independent evolution keeps changes reviewable without a shared-core or feature-matrix prerequisite; source drift and deliberate manual integration are accepted costs.
 
-**Rootless user spaces.** Installed deployments run one rootless Podman user instance per account, with private home/workspace mounts and loopback listeners. The authenticated network return path pins public IPv4 destinations and rejects declared host aliases; missing inventory fails closed. Development mode offers no isolation. Rootless operation requires Linux host preparation and real container/network verification; it does not certify arbitrary plugins.
+**Rootless user spaces.** Installed deployments run one rootless Podman user instance per account, with private home/workspace mounts and loopback listeners. The authenticated network return path pins public IPv4 destinations and rejects known and declared host aliases; a missing declaration fails closed, while an explicit empty alias list permits normal public egress. Development mode offers no isolation. Rootless operation requires Linux host preparation and real container/network verification; it does not certify arbitrary plugins.
 
 **Administrator-owned shared models.** Administrators own provider credentials, manual model lists, each supplier's upstream protocol and the default selection. Each supplier's protocol becomes its DSH provider `api`; the gateway accepts that protocol's path and authentication shape, forwards the request unchanged to the supplier endpoint and never translates between protocols. Stable opaque identities route requests using a provider snapshot captured at admission; disabled selections fail without silent fallback. Catalogs update through official DSH seams, while keys remain in platform storage. Ordinary personal-provider settings are unavailable; terminals, user plugins and unrelated settings remain available, including external model access through user code. The gateway is not a prohibition on all external model traffic. Administrator model lists declare each model's input types as text or text and images; the platform writes that declaration into the DSH model entry, which enforces it at session admission, `read_image` and subagent image delivery. The platform does not infer capability from provider metadata.
 

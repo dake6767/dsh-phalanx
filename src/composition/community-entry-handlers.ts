@@ -1,3 +1,4 @@
+import { CommunityMemberInstances } from '../use-cases/community-member-instances.js'
 import { FileInitialModelDefaults } from '../adapters/initial-model-defaults.js'
 import { InitialModelSetup } from '../use-cases/initial-model-setup.js'
 import type { PluginIntake } from '../use-cases/plugin-intake.js'
@@ -298,8 +299,9 @@ export function createCommunityEntryHandlers(input: {
     signedInAccounts,
     recordsReady: () => lifecycle().recordsReady(),
   })
-  const recovery = createCommunityMemberRoute({ entry, environment, accountChoices: signedInAccounts.loginChoices })
+  const recovery = createCommunityMemberRoute({ entry, environment, features: nativeFeatures, accountChoices: signedInAccounts.loginChoices })
   const admin = createCommunityAdminRoute({
+    memberInstances: new CommunityMemberInstances(accounts, runtime, connections),
     authenticate,
     onboarding,
     administration,

@@ -55,7 +55,7 @@ try:
  scopes=[data,users,postgres,Path('/etc/dsh-phalanx/environment')];assert all(p.exists() for p in scopes)
  for relative in ('plugins/instances','mcp/members','skills/members','experts/members','platform-plugin','managed-models'):
   p=data/relative;assert p.is_dir() and any(p.iterdir()), 'Required populated scan scope missing'
- assert (users/payload['member']/'workspace/owned-result.txt').is_file()
+ assert (users/'_spaces'/payload['spaceId']/'workspace/owned-result.txt').is_file()
  for name in ('shared-models.json','model-access.json','plugin-upstreams.json','mcp/library.json','plugins/access.json','execution/configuration.json'):assert not (data/name).exists()
  visited=set();files=0;total=0;links=0;hits=[];overlap=max(len(v) for _,v in needles)-1
  imageTargets=set();imageAllowed={'/opt/dsh/node_modules/@deepseek-ai/'+name for name in ('dsh-web','dsh-tools','dsh-system-prompt','dsh-credentials','dsh-tool-web','cordis')}

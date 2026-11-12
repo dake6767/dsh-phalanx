@@ -131,7 +131,7 @@ it('uses actual native inventory for market actions without treating delivery hi
   const plugin = {
     packageName: 'native',
     version: '1.0.0',
-    integrity: 'sha512-fixture',
+    integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
     artifact: 'artifacts/fixture',
     runtimeRevision: 'revision',
     title: 'Native',
@@ -139,14 +139,32 @@ it('uses actual native inventory for market actions without treating delivery hi
     bundlePatch: '[]',
     dependencies: {},
   }
+  let current = plugin,
+    publication = true,
+    generation = 0
   const library = {
-    list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available' as const, published: true }],
+    authorizationRevision: () => String(generation),
+    list: async () => [
+      {
+        source: { kind: 'npm' as const },
+        ...current,
+        current,
+        identities: {
+          [plugin.version]: plugin.integrity,
+          ['legacy:' + plugin.version]: plugin.integrity,
+          [plugin.version + ':' + plugin.integrity]: plugin.integrity,
+          [plugin.version + ':sha512-' + Buffer.alloc(64, 3).toString('base64')]: 'sha512-' + Buffer.alloc(64, 3).toString('base64'),
+        },
+        stage: 'available' as const,
+        published: publication,
+      },
+    ],
     save: async () => {},
     remove: async () => {},
   }
   const instance = { userId: 'member', processId: 1, origin: 'http://localhost', launchUrl: 'http://localhost' },
     runtime = { ensure: async () => instance }
-  let installed: { packageName: string; version: string; retainedArchive?: true }[] = [],
+  let installed: import('../src/ports/plugin-market.js').InstalledMarketPlugin[] = [],
     credential = ''
   let finish!: () => void, entered!: () => void
   const started = new Promise<void>(resolve => {
@@ -157,10 +175,11 @@ it('uses actual native inventory for market actions without treating delivery hi
     })
   const manager = {
     list: async () => installed,
+    verifyArchive: async () => true,
     install: async () => {
       entered()
       await completed
-      installed = [{ packageName: 'native', version: '1.0.0', retainedArchive: true }]
+      installed = [{ packageName: 'native', version: '1.0.0', retainedArchive: true, archiveIntegrity: plugin.integrity, enabled: false }]
       return 'applied' as const
     },
     remove: async () => {
@@ -171,8 +190,12 @@ it('uses actual native inventory for market actions without treating delivery hi
   const downloads = new NativePluginDownloads(accounts, library, { issue: () => 'signed', read: () => undefined }, { now: () => 0 }, 'revision')
   const native = new MemberNativePlugins(accounts, downloads, manager, { current: () => ({ npm: 'https://registry.npmjs.org' }) })
   let history: readonly import('../src/ports/plugin-installations.js').PluginInstallation[] = []
+  let beforeDelivery: (() => Promise<void>) | undefined
   const records = {
-    get: async () => history,
+    get: async () => {
+      await beforeDelivery?.()
+      return history
+    },
     save: async (_space: string, row: import('../src/ports/plugin-installations.js').PluginInstallation) => {
       history = [row]
     },
@@ -203,6 +226,7 @@ it('uses actual native inventory for market actions without treating delivery hi
   )
   const origin = new URL('http://localhost'),
     signal = new AbortController().signal
+  const listMarket = () => market.list(account, origin, signal)
   expect(await market.install(account, 'native', origin, signal, 'request-1')).toMatchObject({ job: { status: 'running' } })
   await started
   expect((await market.list(account, origin, signal)).plugins[0]).toMatchObject({ status: 'install', job: { status: 'running' } })
@@ -210,7 +234,52 @@ it('uses actual native inventory for market actions without treating delivery hi
   await jobs.drain()
   expect((await market.list(account, origin, signal)).plugins[0]).toMatchObject({ status: 'installed', job: { status: 'succeeded' } })
   expect(selected).toEqual([])
-  expect(history).toEqual([{ packageName: 'native', version: '1.0.0', source: 'selected' }])
+  expect(history).toEqual([{ packageName: 'native', version: '1.0.0', source: 'selected', integrity: plugin.integrity }])
+  current = { ...plugin, version: '2.0.0', integrity: 'sha512-' + Buffer.alloc(64, 2).toString('base64') }
+  expect((await listMarket()).plugins[0]).toMatchObject({ status: 'installed', installedVersion: '1.0.0', update: { kind: 'version', version: '2.0.0' } })
+  const choice = (await listMarket()).plugins[0]!.update!
+  let count = 0,
+    raceEntered!: () => void,
+    release!: () => void
+  const waiting = new Promise<void>(resolve => {
+    raceEntered = resolve
+  })
+  const proceed = new Promise<void>(resolve => {
+    release = resolve
+  })
+  beforeDelivery = async () => {
+    if (++count === 2) {
+      raceEntered()
+      await proceed
+    }
+  }
+  const accepting = market.update(account, 'native', origin, signal, 'update-while-unpublishing', choice.target)
+  try {
+    expect(await Promise.race([waiting.then(() => 'waiting'), accepting])).toBe('waiting')
+    publication = false
+    generation++
+  } finally {
+    release()
+    beforeDelivery = undefined
+  }
+  await expect(accepting).rejects.toMatchObject({ code: 'plugin-update-changed' })
+  expect((await listMarket()).plugins).toEqual([])
+  publication = true
+  generation++
+  current = { ...current, version: '0.9.0' }
+  expect((await listMarket()).plugins[0]?.update).toBeUndefined()
+  current = { ...current, version: '1.0.0' }
+  expect((await listMarket()).plugins[0]).toMatchObject({ update: { kind: 'content', version: '1.0.0' } })
+  const recorded = history
+  const actual = installed
+  history = [{ packageName: 'native', version: '1.0.0', source: 'selected' }]
+  expect((await listMarket()).plugins[0]?.update).toMatchObject({ kind: 'content' })
+  installed = [{ ...installed[0]!, archiveIntegrity: 'sha512-' + Buffer.alloc(64, 3).toString('base64') }]
+  expect((await listMarket()).plugins[0]).toMatchObject({ status: 'installed', installedVersion: '1.0.0' })
+  expect((await listMarket()).plugins[0]?.update).toBeUndefined()
+  installed = actual
+  history = recorded
+  current = plugin
   credential = 'shared-fixture' // A preinstalled native copy still has no shared key.
   expect((await market.list(account, origin, signal)).plugins[0]?.sharedCredential).not.toBe(true)
   expect(await market.uninstall(account, 'native', origin, signal, 'remove-1')).toMatchObject({ job: { action: 'uninstall' } })

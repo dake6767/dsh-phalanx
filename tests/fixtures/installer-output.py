@@ -21,7 +21,7 @@ class InstallerOutput(unittest.TestCase):
                 root = Path(temporary); machine = InstallationMachine(root)
                 host = installer.Host(root, machine.command, system='Linux', machine='x86_64', uid=0)
                 host.request = lambda *args, **kwargs: b'login'
-                args = [*machine.make_bundle('v0.1.1-rc.1'), '--output', output]
+                args = [*machine.make_bundle('v0.1.1-rc.1'), '--output', output, '--language', 'en']
                 with contextlib.redirect_stdout(stdout := io.StringIO()), contextlib.redirect_stderr(stderr := io.StringIO()):
                     self.assertEqual(installer.main(args, host), 0)
                 if output == 'json': self.assertEqual(json.loads(stdout.getvalue())['status'], 'installed')
@@ -122,7 +122,7 @@ class InstallerOutput(unittest.TestCase):
         import fcntl
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary); lock=root/'run/lock/dsh-phalanx-install.lock'; lock.parent.mkdir(parents=True)
-            child="from pathlib import Path; from installer_contract_support import installer,InstallationMachine; import sys; m=InstallationMachine(Path(sys.argv[1])); h=installer.Host(m.root,m.command,system='Linux',machine='x86_64',uid=0); h.request=lambda *a,**k:b'login'; sys.exit(installer.main([*m.make_bundle('v0.1.1-rc.1'),'--output','json'],h))"
+            child="from pathlib import Path; from installer_contract_support import installer,InstallationMachine; import sys; m=InstallationMachine(Path(sys.argv[1])); h=installer.Host(m.root,m.command,system='Linux',machine='x86_64',uid=0); h.request=lambda *a,**k:b'login'; sys.exit(installer.main([*m.make_bundle('v0.1.1-rc.1'),'--output','json','--language','en'],h))"
             with lock.open('w') as held:
                 fcntl.flock(held,fcntl.LOCK_EX)
                 process=subprocess.Popen([sys.executable,'-c',child,str(root)],cwd=Path(__file__).parent,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)

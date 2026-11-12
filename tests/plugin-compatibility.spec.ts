@@ -335,3 +335,50 @@ it('completes a persisted administrator first-add source record after preparatio
   await new PluginCompatibility(store, { prepare: async () => prepared }, 'next/runtime').recover()
   expect(row.provenance?.versions).toHaveLength(1)
 })
+
+it('rechecks the selected and staged GitHub archives independently when their package versions match', async () => {
+  const current: PreparedPlugin = {
+    packageName: 'plugin',
+    version: '1.0.0',
+    integrity: 'old-checked',
+    artifact: 'artifacts/old',
+    sourceCommit: 'a'.repeat(40),
+    runtimeRevision: 'old-runtime',
+    title: '',
+    description: '',
+    bundlePatch: '[]',
+    dependencies: {},
+  }
+  const staged = { ...current, integrity: 'new-checked', artifact: 'artifacts/new', sourceCommit: 'b'.repeat(40) }
+  let row: LibraryPlugin = {
+    source: { kind: 'github', repository: 'example/plugin' },
+    packageName: current.packageName,
+    version: current.version,
+    current,
+    stage: 'available',
+    published: true,
+    replacement: { packageName: staged.packageName, version: staged.version, stage: 'available', prepared: staged },
+  }
+  await new PluginCompatibility(
+    {
+      list: async () => [row],
+      save: async value => {
+        row = value
+      },
+      remove: async () => {},
+    },
+    {
+      prepare: async input => ({
+        ...(input.retainedIntegrity === current.integrity ? current : staged),
+        runtimeRevision: 'new-runtime',
+      }),
+    },
+    'new',
+  ).recover()
+  expect(row).toMatchObject({
+    stage: 'available',
+    published: true,
+    current: { ...current, runtimeRevision: 'new-runtime' },
+    replacement: { stage: 'available', prepared: { ...staged, runtimeRevision: 'new-runtime' } },
+  })
+})

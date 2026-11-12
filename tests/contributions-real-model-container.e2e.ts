@@ -1,4 +1,5 @@
 // Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
@@ -13,7 +14,6 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { contributionDeclaration } from '../src/domain/contribution-checks.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
@@ -120,7 +120,7 @@ it.skip('hidden in 0.1.32: accepts real-model creator and minimal contributions 
       .filter({ hasNot: page.locator('[data-copy-version]') })
       .first()
       .click()
-    await selectCommunityWorkspace(page.context(), page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'member-a'), true), true)
+    await selectCommunityWorkspace(page.context(), page, origin, instanceWorkspacePath('', true), true)
   }
   const pending = async (kind: string) =>
     (await get('contributions')).contributions.filter((row: { kind?: string; status: string }) => row.status === 'pending' && (row.kind ?? 'skill') === kind)
@@ -151,7 +151,7 @@ it.skip('hidden in 0.1.32: accepts real-model creator and minimal contributions 
     ).toBe(303)
     for (const username of ['member-a', 'member-b', 'member-c']) {
       expect((await post('accounts', { username, password: 'password', email: '' })).status()).toBe(201)
-      const home = join(effectiveUserDataRoot({ dataRoot: root }), username, 'home')
+      const home = join(await memberSpacePath(root, username), 'home')
       await mkdir(home, { recursive: true, mode: 0o700 })
       await writeFile(join(home, 'access-probe.mjs'), await readFile(new URL('./fixtures/plugin-access-probe.mjs', import.meta.url)))
     }
@@ -159,7 +159,7 @@ it.skip('hidden in 0.1.32: accepts real-model creator and minimal contributions 
     await signInCommunity(a, origin, 'member-a', 'password')
     await signInCommunity(b, origin, 'member-b', 'password')
     await signInCommunity(c, origin, 'member-c', 'password')
-    const workspace = defaultWorkspacePath(root, 'member-a'),
+    const workspace = await defaultWorkspacePath(root, 'member-a'),
       directory = join(workspace, 'team-anysearch')
     await setStage('creator-source')
     await command('member-a', [
@@ -417,7 +417,7 @@ it.skip('hidden in 0.1.32: accepts real-model creator and minimal contributions 
     expect((await b.request.get(new URL('access-probe', b.url()).href)).status()).toBe(200)
     await setStage('nonmaintainer-rejection')
     const nonMaintainerBefore = model.observations.length
-    const otherWorkspace = defaultWorkspacePath(root, 'member-c')
+    const otherWorkspace = await defaultWorkspacePath(root, 'member-c')
     await cp(directory, join(otherWorkspace, 'team-anysearch'), { recursive: true })
     const otherManifest = { ...manifest, version: `${versionParts![1]}.${versionParts![2]}.${Number(versionParts![3]) + 2}` }
     await writeFile(join(otherWorkspace, 'team-anysearch/package.json'), JSON.stringify(otherManifest))
@@ -530,7 +530,7 @@ it.skip('hidden in 0.1.32: accepts real-model creator and minimal contributions 
     await snapshot(a, 'real-minimal-confirmed')
     await setStage('readable-files-scan')
     await writeFile(
-      join(effectiveUserDataRoot({ dataRoot: root }), 'member-b/home/readable-scan.mjs'),
+      join(await memberSpacePath(root, 'member-b'), 'home/readable-scan.mjs'),
       await readFile(new URL('./fixtures/contribution-readable-scan.mjs', import.meta.url)),
     )
     const scan = spawn(runtimeSettings.containerRuntimeCli, ['exec', await container('member-b'), 'node', '/dsh-phalanx/home/readable-scan.mjs'], {
@@ -562,7 +562,7 @@ it.skip('hidden in 0.1.32: accepts real-model creator and minimal contributions 
     await record('tool-results.json', model.observations)
     completed = true
   } catch (error) {
-    const packageRoot = join(defaultWorkspacePath(root, 'member-a'), 'team-anysearch')
+    const packageRoot = join(await defaultWorkspacePath(root, 'member-a'), 'team-anysearch')
     await record(
       'creator-package-diagnostic.json',
       Object.fromEntries(

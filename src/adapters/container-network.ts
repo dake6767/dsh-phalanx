@@ -4,6 +4,72 @@ import { PASTA_HOST_LOOPBACK_OPTION } from '../dsh/container.js'
 import { CommunityRuntimeUnavailableError } from '../ports/community-runtime.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
 
+// Keep the helper's output on a terminal and own its lifetime as a direct
+// child. util-linux script can exit after signalling its child without reaping it.
+const terminalHelp = `
+import errno
+import os
+import pty
+import select
+import signal
+import subprocess
+import sys
+import time
+
+cancelled = False
+
+def cancel(_signum, _frame):
+    global cancelled
+    cancelled = True
+
+signal.signal(signal.SIGTERM, cancel)
+master, slave = pty.openpty()
+helper = None
+try:
+    try:
+        helper = subprocess.Popen(
+            [sys.argv[1], "--help"],
+            stdin=subprocess.DEVNULL,
+            stdout=slave,
+            stderr=slave,
+        )
+    finally:
+        os.close(slave)
+
+    terminal_open = True
+    deadline = None
+    while terminal_open or helper.poll() is None:
+        if cancelled:
+            if deadline is None:
+                helper.terminate()
+                deadline = time.monotonic() + 2
+            elif time.monotonic() >= deadline:
+                break
+        readable, _, _ = select.select([master] if terminal_open else [], [], [], 0.05)
+        if not readable:
+            continue
+        try:
+            chunk = os.read(master, 65536)
+        except OSError as error:
+            if error.errno != errno.EIO:
+                raise
+            chunk = b""
+        if chunk:
+            sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+        else:
+            terminal_open = False
+
+    if helper.poll() is None:
+        helper.kill()
+    sys.exit(helper.wait())
+finally:
+    os.close(master)
+    if helper is not None and helper.poll() is None:
+        helper.kill()
+        helper.wait()
+`
+
 /** Observe the same helper Podman resolves, without guessing from distribution or package versions. */
 export async function readPastaLoopbackMapping(
   runtime: string,
@@ -18,11 +84,8 @@ export async function readPastaLoopbackMapping(
     const helper = info?.host?.pasta?.executable
     if (typeof helper !== 'string' || !isAbsolute(helper)) throw new Error('Podman did not identify its pasta helper')
     // Some pasta versions use _exit without flushing piped help. A terminal preserves its tail.
-    const quotedHelper = `'${helper.replaceAll("'", "'\\''")}'`
     const invocation =
-      process.platform === 'linux'
-        ? { command: '/usr/bin/script', args: ['--quiet', '--return', '--command', `exec ${quotedHelper} --help`, '/dev/null'] }
-        : { command: helper, args: ['--help'] }
+      process.platform === 'linux' ? { command: '/usr/bin/python3', args: ['-I', '-c', terminalHelp, helper] } : { command: helper, args: ['--help'] }
     const help = await new Promise<string>((resolveHelp, reject) => {
       signal.throwIfAborted()
       const child = spawn(invocation.command, invocation.args, { env: { ...containerClientEnvironment(), SHELL: '/bin/sh' } })

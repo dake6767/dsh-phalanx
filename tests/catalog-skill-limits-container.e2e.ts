@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; installed platform composition and actual Linux rootless DSH.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,7 +8,6 @@ import { expect, it, vi } from 'vitest'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { gitFixture } from './fixtures/skills/git-repository.js'
@@ -79,7 +79,7 @@ it('imports a catalog skill near the file and size limits, distributes it and di
     await accounts.createFirstAdmin({ username: 'admin', password: 'password', email: '' })
     await accounts.create({ username: 'member', password: 'password', email: '' })
     const origin = await app.start()
-    const home = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home')
+    const home = join(await memberSpacePath(root, 'member'), 'home')
     await mkdir(home, { recursive: true, mode: 0o700 })
     await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'skills-observer.mjs'))
     const login = async (username: string) => {

@@ -1,3 +1,4 @@
+import { openTestAccounts } from './community-application.js'
 import { effectiveUserDataRoot } from '../../src/domain/storage-layout.js'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
@@ -66,6 +67,22 @@ export function instanceWorkspacePath(hostWorkspace: string, containerMode: bool
   return containerMode ? join(CONTAINER_HOME, 'Documents', 'deepseek-harness', 'default-workspace') : hostWorkspace
 }
 
-export function defaultWorkspacePath(dataRoot: string, userId: string): string {
-  return join(effectiveUserDataRoot({ dataRoot: dataRoot }), userId, 'home', 'Documents', 'deepseek-harness', 'default-workspace')
+/** Resolve the persisted mapping, including legacy username layouts. */
+export async function memberSpacePath(dataRoot: string, username: string, userDataRoot?: string): Promise<string> {
+  const accounts = await openTestAccounts(dataRoot)
+  try {
+    const space = await accounts.getSpace(username)
+    if (!space) throw new Error('Fixture account has no persisted space mapping')
+    return join(userDataRoot ?? effectiveUserDataRoot({ dataRoot }), space.storageKey)
+  } finally {
+    await accounts.close()
+  }
+}
+
+export async function memberHomePath(dataRoot: string, username: string): Promise<string> {
+  return join(await memberSpacePath(dataRoot, username), 'home')
+}
+
+export async function defaultWorkspacePath(dataRoot: string, username: string): Promise<string> {
+  return join(await memberHomePath(dataRoot, username), 'Documents', 'deepseek-harness', 'default-workspace')
 }

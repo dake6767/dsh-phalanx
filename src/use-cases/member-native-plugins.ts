@@ -3,7 +3,7 @@ import { CommunityAuthenticationError, type CommunityAccountActor } from '../dom
 import type { DownloadSourceValues } from '../domain/download-source.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
-import type { MemberNativePluginManagerPort, NativePluginInstallPhase } from '../ports/member-native-plugins.js'
+import type { MemberNativePluginManagerPort, NativePluginInstallPhase, NativePluginReplacement } from '../ports/member-native-plugins.js'
 import type { NativePluginDownloads } from './native-plugin-downloads.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 import { PluginPreinstallCancelled } from '../domain/plugin-preinstall.js'
@@ -79,7 +79,39 @@ export class MemberNativePlugins {
       signal,
     )
     await assertCurrent()
-    return { application, version: archive.plugin.version }
+    return { application, version: archive.plugin.version, integrity: archive.plugin.integrity }
+  }
+  async update(
+    actor: CommunityAccountActor,
+    instance: CommunityUserInstance,
+    origin: URL,
+    replacement: NativePluginReplacement,
+    signal: AbortSignal,
+    requestId: string,
+    assertCurrent: () => Promise<() => boolean>,
+    progress: (phase: NativePluginInstallPhase) => void,
+  ) {
+    await this.current(actor, instance)
+    if (!(await assertCurrent())()) throw new BusinessRuleError('conflict', 'The available plugin update changed.', 'plugin-update-changed')
+    const archive = await this.downloads.issueUpdate(actor, replacement.packageName, async () => {
+      signal.throwIfAborted()
+      const current = await assertCurrent()
+      return () => !signal.aborted && current()
+    })
+    try {
+      if (!this.manager.replace || archive.plugin.version !== replacement.next.version || archive.plugin.integrity !== replacement.next.integrity)
+        throw new BusinessRuleError('conflict', 'The available plugin update changed.', 'plugin-update-changed')
+      return await this.manager.replace(
+        instance,
+        origin,
+        { url: archive.url, integrity: archive.plugin.integrity, authorizationUrl: archive.authorizationUrl },
+        replacement,
+        { registry: (await this.sources.current()).npm, requestId, progress },
+        signal,
+      )
+    } finally {
+      archive.release()
+    }
   }
   async remove(actor: CommunityAccountActor, packageName: string, instance: CommunityUserInstance, origin: URL, signal: AbortSignal) {
     await this.current(actor, instance)

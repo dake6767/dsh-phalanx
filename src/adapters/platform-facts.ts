@@ -1,8 +1,12 @@
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { downloadSourceSelection, type DownloadSourceSelection } from '../domain/download-source.js'
 import { PlatformDatabaseError } from '../domain/platform-database.js'
 import { FilePlatformDatabaseConfig } from './platform-database-config.js'
-import { readRegisteredSchemaVersions, platformDatabasePool } from './platform-database-inspection.js'
+import { readRegisteredSchemaVersions, platformDatabasePool, inspectPlatformDatabaseSession } from './platform-database-inspection.js'
+
+import { readUserStorageRecord } from './postgres-user-storage-facts.js'
+import { assertOwnedDirectory, mountIdentity, readStorageMarker } from './user-storage-files.js'
 
 /**
  * Read-only facts the installer and upgrader need, served by the installed platform
@@ -68,6 +72,33 @@ export async function registeredSchemaVersions(configFile: string, dataRoot: str
     return await readRegisteredSchemaVersions(pool)
   } catch {
     throw new PlatformDatabaseError('unavailable', 'Platform database is unavailable; check the database service and connection settings')
+  } finally {
+    await pool.end()
+  }
+}
+
+/** Verify the installed deployment's database and the dedicated external member storage. */
+export async function verifiedUserStorage(configFile: string, dataRoot: string) {
+  const saved = FilePlatformDatabaseConfig.open(configFile, dataRoot)
+  if (!saved.deploymentId || !saved.selection) throw Error('The deployment database is not selected')
+  const pool = platformDatabasePool(saved.connection)
+  try {
+    const client = await pool.connect()
+    try {
+      const inspection = await inspectPlatformDatabaseSession(client, saved.security.registry.masterFingerprint, saved.deploymentId)
+      if (!inspection.ok || inspection.schema === 'empty') throw Error('The database does not verify the installed deployment')
+      const record = await readUserStorageRecord({ query: async (text, values) => (await client.query(text, values ? [...values] : undefined)).rows })
+      if (!record?.binding) throw Error('The deployment has no external member storage binding')
+      const { path, id, mount } = record.binding
+      const expectedMount: { path: string } = JSON.parse(mount)
+      assertOwnedDirectory(path)
+      const marker = readStorageMarker(join(path, '.dsh-phalanx-storage.json'))
+      if (marker.id !== id || marker.owner !== record.owner || mountIdentity(path, true, expectedMount.path) !== mount)
+        throw Error('External member storage ownership changed')
+      return record
+    } finally {
+      client.release()
+    }
   } finally {
     await pool.end()
   }

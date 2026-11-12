@@ -303,7 +303,7 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
       context,
       page,
       origin,
-      instanceWorkspacePath(defaultWorkspacePath(root!, username), runtime!.container !== undefined),
+      instanceWorkspacePath(await defaultWorkspacePath(root!, username), runtime!.container !== undefined),
       runtime!.container !== undefined,
     )
     return { context, page, cookie: await cookieHeader(context, origin) }
@@ -428,7 +428,7 @@ it('keeps the empty-catalog explanation in the language each browser last entere
       context,
       page,
       origin,
-      instanceWorkspacePath(defaultWorkspacePath(root!, 'mei'), runtime!.container !== undefined),
+      instanceWorkspacePath(await defaultWorkspacePath(root!, 'mei'), runtime!.container !== undefined),
       runtime!.container !== undefined,
     )
     if (language !== undefined) {

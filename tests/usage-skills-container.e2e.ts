@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; installed platform with actual rootless DSH skill loads.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
@@ -37,12 +37,8 @@ it('reports platform skill loads without counting personal overrides or interrup
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
   const runtime = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings),
     container = 'container' in runtime
-  const home = join(effectiveUserDataRoot(runtime), 'member/home'),
-    overlay = join(root, 'observer.json')
-  await writeFile(
-    overlay,
-    JSON.stringify([{ insert: [{ id: 'reported-skills-observer', name: container ? '/dsh-phalanx/home/observer.mjs' : join(home, 'observer.mjs') }] }]),
-  )
+  const overlay = join(root, 'observer.json')
+  await writeFile(overlay, '[]')
   runtime.patches.push(overlay)
   let app: CommunityApplication | undefined, browser: Browser | undefined, failure: unknown
   const cleanup = async () => {
@@ -104,6 +100,11 @@ it('reports platform skill loads without counting personal overrides or interrup
       },
     })
     const account = await api('accounts', { username: 'member', password: 'password', email: '' })
+    const home = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home')
+    await writeFile(
+      overlay,
+      JSON.stringify([{ insert: [{ id: 'reported-skills-observer', name: container ? '/dsh-phalanx/home/observer.mjs' : join(home, 'observer.mjs') }] }]),
+    )
     await mkdir(home, { recursive: true, mode: 0o700 })
     await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'observer.mjs'))
     const upload = async (name: string) => {
@@ -145,7 +146,7 @@ it('reports platform skill loads without counting personal overrides or interrup
     const session = async (agentPreset?: string) =>
       (
         await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', {
-          request: { cwd: instanceWorkspacePath(defaultWorkspacePath(runtime.dataRoot, 'member'), container), ...(agentPreset ? { agentPreset } : {}) },
+          request: { cwd: instanceWorkspacePath(await defaultWorkspacePath(runtime.dataRoot, 'member'), container), ...(agentPreset ? { agentPreset } : {}) },
         })
       ).sessionId
     const observe = async (data: object) => {

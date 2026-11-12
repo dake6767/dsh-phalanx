@@ -82,8 +82,14 @@ export function upsertSignedInAccount(
   cookieHeader: string | undefined,
   account: CommunityAccountRecord,
   token: string,
+  preserved?: SignedInAccountEntry,
 ): readonly SignedInAccountEntry[] | 'full' {
   const entries = readSignedInAccounts(sessions, cookieHeader).filter(candidate => candidate.marker !== sessions.storageAccountMarker(account.spaceId))
+  if (preserved && preserved.marker !== sessions.storageAccountMarker(account.spaceId)) {
+    const index = entries.findIndex(entry => entry.marker === preserved.marker)
+    if (index === -1) entries.push(preserved)
+    else entries[index] = preserved
+  }
   if (entries.length >= MAX_SIGNED_IN_ACCOUNTS) return 'full'
   return [{ userId: account.username, marker: sessions.storageAccountMarker(account.spaceId), token }, ...entries]
 }

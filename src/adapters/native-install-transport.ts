@@ -15,6 +15,7 @@ export class SignedNativeInstallTransport implements NativePluginInstallTranspor
     const body = rpcRequestBody('platform-plugin-operation', DSH_BUNDLE_INSTALL, {
       spec: input.spec,
       options: { registry: input.registry, requestId: input.requestId },
+      ...(input.replacement ? { replacement: input.replacement } : {}),
     })
     const authorization = this.authority.authorize(instance, body)
     const result = await dshPluginRequest(

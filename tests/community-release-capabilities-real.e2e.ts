@@ -15,7 +15,7 @@ import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { hasToolResult, streamText, streamToolCall } from './support/real-dsh-model.js'
-import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
+import { assertPinnedDshRevision, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 
 interface Inputs {
   modelApiKey: string
@@ -165,7 +165,7 @@ async function setup(mode: 'image' | 'retrieval'): Promise<{ page: Page; inputs:
     page = await context.newPage()
   page.setDefaultTimeout(60000)
   await signInCommunity(page, origin, 'member', 'password')
-  await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'member'), true), true)
+  await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath('', true), true)
   if (mode === 'retrieval') {
     // The production default is off; exercise the same member opt-in as the controlled browser case.
     await page.getByRole('button', { name: 'Plugins', exact: true }).click()

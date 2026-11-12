@@ -205,6 +205,30 @@ it('caps the remembered list at ten accounts and keeps the cookie within the bro
     expect(rowOf(refusedHtml, members[10]!)).toBe('')
     for (const username of members.slice(0, 10)) expect(rowOf(refusedHtml, username)).not.toBe('')
 
+    // A valid administrator absent from the remembered list also consumes a slot.
+    const adminBrowser = jar()
+    adminBrowser.absorb(
+      await fetch(origin + '/login', {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { origin, 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username: 'root', password: 'password' }),
+      }),
+    )
+    const currentMember = browser.value('dsh-phalanx_session')!
+    browser.set('dsh-phalanx_session', adminBrowser.value('dsh-phalanx_session')!)
+    const store = await openTestAccounts(dataRoot)
+    const target = await store.get(members[0]!)
+    await store.close()
+    const directed = `/login?member=${members[0]}&space=${target!.spaceId}`
+    expect((await request(directed, { method: 'POST', body: new URLSearchParams({ password: 'wrong-password' }) })).status).toBe(401)
+    const full = await request(directed, { method: 'POST', body: new URLSearchParams({ password: 'password' }) })
+    expect(full.status).toBe(403)
+    expect(await full.text()).toContain(`value="${members[0]}"`)
+    expect(browser.value('dsh-phalanx_signed_in_accounts')).toBe(remembered)
+    expect(browser.value('dsh-phalanx_session')).toBe(adminBrowser.value('dsh-phalanx_session'))
+    browser.set('dsh-phalanx_session', currentMember)
+
     // Removing one entry frees the slot; the removed account is no longer listed.
     const removed = await request('/account/signed-in/remove', { method: 'POST', body: new URLSearchParams({ marker: markerOf(refusedHtml, members[2]!) }) })
     expect(removed.status).toBe(303)
@@ -412,6 +436,67 @@ it('keeps logged-out entries for a fresh sign in and forgets everything on sign 
     const plainHtml = await plain.text()
     expect(plainHtml).toContain('Sign in to dsh-phalanx')
     expect(plainHtml).not.toContain('Choose an account')
+  } finally {
+    await app.stop()
+    await rm(dataRoot, { recursive: true, force: true })
+  }
+})
+
+it('requires the fixed member password and preserves an administrator missing from remembered accounts', async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), 'dsh-phalanx-directed-'))
+  const app = createCommunityApplication({
+    listen: { host: '127.0.0.1', port: 0 },
+    sessionSecret: 'directed-accounts-fixture-secret-32-bytes',
+    runtime: {
+      command: process.execPath,
+      args: [fileURLToPath(new URL('./fixtures/runtime.mjs', import.meta.url))],
+      dataRoot,
+      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } },
+    },
+  })
+  try {
+    await prepare(dataRoot, ['member'], { username: 'admin', password: 'password' })
+    const accounts = await openTestAccounts(dataRoot)
+    const target = await accounts.get('member')
+    await accounts.close()
+    const origin = await app.start(),
+      browser = jar()
+    const request = async (path: string, body?: URLSearchParams) => {
+      const response = await fetch(origin + path, {
+        redirect: 'manual',
+        method: body ? 'POST' : 'GET',
+        headers: { origin, cookie: browser.header(), ...(body ? { 'content-type': 'application/x-www-form-urlencoded' } : {}) },
+        ...(body ? { body } : {}),
+      })
+      browser.absorb(response)
+      return response
+    }
+    await request('/login', new URLSearchParams({ username: 'admin', password: 'password' }))
+    const adminToken = browser.value('dsh-phalanx_session')
+    browser.set('dsh-phalanx_signed_in_accounts', '')
+    const path = `/login?member=member&space=${target!.spaceId}`
+    const form = await (await request(path)).text()
+    expect(form).toContain('readonly')
+    expect(form).toContain('href="/admin"')
+    const failed = await request(path, new URLSearchParams({ username: 'admin', password: 'wrong' }))
+    expect(failed.status).toBe(401)
+    expect(await failed.text()).toContain('value="member"')
+    expect(browser.value('dsh-phalanx_session')).toBe(adminToken)
+    const success = await request(path, new URLSearchParams({ username: 'admin', password: 'password' }))
+    expect(success.headers.get('location')).toBe(`/app/${target!.spaceId}/`)
+    const remembered = (await (await request('/account/signed-in')).json()) as { accounts: { username: string; status: string }[] }
+    expect(remembered.accounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ username: 'admin', status: 'available' }),
+        expect.objectContaining({ username: 'member', status: 'current' }),
+      ]),
+    )
+    const store = await openTestAccounts(dataRoot)
+    const administrator = await store.get('admin')
+    await store.close()
+    browser.set('dsh-phalanx_session', adminToken!)
+    const adminTarget = await request(`/login?member=admin&space=${administrator!.spaceId}`, new URLSearchParams({ password: 'password' }))
+    expect(adminTarget.headers.get('location')).toBe(`/app/${administrator!.spaceId}/`)
   } finally {
     await app.stop()
     await rm(dataRoot, { recursive: true, force: true })

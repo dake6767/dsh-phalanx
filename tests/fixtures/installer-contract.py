@@ -347,7 +347,7 @@ class InstallCommandContract(unittest.TestCase):
             host.prompt = lambda label, **kwargs: prompts.append((label, kwargs)) or ('y' if label.startswith('Continue') else 'fixture-key')
             host.request = lambda url, **kwargs: b'login'
             with contextlib.redirect_stdout(output := io.StringIO()):
-                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json", "--language", "en", "--download-source-preset", "official"], host), 0)
             receipt = json.loads(output.getvalue())
             self.assertEqual(receipt['entry'], 'http://127.0.0.1:18080')
             self.assertNotIn('initializationUrl', receipt)
@@ -408,7 +408,7 @@ class InstallCommandContract(unittest.TestCase):
             self.assertNotIn('initializationUrl', json.loads(output.getvalue()))
             self.assertEqual(json.loads(output.getvalue())['adminUrl'], 'http://127.0.0.1:18080/admin')
 
-    def test_deployer_confirms_or_overrides_the_detected_browser_address(self):
+    def test_deployer_confirms_or_overrides_the_ip_based_browser_address(self):
         for answer, expected in [('', 'http://192.168.1.50:18080'), ('https://deployment.example.test', 'https://deployment.example.test')]:
             with self.subTest(answer=answer), tempfile.TemporaryDirectory() as directory:
                 machine = InstallationMachine(directory)
@@ -418,14 +418,14 @@ class InstallCommandContract(unittest.TestCase):
                 host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
                 prompts = []
                 host.terminal_available = lambda: True
-                answers = iter(['', answer, 'n', 'y'])
+                answers = iter(['192.168.1.50', '', answer, 'n', 'install'])
                 host.prompt = lambda label, **kwargs: prompts.append(label) or next(answers)
                 host.request = lambda url, **kwargs: b'login'
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
-                    self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
+                    self.assertEqual(installer.main([*args, "--output", "json", "--language", "en", "--download-source-preset", "official"], host), 0)
                 self.assertEqual(json.loads(output.getvalue())['entry'], expected)
-                self.assertIn('http://192.168.1.50:18080', prompts[1])
+                self.assertIn('http://192.168.1.50:18080', prompts[2])
                 self.assertIn('DSH_PHALANX_HOST="0.0.0.0"', (machine.root / 'etc/dsh-phalanx/environment').read_text())
 
     def test_installation_needs_no_model_key_when_the_access_address_is_supplied(self):

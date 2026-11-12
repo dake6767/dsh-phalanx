@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH and exact PyPI wheels.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,7 +8,6 @@ import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { skillZip } from './fixtures/skills/archive.js'
 import { candidateApplication } from './support/candidate-application.js'
@@ -52,7 +52,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       await accounts.createFirstAdmin({ username: 'admin', password: 'password', email: '' })
       await accounts.create({ username: 'member', password: 'password', email: '' })
       const origin = await app.start()
-      const home = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home')
+      const home = join(await memberSpacePath(root, 'member'), 'home')
       await mkdir(home, { recursive: true, mode: 0o700 })
       await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'skills-observer.mjs'))
       const login = async (username: string) => {

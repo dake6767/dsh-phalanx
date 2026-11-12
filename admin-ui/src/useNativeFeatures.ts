@@ -5,13 +5,15 @@ import { request } from './community-api'
 export function useNativeFeatures(groupId: string, onError: (failure: unknown) => void) {
   const [data, setData] = useState<CommunityNativeFeatureGroup>()
   const [disabled, setDisabled] = useState<readonly string[]>([])
+  const [showAppCenter, setShowAppCenter] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useState<'native' | 'platform'>()
   const pending = useRef(false)
   const errors = useRef(onError)
   errors.current = onError
   const apply = (next: CommunityNativeFeatureGroup) => {
     setData(next)
+    setShowAppCenter(next.showAppCenter)
     setDisabled(
       next.features
         .filter(feature => feature.availability.available && !feature.enabled)
@@ -23,7 +25,8 @@ export function useNativeFeatures(groupId: string, onError: (failure: unknown) =
     const controller = new AbortController()
     setData(undefined)
     setDisabled([])
-    setSaved(false)
+    setShowAppCenter(false)
+    setSaved(undefined)
     void request<CommunityNativeFeatureGroup>(`/admin/api/groups/${encodeURIComponent(groupId)}/native-features`, { signal: controller.signal })
       .then(next => {
         if (!controller.signal.aborted) apply(next)
@@ -33,7 +36,7 @@ export function useNativeFeatures(groupId: string, onError: (failure: unknown) =
       })
     return () => controller.abort()
   }, [groupId])
-  const dirty =
+  const nativeDirty =
     data !== undefined &&
     JSON.stringify([...disabled].sort()) !==
       JSON.stringify(
@@ -42,8 +45,14 @@ export function useNativeFeatures(groupId: string, onError: (failure: unknown) =
           .map(feature => feature.id)
           .sort(),
       )
+  const platformDirty = data !== undefined && showAppCenter !== data.showAppCenter
+  const dirty = nativeDirty || platformDirty
   const save = async () => {
-    if (!data || pending.current) return false
+    if (!data || !dirty || pending.current) return false
+    const changes = {
+      ...(nativeDirty ? { disabledIds: disabled } : {}),
+      ...(platformDirty ? { showAppCenter } : {}),
+    }
     pending.current = true
     setBusy(true)
     errors.current(undefined)
@@ -51,10 +60,10 @@ export function useNativeFeatures(groupId: string, onError: (failure: unknown) =
       const next = await request<CommunityNativeFeatureGroup>(`/admin/api/groups/${encodeURIComponent(groupId)}/native-features`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ revision: data.revision, disabledIds: disabled }),
+        body: JSON.stringify({ revision: data.revision, ...changes }),
       })
       apply(next)
-      setSaved(true)
+      setSaved(nativeDirty ? 'native' : 'platform')
       return true
     } catch (failure) {
       errors.current(failure)
@@ -67,9 +76,14 @@ export function useNativeFeatures(groupId: string, onError: (failure: unknown) =
   return {
     data,
     disabled,
+    showAppCenter,
+    setShowAppCenter: (show: boolean) => {
+      setShowAppCenter(show)
+      setSaved(undefined)
+    },
     setDisabled: (ids: readonly string[]) => {
       setDisabled(ids)
-      setSaved(false)
+      setSaved(undefined)
     },
     dirty,
     busy,

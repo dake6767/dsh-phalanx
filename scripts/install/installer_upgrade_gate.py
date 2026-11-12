@@ -330,8 +330,12 @@ def maintenance_serve(operation,target,address,port,token):
     finally:listener.close()
 
 class LinuxAdmissionGate:
+    def __init__(self, host=None):
+        self.host = host
+
     def run(self,args,**kwargs):
-        result=subprocess.run(['nft',*args],capture_output=True,text=True,**kwargs)
+        command = ['nft', *args]
+        result = self.host.run(command, check=False, **kwargs) if self.host else subprocess.run(command,capture_output=True,text=True,**kwargs)
         if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')
         return result.stdout
 

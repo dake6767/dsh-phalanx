@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { showAppCenterForFixture } from './support/app-center-visibility.js'
 import { cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -40,6 +41,7 @@ it('keeps native HTML interaction independent of coding view and isolated from p
   const address = destination.address()
   if (!address || typeof address === 'string') throw Error('Missing fixture address')
   try {
+    await showAppCenterForFixture(origin, 'fixtureadmin', 'password')
     await context.route('**/plugins/**', async route => {
       if (new URL(route.request().url()).pathname.endsWith('/events')) {
         await route.continue()
@@ -64,7 +66,7 @@ it('keeps native HTML interaction independent of coding view and isolated from p
       await route.fulfill({ response, body: body.replace(platformPluginClient, patched) })
     })
     await signInCommunity(page, origin, 'alice', 'password')
-    const workspace = defaultWorkspacePath(root, 'alice')
+    const workspace = await defaultWorkspacePath(root, 'alice')
     await mkdir(workspace, { recursive: true })
     await cp(new URL('./fixtures/artifacts/interactive.html', import.meta.url), join(workspace, 'interactive.html'))
     await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(workspace, runtime.container !== undefined), runtime.container !== undefined)

@@ -1,3 +1,5 @@
+import { memberInstanceRoute } from './member-instance-route.js'
+import type { CommunityMemberInstances } from '../use-cases/community-member-instances.js'
 import type { InitialModelSetup } from '../use-cases/initial-model-setup.js'
 import { initialModelRoute } from './initial-model-route.js'
 import type { PluginIntake } from '../use-cases/plugin-intake.js'
@@ -70,6 +72,7 @@ import { modelAdminRoute } from './model-admin-route.js'
 export function createCommunityAdminRoute(deps: {
   readonly authenticate: (request: IncomingMessage) => Promise<string | undefined>
   readonly onboarding: CommunityOnboarding
+  readonly memberInstances: CommunityMemberInstances
   readonly administration: CommunityAccountAdministration
   readonly runtime: Pick<CommunityRuntimePort, 'status'>
   readonly assets: AdminAssetServer
@@ -419,6 +422,7 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
         return
       }
+      if (await memberInstanceRoute(request, response, url, caller, deps.memberInstances, deps.origin())) return
       const resetRoute = /^\/admin\/api\/accounts\/([^/]+)\/reset-environment$/u.exec(url.pathname)
       if (resetRoute !== null) {
         if (request.method !== 'POST') {

@@ -3,6 +3,7 @@ export interface PluginInstallation {
   readonly packageName: string
   readonly source: 'selected' | 'preinstall'
   readonly version: string
+  readonly integrity?: string
 }
 export interface PluginInstallationsPort {
   get(spaceId: string): Promise<readonly PluginInstallation[]>

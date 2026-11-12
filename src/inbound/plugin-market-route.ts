@@ -100,13 +100,20 @@ export function createPluginMarketRoute(deps: {
           !input ||
           typeof input !== 'object' ||
           typeof input.packageName !== 'string' ||
-          (input.action !== undefined && !['install', 'uninstall'].includes(input.action)) ||
-          (input.requestId !== undefined && typeof input.requestId !== 'string')
+          (input.action !== undefined && !['install', 'uninstall', 'update'].includes(input.action)) ||
+          (input.requestId !== undefined && typeof input.requestId !== 'string') ||
+          (input.action === 'update' &&
+            (typeof input.requestId !== 'string' ||
+              !/^[a-zA-Z0-9_-]{1,128}$/u.test(input.requestId) ||
+              typeof input.target !== 'string' ||
+              !/^[a-f0-9]{64}$/u.test(input.target)))
         )
           throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
         const result = await (input.action === 'uninstall'
           ? deps.market.uninstall(actor, input.packageName, origin, controller.signal, input.requestId)
-          : deps.market.install(actor, input.packageName, origin, controller.signal, input.requestId))
+          : input.action === 'update'
+            ? deps.market.update(actor, input.packageName, origin, controller.signal, input.requestId!, input.target!)
+            : deps.market.install(actor, input.packageName, origin, controller.signal, input.requestId))
         if (!response.destroyed) sendCommunityJson(response, 'job' in result ? 202 : 200, result)
         return
       }

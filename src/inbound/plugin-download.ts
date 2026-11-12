@@ -36,11 +36,17 @@ export function createPluginDownload(deps: {
       sendText(response, 405, 'Method Not Allowed')
       return true
     }
-    const match = /^\/plugin-archive\/([A-Za-z0-9_.-]+)\.tgz$/u.exec(url.pathname)
+    const match = /^\/(plugin-archive|plugin-update)\/([A-Za-z0-9_.-]+)\.tgz$/u.exec(url.pathname)
     if (!match) {
       sendText(response, 404, 'Not Found')
       return true
     }
+    const confirmUpdate = match[1] === 'plugin-update'
+    if (confirmUpdate && request.method !== 'HEAD') {
+      sendText(response, 405, 'Method Not Allowed')
+      return true
+    }
+    const token = match[2]!
     try {
       const username = await deps.authorization.authorize(communityProxyToken(request.headers['proxy-authorization']))
       await deps.authorization.register(communityProxyToken(request.headers['proxy-authorization']), (current, onAbort) => {
@@ -53,10 +59,15 @@ export function createPluginDownload(deps: {
         deps.connections.track(current, request.socket)
       })
       if (response.destroyed || request.socket.destroyed) return true
-      const plugin = await deps.downloads.read(match[1]!, username)
+      if (confirmUpdate) {
+        await deps.downloads.confirmUpdate(token, username)
+        response.writeHead(204, { 'cache-control': 'no-store' }).end()
+        return true
+      }
+      const plugin = await deps.downloads.read(token, username)
       const archive = await deps.archives.open(plugin.artifact)
       await deps.authorization.authorize(communityProxyToken(request.headers['proxy-authorization']))
-      await deps.downloads.read(match[1]!, username)
+      await deps.downloads.read(token, username)
       response.writeHead(200, { 'content-type': 'application/gzip', 'content-length': archive.size, 'cache-control': 'no-store' })
       const body = Readable.from(archive.body)
       if (request.method === 'HEAD') {

@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
@@ -11,7 +12,6 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityModelSettings } from '../src/domain/admin-contract.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { DSH_CONTAINER_HOME, DSH_PATCH_CONFIG, dshHomePath, dshProfilesPath, dshWebProfilePath } from '../src/dsh/profile-layout.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
@@ -116,7 +116,7 @@ it('keeps shared model selections and an installed network plugin usable across 
       context,
       page,
       entryOrigin,
-      instanceWorkspacePath(defaultWorkspacePath(root!, username), runtime!.container !== undefined),
+      instanceWorkspacePath(await defaultWorkspacePath(root!, username), runtime!.container !== undefined),
       runtime!.container !== undefined,
     )
     return { context, page, username, closedSockets }
@@ -248,7 +248,7 @@ it('keeps shared model selections and an installed network plugin usable across 
   await newSession(bob)
   await chat(bob, 'PERSONAL_CONFIG_TASK: Reply with your fixture marker.', 'PERSONAL_MODEL_READY')
   const profile = join(
-    dshWebProfilePath(runtime.container === undefined ? join(effectiveUserDataRoot({ dataRoot: root }), 'bob', 'home') : DSH_CONTAINER_HOME),
+    dshWebProfilePath(runtime.container === undefined ? join(await memberSpacePath(root, 'bob'), 'home') : DSH_CONTAINER_HOME),
     DSH_PATCH_CONFIG,
   )
   // Read this member's fictional profile through the public native terminal.
@@ -331,7 +331,7 @@ it('keeps shared model selections and an installed network plugin usable across 
     const spaceId = (await storedAccounts.getState('bob'))!.spaceId
     await storedAccounts.close()
     const token = await modelAccessToken(root, 'bob', spaceId)
-    const workspace = defaultWorkspacePath(root, 'bob')
+    const workspace = await defaultWorkspacePath(root, 'bob')
     await writeFile(
       join(workspace, 'network-probe.cjs'),
       `
@@ -397,7 +397,7 @@ it.each(['patch', 'web', 'profiles', 'dsh-home'] as const)(
       context,
       page,
       origin,
-      instanceWorkspacePath(defaultWorkspacePath(root, 'bob'), runtime.container !== undefined),
+      instanceWorkspacePath(await defaultWorkspacePath(root, 'bob'), runtime.container !== undefined),
       runtime.container !== undefined,
     )
     // The chooser already selects a usable blank; unselected blanks are absent from native history.
@@ -424,10 +424,10 @@ it.each(['patch', 'web', 'profiles', 'dsh-home'] as const)(
     model.release()
     await conversation.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
     // Arrange a valid private patch outside Bob's mount; only Bob's native terminal creates the attack.
-    const home = runtime.container === undefined ? join(effectiveUserDataRoot({ dataRoot: root }), 'bob', 'home') : DSH_CONTAINER_HOME
+    const home = runtime.container === undefined ? join(await memberSpacePath(root, 'bob'), 'home') : DSH_CONTAINER_HOME
     const profile = join(dshWebProfilePath(home), DSH_PATCH_CONFIG)
     const linkPath = { patch: profile, web: dshWebProfilePath(home), profiles: dshProfilesPath(home), 'dsh-home': dshHomePath(home) }[kind]
-    const privatePath = join(effectiveUserDataRoot({ dataRoot: root }), 'alice', 'private-profile')
+    const privatePath = join(await memberSpacePath(root, 'alice'), 'private-profile')
     const privatePatch = join(privatePath, relative(linkPath, profile))
     await mkdir(dirname(privatePatch), { recursive: true, mode: 0o700 })
     await writeFile(privatePatch, '# OTHER_MEMBER_PRIVATE_CREDENTIAL\n[]\n', { mode: 0o600, flag: 'wx' })

@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { coordinationPackage, packCoordinationPlugin } from './fixtures/coordination-plugin.js'
 import { mkdtemp, readFile, copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -103,12 +103,12 @@ it.skipIf(!runtimeSettings.containerImage)(
       // An independent native copy yields only to an explicit controlled group grant after restart.
       // Package installation can exceed the ordinary RPC helper's retry deadline.
       const installRpc = createRealDshRpc('', (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(240_000) }))
-      await copyFile(archive, join(effectiveUserDataRoot(runtime), 'member/home/client.tgz'))
+      await copyFile(archive, join(await memberSpacePath(runtime.dataRoot, 'member'), 'home/client.tgz'))
       const installed = await installRpc.remoteRpc(origin, member, 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/client.tgz' })
       expect(installed, JSON.stringify(installed)).toMatchObject({ changed: true })
       await restart()
       await checkSidebar(false)
-      const profile = join(effectiveUserDataRoot(runtime), 'member/home/.dsh/profiles/web')
+      const profile = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home/.dsh/profiles/web')
       const original = await readFile(join(profile, 'node_modules/' + coordinationPackage + '/package.json'), 'utf8')
       const endpoint = `groups/${group.id}/plugins`
       await adminRequest(endpoint, {

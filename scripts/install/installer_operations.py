@@ -29,18 +29,22 @@ def read_owned(path,uid,mode=0o600):
     finally:os.close(descriptor)
 
 
+def read_platform_operation(host):
+    path=host.path(JOURNAL)
+    if not path.exists() and not path.is_symlink():return None
+    job=json.loads(read_owned(path,os.geteuid()))
+    if not isinstance(job,dict) or job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):
+        raise InstallError('Unknown protected platform operation')
+    return job
+
+
 class PlatformOperations:
     def __init__(self,host,port):
         self.host=host;self.port=port;root=host.mkdir('/var/lib/dsh-phalanx-updater',0o700)
         if root.stat().st_uid!=os.geteuid():raise InstallError('Invalid platform operation directory owner')
 
     def load(self):
-        path=self.host.path(JOURNAL)
-        if not path.exists() and not path.is_symlink():return None
-        job=json.loads(read_owned(path,os.geteuid()))
-        if job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):
-            raise InstallError('Unknown protected platform operation')
-        return job
+        return read_platform_operation(self.host)
 
     def save(self,job):self.host.atomic(JOURNAL,json.dumps(job)+'\n')
 

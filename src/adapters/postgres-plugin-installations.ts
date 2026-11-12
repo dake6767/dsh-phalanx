@@ -6,16 +6,16 @@ export class PostgresPluginInstallations implements PluginInstallationsPort {
   constructor(private readonly connection: PluginRepositoryConnection) {}
   async get(spaceId: string): Promise<readonly PluginInstallation[]> {
     return (
-      await pluginSql(this.connection).query<{ package_name: string; version: string; source: PluginInstallation['source'] }>(
-        'SELECT package_name,version,source FROM dsh_phalanx.plugin_deliveries WHERE space_id=$1 ORDER BY package_name',
+      await pluginSql(this.connection).query<{ package_name: string; version: string; source: PluginInstallation['source']; integrity: string | null }>(
+        'SELECT package_name,version,source,integrity FROM dsh_phalanx.plugin_deliveries WHERE space_id=$1 ORDER BY package_name',
         [spaceId],
       )
-    ).map(({ package_name, ...row }) => ({ packageName: package_name, ...row }))
+    ).map(({ package_name, integrity, ...row }) => ({ packageName: package_name, ...row, ...(integrity === null ? {} : { integrity }) }))
   }
   async save(spaceId: string, record: PluginInstallation): Promise<void> {
     await pluginSql(this.connection).query(
-      `INSERT INTO dsh_phalanx.plugin_deliveries(space_id,package_name,version,source) VALUES($1,$2,$3,$4) ON CONFLICT(space_id,package_name) DO UPDATE SET version=EXCLUDED.version,source=EXCLUDED.source`,
-      [spaceId, record.packageName, record.version, record.source],
+      `INSERT INTO dsh_phalanx.plugin_deliveries(space_id,package_name,version,source,integrity) VALUES($1,$2,$3,$4,$5) ON CONFLICT(space_id,package_name) DO UPDATE SET version=EXCLUDED.version,source=EXCLUDED.source,integrity=EXCLUDED.integrity`,
+      [spaceId, record.packageName, record.version, record.source, record.integrity ?? null],
     )
   }
   async clearPreinstalls(spaceId: string): Promise<void> {

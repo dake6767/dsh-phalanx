@@ -71,7 +71,7 @@ describe('community onboarding through the native DSH product entry', () => {
     // Open DSH opens a new tab; the management page stays put.
     const [dsh] = await Promise.all([adminContext.waitForEvent('page'), admin.getByRole('link', { name: 'Open admin’s DSH', exact: true }).click()])
     await dsh.waitForURL(url => url.origin === origin && /^\/app\/[^/]+\/$/u.test(url.pathname))
-    await selectWorkspace(adminContext, dsh, origin, defaultWorkspacePath(root, 'admin'))
+    await selectWorkspace(adminContext, dsh, origin, await defaultWorkspacePath(root, 'admin'))
     await terminal(dsh, "printf 'ADMIN_DSH_%s' 'ENTRY_OK'", 'ADMIN_DSH_ENTRY_OK')
     await dsh.close()
     await admin.goto(`${origin}/admin`)
@@ -92,7 +92,7 @@ describe('community onboarding through the native DSH product entry', () => {
     let memberContext = await newValidationContext(browser)
     let member = await memberContext.newPage()
     await signIn(member, origin, 'member', 'member-password')
-    const workspace = defaultWorkspacePath(root, 'member')
+    const workspace = await defaultWorkspacePath(root, 'member')
     await selectWorkspace(memberContext, member, origin, workspace)
     await member.locator('[data-composer-input]').fill('NO_MODEL_TASK')
     await member.locator('[data-composer-input]').press('Enter')

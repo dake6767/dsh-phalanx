@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { setAppCenterVisibility } from './support/app-center-visibility.js'
 import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -88,6 +89,7 @@ it('creates ordered packs, grants them, installs them in the market and reviews 
     const member = await browser.newPage({ locale: 'en' })
     member.setDefaultTimeout(10000)
     if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await member.context().newCDPSession(member)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
+    await setAppCenterVisibility(admin.request, origin)
     await signInCommunity(member, origin, 'member', 'password')
     await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     await member.getByRole('tab', { name: 'Skills', exact: true }).click()

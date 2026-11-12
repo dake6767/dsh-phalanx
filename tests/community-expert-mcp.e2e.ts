@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; installed DSH clients in all three MCP run locations.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readdir, realpath, writeFile } from 'node:fs/promises'
@@ -10,7 +11,6 @@ import { expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
@@ -83,17 +83,9 @@ it('projects remote, shared and member MCP into an expert, isolates failed servi
   await Promise.all([once(model, 'listening'), once(remote, 'listening')])
   const address = (server: typeof model) => `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const baseRuntime = runtimeSection(join(root, 'platform'), address(model), runtimeSettings),
-    home = join(effectiveUserDataRoot(baseRuntime), 'member/home'),
     overlay = join(root, 'expert-mcp.json')
   const runtime: CommunityRuntimeConfig = { ...baseRuntime, patches: [...baseRuntime.patches, overlay] }
-  await writeFile(
-    overlay,
-    JSON.stringify([
-      {
-        insert: [{ id: 'expert-mcp-observer', name: runtime.container ? '/dsh-phalanx/home/expert-mcp-observer.mjs' : join(home, 'expert-mcp-observer.mjs') }],
-      },
-    ]),
-  )
+  await writeFile(overlay, '[]')
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'expert-mcp-acceptance-fixture-secret', runtime })
   const browser = await chromium.launch({ headless: true })
   let primaryFailure: unknown
@@ -130,6 +122,17 @@ it('projects remote, shared and member MCP into an expert, isolates failed servi
       },
     })
     const account = await api('accounts', { username: 'member', password: 'password', email: '' })
+    const home = join(await memberSpacePath(baseRuntime.dataRoot, 'member'), 'home')
+    await writeFile(
+      overlay,
+      JSON.stringify([
+        {
+          insert: [
+            { id: 'expert-mcp-observer', name: runtime.container ? '/dsh-phalanx/home/expert-mcp-observer.mjs' : join(home, 'expert-mcp-observer.mjs') },
+          ],
+        },
+      ]),
+    )
     await mkdir(home, { recursive: true })
     await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'expert-mcp-observer.mjs'))
     await api('mcp', {
@@ -210,7 +213,7 @@ it('projects remote, shared and member MCP into an expert, isolates failed servi
     const session = async (agentPreset: string) =>
       (
         await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', {
-          request: { cwd: runtime.container ? '/dsh-phalanx/workspace' : join(effectiveUserDataRoot(runtime), 'member/workspace'), agentPreset },
+          request: { cwd: runtime.container ? '/dsh-phalanx/workspace' : join(await memberSpacePath(runtime.dataRoot, 'member'), 'workspace'), agentPreset },
         })
       ).sessionId
     const tool = async (sessionId: string, name: string) => {

@@ -12,8 +12,13 @@ from installer_upgrade_gate import LinuxAdmissionGate  # embedded-upgrade-gate
 EXECUTOR='/opt/dsh-phalanx/updater'
 BANKS='/opt/dsh-phalanx/updaters'
 EXECUTOR_UNIT='/etc/systemd/system/dsh-phalanx-updater.service'
+GLOBAL_CLI='/usr/local/bin/dsh-phalanx'
+GLOBAL_CLI_PROGRAM='#!/bin/sh\n# dsh-phalanx managed deployment command\nexec /usr/bin/python3 -B /opt/dsh-phalanx/updater/installer_deployment_cli.py "$@"\n'
 MODULES=globals().get('EXECUTOR_MODULES') or json.loads(Path(__file__).with_name('executor-files.json').read_text())
-PRE_OPERATIONS_MODULES=[name for name in MODULES if name!='installer_operations.py']
+PRE_UNINSTALL_MODULES=[name for name in MODULES if name!='installer_uninstall.py']
+PRE_DEPLOYMENT_MODULES=[name for name in PRE_UNINSTALL_MODULES if name not in ('installer_deployment.py','installer_deployment_cli.py')]
+PRE_QUESTIONS_MODULES=[name for name in PRE_DEPLOYMENT_MODULES if name!='installer_questions.py']
+PRE_OPERATIONS_MODULES=[name for name in PRE_QUESTIONS_MODULES if name!='installer_operations.py']
 PRE_CLEANUP_MODULES=[name for name in PRE_OPERATIONS_MODULES if name!='installer_cleanup.py']
 LEGACY_MODULES=[name for name in PRE_CLEANUP_MODULES if name not in ('installer_storage.py','installer_executor_bootstrap.py')]
 REQUIRED=set(MODULES)|{'updater.service.in','executor-files.json'}
@@ -30,7 +35,7 @@ def executor_package(directory,commit=None):
     if commit is not None and value['sourceCommit']!=commit:raise InstallError('Executor and selected platform source differ')
     files=value.get('files')
     declared=json.loads((directory/'executor-files.json').read_text())
-    if declared not in (MODULES,PRE_OPERATIONS_MODULES,PRE_CLEANUP_MODULES,LEGACY_MODULES):raise InstallError('Executor dependency inventory differs from its protocol')
+    if declared not in (MODULES,PRE_UNINSTALL_MODULES,PRE_DEPLOYMENT_MODULES,PRE_QUESTIONS_MODULES,PRE_OPERATIONS_MODULES,PRE_CLEANUP_MODULES,LEGACY_MODULES):raise InstallError('Executor dependency inventory differs from its protocol')
     required=set(declared)|{'updater.service.in','executor-files.json'}
     if not isinstance(files,dict) or required!=set(files) or len(files)>32 or set(path.name for path in directory.iterdir())!=set(files)|{'manifest.json'}:
         raise InstallError('Executor package inventory is incomplete or unexpected')
@@ -55,6 +60,21 @@ def executor_pointer(host):
     return os.readlink(path) if path.is_symlink() else None
 
 
+def verify_global_cli_path(host):
+    path=host.path(GLOBAL_CLI)
+    if not path.exists() and not path.is_symlink():return
+    if path.is_symlink() or not path.is_file() or path.stat().st_uid!=os.geteuid() or path.read_text()!=GLOBAL_CLI_PROGRAM:
+        raise InstallError('The global dsh-phalanx command path belongs to another program; retain it and resolve the conflict')
+
+
+def install_global_cli(host):
+    verify_global_cli_path(host)
+    host.mkdir('/usr/local/bin',mode=None)
+    path=host.path(GLOBAL_CLI)
+    if not path.exists() or path.stat().st_mode&0o7777!=0o755:
+        host.atomic(GLOBAL_CLI,GLOBAL_CLI_PROGRAM,0o755)
+
+
 def install_executor(host,uid,gid,target,commit,*,initial_only=False,activate=False,repair=False):
     source=Path(target)/'updater';identity=executor_package(source,commit)
     try:current=installed_executor(host)
@@ -63,6 +83,8 @@ def install_executor(host,uid,gid,target,commit,*,initial_only=False,activate=Fa
         if not repair or not pointer.is_symlink() or pointer.resolve().parent!=host.path(BANKS):raise
         current=None
     if initial_only and current is not None:return current
+    management=(source/'installer_deployment_cli.py').is_file()
+    if management:verify_global_cli_path(host)
     host.mkdir(BANKS)
     if current!=identity:
         parent=host.path(BANKS)
@@ -76,7 +98,9 @@ def install_executor(host,uid,gid,target,commit,*,initial_only=False,activate=Fa
     LinuxAdmissionGate().install(host,uid,program=(source/'installer_upgrade_gate.py').read_text())
     unit=(source/'updater.service.in').read_text().replace('@UID@',str(uid)).replace('@GID@',str(gid))
     if '@UID@' in unit or '@GID@' in unit:raise InstallError('Executor unit identity could not be bound')
-    host.atomic(EXECUTOR_UNIT,unit,0o644);host.run(['systemctl','daemon-reload']);host.run(['systemctl','enable','dsh-phalanx-updater.service'])
+    host.atomic(EXECUTOR_UNIT,unit,0o644)
+    if management:install_global_cli(host)
+    host.run(['systemctl','daemon-reload']);host.run(['systemctl','enable','dsh-phalanx-updater.service'])
     if activate:activate_executor(host)
     return identity
 

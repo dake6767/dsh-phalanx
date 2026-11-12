@@ -3,13 +3,9 @@ import json
 import re
 import urllib.parse
 from installer_host import InstallError  # embedded-host
-from installer_config import HOME_DIR, default_storage_root  # embedded-config
+from installer_config import HOME_DIR, default_storage_root, unit_argument  # embedded-config
 
 DATABASE_UNIT = HOME_DIR+'/.config/systemd/user/dsh-phalanx-postgres.service'
-
-
-def unit_argument(value):
-    return '"'+str(value).replace('\\','\\\\').replace('"','\\"').replace('%','%%')+'"'
 
 
 def database_backup_notice(host, info):

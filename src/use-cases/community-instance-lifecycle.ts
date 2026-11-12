@@ -15,6 +15,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   private readonly starting = new Map<string, { promise: Promise<CommunityUserInstance>; abort: AbortController; progress: { stage: CommunityStartupStage } }>()
   private readonly draining = new Set<string>()
   private readonly removing = new Map<string, Promise<void>>()
+  private readonly pluginReplacements = new Map<string, Promise<void>>()
   private readonly maintenance = new Map<string, Promise<void>>()
   private readonly restarting = new Map<string, Promise<CommunityUserInstance>>()
   private readonly reclaiming = new Map<string, Promise<import('../ports/community-runtime.js').CommunityReclaimResult>>()
@@ -266,6 +267,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     if (this.stopped || this.running.get(instance.userId) !== instance || this.draining.has(instance.userId)) return
     await this.maintain(instance.userId, async () => {
       if (this.running.get(instance.userId) !== instance) return
+      await this.pluginReplacements.get(instance.userId)
       await this.driver.stop(instance)
       if (this.running.get(instance.userId) === instance) this.running.delete(instance.userId)
     })
@@ -279,6 +281,54 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
       : this.maintenance.has(userId) || this.queued.has(userId)
         ? { state: 'starting', stage: 'preparing' }
         : { state: 'stopped' }
+  }
+  async withPluginReplacement<T>(instance: CommunityUserInstance, operation: () => Promise<T>): Promise<T> {
+    const user = instance.userId
+    if (this.stopped) throw this.unavailable('shutdown')
+    if (this.draining.has(user) || this.pluginReplacements.has(user) || this.running.get(user) !== instance) throw this.unavailable('draining')
+    const result = Promise.resolve().then(operation)
+    this.pluginReplacements.set(
+      user,
+      result.then(
+        () => {},
+        () => {},
+      ),
+    )
+    try {
+      return await result
+    } finally {
+      this.pluginReplacements.delete(user)
+    }
+  }
+  async operateMember(
+    userId: string,
+    action: 'start' | 'restart',
+    publicOriginUrl: string,
+    assertCurrent: () => Promise<void>,
+    beforeStop?: () => Promise<void>,
+  ): Promise<CommunityUserInstance> {
+    if (this.stopped) throw this.unavailable('shutdown')
+    if (this.draining.has(userId) || this.status(userId).state !== (action === 'start' ? 'stopped' : 'ready')) throw this.unavailable('draining')
+    return await this.maintain(userId, async () => {
+      await assertCurrent()
+      if (action === 'restart') {
+        await beforeStop?.()
+        await assertCurrent()
+        await this.remove(userId)
+      }
+      await assertCurrent()
+      const instance = await this.launch(userId, publicOriginUrl)
+      try {
+        await assertCurrent()
+        return instance
+      } catch (error) {
+        if (this.running.get(userId) === instance) {
+          await this.driver.stop(instance)
+          this.running.delete(userId)
+        }
+        throw error
+      }
+    })
   }
   async restart(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance> {
     if (this.stopped) throw this.unavailable('shutdown')
@@ -335,6 +385,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     }
   }
   private async remove(userId: string): Promise<void> {
+    await this.pluginReplacements.get(userId)
     const reclamation = this.reclaiming.get(userId)
     if (reclamation !== undefined) await reclamation
     const pending = this.starting.get(userId)
@@ -348,6 +399,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   }
   async reclaim(userId: string, prepare: (instance: CommunityUserInstance) => Promise<boolean>) {
     if (this.stopped) throw this.unavailable('shutdown')
+    if (this.pluginReplacements.has(userId)) return 'busy' as const
     if (this.draining.has(userId) || this.starting.has(userId)) return 'already-draining' as const
     const instance = this.running.get(userId)
     if (instance === undefined) return 'not-running' as const
@@ -376,6 +428,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     await Promise.allSettled([...this.starting.values()].map(pending => pending.promise))
     await Promise.allSettled([...this.automaticWork])
     const operations = await Promise.allSettled([
+      ...this.pluginReplacements.values(),
       ...this.removing.values(),
       ...this.restarting.values(),
       ...this.maintenance.values(),

@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { withPluginFacts } from './support/plugin-facts.js'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -76,7 +76,7 @@ it.skip('hidden in 0.1.32: accepts a maintainer update, rejects another member, 
     })
     await signInCommunity(admin, origin, 'admin', 'password', true)
     await signInCommunity(member, origin, 'member', 'password')
-    const workspace = defaultWorkspacePath(root, 'member'),
+    const workspace = await defaultWorkspacePath(root, 'member'),
       directory = join(workspace, 'team-plugin')
     await mkdir(directory, { recursive: true })
     await writeFile(
@@ -97,7 +97,7 @@ it.skip('hidden in 0.1.32: accepts a maintainer update, rejects another member, 
       join(directory, 'cordis.patch.yml'),
       JSON.stringify([{ insert: [{ id: 'team-contribution-fixture', name: '@example/team-contribution' }] }]),
     )
-    const home = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home')
+    const home = join(await memberSpacePath(root, 'member'), 'home')
     const packed = JSON.parse(await execFileText('npm', ['pack', directory, '--ignore-scripts', '--json', '--pack-destination', home])) as Array<{
       filename: string
     }>
@@ -253,11 +253,11 @@ it.skip('hidden in 0.1.32: accepts a maintainer update, rejects another member, 
     expect(updated.provenance.versions.map((row: { source: string }) => row.source)).toEqual(['member', 'member'])
     const other = await browser.newPage({ locale: 'en' })
     await signInCommunity(other, origin, 'other', 'password')
-    const otherDirectory = join(defaultWorkspacePath(root, 'other'), 'team-plugin')
+    const otherDirectory = join(await defaultWorkspacePath(root, 'other'), 'team-plugin')
     await mkdir(otherDirectory, { recursive: true })
     await writeFile(join(otherDirectory, 'package.json'), JSON.stringify({ ...manifest, version: '1.0.2' }))
     for (const file of ['index.js', 'cordis.patch.yml']) await writeFile(join(otherDirectory, file), await readFile(join(directory, file)))
-    await selectCommunityWorkspace(other.context(), other, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'other'), true), true)
+    await selectCommunityWorkspace(other.context(), other, origin, instanceWorkspacePath('', true), true)
     const otherComposer = other.locator('[data-composer-input]')
     await otherComposer.fill('OTHER_PLUGIN: Submit team-plugin.')
     await otherComposer.press('Enter')

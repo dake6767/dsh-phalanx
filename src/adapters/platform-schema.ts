@@ -169,6 +169,12 @@ export const PLATFORM_MIGRATIONS: readonly { readonly version: number; readonly 
     name: 'model reasoning usage',
     sql: 'ALTER TABLE dsh_phalanx.usage_model_hours ADD COLUMN reasoning_tokens bigint CHECK(reasoning_tokens >= 0);',
   },
+  { version: 20, name: 'member plugin delivery integrity', sql: 'ALTER TABLE dsh_phalanx.plugin_deliveries ADD COLUMN integrity text;' },
+  {
+    version: 21,
+    name: 'group app center visibility',
+    sql: 'ALTER TABLE dsh_phalanx.native_feature_group_settings ADD COLUMN show_app_center boolean NOT NULL DEFAULT false;',
+  },
 ]
 
 /** The newest version this code can prepare, always the last migration. */

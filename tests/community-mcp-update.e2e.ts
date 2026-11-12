@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { setAppCenterVisibility } from './support/app-center-visibility.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, lstat, mkdtemp, readdir, writeFile } from 'node:fs/promises'
@@ -125,6 +126,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       await admin.getByRole('button', { name: 'Create administrator', exact: true }).click()
       await admin.getByRole('button', { name: 'Continue to administration', exact: true }).click()
       await admin.waitForURL(origin + '/admin')
+      await setAppCenterVisibility(admin.request, origin)
       const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
       const settings = await (await admin.request.get(origin + '/admin/api/models')).json()
       expect(

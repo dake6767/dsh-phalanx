@@ -1,4 +1,3 @@
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 // Explicit published-plugin acceptance; excluded from regular credential-free inventories.
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -13,7 +12,7 @@ import { readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
 import { selectCommunityWorkspace, signInCommunity, startCommunitySession } from './fixtures/community-native-browser.js'
 import { openOfficeSession, until } from './fixtures/office-session.js'
 import { communityEntryUrl } from './support/community-space.js'
-import { defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
+import { instanceWorkspacePath } from './support/real-dsh-runtime.js'
 
 const packageName = '@dake6767/dsh-onlyoffice'
 const password = 'office-facts-fixture-password'
@@ -121,9 +120,9 @@ it('prepares the signed SDK resource and uses its read-only shared tree for two 
     if (!accounts.items.some((row: { username: string }) => row.username === 'member-b')) {
       await session.api('accounts', { username: 'member-b', email: '', password, groupId: session.group.id })
     }
-    const observer = await readFile(join(effectiveUserDataRoot({ dataRoot: session.root }), 'member/home/observer.mjs'))
-    await mkdir(join(effectiveUserDataRoot({ dataRoot: session.root }), 'member-b/home'), { recursive: true })
-    await writeFile(join(effectiveUserDataRoot({ dataRoot: session.root }), 'member-b/home/observer.mjs'), observer)
+    const observer = await readFile(join(await session.spacePath('member'), 'home/observer.mjs'))
+    await mkdir(join(await session.spacePath('member-b'), 'home'), { recursive: true })
+    await writeFile(join(await session.spacePath('member-b'), 'home/observer.mjs'), observer)
     await admin.close()
     const sharedIdentities: string[] = []
     const hostReaders = new Map<string, () => { stdout: string; stderr: string }>()
@@ -153,12 +152,12 @@ it('prepares the signed SDK resource and uses its read-only shared tree for two 
         assert(settled.plugins.find((row: { packageName: string }) => row.packageName === packageName)?.job.status === 'succeeded')
       }
       await request('/recovery/restart', { confirmed: true })
-      const workspace = defaultWorkspacePath(session.root, username)
+      const workspace = await session.workspacePath(username)
       await mkdir(workspace, { recursive: true })
       for (const extension of ['docx', 'xlsx', 'pptx']) {
         await writeFile(join(workspace, 'shared-editor.' + extension), await readFile(join(input.root, 'documents/audit.' + extension)))
       }
-      const cache = join(effectiveUserDataRoot({ dataRoot: session.root }), username, 'home/.dsh/onlyoffice-sdk')
+      const cache = join(await session.spacePath(username), 'home/.dsh/onlyoffice-sdk')
       const cacheFiles = async () => {
         try {
           return (await readdir(cache, { recursive: true })).filter(path => !path.startsWith('.'))
@@ -376,7 +375,7 @@ it('prepares the signed SDK resource and uses its read-only shared tree for two 
     phase = 'member-b-fallback'
     const relative = 'web-apps/apps/documenteditor/main/locale/fr.json'
     assert(!expectedFiles.some((row: { path: string }) => row.path === '9.4.0-develop/' + relative), 'Fallback asset must not be preseeded')
-    const memberCache = join(effectiveUserDataRoot({ dataRoot: session.root }), 'member-b/home/.dsh/onlyoffice-sdk/9.4.0-develop', relative)
+    const memberCache = join(await session.spacePath('member-b'), 'home/.dsh/onlyoffice-sdk/9.4.0-develop', relative)
     await assert.rejects(readFile(memberCache), { code: 'ENOENT' })
     const readHostLog = hostReaders.get('member-b')!,
       beforeFallback = readHostLog()

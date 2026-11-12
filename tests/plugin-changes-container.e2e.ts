@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import type { LibraryPlugin } from '../src/domain/plugin-library.js'
 import { pluginChoices, withPluginFacts } from './support/plugin-facts.js'
 import { createHash } from 'node:crypto'
@@ -109,7 +109,7 @@ it.skipIf(!runtimeSettings.containerImage)(
         .toBe(fails ? 'failed' : 'available')
     }
     const nativeInstall = async (version: string) => {
-      await copyFile(join(root, `example-versioned-${version}.tgz`), join(effectiveUserDataRoot(runtime), 'member/home/native.tgz'))
+      await copyFile(join(root, `example-versioned-${version}.tgz`), join(await memberSpacePath(runtime.dataRoot, 'member'), 'home/native.tgz'))
       expect(await createRealDshRpc().remoteRpc(origin, member, 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/native.tgz' })).toMatchObject({
         changed: true,
       })
@@ -131,7 +131,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       await adminRequest('plugins/publication', { action: 'publish', packageName: '@example/versioned', published: true })
       await login()
       await nativeInstall('1.0.0')
-      const home = join(effectiveUserDataRoot(runtime), 'member/home')
+      const home = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home')
       const current = async () => readFile(join(home, 'PLUGIN_VERSION'), 'utf8')
       expect(await current()).toBe('1.0.0')
       const accessQuery = '?packageName=%40example%2Fversioned'

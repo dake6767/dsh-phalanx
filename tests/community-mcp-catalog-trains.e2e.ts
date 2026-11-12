@@ -1,4 +1,5 @@
 // Validation: T4; real credentials: none; optional live 12306 diagnostic, outside required release acceptance.
+import { setAppCenterVisibility } from './support/app-center-visibility.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, lstat, mkdtemp, readdir, writeFile } from 'node:fs/promises'
@@ -131,6 +132,7 @@ it.skipIf(!runtimeSettings.containerImage)(
           })
         ).status(),
       ).toBe(200)
+      await setAppCenterVisibility(admin.request, origin)
       const owner = createHash('sha256').update(root).digest('hex')
       for (const username of ['alice', 'bob']) {
         const context = await browser.newContext({ locale: 'en', viewport: { width: 1440, height: 1000 } }),

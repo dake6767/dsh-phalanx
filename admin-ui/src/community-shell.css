@@ -193,7 +193,9 @@
 .grant-segment-tabs .tabs__panel[data-inert] { display: none; }
 .grant-tab-panel { display: grid; gap: 12px; }
 .grant-tab-panel > .section-note { margin: 0; color: var(--muted); font-size: 13px; }
-.plugin-settings-panel > .native-feature-intro { margin: 0 0 12px; }
+.native-feature-settings { display: grid; gap: 16px; margin-top: 16px; }
+.native-feature-intro { display: grid; gap: 2px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.native-feature-intro h2 { margin: 0; color: var(--foreground); font-size: 15px; font-weight: 600; }
 .native-feature-intro p { margin: 0; }
 .native-feature-list { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
 .native-feature-list > li { display: grid; gap: 2px; min-width: 0; }

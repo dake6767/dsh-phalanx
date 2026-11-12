@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, lstat, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
@@ -13,7 +14,6 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import type { CommunityMcpSettings } from '../src/domain/mcp-admin-contract.js'
 import { mcpWriteInput } from '../src/domain/mcp-service.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { openCommunityHttpEntry } from './support/community-http-entry.js'
@@ -145,7 +145,7 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
     carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim()
     const before = JSON.parse(await execFileText('podman', ['inspect', carrier]))[0]
-    const workspace = join(effectiveUserDataRoot(runtime), 'member/workspace')
+    const workspace = join(await memberSpacePath(runtime.dataRoot, 'member'), 'workspace')
     await writeFile(join(workspace, 'input.html'), '<h1>MEMBER_WORKSPACE_FIXTURE</h1>')
     const downloadHost = process.env.DSH_PHALANX_PLAYWRIGHT_DOWNLOAD_HOST
     const input = {
@@ -326,7 +326,7 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     await save(cleanupInput)
     await expect.poll(async () => (await library()).find(row => row.name === 'p-cleanup')?.preparation?.stage, { timeout: 30000 }).toBe('ready')
     await checkedMcpResponse('test-mcp', 'p-cleanup', await post('mcp/test', { name: 'p-cleanup' }), 'passed')
-    const diagnosticPid = (await readFile(join(effectiveUserDataRoot(runtime), 'admin/workspace/diagnostic.pid'), 'utf8')).trim()
+    const diagnosticPid = (await readFile(join(await memberSpacePath(runtime.dataRoot, 'admin'), 'workspace/diagnostic.pid'), 'utf8')).trim()
     expect(/^[0-9]+$/.test(diagnosticPid)).toBe(true)
     const adminCarrier = carriers.find((row: { Id: string }) => row.Id !== before.Id).Id
     const inspectProcess =

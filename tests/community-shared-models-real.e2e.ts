@@ -110,7 +110,7 @@ it.skipIf(!process.env.DSH_PHALANX_REAL_DEEPSEEK_KEY_FILE || !process.env.DSH_PH
         context,
         page,
         origin,
-        instanceWorkspacePath(defaultWorkspacePath(root, username), runtime.container !== undefined),
+        instanceWorkspacePath(await defaultWorkspacePath(root, username), runtime.container !== undefined),
         runtime.container !== undefined,
       )
       worlds.push({ page, frames })

@@ -6,8 +6,7 @@ import { lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { chromium } from 'playwright'
 import { expect } from 'vitest'
-import { effectiveUserDataRoot } from '../../src/domain/storage-layout.js'
-import { defaultWorkspacePath, instanceWorkspacePath } from '../support/real-dsh-runtime.js'
+import { instanceWorkspacePath } from '../support/real-dsh-runtime.js'
 import { selectCommunityWorkspace, signInCommunity, startCommunitySession } from './community-native-browser.js'
 import inputs from './office-inputs.json' with { type: 'json' }
 import { until, type OfficeFactsInput, type OfficeSession } from './office-session.js'
@@ -60,7 +59,7 @@ export async function probeOfficeDocument(
   }
   if ((await state()).pending) await request('/recovery/restart', { confirmed: true })
 
-  const cache = join(effectiveUserDataRoot({ dataRoot: session.root }), 'member/home/.dsh/onlyoffice-sdk'),
+  const cache = join(await session.spacePath('member'), 'home/.dsh/onlyoffice-sdk'),
     sdk = join(cache, '9.4.0-develop')
   assert(!relative(input.root, input.sdkRoot).startsWith('..'), 'SDK must be in the owned probe root')
   try {
@@ -85,7 +84,7 @@ export async function probeOfficeDocument(
   }
   const apiJs = join(sdk, 'web-apps/apps/api/documents/api.js')
   assert((await readFile(apiJs, 'utf8')).includes('onDocumentReady'), 'Missing real SDK document API')
-  const workspace = defaultWorkspacePath(session.root, 'member')
+  const workspace = await session.workspacePath('member')
   await mkdir(workspace, { recursive: true })
   await writeFile(
     join(workspace, 'office-facts.docx'),

@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual installed modules, private gateway and rootless member DSH.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,7 +12,6 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 import { declaredRuntimeRevision } from '../src/adapters/runtime-revision.js'
 import type { CommunityMarketPageData, CommunityPluginView } from '../src/domain/admin-contract.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { DSH_CONTAINER_PROFILE } from '../src/dsh/profile-layout.js'
 import type { CommunityUserInstance } from '../src/ports/community-runtime.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
@@ -203,14 +203,14 @@ it.skipIf(!runtimeSettings.containerImage)(
       expect((await bundles()).find(row => row.name === packageName)?.installed).toBe(true)
       const plugins = await rpc.remoteRpc<{ moduleName: string; enabled: boolean; fiberPhase: string }[]>(origin, cookie, 'pluginManager/listPlugins', {})
       expect(plugins.find(row => row.moduleName === packageName)).toMatchObject({ enabled: true, fiberPhase: 'active' })
-      expect(JSON.parse(await readFile(join(effectiveUserDataRoot(runtime), 'alice/home/NATIVE_SEAM_READY'), 'utf8'))).toMatchObject({
+      expect(JSON.parse(await readFile(join(await memberSpacePath(runtime.dataRoot, 'alice'), 'home/NATIVE_SEAM_READY'), 'utf8'))).toMatchObject({
         literal: 'member-literal',
         template: null,
         entry: null,
         resource: 'SDK_V1',
         readOnly: true,
       })
-      const observed = async () => JSON.parse(await readFile(join(effectiveUserDataRoot(runtime), 'alice/home/NATIVE_SEAM_READY'), 'utf8'))
+      const observed = async () => JSON.parse(await readFile(join(await memberSpacePath(runtime.dataRoot, 'alice'), 'home/NATIVE_SEAM_READY'), 'utf8'))
       const first = await observed()
       expect(first.root).toBe(runtimeDependencyMount + '/' + (await api('runtime-dependencies?name=native-sdk')).current.id)
       // Refresh the captured identity after restart; the old container has already stopped.
@@ -267,7 +267,7 @@ it.skipIf(!runtimeSettings.containerImage)(
           'process.stdout.write(JSON.stringify(process.env.NATIVE_SEAM_SDK??null))',
         ]),
       ).toBe('null')
-      const profile = join(effectiveUserDataRoot(runtime), 'alice/home/.dsh/profiles/web'),
+      const profile = join(await memberSpacePath(runtime.dataRoot, 'alice'), 'home/.dsh/profiles/web'),
         manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
       expect(manifest.dependencies[packageName]).toMatch(/^file:/u)
       expect(manifest.dependencies[packageName]).not.toContain('plugins.dsh-phalanx.invalid')

@@ -1,6 +1,7 @@
 // Validation: T2; real credentials: none; installed platform, actual rootless DSH and real plugin settings.
+import { setAppCenterVisibility } from './support/app-center-visibility.js'
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { pluginDeliveries } from './support/plugin-facts.js'
 import { lstat, mkdir, mkdtemp, open, readFile, readdir, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
@@ -65,8 +66,8 @@ it.skipIf(!runtimeSettings.containerImage)(
   async () => {
     assertPinnedDshRevision(runtimeSettings)
     const root = await mkdtemp(join(tmpdir(), 'plugin-market-')),
-      runtime = runtimeSection(join(root, 'data'), 'https://example.test', runtimeSettings),
-      profile = join(effectiveUserDataRoot(runtime), 'member/home/.dsh/profiles/web')
+      runtime = runtimeSection(join(root, 'data'), 'https://example.test', runtimeSettings)
+    let profile = ''
     const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'native-market-container-fictional-secret', runtime })
     const browser = await chromium.launch({ headless: true }),
       admin = await browser.newPage({ locale: 'en' }),
@@ -114,6 +115,7 @@ it.skipIf(!runtimeSettings.containerImage)(
               const logs: { operation: string; bytes: number; sha256?: string; codes?: string[]; hosts?: string[]; omitted?: string }[] = []
               let capture = 'captured'
               try {
+                if (!profile) throw new Error('Member profile was not created')
                 const directory = join(profile, '.plugin-manager/logs')
                 for (const path of [profile, join(profile, '.plugin-manager'), directory])
                   if (!(await lstat(path)).isDirectory()) throw new Error('Not a regular directory')
@@ -200,6 +202,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       expect(bootstrap.status()).toBe(303)
       const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
       expect((await post('accounts', { username: 'member', password: 'password', email: '' })).status()).toBe(201)
+      profile = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home/.dsh/profiles/web')
       const prepare = async () => {
         mark(phase + ':request')
         const accepted = await post('plugins/previews', { input: `${packageName}@${version}` })
@@ -240,6 +243,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       mark('initial-preparation')
       await prepare()
       expect((await post('plugins/publication', { action: 'publish', packageName, published: true })).status()).toBe(200)
+      await setAppCenterVisibility(admin.request, origin)
       await signInCommunity(page, origin, 'member', 'password')
       const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
       const openMarket = async () => {

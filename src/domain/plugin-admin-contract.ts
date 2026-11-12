@@ -66,11 +66,16 @@ export type { CommunityManagedGroupView, CommunityPluginGrantAction } from './pl
 
 export interface CommunityNativePluginJob {
   readonly requestId: string
-  readonly action: 'install' | 'uninstall'
+  readonly action: 'install' | 'uninstall' | 'update'
   readonly status: 'running' | 'succeeded' | 'failed'
   readonly phase: 'preparing' | 'downloading' | 'installing' | 'removing' | 'complete'
   readonly application?: 'applied' | 'restart-required'
   readonly failure?: CommunityApiErrorBody
+}
+export interface CommunityPluginUpdateChoice {
+  readonly kind: 'version' | 'content'
+  readonly version: string
+  readonly target: string
 }
 export interface CommunityMarketPluginView {
   readonly contribution?: { readonly name?: string; readonly anonymous: boolean }
@@ -78,13 +83,16 @@ export interface CommunityMarketPluginView {
   readonly title: string
   readonly description: string
   readonly version: string
-  readonly status: 'install' | 'selected' | 'managed' | 'native' | 'installed'
+  readonly status: 'install' | 'selected' | 'managed' | 'native' | 'installed' | 'unknown'
   readonly sharedCredential?: true
+  readonly installedVersion?: string
+  readonly update?: CommunityPluginUpdateChoice
   readonly job?: CommunityNativePluginJob
 }
 export interface CommunityMarketPageData {
   readonly plugins: readonly CommunityMarketPluginView[]
   readonly pending: boolean
+  readonly unlistedUpdates?: readonly { readonly packageName: string; readonly job: CommunityNativePluginJob }[]
 }
 export interface CommunityPluginPublishAction {
   readonly confirmed?: true
@@ -95,7 +103,8 @@ export interface CommunityPluginPublishAction {
 }
 export interface CommunityMarketInstallAction {
   readonly packageName: string
-  readonly action?: 'install' | 'uninstall'
+  readonly action?: 'install' | 'uninstall' | 'update'
+  readonly target?: string
   readonly requestId?: string
 }
 export type CommunityMarketInstallResult = { readonly application: 'applied' | 'restart-required' } | { readonly job: CommunityNativePluginJob }

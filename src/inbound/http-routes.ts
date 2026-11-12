@@ -22,6 +22,7 @@ export type HttpRouteId =
   | 'enter'
   | 'recovery'
   | 'identity'
+  | 'platform-features'
   | 'startup'
   | 'signed-in-accounts'
   | 'account-change-notice'
@@ -102,6 +103,15 @@ export const HTTP_ROUTES: readonly HttpRoute[] = [
   { id: 'not-found', methods: '*', path: '/_dsh-phalanx/', unsupportedMethod: 'owner', match: 'prefix', identity: 'public', needsRuntimeRecords: false },
   { id: 'startup', methods: '*', path: '/account/startup', unsupportedMethod: 'owner', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },
   { id: 'identity', methods: '*', path: '/account/identity', unsupportedMethod: 'owner', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },
+  {
+    id: 'platform-features',
+    methods: '*',
+    path: '/account/platform-features',
+    unsupportedMethod: 'owner',
+    match: 'exact',
+    identity: 'platform-user',
+    needsRuntimeRecords: true,
+  },
   {
     id: 'signed-in-accounts',
     methods: ['GET'],

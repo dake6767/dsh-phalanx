@@ -69,6 +69,16 @@ export interface CommunityRuntimePort {
   cancelQueued?(userId: string): void
   /** Concurrent entries share at most one instance per user. */
   ensure(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance>
+  /** Keep the exact carrier alive through a member plugin replacement and its recovery. */
+  withPluginReplacement?<T>(instance: CommunityUserInstance, operation: () => Promise<T>): Promise<T>
+  /** Atomically admit an administrator action only in its expected idle state. */
+  operateMember?(
+    userId: string,
+    action: 'start' | 'restart',
+    publicOriginUrl: string,
+    assertCurrent: () => Promise<void>,
+    beforeStop?: () => Promise<void>,
+  ): Promise<CommunityUserInstance>
   /** Fence entry, stop the current carrier and start one replacement. */
   restart(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance>
   /** Stop, run backup/reset inside the maintenance fence, then start one replacement. */

@@ -1,4 +1,3 @@
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 // Explicit credentialed catalog acceptance; never included in the credential-free inventories.
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -134,7 +133,7 @@ it('installs the signed presentation entry and creates editable member decks wit
         name + '-initialize',
         'python3 ' + quote(skill + '/scripts/project_manager.py') + ' init ' + quote(projectName) + ' --quick-generate --dir ' + quote(project),
       )
-      const host = join(effectiveUserDataRoot({ dataRoot: session.root }), 'member/workspace/ppt-catalog', projectName)
+      const host = join(await session.spacePath('member'), 'workspace/ppt-catalog', projectName)
       const svg =
         '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1280" height="720" viewBox="0 0 1280 720" lang="en"><rect width="1280" height="720" fill="#FFFFFF"/><text x="80" y="120" font-family="Arial" font-size="40" fill="#102A43">Editable presentation</text><text x="80" y="200" font-family="Arial" font-size="28" fill="#334E68">A member project built from text.</text>' +
         (withImage
@@ -225,10 +224,7 @@ it('installs the signed presentation entry and creates editable member decks wit
       protectedCloud.stdout.text.includes('Credentials are configured by the platform'),
       'The signed cloud template must refuse endpoint overrides before a provider call',
     )
-    await writeFile(
-      join(effectiveUserDataRoot({ dataRoot: session.root }), 'member/workspace/ppt-catalog/.env'),
-      'MINIMAX_BASE_URL=https://member.example.test\n',
-    )
+    await writeFile(join(await session.spacePath('member'), 'workspace/ppt-catalog/.env'), 'MINIMAX_BASE_URL=https://member.example.test\n')
     await command(
       'delegated-image',
       'cd ' +

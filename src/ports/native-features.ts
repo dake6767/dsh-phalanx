@@ -7,11 +7,12 @@ export interface NativeFeatureGroupState {
   readonly groupId: string
   readonly revision: string
   readonly disabledIds: readonly string[]
+  readonly showAppCenter: boolean
 }
 export interface NativeFeatureRows {
   readGroup(groupId: string): Promise<NativeFeatureGroupState | undefined>
   forMember(member: NativeFeatureMember): Promise<NativeFeatureGroupState | undefined>
-  save(groupId: string, disabledIds: readonly string[], expectedRevision: string): Promise<NativeFeatureGroupState>
+  save(groupId: string, disabledIds: readonly string[], expectedRevision: string, showAppCenter?: boolean): Promise<NativeFeatureGroupState>
 }
 export interface NativeFeatureRepositories {
   readonly actors: SpaceAdministrators

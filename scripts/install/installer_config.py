@@ -57,10 +57,12 @@ DOWNLOAD_SOURCE_PRESETS = json.loads("{\n  \"official\": {\n    \"npm\": \"https
 # END GENERATED DOWNLOAD SOURCE PRESETS
 
 DOWNLOAD_SOURCE_OPTIONS = {
-    'npm_registry': 'npm', 'pypi_index': 'pypi', 'container_mirror': 'containerMirror', 'ghcr_mirror': 'ghcrMirror',
-    'github_proxy_prefix': 'githubAssets', 'github_api_proxy_prefix': 'githubApi',
-    'browser_download_host': 'browser', 'chromium_arm64_download_host': 'browserChromiumArm64',
+    'npm_registry': 'npm', 'pypi_index': 'pypi', 'container_mirror': 'containerMirror',
+    'ghcr_mirror': 'ghcrMirror', 'github_proxy_prefix': 'githubAssets',
+    'github_api_proxy_prefix': 'githubApi', 'browser_download_host': 'browser',
+    'chromium_arm64_download_host': 'browserChromiumArm64',
 }
+
 DOWNLOAD_SOURCE_PREFIXES = ('containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi')
 
 
@@ -166,10 +168,29 @@ def download_source_environment(sources, architecture):
 CONFIG = '/etc/dsh-phalanx/environment'
 STATE = '/etc/dsh-phalanx/install-state.json'
 HOME_DIR = '/var/lib/dsh-phalanx'
+UNINSTALL_STATE = '/etc/dsh-phalanx/uninstall-state.json'
+
+
+def uninstall_record(host):
+    path = host.path(UNINSTALL_STATE)
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.parent.is_symlink() or path.is_symlink() or not path.is_file() or path.stat().st_uid != os.geteuid() or path.stat().st_mode & 0o077:
+        raise ConfigurationError('Uninstall receipt ownership cannot be verified')
+    if path.stat().st_size > 1048576:
+        raise ConfigurationError('Uninstall receipt exceeds its allowed size')
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict) or value.get('schema') != 1 or value.get('phase') not in ('removing', 'retained', 'purging'):
+        raise ConfigurationError('Invalid uninstall receipt')
+    return value
 
 
 def default_storage_root(data_root):
     return os.path.abspath(data_root)+'.durable'
+
+
+def unit_argument(value):
+    return '"'+str(value).replace('\\','\\\\').replace('"','\\"').replace('%','%%')+'"'
 
 
 def effective_user_data_root(values):
@@ -177,6 +198,11 @@ def effective_user_data_root(values):
 
 
 class ConfigurationError(ValueError):
+    pass
+
+
+class HiddenConfigurationConflict(ConfigurationError):
+    """An existing compatibility listener needs explicit offline maintenance."""
     pass
 
 
@@ -266,7 +292,7 @@ def validate_configuration(host, values):
         raise ConfigurationError('Initial legacy model provider must be deepseek-official; configure shared providers in administration after signup')
     if 'DSH_PHALANX_SESSION_SECRET' in values and len(values['DSH_PHALANX_SESSION_SECRET']) < 32:
         raise ConfigurationError('Session secret must contain at least 32 characters')
-    for address in filter(None, values['DSH_PHALANX_HOST_PUBLIC_ADDRESSES'].split(',')):
+    for address in filter(None, values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES', '').split(',')):
         if not ipaddress.IPv4Address(address.strip()).is_global:
             raise ConfigurationError('Host aliases must be public IPv4 literals')
     if any('\n' in value or '\r' in value or '\0' in value for value in values.values()):
@@ -319,6 +345,7 @@ def validate_storage(host, values):
 
 
 def check_ports(host, args, values, successful, interactive):
+    from installer_questions import InstallerQuestions, validate_port  # embedded-questions
     endpoints = [('PORT', values['DSH_PHALANX_HOST'], '--port'), ('CONTAINER_GATEWAY_PORT', '127.0.0.1', '--gateway-port')]
     if values.get('DSH_PHALANX_PREVIEW_PORT'):endpoints.append(('PREVIEW_PORT', values['DSH_PHALANX_HOST'], '--preview-port'))
     for name, address, flag in endpoints:
@@ -338,18 +365,24 @@ def check_ports(host, args, values, successful, interactive):
                 host.tell(f'Private gateway port {number} is occupied; using {free} (saved in configuration).')
                 values[key] = str(free)
                 continue
+            if name == 'PREVIEW_PORT':
+                reason = f'已有兼容监听端口 {number} 不可用，已保留配置；请按服务管理文档处理后重试。' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else f'Existing compatibility listener port {number} is unavailable; configuration retained. Follow service management documentation before retrying.'
+                raise HiddenConfigurationConflict(reason)
             host.tell(f'{flag} {number} is unavailable: {conflict}. No occupying process was stopped.')
             if not interactive or successful:
                 raise ConfigurationError(f'Choose a free {flag} and rerun the installer; {conflict}')
-            values[key] = host.prompt(f'New {flag} value: ')
+            dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+            values[key] = dialogue.ask(f'新的 {flag} 值', f'New {flag} value', validate=validate_port)
             origin = urllib.parse.urlparse(values['DSH_PHALANX_PUBLIC_ORIGIN'])
-            if name == 'PORT' and origin.scheme == 'http' and origin.port == number:
+            if name == 'PORT' and origin.scheme == 'http' and origin.port == number and (getattr(args, 'dialogue', None) is None or args.dialogue.automatic_origin):
                 values['DSH_PHALANX_PUBLIC_ORIGIN'] = origin._replace(netloc=origin.netloc.rsplit(':', 1)[0]+':'+values[key]).geturl()
             if not values[key].isdigit() or not 1 <= int(values[key]) <= 65535:
                 raise ConfigurationError('Port must be between 1 and 65535')
 
 
 def configuration(host, args, *, target_version, entry_url, access_candidate):
+    from installer_progress import operator_text  # embedded-progress
+    from installer_questions import InstallerQuestions, apply_source_choice, validate_ip, Cancelled  # embedded-questions
     # The release selector has already verified this manifest version.
     release = tuple(map(int, target_version.split('.')))
     protected_secrets = release >= (0, 1, 25)
@@ -359,8 +392,8 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
     if not modern and (args.user_data_root is not None or args.user_data_mount is not None):
         raise ConfigurationError('External user storage options require 0.1.1 or later')
     previous = read_configuration(host)
-    successful = installed_state(host) is not None
-    interactive = host.terminal_available()
+    successful = installed_state(host) is not None or uninstall_record(host) is not None
+    interactive = host.terminal_available() and not getattr(args, 'non_interactive', False)
     values = dict(previous)
     if protected_secrets:
         values.pop('DSH_PHALANX_SESSION_SECRET', None)
@@ -379,6 +412,8 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
                 if successful:
                     raise ConfigurationError('Existing successful installation configuration differs; use explicit offline configuration/storage maintenance')
             values[name] = str(value)
+    if getattr(args, 'server_ip', None) is not None:
+        validate_ip(args.server_ip)
     missing = []
     if not interactive:
         if 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
@@ -388,8 +423,10 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
         if not modern and args.model_key_file is None and 'DSH_PHALANX_MODEL_UPSTREAM_API_KEY' not in values:
             missing.append('--model-key-file')
         if missing:
-            raise ConfigurationError('Missing '+', '.join(missing)+'. Example: sudo bash install.sh --public-origin http://<host>:18080 --host-public-addresses ""'+(' --model-key-file /path/to/protected-key' if not modern else ''))
-    if 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
+            prefix = '非交互安装缺少参数：' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else 'Missing '
+            example = '。示例：' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else '. Example: '
+            raise ConfigurationError(prefix+', '.join(missing)+example+'sudo bash install.sh --public-origin http://<host>:18080 --host-public-addresses ""'+(' --model-key-file /path/to/protected-key' if not modern else ''))
+    if not modern and 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
         values['DSH_PHALANX_HOST_PUBLIC_ADDRESSES'] = host.prompt('All public IPv4 host aliases, comma-separated (empty if none): ')
     if args.model_key_file:
         path = args.model_key_file
@@ -415,19 +452,68 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
     for name, value in defaults.items():
         values.setdefault('DSH_PHALANX_'+name, value)
     if interactive and modern and not successful:
-        if args.port is None:
-            values['DSH_PHALANX_PORT'] = host.prompt('Entry port ['+values['DSH_PHALANX_PORT']+']: ') or values['DSH_PHALANX_PORT']
-        candidate = values.get('DSH_PHALANX_PUBLIC_ORIGIN') or access_candidate(host, values)
-        if args.public_origin is None:
-            values['DSH_PHALANX_PUBLIC_ORIGIN'] = host.prompt(f'Browser access URL [{candidate}]: ') or candidate
-        if host.prompt('Advanced gateway/storage settings? [y/N]: ').lower() == 'y':
-            gateway = host.prompt('Private gateway port ['+values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']+']: ')
-            args.gateway_chosen = args.gateway_chosen or bool(gateway)
-            values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'] = gateway or values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']
-            for name, label in (('USER_DATA_ROOT', 'User data directory'), ('USER_DATA_MOUNT', 'Existing data mount')):
-                selected = host.prompt(label+' ['+values.get('DSH_PHALANX_'+name, '')+']: ')
-                if selected:
-                    values['DSH_PHALANX_'+name] = selected
+        dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+        selection = configured_download_sources(host, values, args)
+        config = {'source': selection['preset'], 'overrides': selection.get('overrides', {}),
+                  'server_ip': getattr(args, 'server_ip', None), 'port': values['DSH_PHALANX_PORT'],
+                  'origin': values.get('DSH_PHALANX_PUBLIC_ORIGIN'), 'mapping': values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES'),
+                  'gateway': values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'], 'data': values.get('DSH_PHALANX_USER_DATA_ROOT', ''),
+                  'mount': values.get('DSH_PHALANX_USER_DATA_MOUNT', '')}
+        if config['origin'] and args.public_origin is None:
+            try:
+                previous_ip = str(ipaddress.ip_address(urllib.parse.urlsplit(config['origin']).hostname))
+            except ValueError:
+                previous_ip = None
+            config['server_ip'] = config['server_ip'] or previous_ip
+            dialogue.automatic_origin = previous_ip is not None and config['origin'] == entry_url(config['port'], previous_ip)
+        supplied = set()
+        if args.public_origin is not None: supplied.update(('server_ip', 'origin'))
+        if getattr(args, 'server_ip', None) is not None:
+            config['server_ip'] = validate_ip(args.server_ip)
+            supplied.add('server_ip')
+        if args.port is not None: supplied.add('port')
+        if args.host_public_addresses is not None: supplied.add('mapping')
+        dialogue.edit_common(config, supplied)
+        if dialogue.choose('展开高级设置？y/n', 'Open advanced settings? y/n', ('y', 'n'), 'n') == 'y':
+            dialogue.edit_advanced(config)
+        while True:
+            for name, key in (('port', 'PORT'), ('origin', 'PUBLIC_ORIGIN'), ('gateway', 'CONTAINER_GATEWAY_PORT')):
+                values['DSH_PHALANX_'+key] = config[name]
+            for name, key in (('mapping', 'HOST_PUBLIC_ADDRESSES'), ('data', 'USER_DATA_ROOT'), ('mount', 'USER_DATA_MOUNT')):
+                if config[name] is None or name != 'mapping' and not config[name]:
+                    values.pop('DSH_PHALANX_'+key, None)
+                else:
+                    values['DSH_PHALANX_'+key] = config[name]
+            apply_source_choice(args, config)
+            args.gateway_chosen = args.gateway_chosen or dialogue.gateway_chosen
+            try:
+                validate_configuration(host, values)
+                validate_storage(host, values)
+                check_ports(host, args, values, successful, interactive)
+                config['port'] = values['DSH_PHALANX_PORT']
+                config['gateway'] = values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']
+                config['origin'] = values['DSH_PHALANX_PUBLIC_ORIGIN']
+            except (ValueError, OSError) as error:
+                if isinstance(error, (Cancelled, HiddenConfigurationConflict)) or args.preview_port is not None or args.preview_origin is not None:
+                    raise
+                dialogue.tell('配置未通过校验，请修改后重试：'+operator_text(str(error), 'zh-CN'), 'Configuration validation failed; edit and retry: '+str(error))
+                dialogue.edit_common(config)
+                dialogue.edit_advanced(config)
+                continue
+            dialogue.summary({**config, 'data': config['data'] or effective_user_data_root(values)})
+            action = dialogue.choose('摘要：install 安装 / edit 修改 / cancel 取消', 'Summary: install / edit / cancel', ('install', 'edit', 'cancel'), 'install')
+            if action == 'install': break
+            if action == 'cancel':
+                raise Cancelled(dialogue.tr('安装已取消；保留已准备的依赖及现有数据。', 'Installation cancelled; prepared dependencies and existing data are retained.'))
+            section = dialogue.choose('修改：source 下载源 / common 常用 / advanced 高级', 'Edit: source / common / advanced', ('source', 'common', 'advanced'), 'common')
+            if section == 'source':
+                dialogue.edit_source(config)
+                apply_source_choice(args, config)
+                host.download_sources = resolve_download_sources({'preset': config['source'], 'overrides': config['overrides']})
+                if getattr(host, 'recheck_release', None) is not None: host.recheck_release()
+                dialogue.tell('已按新下载源重新核对版本。', 'Release rechecked using the new source.')
+            elif section == 'common': dialogue.edit_common(config)
+            else: dialogue.edit_advanced(config)
     values.setdefault('DSH_PHALANX_PUBLIC_ORIGIN', entry_url(values['DSH_PHALANX_PORT'], values['DSH_PHALANX_HOST']))
     values['DSH_PHALANX_DOWNLOAD_SOURCES'] = json.dumps(configured_download_sources(host, values, args), separators=(',', ':'))
     validate_configuration(host, values)
@@ -436,10 +522,18 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
     validate_configuration(host, values)
     if not successful:
         changes = sorted(key.removeprefix('DSH_PHALANX_') for key, value in values.items() if key in previous and previous[key] != value)
-        host.tell('Configuration: '+values['DSH_PHALANX_PUBLIC_ORIGIN']+'; entry port '+values['DSH_PHALANX_PORT']+'; private gateway '+values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])
-        host.tell('Platform data: '+values['DSH_PHALANX_DATA_ROOT']+'; user data: '+effective_user_data_root(values))
+        if modern:
+            if not interactive:
+                dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+                selection = configured_download_sources(host, values, args)
+                dialogue.summary({'source': selection['preset'], 'overrides': selection.get('overrides', {}), 'server_ip': getattr(args, 'server_ip', None),
+                                  'port': values['DSH_PHALANX_PORT'], 'origin': values['DSH_PHALANX_PUBLIC_ORIGIN'], 'gateway': values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'],
+                                  'mapping': values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES'), 'data': effective_user_data_root(values), 'mount': values.get('DSH_PHALANX_USER_DATA_MOUNT', '')})
+        else:
+            host.tell('Configuration: '+values['DSH_PHALANX_PUBLIC_ORIGIN']+'; entry port '+values['DSH_PHALANX_PORT']+'; private gateway '+values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])
+            host.tell('Platform data: '+values['DSH_PHALANX_DATA_ROOT']+'; user data: '+effective_user_data_root(values))
         if changes:
             host.tell('Retry changes: '+', '.join(changes)+'. Existing data will be preserved.')
-        if interactive and host.prompt('Continue with this configuration? [y/N]: ').lower() != 'y':
+        if interactive and not modern and host.prompt('Continue with this configuration? [y/N]: ').lower() != 'y':
             raise ConfigurationError('Installation cancelled before downloads or deployment changes')
     return values

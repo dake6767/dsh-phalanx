@@ -1,4 +1,15 @@
 export const en = {
+  'Installed version': 'Installed version',
+  'Installation status unavailable': 'Installation status unavailable',
+  'Content update available': 'Content update available',
+  'Update plugin': 'Update plugin',
+  'Updating plugin…': 'Updating plugin…',
+  'Update complete. Restarting DSH is recommended.': 'Update complete. Restarting DSH is recommended.',
+  'Update complete. Restart required.': 'Update complete. Restart required.',
+  'Recovery saved. Restart required.': 'Recovery saved. Restart required.',
+  Later: 'Later',
+  'Recovery files: {recovery}': 'Recovery files: {recovery}',
+
   'Upstreams and access settings are not configured': 'Upstreams and access settings are not configured',
 
   'Plugin configuration': 'Plugin configuration',
@@ -250,6 +261,17 @@ export const en = {
     'Editing replaces the saved entry configuration. Leave unchanged to retain it.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  'Installed version': '已装版本',
+  'Installation status unavailable': '无法确认安装状态',
+  'Content update available': '有内容更新',
+  'Update plugin': '更新插件',
+  'Updating plugin…': '正在更新插件…',
+  'Update complete. Restarting DSH is recommended.': '更新完成，建议重启 DSH',
+  'Update complete. Restart required.': '更新完成，需要重启',
+  'Recovery saved. Restart required.': '已恢复旧版，需要重启',
+  Later: '稍后',
+  'Recovery files: {recovery}': '恢复材料：{recovery}',
+
   'Upstreams and access settings are not configured': '尚未配置上游与接入设置',
 
   'Plugin configuration': '插件配置',

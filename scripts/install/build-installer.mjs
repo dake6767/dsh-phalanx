@@ -6,6 +6,7 @@ import { databaseProgram, executorFactsProgram, initializationRecoveryProgram } 
 const directory = new URL('./', import.meta.url)
 const [
   bootstrap,
+  questions,
   installer,
   configurationSource,
   host,
@@ -23,8 +24,11 @@ const [
   operations,
   cleanup,
   database,
+  deployment,
+  uninstall,
 ] = await Promise.all([
   readFile(new URL('bootstrap.sh', directory), 'utf8'),
+  readFile(new URL('installer_questions.py', directory), 'utf8'),
   readFile(new URL('installer.py', directory), 'utf8'),
   readFile(new URL('installer_config.py', directory), 'utf8'),
   readFile(new URL('installer_host.py', directory), 'utf8'),
@@ -42,6 +46,8 @@ const [
   readFile(new URL('installer_operations.py', directory), 'utf8'),
   readFile(new URL('installer_cleanup.py', directory), 'utf8'),
   readFile(new URL('installer_database.py', directory), 'utf8'),
+  readFile(new URL('installer_deployment.py', directory), 'utf8'),
+  readFile(new URL('installer_uninstall.py', directory), 'utf8'),
 ])
 // Generated data embeds the platform-owned adapters; Python never decrypts or queries PostgreSQL.
 const upgradeBackup = upgradeBackupSource.replace(
@@ -76,6 +82,7 @@ const generated =
   `EXECUTOR_MODULES = ${JSON.stringify(executorModules)}\nUPGRADE_GATE_SOURCE = ${JSON.stringify(upgradeGate)}\n` +
   [
     configuration,
+    questions,
     progress,
     host,
     compatibility,
@@ -91,11 +98,13 @@ const generated =
     executorBootstrap,
     upgradeCli,
     database,
+    deployment,
+    uninstall,
     installer,
   ]
     .map(source =>
       source.replace(
-        /^[ \t]*from installer_(?:config|host|progress|compatibility|release|upgrade_core|upgrade_backup|upgrade_host|upgrade_cli|upgrade_gate|executor_install|storage|executor_bootstrap|operations|cleanup|database) import .*# embedded-(?:config|host|progress|compatibility|release|upgrade-core|upgrade-backup|upgrade-host|upgrade-cli|upgrade-gate|executor-install|storage|executor-bootstrap|operations|cleanup|database)\n/gmu,
+        /^[ \t]*from installer_(?:questions|config|host|progress|compatibility|release|upgrade_core|upgrade_backup|upgrade_host|upgrade_cli|upgrade_gate|executor_install|storage|executor_bootstrap|operations|cleanup|database|deployment|uninstall) import .*# embedded-(?:questions|config|host|progress|compatibility|release|upgrade-core|upgrade-backup|upgrade-host|upgrade-cli|upgrade-gate|executor-install|storage|executor-bootstrap|operations|cleanup|database|deployment|uninstall)\n/gmu,
         '',
       ),
     )

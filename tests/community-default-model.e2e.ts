@@ -62,7 +62,7 @@ describe('community default model through native DSH', () => {
       }),
     )
     await signInCommunity(page, origin, 'member', 'password')
-    await selectCommunityWorkspace(context, page, origin, defaultWorkspacePath(root, 'member'))
+    await selectCommunityWorkspace(context, page, origin, await defaultWorkspacePath(root, 'member'))
     const catalog = await createRealDshRpc().remoteRpc<{ groups: { models: { id: string }[] }[]; failures: unknown[] }>(
       origin,
       await cookieHeader(context, origin),

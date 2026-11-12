@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises'
@@ -12,7 +13,6 @@ import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { skillZip } from './fixtures/skills/archive.js'
@@ -146,8 +146,8 @@ sys.exit(7)
       }
       expect(JSON.stringify(await api('skills/execution?name=news', configuration))).not.toContain(secret)
       await expect.poll(async () => (await api('skills/execution?name=news')).preparation?.stage).toBe('ready')
-      await mkdir(join(effectiveUserDataRoot({ dataRoot: root }), 'member/home'), { recursive: true, mode: 0o700 })
-      await copyFile('tests/fixtures/skill-observer.mjs', join(effectiveUserDataRoot({ dataRoot: root }), 'member/home/observer.mjs'))
+      await mkdir(join(await memberSpacePath(root, 'member'), 'home'), { recursive: true, mode: 0o700 })
+      await copyFile('tests/fixtures/skill-observer.mjs', join(await memberSpacePath(root, 'member'), 'home/observer.mjs'))
       const login = await fetch(origin + '/login', {
         method: 'POST',
         redirect: 'manual',
@@ -231,8 +231,8 @@ sys.exit(7)
         argv: ['hot', 'two words'],
       })
       expect(result.stdout.subarray(line + 1)).toEqual(input)
-      expect(await readFile(join(effectiveUserDataRoot({ dataRoot: root }), 'member/workspace/owned-result.txt'), 'utf8')).toBe('created')
-      expect((await stat(join(effectiveUserDataRoot({ dataRoot: root }), 'member/workspace/owned-result.txt'))).uid).toBe(process.getuid!())
+      expect(await readFile(join(await memberSpacePath(root, 'member'), 'workspace/owned-result.txt'), 'utf8')).toBe('created')
+      expect((await stat(join(await memberSpacePath(root, 'member'), 'workspace/owned-result.txt'))).uid).toBe(process.getuid!())
       expect((await execute('node /dsh-phalanx/member-skills/live/news/scripts/news.js hot', input)).code).toBe(7)
       const hook = "import os\nopen('/dsh-phalanx/home/leaked-key.txt','w').write(os.environ.get('NEWS_KEY','none'))\n"
       const createHook = `import pathlib,sys; p=pathlib.Path('/dsh-phalanx/home/.local/lib')/('python'+str(sys.version_info.major)+'.'+str(sys.version_info.minor))/'site-packages';p.mkdir(parents=True,exist_ok=True);(p/'usercustomize.py').write_text(${JSON.stringify(hook)})`
@@ -243,7 +243,7 @@ sys.exit(7)
       const alias = await execute('python3 /dsh-phalanx/member-skills/live/news/scripts/cloud.py')
       expect(alias.code, alias.stderr).toBe(7)
       expect(alias.stdout.toString()).toBe('PYTHON_AUTHORIZED\n')
-      await writeFile(join(effectiveUserDataRoot({ dataRoot: root }), 'member/workspace/json.py'), 'raise RuntimeError("member json executed")\n')
+      await writeFile(join(await memberSpacePath(root, 'member'), 'workspace/json.py'), 'raise RuntimeError("member json executed")\n')
       expect((await execute('mkdir -p notes && ln -s /proc/self/environ notes/slide_01.md')).code).toBe(0)
       const linked = await execute('python3 /dsh-phalanx/member-skills/live/news/scripts/cloud.py --probe notes/slide_01.md', input)
       expect(linked.code, linked.stderr).toBe(7)
@@ -260,7 +260,7 @@ sys.exit(7)
       ).toBe(0)
       // The member's own Python wrapper may run its hook without credentials; the trusted execution must never write the key.
       try {
-        expect(await readFile(join(effectiveUserDataRoot({ dataRoot: root }), 'member/home/leaked-key.txt'), 'utf8')).not.toBe(secret)
+        expect(await readFile(join(await memberSpacePath(root, 'member'), 'home/leaked-key.txt'), 'utf8')).not.toBe(secret)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
@@ -280,7 +280,7 @@ sys.exit(7)
       await expect
         .poll(async () => {
           try {
-            return await readFile(join(effectiveUserDataRoot({ dataRoot: root }), 'member/workspace/execution-started'), 'utf8')
+            return await readFile(join(await memberSpacePath(root, 'member'), 'workspace/execution-started'), 'utf8')
           } catch {
             return ''
           }
@@ -328,7 +328,7 @@ sys.exit(7)
       await api(adminGrantPath, { action: 'save', names: ['news'], revision: adminGrant.revision, confirmed: true })
       const trial = await api('execution/trial', { owner: 'skill:news', line: 'news-cli trial' })
       expect(trial.exitCode, trial.stderr).toBe(7)
-      expect(await readFile(join(effectiveUserDataRoot({ dataRoot: root }), 'admin/workspace/owned-result.txt'), 'utf8')).toBe('created')
+      expect(await readFile(join(await memberSpacePath(root, 'admin'), 'workspace/owned-result.txt'), 'utf8')).toBe('created')
       expect((await execute('sh /dsh-phalanx/member-skills/live/news/query.sh')).stdout.toString()).toBe('ROOT_SCRIPT_OK')
       expect((await execute(`cp /dsh-phalanx/member-skills/live/news/query.sh ${CONTAINER_HOME}/retained-query.sh`)).code).toBe(0)
       expect((await execute(`cp /dsh-phalanx/member-skills/live/news/scripts/news.py ${CONTAINER_HOME}/retained-python.py`)).code).toBe(0)
@@ -374,7 +374,7 @@ sys.exit(7)
         ])
       ).trim()
       expect((await execute('news-cli hot')).code).toBe(7)
-      const files = [join(effectiveUserDataRoot({ dataRoot: root }), 'member'), join(root, 'skills/members', member.spaceId)]
+      const files = [join(await memberSpacePath(root, 'member')), join(root, 'skills/members', member.spaceId)]
       const scan = async (directory: string): Promise<void> => {
         for (const entry of await readdir(directory, { withFileTypes: true })) {
           const path = join(directory, entry.name)

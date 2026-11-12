@@ -5,6 +5,25 @@ import { dirname, join } from 'node:path'
 import { expect, it } from 'vitest'
 import { readPastaLoopbackMapping } from '../src/adapters/container-network.js'
 
+function readLinuxProcessIdentity(pid: number): { state: string; started: string } | null {
+  let stat: string
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+  } catch (error) {
+    if (['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')) return null
+    throw error
+  }
+  const fields = stat
+    .slice(stat.lastIndexOf(')') + 2)
+    .trim()
+    .split(/\s+/u)
+  const state = fields[0],
+    currentStart = fields[19]
+  if (state === undefined || currentStart === undefined || !/^\d+$/u.test(currentStart) || !/^[RSDZTWtXxKPI]$/u.test(state))
+    throw new Error('Unrecognized process identity')
+  return { state, started: currentStart }
+}
+
 async function withRuntimeHelper(action: (runtime: string, helper: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), 'pasta-capability-'))
   const runtime = join(root, 'podman'),
@@ -90,21 +109,9 @@ it('waits for the cancelled help process to exit before completing the observati
     type ProcessFact = { pid: number; exited: boolean; identity: string; state?: string }
     let helperIdentity: Identity | undefined, completionFacts: ProcessFact[] | undefined, inspectionError: string | undefined
     const inspect = (pid: number, started: string): ProcessFact => {
-      let stat: string
-      try {
-        stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
-      } catch (error) {
-        if (['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')) return { pid, exited: true, identity: 'exited' }
-        throw error
-      }
-      const fields = stat
-        .slice(stat.lastIndexOf(')') + 2)
-        .trim()
-        .split(/\s+/u)
-      const state = fields[0],
-        currentStart = fields[19]
-      if (state === undefined || currentStart === undefined || !/^\d+$/u.test(currentStart) || !/^[RSDZTWtXxKPI]$/u.test(state))
-        throw new Error('Unrecognized process identity')
+      const identity = readLinuxProcessIdentity(pid)
+      if (!identity) return { pid, exited: true, identity: 'exited' }
+      const { state, started: currentStart } = identity
       if (currentStart !== started) return { pid, exited: true, identity: 'reused' }
       return { pid, exited: ['Z', 'X', 'x'].includes(state), identity: 'fixture', state }
     }
@@ -198,6 +205,53 @@ fs.writeFileSync(${JSON.stringify(ready)},'ready');if(fs.existsSync(release))pro
     }
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) throw new AggregateError(failures, 'Cancellation assertion and owned process cleanup failed')
+  })
+})
+
+it.runIf(process.platform === 'linux')('reaps the terminal help process when it refuses cooperative cancellation', async () => {
+  await withRuntimeHelper(async (runtime, helper) => {
+    const identity = join(dirname(helper), 'helper-pid'),
+      release = join(dirname(helper), 'release'),
+      controller = new AbortController()
+    await writeFile(
+      helper,
+      `#!/usr/bin/env node
+const fs = require('node:fs')
+process.on('SIGTERM', () => {})
+process.on('SIGHUP', () => {})
+setInterval(() => { if (fs.existsSync(${JSON.stringify(release)})) process.exit(0) }, 20)
+fs.writeFileSync(${JSON.stringify(identity)}, String(process.pid))
+`,
+      { mode: 0o700 },
+    )
+    let owned: { pid: number; started: string } | undefined
+    const outcome = readPastaLoopbackMapping(runtime, controller.signal).catch((error: unknown) => error)
+    try {
+      await expect.poll(() => readFile(identity, 'utf8').catch(() => ''), { timeout: 10000 }).toMatch(/^\d+$/u)
+      const pid = Number(await readFile(identity, 'utf8')),
+        processIdentity = readLinuxProcessIdentity(pid),
+        reason = new Error('fixture help cancelled')
+      if (!processIdentity) throw new Error('Initial helper process identity is unavailable')
+      owned = { pid, started: processIdentity.started }
+      controller.abort(reason)
+      const result = await outcome
+      const remainingIdentity = readLinuxProcessIdentity(pid)
+      expect(result).toBe(reason)
+      expect(remainingIdentity?.started).not.toBe(processIdentity.started)
+    } finally {
+      await writeFile(release, '')
+      controller.abort()
+      await outcome
+      if (owned) {
+        const { pid, started } = owned
+        await expect
+          .poll(() => {
+            const current = readLinuxProcessIdentity(pid)
+            return current?.started !== started || ['Z', 'X', 'x'].includes(current.state)
+          })
+          .toBe(true)
+      }
+    }
   })
 })
 

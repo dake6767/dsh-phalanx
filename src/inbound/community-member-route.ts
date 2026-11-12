@@ -3,6 +3,7 @@ import type { CommunityEnvironmentRecovery } from '../use-cases/community-enviro
 import { requestLanguage } from './platform-language.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CommunityEntry } from '../use-cases/community-entry.js'
+import type { NativeFeatures } from '../use-cases/native-features.js'
 import type {
   SignedInAccountView,
   CommunityRestartResult,
@@ -19,6 +20,7 @@ import { communityRecoveryPage } from './community-recovery-page.js'
 export function createCommunityMemberRoute(deps: {
   readonly entry: CommunityEntry
   readonly environment: CommunityEnvironmentRecovery
+  readonly features: Pick<NativeFeatures, 'platformFeatures'>
   readonly accountChoices: (request: IncomingMessage) => Promise<readonly SignedInAccountView[]>
 }) {
   return async (request: IncomingMessage, response: ServerResponse, username: string, origin: URL): Promise<void> => {
@@ -44,6 +46,18 @@ export function createCommunityMemberRoute(deps: {
         const account = await deps.entry.account(username)
         const identity: CommunitySelfIdentity = { username: account.username, admin: account.admin }
         sendCommunityJson(response, 200, identity)
+      } catch (error) {
+        handleCommunityFailure(response, error, true)
+      }
+      return
+    }
+    if (url.pathname === '/account/platform-features') {
+      if (request.method !== 'GET') {
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
+      }
+      try {
+        sendCommunityJson(response, 200, await deps.features.platformFeatures(await deps.entry.account(username)))
       } catch (error) {
         handleCommunityFailure(response, error, true)
       }

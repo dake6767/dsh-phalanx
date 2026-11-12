@@ -129,7 +129,7 @@ it('declares shared model image input and enforces it for prompts and image read
     context,
     page,
     origin,
-    instanceWorkspacePath(defaultWorkspacePath(root, 'alice'), runtime.container !== undefined),
+    instanceWorkspacePath(await defaultWorkspacePath(root, 'alice'), runtime.container !== undefined),
     runtime.container !== undefined,
   )
   const rpc = createRealDshRpc()

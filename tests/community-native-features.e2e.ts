@@ -1,4 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH through the installed public entry.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
+import { createHash } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,12 +9,13 @@ import { expect, it } from 'vitest'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
+import { execFileText } from '../src/adapters/runtime-command.js'
 import { DSH_PATCH_CONFIG, dshWebProfilePath } from '../src/dsh/profile-layout.js'
 import { openNativeSettings, runCommunityTerminal, selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
 import { cleanupOwned, removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { skillZip } from './fixtures/skills/archive.js'
 import { candidateApplication } from './support/candidate-application.js'
+import { appCenterButton, appCenterPanel, refreshAppCenter, setAppCenterVisibility } from './support/app-center-visibility.js'
 import { nativeFeaturePredecessor } from './fixtures/native-feature-predecessor.js'
 import { communityEntryUrl } from './support/community-space.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
@@ -46,12 +49,13 @@ it('applies group terminal choices only on restart, preserves agent and platform
     try {
       const response = await readiness.request.get(origin + '/readyz')
       expect(response.status(), await response.text()).toBe(200)
+      expect((await readiness.request.get(origin + '/account/platform-features', { maxRedirects: 0 })).status()).toBe(401)
     } finally {
       await readiness.close()
     }
     // Let the real upgrade establish storage ownership before publishing member files.
     for (const username of ['admin', 'member', 'peer']) {
-      const home = join(effectiveUserDataRoot({ dataRoot: root }), username, 'home')
+      const home = join(await memberSpacePath(root, username), 'home')
       await mkdir(join(home, 'Documents/deepseek-harness/default-workspace'), { recursive: true, mode: 0o700 })
       await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'skills-observer.mjs'))
     }
@@ -73,7 +77,11 @@ it('applies group terminal choices only on restart, preserves agent and platform
     for (const id of ['admin', 'default', other.id]) {
       const state = await api(`groups/${id}/native-features`)
       expect(state.features.every((feature: { enabled: boolean }) => feature.enabled)).toBe(true)
+      expect(state.showAppCenter).toBe(false)
     }
+    await api('groups', { action: 'create', name: 'New team' })
+    const newGroup = (await api('groups')).find((group: { name: string }) => group.name === 'New team')
+    expect((await api(`groups/${newGroup.id}/native-features`)).showAppCenter).toBe(false)
     const select = async (id: string, disabledIds: string[]) => {
       const state = await api(`groups/${id}/native-features`)
       await api(`groups/${id}/native-features`, { revision: state.revision, disabledIds })
@@ -122,10 +130,49 @@ it('applies group terminal choices only on restart, preserves agent and platform
       }
     }
     await signInCommunity(page, origin, 'member', 'password')
+    await refreshAppCenter(page, false)
+    const memberCarrier = async () =>
+      (
+        await execFileText(runtimeSettings.containerRuntimeCli, [
+          'ps',
+          '--filter',
+          `label=dsh-phalanx.community-root=${createHash('sha256').update(root).digest('hex')}`,
+          '--filter',
+          'label=dsh-phalanx.user=member',
+          '--format',
+          '{{.ID}}',
+        ])
+      ).trim()
+    const running = await memberCarrier()
+    expect(running).toMatch(/^[a-f0-9]+$/u)
+    await adminPage.getByRole('link', { name: 'Group management', exact: true }).click()
+    await adminPage.getByRole('row').filter({ hasText: 'Default group' }).getByRole('button', { name: 'Details', exact: true }).click()
+    const dialog = adminPage.getByRole('dialog', { name: 'Default group', exact: true })
+    await dialog.getByRole('tab', { name: 'Feature settings', exact: true }).click()
+    await dialog.getByText('Show Platform App Center', { exact: true }).click()
+    await dialog.getByRole('button', { name: 'Save changes', exact: true }).click()
+    await dialog.getByText('Feature settings saved.', { exact: true }).waitFor()
+    await dialog.getByRole('button', { name: 'Close group details', exact: true }).filter({ hasText: 'Close group details' }).click()
+    expect(await appCenterButton(page).count()).toBe(0)
+    await refreshAppCenter(page, true)
+    await appCenterButton(page).click()
+    await appCenterPanel(page).waitFor()
+    expect(await memberCarrier()).toBe(running)
+    const settingsPath = '**/account/platform-features'
+    await page.route(settingsPath, route => route.fulfill({ status: 503, json: { error: 'Fixture feature settings unavailable' } }))
+    const unavailable = page.waitForResponse(response => new URL(response.url()).pathname === '/account/platform-features')
+    await page.reload()
+    expect((await unavailable).status()).toBe(503)
+    await page.getByRole('button', { name: /^Platform account:/u }).waitFor()
+    expect(await appCenterButton(page).count()).toBe(0)
+    expect(await appCenterPanel(page).count()).toBe(0)
+    expect(await memberCarrier()).toBe(running)
+    await page.unroute(settingsPath)
+    await refreshAppCenter(page, true)
     await terminal(member, true)
     await select('default', ['terminal'])
     await terminal(member, true) // Saving does not change the running instance.
-    const home = join(effectiveUserDataRoot({ dataRoot: root }), 'member', 'home')
+    const home = join(await memberSpacePath(root, 'member'), 'home')
     await writeFile(
       join(dshWebProfilePath(home), DSH_PATCH_CONFIG),
       JSON.stringify([
@@ -205,6 +252,8 @@ it('applies group terminal choices only on restart, preserves agent and platform
       variables: [{ name: 'NATIVE_FEATURE_EXECUTION', value: 'platform-fixture', secret: false }],
     })
     await expect.poll(async () => (await api('skills/execution?name=native-execution')).preparation?.stage).toBe('ready')
+    await setAppCenterVisibility(admin.request, origin, 'default', false)
+    await refreshAppCenter(page, false)
     expect(await bash('test -z "${NATIVE_FEATURE_EXECUTION-}" && printf \'NATIVE_AGENT_SHELL_OK\\n\'')).toMatchObject({
       exitCode: 0,
       stdout: { text: 'NATIVE_AGENT_SHELL_OK\n' },
@@ -213,7 +262,10 @@ it('applies group terminal choices only on restart, preserves agent and platform
       exitCode: 0,
       stdout: { text: 'NATIVE_PLATFORM_EXECUTION_OK\n' },
     })
+    await setAppCenterVisibility(admin.request, origin)
+    await refreshAppCenter(page, true)
     await signInCommunity(peerPage, origin, 'peer', 'password')
+    await refreshAppCenter(peerPage, false)
     await terminal(peer, true)
     await selectCommunityWorkspace(peer, peerPage, origin, CONTAINER_HOME + '/Documents/deepseek-harness/default-workspace', true)
     await runCommunityTerminal(peerPage, "printf 'PEER_TERMINAL_%s\\n' OK", 'PEER_TERMINAL_OK')
@@ -221,10 +273,20 @@ it('applies group terminal choices only on restart, preserves agent and platform
     const [adminDsh] = await Promise.all([admin.waitForEvent('page'), adminPage.getByRole('link', { name: 'Open admin’s DSH', exact: true }).click()])
     await adminDsh.waitForURL(url => /^\/app\/[^/]+\/$/u.test(url.pathname))
     await adminDsh.getByRole('button', { name: /^Platform account:/u }).waitFor()
+    await refreshAppCenter(adminDsh, false)
     await adminDsh.close()
     await terminal(admin, false)
     const memberAccount = (await api('accounts')).items.find((account: { username: string }) => account.username === 'member')
+    const beforeMove = await memberCarrier()
+    await appCenterButton(page).click()
+    await appCenterPanel(page).waitFor()
     await api('accounts/member/actions', { action: 'set-email', email: memberAccount.email, groupId: other.id })
+    await appCenterPanel(page).waitFor()
+    await refreshAppCenter(page, false)
+    expect(await memberCarrier()).toBe(beforeMove)
+    await setAppCenterVisibility(admin.request, origin, other.id)
+    await refreshAppCenter(page, true)
+    expect(await memberCarrier()).toBe(beforeMove)
     await terminal(member, false)
     await restart(member)
     await terminal(member, true)

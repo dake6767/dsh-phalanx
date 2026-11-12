@@ -1,4 +1,6 @@
 // Validation: T4 only; real credentials: required (DeepSeek, AnySearch, MiniMax and Amap). Never selected by T2.
+import { setAppCenterVisibility } from './support/app-center-visibility.js'
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -8,7 +10,6 @@ import { expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import type { UsageRecord } from '../src/domain/usage-record.js'
 import { sendCommunityPrompt, signInCommunity } from './fixtures/community-native-browser.js'
 import { packRealExpertSearch, realExpertSearchPackage, realExpertSearchTool } from './fixtures/expert-real-search.js'
@@ -64,8 +65,7 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
   await mkdir(evidence, { recursive: true, mode: 0o700 })
   const receipt = async (name: string, value: object) =>
     writeFile(join(evidence, 'expert-' + name + '.json'), safe(JSON.stringify(value, null, 2)) + '\n', { mode: 0o600 })
-  const root = await mkdtemp(join(tmpdir(), 'real-expert-combination-')),
-    home = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home')
+  const root = await mkdtemp(join(tmpdir(), 'real-expert-combination-'))
   let phase = 'prepare',
     exposed = false,
     passed = false,
@@ -187,6 +187,7 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
     })
     const provider = configured.providers.find((row: { name: string }) => row.name === 'Expert DeepSeek')
     const account = await api('accounts', { username: 'member', password: 'password', email: '' })
+    const home = join(await memberSpacePath(root, 'member'), 'home')
     await mkdir(home, { recursive: true, mode: 0o700 })
     await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'observer.mjs'))
     await stage('libraries')
@@ -241,6 +242,7 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
       .toMatch(/^(ready|failed)$/u)
     expect((await api('mcp')).find((row: { name: string }) => row.name === 'p-amap')?.catalog).toMatchObject({ id: 'amap', version: '1', status: 'ready' })
     expect((await api('mcp/test', { name: 'p-amap' })).testStatus).toBe('passed')
+    await setAppCenterVisibility(admin.request, origin)
     await signInCommunity(member, origin, 'member', 'password')
     const cookie = await cookieHeader(member.context(), origin),
       rpc = createBrowserDshRpc(member.context())
@@ -320,7 +322,7 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
       member,
       'Use this expert to prepare a small commerce campaign. First call expert_anysearch_domains and report a real catalog fact. Call mcp__p-amap__maps_weather for city 110000 and use the actual Beijing weather. Read the supplied MiniMax/mmx skill, then use its documented mmx image command through the supplied platform execution to generate one square image of a blue circle on white, saving its actual bytes as expert-campaign.png in this workspace and preserving its native encoding. Do not install, authenticate, ask for keys, print environment or credentials, or create a placeholder image. Use all three capabilities, then summarize the campaign.',
     )
-    const image = join(defaultWorkspacePath(root, 'member'), 'expert-campaign.png')
+    const image = join(await defaultWorkspacePath(root, 'member'), 'expert-campaign.png')
     const validImage = async () => {
       try {
         const bytes = await readFile(image)

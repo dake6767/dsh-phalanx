@@ -1,4 +1,5 @@
 // Validation: T4 integration; real credentials: none; exact historical amd64 artifacts required. Not part of the approved T2 batch.
+import { refreshAppCenter, setAppCenterVisibility } from './support/app-center-visibility.js'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
@@ -211,6 +212,9 @@ it.skipIf(!baselineRoot || !baselineImage || !runtimeSettings.containerImage)(
       await signInCommunity(upgraded, origin, 'member', 'password')
       expect(new URL(upgraded.url()).pathname).toBe(memberEntry)
       await assertPlugins()
+      await refreshAppCenter(upgraded, false)
+      await setAppCenterVisibility(admin.request, origin)
+      await refreshAppCenter(upgraded, true)
       await upgraded.getByRole('button', { name: 'Platform App Center', exact: true }).click()
       for (const name of ['Plugins', 'Skills', 'MCP services']) await upgraded.getByRole('tab', { name, exact: true }).waitFor()
       await upgraded.getByRole('tab', { name: 'Skills', exact: true }).click()

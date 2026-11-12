@@ -8,7 +8,7 @@ import {
   recoverManagedDatabaseSwitch,
   switchPlatformDatabase,
 } from '../adapters/platform-database-switch.js'
-import { pluginBudgetRows, registeredSchemaVersions, savedDownloadSources } from '../adapters/platform-facts.js'
+import { pluginBudgetRows, registeredSchemaVersions, savedDownloadSources, verifiedUserStorage } from '../adapters/platform-facts.js'
 import { platformKeyFingerprint, resetPlatformKey, rotatePlatformKey } from '../adapters/platform-key-operations.js'
 import { PlatformDatabaseError } from '../domain/platform-database.js'
 import { parseCommunityCommand } from '../inbound/community-command.js'
@@ -73,7 +73,9 @@ async function main(): Promise<void> {
           ? { selection: (await savedDownloadSources(command.configFile, command.dataRoot)) ?? null }
           : command.fact === 'schemas'
             ? { schemas: await registeredSchemaVersions(command.configFile, command.dataRoot) }
-            : { schema: 1, plugins: await pluginBudgetRows(command.configFile, command.dataRoot) }
+            : command.fact === 'user-storage'
+              ? await verifiedUserStorage(command.configFile, command.dataRoot)
+              : { schema: 1, plugins: await pluginBudgetRows(command.configFile, command.dataRoot) }
       console.log(JSON.stringify(value))
     } catch (error) {
       console.error(error instanceof Error ? error.message : 'Platform facts are unavailable')

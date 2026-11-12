@@ -2,6 +2,8 @@
 export const DSH_BUNDLE_LIST = 'pluginManager/listBundles'
 export const DSH_BUNDLE_INSTALL = 'pluginManager/installBundle'
 export const DSH_BUNDLE_ENABLE = 'pluginManager/setBundleEnabled'
+export const DSH_BUNDLE_UPDATE = 'pluginManager/updateBundle'
+export const DSH_PLUGIN_ENABLE = 'pluginManager/setPluginEnabled'
 export const DSH_BUNDLE_REMOVE = 'pluginManager/removeBundle'
 
 /** Read only public official optional-bundle state, rejecting malformed native inventory. */

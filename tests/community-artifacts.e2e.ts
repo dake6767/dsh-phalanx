@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { showAppCenterForFixture } from './support/app-center-visibility.js'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, open, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -59,9 +60,10 @@ it('downloads current originals from native delivery cards and document actions 
   const page = await context.newPage()
   page.setDefaultTimeout(45000)
   try {
+    await showAppCenterForFixture(origin, 'fixtureadmin', 'password')
     await signInCommunity(page, origin, 'alice', 'password')
     console.log('artifacts signed in')
-    const workspace = defaultWorkspacePath(root, 'alice')
+    const workspace = await defaultWorkspacePath(root, 'alice')
     await mkdir(workspace, { recursive: true })
     for (const file of names.slice(0, 2)) await cp(new URL(`./fixtures/artifacts/${file.split('/').at(-1)}`, import.meta.url), join(workspace, file))
     await writeFile(

@@ -148,6 +148,16 @@ it('serves only the checked bytes to the same authenticated member before expiry
     expect(reads).toBe(1)
     expect((await get('alice-token', 'HEAD')).status).toBe(200)
     expect(reads).toBe(1)
+    let updateEligible = true
+    const update = await downloads.issueUpdate({ username: 'alice', spaceId: 'alice', sessionEpoch: 0 }, prepared.packageName, async () => () => updateEligible)
+    expect((await get('alice-token', 'GET', update.authorizationUrl)).status).toBe(405)
+    expect((await get('bob-token', 'HEAD', update.authorizationUrl)).status).toBe(403)
+    expect(await get('alice-token', 'HEAD', update.authorizationUrl)).toEqual({ status: 204, body: '' })
+    expect(reads).toBe(1)
+    updateEligible = false
+    expect((await get('alice-token', 'HEAD', update.authorizationUrl)).status).toBe(409)
+    update.release()
+    expect((await get('alice-token', 'HEAD', update.authorizationUrl)).status).toBe(403)
     expect((await get('bob-token')).status).toBe(403)
     expect((await get('unknown')).status).toBe(403)
     expect((await get('alice-token', 'POST')).status).toBe(405)

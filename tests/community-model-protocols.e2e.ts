@@ -114,7 +114,7 @@ describe('shared model gateway protocols through native DSH', () => {
         context,
         page,
         origin,
-        instanceWorkspacePath(defaultWorkspacePath(root, 'member'), runtime.container !== undefined),
+        instanceWorkspacePath(await defaultWorkspacePath(root, 'member'), runtime.container !== undefined),
         runtime.container !== undefined,
       )
       const prompt = 'Return the deterministic fixture marker.'

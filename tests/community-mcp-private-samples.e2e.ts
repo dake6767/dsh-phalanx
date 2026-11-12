@@ -1,4 +1,5 @@
 // Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
+import { showAppCenterForFixture } from './support/app-center-visibility.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, lstat, mkdtemp, readdir, writeFile } from 'node:fs/promises'
@@ -203,6 +204,7 @@ for (const sample of samples) {
         expect(login.status).toBe(303)
         let member = cookie(login)
         if (service.name === 'p-amap') {
+          await showAppCenterForFixture(origin, 'admin', 'password')
           memberBrowser = await chromium.launch({ headless: true })
           const page = await memberBrowser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } })
           page.setDefaultTimeout(60000)

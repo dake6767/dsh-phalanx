@@ -82,13 +82,13 @@ class InstallerExperience(unittest.TestCase):
             host.port_conflict = lambda address, port, **kwargs: 'fixture unrelated listener' if port == 3081 else None
             host.request = lambda *args, **kwargs: b'login'
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(error := io.StringIO()):
-                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
+                self.assertEqual(installer.main([*args, "--language", "en", "--output", "json"], host), 0)
             self.assertIn('using 3082', error.getvalue())
             config = machine.root / 'etc/dsh-phalanx/environment'
             self.assertIn('DSH_PHALANX_CONTAINER_GATEWAY_PORT="3082"', config.read_text())
             original = config.read_bytes()
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
+                self.assertEqual(installer.main([*args, "--language", "en", "--output", "json"], host), 0)
             self.assertEqual(config.read_bytes(), original)
 
     def test_explicit_or_entry_port_conflicts_fail_without_modifying_the_host(self):
@@ -99,7 +99,7 @@ class InstallerExperience(unittest.TestCase):
                 host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
                 host.port_conflict = lambda address, number, **kwargs: 'fixture unrelated listener' if number == port else None
                 with contextlib.redirect_stderr(error := io.StringIO()):
-                    self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
+                    self.assertEqual(installer.main([*args, "--language", "en", "--output", "json"], host), 1)
                 self.assertIn(flag, error.getvalue())
                 self.assertIn('No occupying process was stopped', error.getvalue())
                 self.assertEqual(machine.calls, [])

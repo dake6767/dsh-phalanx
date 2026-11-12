@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp } from 'node:fs/promises'
@@ -8,7 +9,6 @@ import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { MODEL_GATEWAY_PATH } from '../src/dsh/model-protocol.js'
 import { SESSION_LIST } from '../src/dsh/session-protocol.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
@@ -21,7 +21,7 @@ import { openTestAccounts } from './support/community-application.js'
 import { communityEntryUrl } from './support/community-space.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { cookieHeader, createRealDshRpc, rpcBody } from './support/real-dsh-rpc.js'
-import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
+import { assertPinnedDshRevision, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 
 let root: string | undefined
 let application: CommunityApplication | undefined
@@ -74,7 +74,7 @@ it('keeps two rootless native user spaces isolated and rebuilds their own files 
       const context = await newValidationContext(browser!)
       const page = await context.newPage()
       await signInCommunity(page, origin, username, 'password')
-      await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root!, username), true), true)
+      await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath('', true), true)
       return { username, context, page }
     }),
   )
@@ -125,7 +125,7 @@ it('keeps two rootless native user spaces isolated and rebuilds their own files 
     expect((await list(world, origin)).items.some(item => item.sessionId === sessions[1 - i]!.sessionId)).toBe(false)
     await sendCommunityTerminal(
       world.page,
-      `if [ ! -e '${join(effectiveUserDataRoot({ dataRoot: root }), other.username, 'home')}' ] && [ ! -e '${join(effectiveUserDataRoot({ dataRoot: root }), other.username, 'workspace')}' ] && [ -z "\${DSH_PHALANX_MODEL_UPSTREAM_API_KEY-}" ]; then printf '\\111\\123\\117\\114\\101\\124\\105\\104'; fi`,
+      `if [ ! -e '${join(await memberSpacePath(root, other.username), 'home')}' ] && [ ! -e '${join(await memberSpacePath(root, other.username), 'workspace')}' ] && [ -z "\${DSH_PHALANX_MODEL_UPSTREAM_API_KEY-}" ]; then printf '\\111\\123\\117\\114\\101\\124\\105\\104'; fi`,
       'ISOLATED',
     )
     await Promise.all(
@@ -166,7 +166,7 @@ it('keeps two rootless native user spaces isolated and rebuilds their own files 
   for (let i = 0; i < worlds.length; i++) {
     const world = worlds[i]!
     await signInCommunity(world.page, restarted, world.username, 'password')
-    await selectCommunityWorkspace(world.context, world.page, restarted, instanceWorkspacePath(defaultWorkspacePath(root, world.username), true), true)
+    await selectCommunityWorkspace(world.context, world.page, restarted, instanceWorkspacePath('', true), true)
     await runCommunityTerminal(
       world.page,
       `if [ "$(cat user-space.txt)" = '${world.username}' ]; then printf '\\122\\105\\123\\124\\117\\122\\105\\104'; fi`,

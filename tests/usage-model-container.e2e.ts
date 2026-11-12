@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; installed platform and real rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
@@ -52,14 +52,8 @@ it('shows native shared-model totals and ends an installed local 402 refusal wit
   await once(model, 'listening')
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
   const runtime = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings)
-  const home = join(effectiveUserDataRoot(runtime), 'member/home'),
-    overlay = join(root, 'observer.json')
-  await writeFile(
-    overlay,
-    JSON.stringify([
-      { insert: [{ id: 'model-usage-observer', name: 'container' in runtime ? '/dsh-phalanx/home/observer.mjs' : join(home, 'observer.mjs') }] },
-    ]),
-  )
+  const overlay = join(root, 'observer.json')
+  await writeFile(overlay, '[]')
   runtime.patches.push(overlay)
   const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'model-usage-installed-acceptance-secret', runtime }
   let app: CommunityApplication | undefined, browser: Browser | undefined, failure: unknown
@@ -121,6 +115,13 @@ it('shows native shared-model totals and ends an installed local 402 refusal wit
     })
     const modelId = models.defaultModelId
     await api('accounts', { username: 'member', password: 'password', email: '' })
+    const home = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home')
+    await writeFile(
+      overlay,
+      JSON.stringify([
+        { insert: [{ id: 'model-usage-observer', name: 'container' in runtime ? '/dsh-phalanx/home/observer.mjs' : join(home, 'observer.mjs') }] },
+      ]),
+    )
     await mkdir(home, { recursive: true })
     await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'observer.mjs'))
     let member = await browser.newPage({ locale: 'en' })
@@ -130,7 +131,7 @@ it('shows native shared-model totals and ends an installed local 402 refusal wit
       const rpc = createBrowserDshRpc(member.context()),
         cookie = await cookieHeader(member.context(), origin)
       const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', {
-        request: { cwd: instanceWorkspacePath(defaultWorkspacePath(runtime.dataRoot, 'member'), 'container' in runtime) },
+        request: { cwd: instanceWorkspacePath(await defaultWorkspacePath(runtime.dataRoot, 'member'), 'container' in runtime) },
       })
       await rpc.remoteRpc(origin, cookie, 'session/prompt', {
         request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text }] },

@@ -198,12 +198,27 @@ export class PluginLibrary {
     const row = await this.required(input.packageName)
     assertPluginSource(row, source)
     if (row.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
-    // An uploaded replacement keeps the recorded version identity: same version with different content is refused.
-    const known = pluginIdentities(row)[input.version]
+    // A pinned GitHub commit identifies new content even when the npm version is unchanged.
+    const previous = row.current
+    const pinnedGithubUpdate = source.kind === 'github' && sourceCommit !== undefined
+    const versionIntegrity = pluginIdentities(row)[input.version]
+    const legacyKey = 'legacy:' + input.version
+    const legacy = row.identities?.[legacyKey] ?? (previous?.version === input.version ? previous.integrity : versionIntegrity)
+    const known = pinnedGithubUpdate
+      ? previous?.sourceCommit === sourceCommit
+        ? previous.integrity
+        : row.identities?.['github:' + sourceCommit]
+      : versionIntegrity
     if (input.upload && known !== undefined && known !== input.upload.integrity)
       throw new BusinessRuleError('conflict', 'This version already has different content.', 'plugin-version-conflict')
     const replacement = { ...input, stage: 'resolving' as const, prepared: null }
-    const identities = { ...pluginIdentities(row), ...(input.upload ? { [input.version]: input.upload.integrity } : {}) }
+    const identities = {
+      ...pluginIdentities(row),
+      ...(pinnedGithubUpdate && legacy ? { [legacyKey]: legacy } : {}),
+      ...(pinnedGithubUpdate && previous ? { [previous.version + ':' + previous.integrity]: previous.integrity } : {}),
+      ...(pinnedGithubUpdate && previous?.sourceCommit ? { ['github:' + previous.sourceCommit]: previous.integrity } : {}),
+      ...(input.upload ? { [input.version]: input.upload.integrity } : {}),
+    }
     await this.store.save({ ...row, identities, replacement })
     this.track(input.packageName, signal =>
       this.prepare(
@@ -396,7 +411,11 @@ export class PluginLibrary {
         signal,
       )
       signal.throwIfAborted()
-      assertPreparedPlugin(row, prepared, pluginIdentities(await this.required(row.packageName))[prepared.version])
+      assertPreparedPlugin(
+        row,
+        prepared,
+        sourceCommit !== undefined ? row.upload?.integrity : pluginIdentities(await this.required(row.packageName))[prepared.version],
+      )
       const ready = { ...row }
       delete ready.incompatible
       delete ready.failureCode

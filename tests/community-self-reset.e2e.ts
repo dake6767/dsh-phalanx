@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; installed rootless DSH; also manual pinned development DSH.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -104,7 +105,7 @@ it('resets through the native recovery link while preserving projects and chat, 
   await signInCommunity(page, origin, 'alice', 'password')
   const entry = page.url(),
     spaceId = previous[0]!.spaceId
-  await selectCommunityWorkspace(memberContext, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'alice'), containerMode), containerMode)
+  await selectCommunityWorkspace(memberContext, page, origin, instanceWorkspacePath(await defaultWorkspacePath(root, 'alice'), containerMode), containerMode)
   await runCommunityTerminal(page, 'printf SELF_PROJECT > keep-project.txt; printf SELF_HOME > "$HOME/keep-home.txt"; printf FILES_SAVED', 'FILES_SAVED')
   const session = await startCommunitySession(page)
   await sendCommunityPrompt(page, 'KEEP_SELF_RESET_CHAT')
@@ -116,7 +117,7 @@ it('resets through the native recovery link while preserving projects and chat, 
   await page.waitForURL(origin + '/recovery')
   await page.route('**/admin/assets/**', route => route.abort())
   expect(await page.locator('script[src]').count()).toBe(0)
-  const home = join(effectiveUserDataRoot({ dataRoot: root }), 'alice/home'),
+  const home = join(await memberSpacePath(root, 'alice'), 'home'),
     patch = join(dshWebProfilePath(home), DSH_PATCH_CONFIG)
   await writeFile(patch, 'broken-self-profile: true\n')
   const form = page.locator('#reset-environment')
@@ -140,7 +141,7 @@ it('resets through the native recovery link while preserving projects and chat, 
   expect(await page.locator('#reset-status').textContent()).not.toContain(root)
   await page.getByRole('link', { name: 'Return to DSH', exact: true }).click()
   await page.getByRole('button', { name: /^Platform account:/u }).waitFor()
-  await selectCommunityWorkspace(memberContext, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'alice'), containerMode), containerMode)
+  await selectCommunityWorkspace(memberContext, page, origin, instanceWorkspacePath(await defaultWorkspacePath(root, 'alice'), containerMode), containerMode)
   await openCommunitySession(page, session)
   await page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
   await runCommunityTerminal(page, 'cat keep-project.txt "$HOME/keep-home.txt"', 'SELF_PROJECTSELF_HOME')

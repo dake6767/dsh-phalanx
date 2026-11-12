@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { PluginPreparationError } from '../src/domain/plugin-library.js'
 import { cleanupPluginHttpFixture, pluginHttpFixture } from './support/plugin-http.js'
@@ -244,7 +243,7 @@ it('checks GitHub commits on request, prompts even when the version number did n
   expect(fixture.requests).toEqual([])
 })
 
-it('keeps a GitHub plugin unchanged when the source is unreachable, the packed name moved, or the version content conflicts', async () => {
+it('keeps a GitHub plugin unchanged on source errors and stages new checked content at the same version', async () => {
   const fixture = await pluginHttpFixture()
   fixture.github.setRepository('example/stable', { commit, files: githubFiles() })
   await addGithub(fixture, 'example/stable')
@@ -263,18 +262,17 @@ it('keeps a GitHub plugin unchanged when the source is unreachable, the packed n
   expect(await json(await fixture.request('plugins/change', { action: 'update', packageName: '@fixture/github-skin' }), 400)).toMatchObject({
     code: 'plugin-package-invalid',
   })
-  // A new commit that kept its version number packs different bytes; the recorded version identity refuses them.
+  // Different checked content at the same version stays staged until explicitly selected.
+  const previous = await plugin(fixture, '@fixture/github-skin')
   fixture.github.setRepository('example/stable', { commit: next, files: githubFiles({}, { 'src/index.js': 'export const changed = true' }) })
-  expect(await json(await fixture.request('plugins/change', { action: 'update', packageName: '@fixture/github-skin' }), 409)).toMatchObject({
-    code: 'plugin-version-conflict',
-  })
-  expect(await plugin(fixture, '@fixture/github-skin')).toMatchObject({
-    currentVersion: '0.1.15-settings.4',
-    sourceCommit: commit,
-    stage: 'available',
-  })
-  expect(await plugin(fixture, '@fixture/github-skin')).not.toHaveProperty('replacement')
-  // Rejected updates release their packed archive; only the adopted one stays retained.
-  const { readdir } = await import('node:fs/promises')
-  expect(await readdir(join(fixture.dataRoot, 'plugins/uploads/archives'))).toHaveLength(1)
+  await json(await fixture.request('plugins/change', { action: 'update', packageName: '@fixture/github-skin' }), 202)
+  await expect.poll(async () => ((await plugin(fixture, '@fixture/github-skin'))?.replacement as { stage?: string })?.stage).toBe('available')
+  expect(await plugin(fixture, '@fixture/github-skin')).toMatchObject({ integrity: previous?.integrity, sourceCommit: commit })
+  const impact = await fixture.get('plugins/impact?packageName=' + encodeURIComponent('@fixture/github-skin'))
+  const selected = await json(
+    await fixture.request('plugins/change', { action: 'select', packageName: '@fixture/github-skin', revision: impact.revision, confirmed: true }),
+    200,
+  )
+  expect(selected).toMatchObject({ currentVersion: '0.1.15-settings.4', sourceCommit: next })
+  expect(selected.integrity).not.toBe(previous?.integrity)
 })

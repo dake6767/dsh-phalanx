@@ -240,9 +240,34 @@ checksums, tag commit and image identity must agree. The image is pulled from
 `ghcr.io/dake6767/dsh-phalanx` by digest. Installation does not register an
 automatic updater. Anonymous public download and pull are verified at release.
 
-No model key is required. Confirm the proposed browser address (or
-supply `--public-origin`) and the complete public IPv4 inventory, including NAT
-aliases. Submit an empty inventory only when the host has no public IPv4 addresses.
+No model key is required. The first screen chooses Simplified Chinese or English,
+with Chinese as the default; use `--language en` to select English explicitly.
+Choose Official (the default), Mainland China or custom download sources before
+the first release lookup. Language does not change the source. Supply the server
+access IP and entry port (default 18080), then accept the suggested HTTP browser
+URL or enter the actual HTTP/HTTPS domain. The URL does not configure certificates
+or a reverse proxy. Bracketed values are defaults; press Enter to accept them.
+Advanced gateway/storage settings are optional; invalid input stays on its
+question, and the summary supports editing or cancellation.
+
+Port forwarding/public NAT is a separate declaration, defaulting to No when
+confirmed with Enter. An explicit empty `--host-public-addresses ''` means no
+additional public ingress aliases; it permits normal public egress while host,
+private, loopback and declared NAT targets remain protected. An undeclared
+inventory continues to block member egress. The server access IP and a shared
+public egress address are not substitutes for the mapping declaration.
+
+For unattended installation, provide explicit facts and disable terminal input:
+
+```sh
+sudo bash install.sh --non-interactive --language en \
+  --public-origin http://192.0.2.10:18080 --host-public-addresses '' --output json
+```
+
+Replace the example origin with the deployment's actual browser address. JSON
+selects structured output; `--non-interactive` disables questions even with a
+terminal. Upgrade interruption still requires its separate `--yes` confirmation.
+
 The installer prints an `initializationUrl`. Open it in a browser, enter an
 administrator username and password, and sign in automatically to the optional first-model form. Email is optional. Save one provider and one enabled default model, or choose **Skip for now and finish installation** to enter `/admin`. Only configuration format is checked; saving does not verify that the model can answer. Existing deployments are not redirected into this step.
 If you skip, the management page shows the unconfigured model state; terminals and workspaces
@@ -631,9 +656,15 @@ mounts. Existing directories retain their durable mappings. Changing storage on 
 existing deployment requires an explicit migration; editing or removing the variable
 does not move data. Back up both roots, configuration and permissions together.
 
+Every new account, including the first administrator, stores its home and workspace under `_spaces/<spaceId>` in the user data root. Existing accounts keep their stored directory mapping; no old directory is moved or removed.
+
 The management API exposes a persistent opaque `spaceId`. Recreating a deleted
 username creates a different space and does not restore its files, sessions or model
 access credentials. Upgrading the session format requires signing in again.
+
+In Account management, the member row's **More actions** menu starts with **Switch to this member’s DSH**. It fixes the target username and requires that account's password. Errors leave the administrator signed in; Cancel returns to account management. Success opens the target DSH, including administrator targets, and preserves the original administrator in the browser's remembered accounts. A full ten-account list refuses the switch without displacing an account.
+
+The same menu offers **Start instance** for a stopped member or **Restart instance** for a running member, immediately above environment reset. Restart requires confirmation that tasks will be interrupted and retains configuration, plugins and persistent files. Disabled accounts and instances with an operation in progress cannot be started or restarted. Refresh the page if another operator changes the state.
 
 Members enter `/app/<spaceId>/` after login. The old root entry redirects there;
 administrators retain `/admin` and its Open DSH link. The platform checks the
@@ -867,7 +898,49 @@ Reinstallation preserves that protected setting and refuses a conflicting option
 
 ## Service management and recovery
 
-Run these commands on the installed host. They operate only on the installer's user service:
+Use the global deployment command on the installed Linux host:
+
+```sh
+sudo dsh-phalanx status
+sudo dsh-phalanx stop
+sudo dsh-phalanx start
+sudo dsh-phalanx stop --yes --language en --output json
+```
+
+`status` is read-only and reports the platform, member instances, built-in database and update/maintenance workers separately. Partial or failed observations return a nonzero exit code. `stop` interrupts member tasks and asks for confirmation in an interactive terminal; automation must explicitly pass `--yes`. It stops verified services, member containers and independent maintenance workers owned by this deployment, retaining data, keys and original boot startup settings. External databases, shared HTTPS edges and other deployments remain separately managed. `start` uses the existing configuration and resident-instance policy; interrupted tasks do not resume automatically. Repeating an action when its target state is already reached does not restart components.
+
+Start and stop refuse conflicts with installation, update or database maintenance. Complete or recover that operation first. If a stop partly fails, inspect its component results, correct the condition and retry; partial success does not confirm a whole-deployment shutdown.
+
+### Uninstall and recover a deployment
+
+```sh
+sudo dsh-phalanx uninstall
+sudo dsh-phalanx uninstall --purge
+```
+
+Default uninstall stops the deployment, removes the managed programs and services,
+and disables deployment autostart. It retains the member spaces, platform
+database, matching master key, protected configuration and recovery receipt
+together. Keep that set intact. The command reports the exact release to reinstall
+with `sudo bash install.sh --version <reported-release>`. Use the corresponding
+verified installer and release assets. The installer checks the retained
+configuration and key before starting the deployment.
+
+Use `--purge` to explicitly remove verified local deployment data, including
+the built-in database and the dedicated member directory on an external volume.
+The command lists its scope before confirmation. After default uninstall, run
+`sudo bash install.sh --uninstall --purge` with the verified installer to manage
+retained data. External PostgreSQL, system accounts and dependencies, shared
+resources and the external volume itself are retained. Keep the configured data
+volume mounted. If the deployment database could not verify the external member
+directory before uninstall, reinstall and start the retained release to verify
+that binding before purging. Use `--yes` for confirmed noninteractive execution.
+
+A nonzero exit reports an incomplete operation. Correct the named condition and
+retry the same uninstall or purge command. If the global command has already
+been removed, use the corresponding `install.sh --uninstall` command to resume.
+
+These lower-level commands operate only on the platform user service and support restarting it after configuration changes:
 
 ```sh
 sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user status dsh-phalanx.service
@@ -890,7 +963,7 @@ keep the private platform data root when backing up or moving the installation.
 Application profiles already blocked by stale locks require the application's
 own recovery procedure; the platform does not remove locks from member files.
 Account deletion also
-preserves files; data erasure and disaster recovery automation are not supplied.
+preserves files. See the deployment uninstall procedure above for local data removal.
 
 For a failed installation, retain configuration/data, inspect the named failure,
 correct network/dependency/port problems and rerun the same verified version.
@@ -902,13 +975,16 @@ Automatic reverse migration of data written by a newer DSH is not provided.
 
 ## Configuration and supported scope
 
-The first-run flags are shown by `bash install.sh --help`: upstream URL/provider/model,
-protected key file, public IPv4 inventory, listener/port, exact public origin and
-private gateway port. Defaults are DeepSeek official `deepseek-chat`, backend
-`0.0.0.0:18080`, gateway loopback3081 and container mode. `--gateway-port` changes
-the private port, not its bind address. Behind HTTPS set the exact public origin
-including its external port. A complete public IPv4 inventory prevents user
-proxies from reaching declared host aliases; missing facts close external proxy access.
+The first-run flags are shown by `bash install.sh --help`: language, noninteractive
+input, download sources, server access IP, public mapping declaration, listener,
+entry port, exact browser origin and internal gateway/storage settings. The
+backend defaults to `0.0.0.0:18080`, gateway loopback 3081 and container mode.
+Configure models in administration after initialization. `--gateway-port` changes
+the internal port, not its bind address. Behind HTTPS set the exact browser origin
+including its external port. An explicit empty mapping declaration permits public
+egress; known host/private/loopback targets and declared aliases remain denied.
+Missing declarations fail external proxy access closed.
+
 
 This installer supports Debian-family amd64 hosts subject to the [host requirements](#host-requirements). Mac process development
 is documented in [the contribution guide](../CONTRIBUTING.md) and has no container isolation guarantee.
@@ -996,11 +1072,13 @@ receipt's recovery instructions; do not erase binding facts to bypass a missing 
 
 ## Installer output and diagnostics
 
-The default is an English completion summary, including when redirected. Stages,
+The default is a Chinese completion summary, including when redirected; select
+English with `--language en`. Stages,
 elapsed time, real download bytes, image/dependency output and waiting messages go
 to stderr. The installer does not estimate a total percentage.
 
-Automation must pass `--output json`: stdout contains one final result, including
+Automation should pass `--non-interactive --output json` with explicit deployment
+facts: stdout contains one final result, including
 a structured failure with nonzero exit status. Use `--verbose` for sanitized commands
 and artifact identity. Existing JSON consumers must opt in explicitly.
 
@@ -1167,3 +1245,47 @@ upgrade recovery or the selected release identity.
 
 
 <span id="usage-records"></span>
+
+## CLI simulation
+
+Before trying the planned installation and deployment commands, rehearse them
+from a source checkout with Python 3. This standalone preview works on macOS
+and Linux; it does not make macOS a supported installation host.
+
+```sh
+python3 scripts/install/preview.py
+python3 scripts/install/preview.py --language en
+python3 scripts/install/preview.py stop
+python3 scripts/install/preview.py uninstall --purge
+python3 scripts/install/preview.py status --state partial --output json
+```
+
+The preview never downloads artifacts, changes system settings, operates real
+services, deletes files or requests credentials. All progress and results are
+simulated. Select the language first, then the independent download source;
+choose `custom` to set a base preset and per-category URL overrides before the
+first version lookup. Explicit overrides take precedence and survive a base
+preset change. Enter `cancel` at any question to leave. The summary offers `edit` before
+`install`. Advanced settings rehearse the internal gateway and member storage.
+An HTTPS browser URL assumes your certificate and reverse proxy already exist.
+Values in square brackets are defaults; press Enter to accept them. The port
+forwarding/public NAT question defaults to `none`, confirmed by pressing Enter;
+choose `list` if public traffic is forwarded to this server. Noninteractive
+input still requires an explicit mapping declaration.
+An explicit `none` mapping declaration differs from `undeclared`; the latter
+continues to block member egress.
+
+For noninteractive rehearsal, use `--server-ip 192.0.2.10
+--host-public-addresses '' --non-interactive`; `--output json` also selects
+noninteractive input and produces one JSON result with `simulation: true` and
+`changed: false`. `--help --output json` lists the preview's options as JSON.
+Use `--fail-stage lookup|prepare|download|deploy|ready` to rehearse installation
+failures, or `--fail-stage operation` for management partial failure. Retry by
+removing that option. Management accepts `--state` to rehearse observed states;
+noninteractive stop/uninstall require `--yes`. None of these flags affect the
+real installer. The installed command and standalone installer support the retained-data procedure described above.
+
+The simulation has no real host adapter. Its questions, input validation, source
+selection, summary and project introduction share the installer question module.
+Lifecycle execution remains simulated; its real implementation must keep failure
+and retained-data instructions aligned with these public terminal contracts. Preview success is not evidence of a real installation.

@@ -14,7 +14,7 @@ import { postgresConnection } from './support/postgres.js'
 import { cleanupOwned } from './fixtures/owned-cleanup.js'
 import { openTestDatabase } from './support/community-application.js'
 
-it('upgrades schema 15 with existing groups and members defaulting to all features, then persists only explicit deviations', async () => {
+it.each([15, 20])('upgrades schema %i with App Center hidden and retains existing native selections', async version => {
   const root = await mkdtemp(join(tmpdir(), 'native-feature-upgrade-'))
   const masterKeyPath = join(root, 'master.key'),
     key = FilePlatformSecrets.create(masterKeyPath)
@@ -22,7 +22,7 @@ it('upgrades schema 15 with existing groups and members defaulting to all featur
     connection = postgresConnection()
   key.close()
   const previous = new PlatformDatabase(connection, security, [
-    { name: 'dsh_phalanx', migrations: PLATFORM_MIGRATIONS.filter(migration => migration.version <= 15) },
+    { name: 'dsh_phalanx', migrations: PLATFORM_MIGRATIONS.filter(migration => migration.version <= version) },
   ])
   const current = new PlatformDatabase(connection, security)
   try {
@@ -31,18 +31,29 @@ it('upgrades schema 15 with existing groups and members defaulting to all featur
     const accounts = new PostgresCommunityAccountStore(previous)
     const admin = await accounts.createFirstAdmin({ username: 'admin', password: 'fixture-password', email: '' })
     const member = await accounts.create({ username: 'member', password: 'fixture-password', email: '', groupId: 'team' })
-    expect(await previous.health()).toMatchObject({ schemaVersion: 15 })
+    if (version === 20) {
+      await previous.query(
+        "INSERT INTO dsh_phalanx.native_feature_group_settings(group_id,disabled_ids,row_revision) VALUES('admin',ARRAY['terminal'],'retained')",
+      )
+    }
+    expect(await previous.health()).toMatchObject({ schemaVersion: version })
     await previous.close()
     await current.initialize()
     expect(await current.health()).toMatchObject({ schemaVersion: PLATFORM_SCHEMA_VERSION })
     const rows = new PostgresNativeFeatures(current)
-    for (const groupId of ['admin', 'default', 'team']) expect(await rows.readGroup(groupId)).toEqual({ groupId, revision: 'none', disabledIds: [] })
-    for (const account of [admin, member]) expect(await rows.forMember(account)).toMatchObject({ disabledIds: [] })
+    for (const groupId of ['default', 'team'])
+      expect(await rows.readGroup(groupId)).toEqual({ groupId, revision: 'none', disabledIds: [], showAppCenter: false })
+    const adminState =
+      version === 20
+        ? { groupId: 'admin', revision: 'retained', disabledIds: ['terminal'], showAppCenter: false }
+        : { groupId: 'admin', revision: 'none', disabledIds: [], showAppCenter: false }
+    expect(await rows.forMember(admin)).toEqual(adminState)
+    expect(await rows.forMember(member)).toMatchObject({ disabledIds: [], showAppCenter: false })
     const saved = await rows.save('team', ['future-feature', 'terminal'], 'none')
     expect(saved.revision).not.toBe('none')
     expect(await new PostgresNativeFeatures(current).readGroup('team')).toEqual(saved)
     expect(await rows.forMember(member)).toEqual(saved)
-    expect(await rows.readGroup('admin')).toMatchObject({ disabledIds: [] })
+    expect(await rows.readGroup('admin')).toEqual(adminState)
   } finally {
     await cleanupOwned(
       () => previous.close(),
@@ -90,12 +101,17 @@ it('reads the current group and refuses retired spaces and disabled accounts in 
     const member = await accounts.create({ username: 'member', password: 'fixture-password', email: '' })
     const rows = new PostgresNativeFeatures(database)
     await rows.save('admin', ['terminal'], 'none')
-    await rows.save('default', ['future-feature', 'terminal'], 'none')
+    const visible = await rows.save('default', ['terminal'], 'none', true)
+    await rows.save('default', ['future-feature', 'terminal'], visible.revision)
     expect(await rows.forMember(admin)).toMatchObject({ groupId: 'admin', disabledIds: ['terminal'] })
     expect(await rows.forMember(member)).toMatchObject({ groupId: 'default', disabledIds: ['future-feature', 'terminal'] })
+    const settings = new NativeFeatures(nativeFeatureCatalog(), createNativeFeatureStorage(database))
+    expect(await settings.platformFeatures(admin)).toEqual({ showAppCenter: false })
+    expect(await settings.platformFeatures(member)).toEqual({ showAppCenter: true })
     await database.query("INSERT INTO dsh_phalanx.groups(id,name,kind) VALUES('other','Fixture other','ordinary')")
     await database.query("UPDATE dsh_phalanx.accounts SET group_id='other' WHERE username='member'")
     expect(await rows.forMember(member)).toMatchObject({ groupId: 'other', disabledIds: [] })
+    expect(await settings.platformFeatures(member)).toEqual({ showAppCenter: false })
     expect(await rows.forMember({ ...member, spaceId: 'retired-space' })).toBeUndefined()
     await database.query("UPDATE dsh_phalanx.accounts SET disabled=true WHERE username='member'")
     expect(await rows.forMember(member)).toBeUndefined()

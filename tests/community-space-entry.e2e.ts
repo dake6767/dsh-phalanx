@@ -6,7 +6,7 @@ import { createServer, type Server } from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Duplex } from 'node:stream'
-import { chromium, type Browser } from 'playwright'
+import { chromium, type Browser, type Response } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
@@ -129,6 +129,8 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     const sockets: string[] = []
     const frames: string[] = []
     const identityRequests: { url: string; method: string }[] = []
+    const featureUrl = `${origin}/account/platform-features`
+    let features: Response | undefined
     let nativeRequests = false
     page.on('request', request => {
       const url = new URL(request.url())
@@ -137,6 +139,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
         identityRequests.push({ url: request.url(), method: request.method() })
         return
       }
+      if (request.url() === featureUrl && request.method() === 'GET') return
       nativeRequests ||= url.pathname.startsWith('/app/')
       if (nativeRequests) resources.push(request.url())
     })
@@ -144,6 +147,9 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
       sockets.push(socket.url())
       socket.on('framesent', frame => frames.push(`sent ${String(frame.payload)}`))
       socket.on('framereceived', frame => frames.push(`received ${String(frame.payload)}`))
+    })
+    page.on('response', response => {
+      if (response.url() === featureUrl && response.request().method() === 'GET') features = response
     })
     await signInCommunity(page, origin, username, 'password')
     const cookie = await cookieHeader(context, origin)
@@ -154,7 +160,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
         context,
         page,
         origin,
-        instanceWorkspacePath(defaultWorkspacePath(root, username), runtime.container !== undefined),
+        instanceWorkspacePath(await defaultWorkspacePath(root, username), runtime.container !== undefined),
         runtime.container !== undefined,
       )
     } catch (error) {
@@ -163,6 +169,8 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     await expect.poll(() => resources.some(url => new URL(url).pathname.includes('/plugins/'))).toBe(true)
     await expect.poll(() => identityRequests.length).toBeGreaterThan(0)
     expect(identityRequests.every(request => request.url === `${origin}/account/identity` && request.method === 'GET')).toBe(true)
+    await expect.poll(() => features?.status(), { timeout: 30_000 }).toBe(200)
+    expect(await features!.json()).toEqual({ showAppCenter: false })
     const identity = await context.request.get(`${origin}/account/identity`)
     expect(identity.status()).toBe(200)
     expect(await identity.json()).toEqual({ username, admin: username === adminUsername })

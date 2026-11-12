@@ -1,6 +1,7 @@
 import { cleanupOwned } from '../fixtures/owned-cleanup.js'
 import { installedMigrationRecovery, type InstalledExternalUpgradeDatabase } from './installed-migration-recovery.js'
 import { installedUpgradeObserver, type InstalledObserverIdentity } from './installed-upgrade-observer.js'
+import { bootstrapInstalledUpgrade, checkBootstrappedUpdater } from './installed-upgrade-bootstrap.js'
 import { compareVersions } from '../../scripts/release/compatibility.mjs'
 import { randomUUID } from 'node:crypto'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
@@ -87,7 +88,8 @@ export async function runInstalledUpgrade({
   if (!scope.upgrade || scope.previous === undefined) throw Error(`Version ${targetVersion} has no formal previous release to upgrade from`)
   const baselineVersion = scope.previous
   const policyTransition = baselineVersion === '0.1.23' && targetVersion === '0.1.24'
-  const bootstrapRequired = policyTransition || (baselineVersion === '0.1.26' && targetVersion === '0.1.27')
+  const executorInventoryTransition = baselineVersion === '0.1.33' && targetVersion === '0.1.34'
+  const bootstrapRequired = policyTransition || executorInventoryTransition || (baselineVersion === '0.1.26' && targetVersion === '0.1.27')
   const databaseRollback = compareVersions(baselineVersion, '0.1.26') >= 0 && compareVersions(targetVersion, '0.1.27') >= 0
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as {
     commit: string
@@ -414,37 +416,24 @@ export async function runInstalledUpgrade({
       return { check: result.check, unmodifiedFormalExecutor: true, expectedPolicyTransitionRefusal: policyTransition }
     })
     if (bootstrapRequired) {
-      await progress.step('updater-bootstrap', async () => {
-        const requestStart = release.requests.length
-        const result = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade bootstrap --output json`, 300000))
-        expect(result).toMatchObject({ status: 'updater-ready', executor: { sourceCommit: candidate }, operation: null })
-        expect((await remote(pidCommand)).trim()).toBe(expectedPid)
-        const requests = release.requests.slice(requestStart)
-        expect(requests.length).toBeGreaterThan(0)
-        expect(requests.every(url => url.endsWith('/updater.json'))).toBe(true)
-        return { executor: result.executor, platformPidUnchanged: true, smallUpdaterOnly: true, requests }
-      })
-      await progress.step('updater-check', async () => {
-        let result: { check: { status: string; version: string } } | undefined
-        await expect
-          .poll(
-            async () => {
-              try {
-                const response = await post('system-update', { action: 'check' })
-                if (response.status() !== 200) return 'unavailable'
-                result = await response.json()
-                return result?.check.status
-              } catch {
-                return 'unavailable'
-              }
-            },
-            { timeout: 300000 },
-          )
-          .toBe('available')
-        expect(result?.check).toMatchObject({ status: 'available', version: 'v' + targetVersion })
-        expect((await remote(pidCommand)).trim()).toBe(expectedPid)
-        return { check: result!.check, releaseBoundExecutor: true, platformPidUnchanged: true }
-      })
+      await progress.step('updater-bootstrap', () =>
+        bootstrapInstalledUpgrade({
+          run: () => remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade bootstrap --output json`, 300000),
+          platformPid: async () => (await remote(pidCommand)).trim(),
+          expectedPid,
+          platformStatus: executorInventoryTransition ? async () => (await admin.request.get(origin + '/readyz')).status() : undefined,
+          candidate,
+          requests: release.requests,
+        }),
+      )
+      await progress.step('updater-check', () =>
+        checkBootstrappedUpdater({
+          check: () => post('system-update', { action: 'check' }),
+          version: 'v' + targetVersion,
+          platformPid: async () => (await remote(pidCommand)).trim(),
+          expectedPid,
+        }),
+      )
     }
     if (databaseRollback) {
       const identity = await progress.step('observer-start', async () => {

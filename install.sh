@@ -5,66 +5,103 @@ set -euo pipefail
 umask 077
 output=human
 development_arm64=false
+language=zh-CN
+language_selected=false
+interactive=true
+help_requested=false
 previous=''
 for option in "$@"; do
   if [[ "$previous" == --output ]]; then output="$option"; fi
   if [[ "$option" == --output=json ]]; then output=json; fi
   if [[ "$option" == --dev-arm64 ]]; then development_arm64=true; fi
+  if [[ "$previous" == --language ]]; then language="$option"; language_selected=true; fi
+  if [[ "$option" == --language=* ]]; then language="${option#*=}"; language_selected=true; fi
+  if [[ "$option" == --non-interactive ]]; then interactive=false; fi
+  if [[ "$option" == --help || "$option" == -h ]]; then help_requested=true; fi
   previous="$option"
 done
-for option in "$@"; do
-  if [[ "$option" == --help || "$option" == -h ]]; then
-    if [[ "$output" == json ]]; then
-      printf '{"status":"help","usage":"sudo bash install.sh [--version TAG] [--output human|json] [--verbose]","requiredWithoutTerminal":["--public-origin URL","--host-public-addresses COMPLETE_LIST"],"advanced":["--gateway-port PORT","--preview-port PORT --preview-origin URL","--user-data-root PATH","--user-data-mount PATH"]}\n'
-      exit 0
-    fi
+text() { if [[ "$language" == zh-CN ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
+if [[ "$help_requested" == true ]]; then
+  if [[ "$output" == json ]]; then
+    printf '{"status":"help","usage":"sudo bash install.sh [--language zh-CN|en] [--non-interactive] [--version TAG] [--output human|json]","uninstall":"sudo bash install.sh --uninstall [--purge] [--yes]","requiredWithoutTerminal":["--public-origin URL","--host-public-addresses COMPLETE_LIST"],"advanced":["--gateway-port PORT","--user-data-root PATH","--user-data-mount PATH"],"downloadSources":["--download-source-preset official|mainland","--npm-registry URL","--pypi-index URL","--container-mirror URL","--ghcr-mirror URL","--github-proxy-prefix URL","--github-api-proxy-prefix URL","--browser-download-host URL","--chromium-arm64-download-host URL"]}\n'
+  else
+    text 'dsh-phalanx：面向小团队的多用户自托管 AI 平台，每位成员拥有独立用户空间。' 'dsh-phalanx: a multi-user self-hosted AI platform for small teams, with an independent space for each member.'
+    printf '\nhttps://github.com/dake6767/dsh-phalanx\n\n'
+    text '安装到 Debian 系 Linux amd64：' 'Install on Debian-family Linux amd64:'
     cat <<'HELP'
-Install dsh-phalanx on Debian-family Linux amd64:
-  sudo bash install.sh [--version latest|vMAJOR.MINOR.PATCH|vMAJOR.MINOR.PATCH-rc.N|run-ID]
-                      [--bundle-dir verified-candidate-directory]
-                      [--dev-release-base-url unsupported-candidate-release-URL]
-                      [--model-key-file protected-file] [--model-base-url URL]
-                      [--host-public-addresses complete-public-IPv4-list]
-                      [--listen-address ADDRESS] [--port PORT] [--gateway-port PORT]
-                      [--upgrade prepare|apply|status|recover] [--operation UUID] [--yes]
-                      [--public-origin URL] [--preview-port PORT --preview-origin URL]
-                      [--output human|json] [--verbose]
-First installation prompts for deployment facts when a terminal is available.
-Reinstallation preserves protected configuration and all user data.
-Apply immediately interrupts all tasks; --yes explicitly accepts this risk.
+
+  sudo bash install.sh [--language zh-CN|en] [--non-interactive]
+    [--version latest|vMAJOR.MINOR.PATCH|vMAJOR.MINOR.PATCH-rc.N|run-ID]
+    [--bundle-dir verified-candidate-directory]
+    [--dev-release-base-url unsupported-candidate-release-URL]
+    [--server-ip IP] [--public-origin URL]
+    [--host-public-addresses complete-public-IPv4-list]
+    [--listen-address ADDRESS] [--port PORT] [--gateway-port PORT]
+    [--user-data-root PATH] [--user-data-mount PATH]
+    [--download-source-preset official|mainland]
+    [--npm-registry URL] [--pypi-index URL] [--container-mirror URL]
+    [--ghcr-mirror URL] [--github-proxy-prefix URL] [--github-api-proxy-prefix URL]
+    [--browser-download-host URL] [--chromium-arm64-download-host URL]
+    [--upgrade check|prepare|apply|status|recover|bootstrap|cleanup]
+    [--operation UUID] [--yes] [--output human|json] [--verbose]
 HELP
-    exit 0
+    text '有终端时进入问答；方括号内为默认值，回车采用。非交互需提供访问地址与映射声明。重新安装保留受保护配置和用户数据。升级apply会立即中断任务，--yes用于明确接受升级中断。' 'With a terminal, follow the questions; press Enter to accept bracketed defaults. Noninteractive use requires an access URL and mapping declaration. Reinstallation retains protected configuration and user data. Upgrade apply interrupts tasks; --yes explicitly accepts that interruption.'
+    printf '\n\n  sudo bash install.sh --uninstall [--purge] [--yes] [--output human|json]\n'
+    text '默认卸载保留恢复数据。--purge 清理核验归属的本地数据。' 'Default uninstall retains recovery data. --purge removes verified local deployment data.'
+    printf '\n'
   fi
-done
+  exit 0
+fi
+if [[ "$language_selected" == false && "$interactive" == true && -r /dev/tty && -w /dev/tty ]]; then
+  if { : </dev/tty; } 2>/dev/null; then
+    printf '方括号 [] 内是默认值，回车采用；输入 cancel 取消。\nValues in [] are defaults; press Enter to accept, or type cancel.\n' >/dev/tty
+    while true; do
+      printf '\n语言 / Language\n  zh-CN 简体中文 / en English\n  > [zh-CN]: ' >/dev/tty
+      IFS= read -r chosen_language </dev/tty || exit 1
+      case "$chosen_language" in
+        ''|zh-CN) language=zh-CN; break ;;
+        en) language=en; break ;;
+        cancel) printf '已取消 / Cancelled\n' >/dev/tty; exit 0 ;;
+        *) printf '请选择 zh-CN 或 en / Choose zh-CN or en\n' >/dev/tty ;;
+      esac
+    done
+  fi
+fi
+if [[ "$language" != zh-CN && "$language" != en ]]; then
+  printf '无效的语言 / Invalid language: use zh-CN or en\n' >&2
+  if [[ "$output" == json ]]; then printf '{"status":"failed","phase":"Bootstrap","reason":"Invalid language","diagnosticLog":null}\n'; fi
+  exit 1
+fi
+if [[ "$language_selected" == false ]]; then set -- "$@" --language "$language"; fi
 fail() {
-  echo "Installation failed: $1" >&2
+  printf '%s: %s\n' "$(text '安装失败' 'Installation failed')" "$1" >&2
   diagnostic_json=null
   if [[ -n "${bootstrap_log:-}" ]]; then diagnostic_json="\"$bootstrap_log\""; fi
   if [[ "$output" == json ]]; then printf '{"status":"failed","phase":"Bootstrap","reason":"%s","diagnosticLog":%s}\n' "$1" "${diagnostic_json:-null}"; fi
   exit 1
 }
 if [[ "$(uname -s)" != Linux ]] || { [[ "$(uname -m)" != x86_64 ]] && { [[ "$development_arm64" != true ]] || [[ "$(uname -m)" != aarch64 ]]; }; }; then
-  fail 'Installation requires Linux amd64'
+  fail "$(text '安装需要 Linux amd64 主机' 'Installation requires Linux amd64')"
 fi
 ID=''; ID_LIKE=''
 if [[ -r /etc/os-release ]]; then source /etc/os-release; fi
 case " $ID $ID_LIKE " in
   *" debian "*|*" ubuntu "*) ;;
-  *) fail 'Installation supports only Debian-family Linux hosts (Ubuntu, Debian and derivatives)' ;;
+  *) fail "$(text '仅支持 Debian 系 Linux（Ubuntu、Debian 及衍生发行版）' 'Installation supports only Debian-family Linux hosts (Ubuntu, Debian and derivatives)')" ;;
 esac
-command -v apt-get >/dev/null || fail 'Debian-family installation requires apt-get'
+command -v apt-get >/dev/null || fail "$(text 'Debian 系安装需要 apt-get' 'Debian-family installation requires apt-get')"
 if [[ "$EUID" != 0 ]]; then
-  fail 'Run the installer with sudo'
+  fail "$(text '请使用 sudo 运行安装器' 'Run the installer with sudo')"
 fi
 if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt ]]; then
   for path in /var /var/log /var/log/dsh-phalanx; do
-    [[ ! -L "$path" ]] || fail 'Diagnostic paths must not be symbolic links'
+    [[ ! -L "$path" ]] || fail "$(text '诊断路径不能是符号链接' 'Diagnostic paths must not be symbolic links')"
   done
-  mkdir -p /var/log/dsh-phalanx && chmod 700 /var/log/dsh-phalanx || fail 'Cannot create private diagnostics; check disk space'
+  mkdir -p /var/log/dsh-phalanx && chmod 700 /var/log/dsh-phalanx || fail "$(text '无法创建私有诊断，请检查磁盘空间' 'Cannot create private diagnostics; check disk space')"
   bootstrap_log="/var/log/dsh-phalanx/$(date -u +%Y%m%dT%H%M%S)-$$-bootstrap.jsonl"
-  (set -o noclobber; : > "$bootstrap_log") || fail 'Cannot create private bootstrap diagnostics'
+  (set -o noclobber; : > "$bootstrap_log") || fail "$(text '无法创建私有前置准备诊断' 'Cannot create private bootstrap diagnostics')"
   bootstrap_event() {
-    printf '[Python prerequisites] %s · %ss: %s\n' "$1" "$SECONDS" "$2" >&2
+    printf '[%s] %s · %ss: %s\n' "$(text 'Python 前置依赖' 'Python prerequisites')" "$1" "$SECONDS" "$2" >&2
     printf '{"phase":"Python prerequisites","status":"%s","elapsed":%s,"message":"%s"}\n' "$1" "$SECONDS" "$2" >> "$bootstrap_log"
   }
   bootstrap_pid=''
@@ -72,20 +109,24 @@ if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt
     if [[ -n "$bootstrap_pid" ]]; then kill -TERM "$bootstrap_pid" 2>/dev/null || true; wait "$bootstrap_pid" 2>/dev/null || true; fi
   }
   trap cleanup_bootstrap EXIT
-  trap 'bootstrap_event failed "Interrupted"; fail "Prerequisite preparation interrupted"' INT TERM
+  interrupted_bootstrap() {
+    bootstrap_event failed "$(text '已中断' 'Interrupted')"
+    fail "$(text '前置依赖准备被中断；可能已安装部分系统依赖' 'Prerequisite preparation interrupted; some OS packages may already be installed')"
+  }
+  trap interrupted_bootstrap INT TERM
   bootstrap_run() {
-    bootstrap_event running 'Preparing Python and certificate prerequisites; raw output withheld until safe diagnostics are available'
+    bootstrap_event running "$(text '准备 Python 和证书依赖；原始输出不直接展示，以保护诊断内容' 'Preparing Python and certificate prerequisites; raw output withheld until safe diagnostics are available')"
     "$@" >/dev/null 2>&1 & bootstrap_pid=$!
     while kill -0 "$bootstrap_pid" 2>/dev/null; do
-      bootstrap_event running 'Waiting for prerequisite package manager; check its lock if this continues'
+      bootstrap_event running "$(text '等待依赖软件包管理器，如持续等待请检查其锁' 'Waiting for prerequisite package manager; check its lock if this continues')"
       sleep 3
     done
-    if wait "$bootstrap_pid"; then bootstrap_pid=''; bootstrap_event completed 'Prerequisite package command completed';
+    if wait "$bootstrap_pid"; then bootstrap_pid=''; bootstrap_event completed "$(text '依赖软件包命令已完成' 'Prerequisite package command completed')";
     else
-      status=$?; bootstrap_pid=''; bootstrap_event failed "Package command exited $status"
-      echo "Diagnostic log: $bootstrap_log" >&2
-      echo 'Inspect prerequisites with sudo apt-get update, then retry sudo bash install.sh.' >&2
-      fail 'Unable to prepare Python prerequisites; see the package exit status'
+      status=$?; bootstrap_pid=''; bootstrap_event failed "$(text "软件包命令退出码 $status" "Package command exited $status")"
+      printf '%s: %s\n' "$(text '诊断日志' 'Diagnostic log')" "$bootstrap_log" >&2
+      text '请使用 sudo apt-get update 检查依赖，再重试 sudo bash install.sh。' 'Inspect prerequisites with sudo apt-get update, then retry sudo bash install.sh.' >&2; printf '\n' >&2
+      fail "$(text 'Python 依赖准备失败，请查看软件包退出状态' 'Unable to prepare Python prerequisites; see the package exit status')"
     fi
   }
   bootstrap_run apt-get -o DPkg::Lock::Timeout=600 update
@@ -93,8 +134,8 @@ if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt
   trap - EXIT INT TERM
 fi
 python3 - "$@" <<'DSH_PHALANX_INSTALLER_PYTHON'
-EXECUTOR_MODULES = ["updater.py","installer_executor.py","installer_executor_protocol.py","installer_executor_server.py","installer_executor_install.py","installer_config.py","installer_progress.py","installer_host.py","installer_compatibility.py","installer_release.py","installer_upgrade_core.py","installer_upgrade_backup.py","installer_upgrade_gate.py","installer_upgrade_host.py","installer_upgrade_cli.py","installer_storage.py","installer_executor_bootstrap.py","installer_cleanup.py","installer_operations.py"]
-UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport hashlib\nimport signal\nimport math\nimport re\nimport socket\nimport threading\nimport stat\nimport json\nimport os\nfrom pathlib import Path, PurePosixPath\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\nimport base64\nimport array\nimport secrets\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\ndef protected_ports(values):\n    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]\n    if values.get('DSH_PHALANX_PREVIEW_PORT'):\n        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})\n    return endpoints\n\n\nclass AdmissionGateError(Exception):\n    code='admission.failed'\n\n\n\ndef maintenance_pages(target):\n    target=Path(target)\n    if target.is_symlink() or (target/'dist').is_symlink():raise AdmissionGateError('Invalid installed maintenance page directory')\n    pages={}\n    for locale in ('en','zh-CN'):\n        path=target/'dist'/('maintenance.'+locale+'.html')\n        try:descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)\n        except FileNotFoundError:continue\n        except OSError as error:raise AdmissionGateError('Installed maintenance page is unavailable') from error\n        with os.fdopen(descriptor,'rb') as file:\n            info=os.fstat(file.fileno())\n            if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0,os.geteuid()) or info.st_mode&0o022:\n                raise AdmissionGateError('Invalid installed maintenance page ownership')\n            page=file.read(262145)\n            if not page or len(page)>262144:raise AdmissionGateError('Invalid installed maintenance page size')\n            try:page.decode('utf-8')\n            except UnicodeError as error:raise AdmissionGateError('Invalid installed maintenance page encoding') from error\n            pages[locale]=page\n    if pages and len(pages)!=2:raise AdmissionGateError('Installed maintenance pages are incomplete')\n    return pages or None\n\n\ndef maintenance_locale(value):\n    languages=[]\n    for part in value.split(','):\n        fields=part.strip().split(';');tag=fields[0].lower()\n        try:quality=1 if len(fields)==1 else float(fields[1].strip().removeprefix('q='))\n        except ValueError:continue\n        if math.isfinite(quality) and 0<quality<=1:languages.append((tag,quality))\n    languages.sort(key=lambda item:item[1],reverse=True)\n    preferred=languages[0][0] if languages else 'en'\n    return 'zh-CN' if preferred=='zh' or preferred.startswith('zh-') else 'en'\n\n\nclass MaintenanceListener:\n    \"\"\"Owns only the temporary HTTP socket; close finishes before its port can be handed off.\"\"\"\n    def __init__(self,pages,address,port):\n        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n        family=socket.AF_INET6 if ipaddress.ip_address(address).version==6 else socket.AF_INET\n        class Handler(BaseHTTPRequestHandler):\n            protocol_version='HTTP/1.1'\n            def setup(handler):\n                super().setup();handler.connection.settimeout(3)\n            def log_message(handler,*args):pass\n            def respond(handler):\n                body=pages[maintenance_locale(handler.headers.get('Accept-Language','en'))]\n                handler.send_response_only(503)\n                for key,value in [('Content-Type','text/html; charset=utf-8'),('Content-Length',str(len(body))),('Retry-After','3'),('Cache-Control','no-store'),('Connection','close'),('Content-Security-Policy',\"frame-ancestors 'none'\"),('X-Content-Type-Options','nosniff')]:handler.send_header(key,value)\n                handler.end_headers();handler.close_connection=True\n                if handler.command!='HEAD':handler.wfile.write(body)\n            do_GET=do_HEAD=do_POST=do_PUT=do_PATCH=do_DELETE=do_OPTIONS=do_CONNECT=do_TRACE=respond\n        class Server(ThreadingHTTPServer):\n            address_family=family;allow_reuse_address=True;daemon_threads=True;block_on_close=False\n            def server_bind(server):\n                if family==socket.AF_INET6:server.socket.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,0)\n                super().server_bind()\n        self.server=Server((address,port),Handler);self.port=self.server.server_address[1];self.closed=False\n        self.thread=threading.Thread(target=self.server.serve_forever,name='dsh-phalanx-maintenance-http',daemon=True)\n        try:self.thread.start()\n        except BaseException:self.server.server_close();raise\n\n    def close(self):\n        if self.closed:return\n        self.server.shutdown();self.thread.join();self.server.server_close();self.closed=True\n\n\ndef process_started(path):return path.read_text().rsplit(')',1)[1].split()[19]\n\n\ndef maintenance_token(job,key):\n    used=job.setdefault('maintenanceTokens',[])\n    if not isinstance(used,list) or len(used)>4096 or any(type(value) is not int or not 0<value<2**32 or value==MARK for value in used):\n        raise AdmissionGateError('Invalid maintenance connection history')\n    previous=job.get(key)\n    if isinstance(previous,dict):\n        token=previous.get('token')\n        if type(token) is not int or not 0<token<2**32 or token==MARK:raise AdmissionGateError('Invalid maintenance connection identity')\n        if token not in used:used.append(token)\n        return token\n    token=secrets.randbits(32)\n    while token in (0,MARK) or token in used:token=secrets.randbits(32)\n    used.append(token);return token\n\n\nclass ManagedMaintenanceSocket:\n    \"\"\"PID1 keeps the exact listener bound independently of either serving process.\"\"\"\n    def __init__(self,host,job,role,key):\n        self.host=host;self.job=job;self.key=key\n        if str(uuid.UUID(job['id']))!=job['id']:raise AdmissionGateError('Invalid maintenance operation identity')\n        self.unit='dsh-phalanx-upgrade-'+role+'-'+job['id']+'.service';self.cgroup='/system.slice/'+self.unit\n        self.endpoint=protected_ports(job['source']['values'])[0]\n        self.program=str(host.path('/opt/dsh-phalanx/maintenance/gate.py'));self.role=role\n\n    def fdname(self):return self.role+'-'+self.job['id']+'-'+str(self.intent()['token'])\n\n    def stored(self,fields):\n        if fields.get('NFileDescriptorStore')!='1':raise AdmissionGateError('The maintenance listener is not pinned by PID1')\n        rows=json.loads(self.host.run(['systemd-analyze','--json=short','fdstore',self.unit]).stdout)\n        if not isinstance(rows,list) or len(rows)!=1:raise AdmissionGateError('Unexpected maintenance descriptor inventory')\n        row=rows[0];inode=row.get('inode')\n        if (type(inode) is not int or inode<=0 or row.get('fdname')!=self.fdname() or\n                type(row.get('type')) is not int or not stat.S_ISSOCK(row['type']) or row.get('path')!='socket:['+str(inode)+']'):\n            raise AdmissionGateError('Maintenance descriptor differs from its owner')\n        expected=self.intent().get('listener',{}).get('inode')\n        if expected is not None and expected!=inode:raise AdmissionGateError('A different platform listener was pinned')\n        result=self.host.run(['/usr/bin/python3','-I',self.program,'--inspect-listener',str(inode),self.endpoint['address'],str(self.endpoint['port'])])\n        if json.loads(result.stdout)!={'inode':inode,'address':self.endpoint['address'],'port':self.endpoint['port']}:\n            raise AdmissionGateError('Pinned maintenance endpoint differs from its owner')\n        return inode\n\n    def facts(self):\n        properties='LoadState,MainPID,Transient,User,Type,NotifyAccess,KillMode,Restart,ExecStart,ControlGroup,RemainAfterExit,FileDescriptorStoreMax,FileDescriptorStorePreserve,NFileDescriptorStore,CollectMode,ActiveState,Job'\n        result=self.host.run(['systemctl','show',self.unit,'--property='+properties],check=False)\n        fields=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)\n        if fields.get('LoadState')=='not-found':return None\n        if result.returncode!=0 or fields.get('LoadState')!='loaded':raise AdmissionGateError('Maintenance unit state is unavailable')\n        return fields\n\n    def verify(self,fields,*,listener=False):\n        intent=self.intent()\n        if intent is None or self.job.get(self.key)!=intent:raise AdmissionGateError('Maintenance unit is not owned by this operation')\n        for key,value in [('Transient','yes'),('User','root'),('Type','notify'),('NotifyAccess','main'),('KillMode','control-group'),('Restart','no'),('RemainAfterExit','yes'),('FileDescriptorStoreMax','1'),('FileDescriptorStorePreserve','yes'),('CollectMode','inactive')]:\n            if fields.get(key)!=value:raise AdmissionGateError('Maintenance unit configuration differs from its owner')\n        command=re.fullmatch(r'\\{ path=([^ ;]+) ; argv\\[\\]=([^;]+) ; ignore_errors=no ;[^{}]*\\}',fields.get('ExecStart',''))\n        if command is None or command[1]!='/usr/bin/python3' or command[2].split()!=self.arguments:\n            raise AdmissionGateError('Maintenance unit command differs from its owner')\n        raw_pid=fields.get('MainPID','')\n        if not raw_pid.isdecimal():raise AdmissionGateError('Invalid maintenance listener process')\n        pid=int(raw_pid);group=fields.get('ControlGroup','')\n        if group not in ('',self.cgroup) or pid and group!=self.cgroup:raise AdmissionGateError('Maintenance unit cgroup differs from its owner')\n        if pid:\n            process=self.host.path('/proc/'+str(pid))\n            actual=[item for item in (process/'cmdline').read_bytes().split(b'\\0') if item]\n            if (actual!=[os.fsencode(item) for item in self.arguments] or\n                    (process/'exe').resolve()!=self.host.path('/usr/bin/python3').resolve() or\n                    '0::'+self.cgroup not in (process/'cgroup').read_text().splitlines()):\n                raise AdmissionGateError('Maintenance listener process differs from its owner')\n        if fields.get('NFileDescriptorStore') not in ('0','1'):raise AdmissionGateError('Invalid maintenance descriptor count')\n        if fields['NFileDescriptorStore']=='1':self.stored(fields)\n        if listener and (fields['NFileDescriptorStore']!='1' or not pid or not self.host.pid_owns_listener(pid,self.endpoint['port'],ipaddress.ip_address(self.endpoint['address']))):\n            raise AdmissionGateError('Maintenance service does not own its expected listener')\n        return pid\n\n    def start(self):\n        if self.intent() is None:return None\n        fields=self.facts()\n        if fields is None:\n            if self.job.get(self.key)!=self.intent():raise AdmissionGateError('Save maintenance ownership before starting its listener')\n            self.host.run(['systemd-run','--unit='+self.unit,'--slice=system.slice',\n                           '--property=Type=notify','--property=NotifyAccess=main','--property=User=root',\n                           '--property=KillMode=control-group','--property=Restart=no','--property=WorkingDirectory=/',\n                           '--property=RemainAfterExit=yes','--property=FileDescriptorStoreMax=1',\n                           '--property=FileDescriptorStorePreserve=yes','--property=CollectMode=inactive',\n                           '--',*self.arguments])\n            fields=self.facts()\n        if fields is None:raise AdmissionGateError('Maintenance listener exited before admission could be verified')\n        self.verify(fields,listener=True)\n        return self.socket_cgroup\n\n    def stop(self):\n        fields=self.facts()\n        if fields is None:return\n        self.verify(fields)\n        result=self.host.run(['systemctl','stop',self.unit],check=False)\n        after=self.facts()\n        if after is not None:\n            if result.returncode!=0 or self.verify(after):raise AdmissionGateError('Maintenance listener did not stop')\n            if after.get('Job',''):raise AdmissionGateError('Maintenance listener still has a pending job')\n            if after.get('ActiveState')=='failed':\n                self.host.run(['systemctl','reset-failed',self.unit]);after=self.facts()\n            if after is not None:\n                self.verify(after)\n                if after.get('ActiveState')!='inactive' or after.get('Job',''):raise AdmissionGateError('Maintenance listener is not inactive')\n                self.host.run(['systemctl','clean','--what=fdstore',self.unit]);after=self.facts()\n                if after is not None and (self.verify(after) or after['NFileDescriptorStore']!='0'):\n                    raise AdmissionGateError('Maintenance descriptor was not released')\n        events=self.host.path('/sys/fs/cgroup'+self.cgroup+'/cgroup.events')\n        if events.exists() and dict(line.split() for line in events.read_text().splitlines()).get('populated')!='0':\n            raise AdmissionGateError('Maintenance unit still has active processes')\n\n\nclass MaintenanceUnit(ManagedMaintenanceSocket):\n    def __init__(self,host,job):\n        super().__init__(host,job,'page','maintenancePage');self.target=Path(job['source']['target']);self.token=None\n        self.socket_cgroup=self.cgroup\n    def intent(self):\n        pages=maintenance_pages(self.target)\n        if pages is None:return None\n        if self.token is None:self.token=maintenance_token(self.job,self.key)\n        return {'unit':self.unit,'source':str(self.target),'pages':{locale:hashlib.sha256(body).hexdigest() for locale,body in pages.items()},'token':self.token}\n    @property\n    def arguments(self):\n        return ['/usr/bin/python3','-I',self.program,'--serve-page',self.job['id'],str(self.target),self.endpoint['address'],str(self.endpoint['port']),str(self.intent()['token'])]\n\n\nclass ListenerPinUnit(ManagedMaintenanceSocket):\n    def __init__(self,host,job):\n        super().__init__(host,job,'listener','maintenanceListener')\n    def intent(self):\n        value=self.job.get(self.key)\n        if value is None:return None\n        if not isinstance(value,dict) or value.get('unit')!=self.unit or not isinstance(value.get('listener'),dict):\n            raise AdmissionGateError('Invalid platform listener ownership')\n        maintenance_token(self.job,self.key)\n        return {'unit':self.unit,'listener':value['listener'],'token':value['token']}\n    @property\n    def arguments(self):\n        value=self.intent();encoded=base64.urlsafe_b64encode(json.dumps(value['listener'],sort_keys=True,separators=(',',':')).encode()).decode()\n        return ['/usr/bin/python3','-I',self.program,'--pin-listener',self.job['id'],encoded,str(value['token'])]\n    @property\n    def socket_cgroup(self):return self.intent()['listener']['cgroup']\n\n\ndef duplicate_listener(value):\n    if sys.platform!='linux' or os.uname().machine not in ('x86_64','aarch64'):raise AdmissionGateError('Listener pinning requires the supported Linux host')\n    import ctypes,fcntl\n    pid=value['pid'];process=Path('/proc')/str(pid)\n    if process_started(process/'stat')!=value['started']:raise AdmissionGateError('Listener process identity changed')\n    descriptor=os.pidfd_open(pid)\n    try:\n        library=ctypes.CDLL(None,use_errno=True);copied=library.syscall(438,descriptor,value['fd'],0)\n        if copied<0:raise OSError(ctypes.get_errno(),'pidfd_getfd')\n    finally:os.close(descriptor)\n    try:\n        if os.fstat(copied).st_ino!=value['inode']:raise AdmissionGateError('Listener descriptor identity changed')\n        flags=fcntl.fcntl(copied,fcntl.F_GETFL);listener=socket.socket(fileno=copied);copied=None\n        try:\n            if fcntl.fcntl(listener.fileno(),fcntl.F_GETFL)!=flags:\n                fcntl.fcntl(listener.fileno(),fcntl.F_SETFL,flags);raise AdmissionGateError('Listener status flags must remain unchanged')\n            actual=listener.getsockname();address=ipaddress.ip_address(value['address'])\n            valid=(ipaddress.ip_address(actual[0])==address and actual[1]==value['port'] and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_TYPE)==socket.SOCK_STREAM and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_ACCEPTCONN)==1 and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT)==0 and\n                not (address.version==6 and address.is_unspecified and listener.getsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY)!=0))\n            if not valid:raise AdmissionGateError('Invalid exclusive maintenance listener')\n        except BaseException:listener.close();raise\n        return listener\n    finally:\n        if copied is not None:os.close(copied)\n\n\ndef inspect_listener(inode,address,port):\n    if not inode.isdecimal() or not port.isdecimal():raise AdmissionGateError('Invalid stored listener')\n    for path in Path('/proc/1/fd').iterdir():\n        try:link=os.readlink(path)\n        except FileNotFoundError:continue\n        if link=='socket:['+inode+']':\n            with duplicate_listener({'pid':1,'fd':int(path.name),'inode':int(inode),'started':process_started(Path('/proc/1/stat')),'address':address,'port':int(port)}):\n                print(json.dumps({'inode':int(inode),'address':address,'port':int(port)}));return\n    raise AdmissionGateError('PID1 no longer holds the listener')\n\n\ndef notify_listener(descriptor,name):\n    path=os.environ.get('NOTIFY_SOCKET')\n    if not path:raise AdmissionGateError('Maintenance listener requires its managed unit')\n    with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as notification:\n        notification.connect('\\0'+path[1:] if path.startswith('@') else path)\n        notification.sendmsg([('FDSTORE=1\\nFDPOLL=0\\nFDNAME='+name+'\\nREADY=1').encode()],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[descriptor]))])\n\n\ndef stopped_event():\n    stopped=threading.Event()\n    for name in (signal.SIGTERM,signal.SIGINT):signal.signal(name,lambda *_:stopped.set())\n    return stopped\n\n\ndef pin_listener(operation,encoded,token):\n    if str(uuid.UUID(operation))!=operation or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:\n        raise AdmissionGateError('Invalid listener pin request')\n    value=json.loads(base64.urlsafe_b64decode(encoded));process=Path('/proc')/str(value['pid'])\n    uid=int(next(line for line in (process/'status').read_text().splitlines() if line.startswith('Uid:')).split()[1])\n    if (uid!=value['uid'] or (process/'exe').resolve()!=Path(value['executable']).resolve() or\n            (process/'cwd').resolve()!=Path(value['directory']) or '0::'+value['cgroup'] not in (process/'cgroup').read_text().splitlines()):\n        raise AdmissionGateError('Platform listener differs from its verified source')\n    stopped=stopped_event()\n    with duplicate_listener(value) as listener:\n        notify_listener(listener.fileno(),'listener-'+operation+'-'+token);stopped.wait()\n\n\ndef maintenance_serve(operation,target,address,port,token):\n    if str(uuid.UUID(operation))!=operation or not port.isdecimal() or not 1<=int(port)<=65535 or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:\n        raise AdmissionGateError('Invalid maintenance listener request')\n    pages=maintenance_pages(Path(target))\n    if pages is None:raise AdmissionGateError('Installed source has no maintenance pages')\n    stopped=stopped_event()\n    listener=MaintenanceListener(pages,address,int(port))\n    try:\n        notify_listener(listener.server.socket.fileno(),'page-'+operation+'-'+token)\n        stopped.wait()\n    finally:listener.close()\n\nclass LinuxAdmissionGate:\n    def run(self,args,**kwargs):\n        result=subprocess.run(['nft',*args],capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing,*,page_cgroup=None,page_token=None):\n        if not isinstance(ports,list) or len(ports) not in (2,3):raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[];public=[]\n        for index,endpoint in enumerate(ports):\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selected=[destination+' tcp dport '+str(endpoint['port'])]\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:selected.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n            selectors.extend(selected)\n            if index==0:public=selected\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        pages=''\n        if page_cgroup is not None:\n            if type(page_token) is not int or not 0<page_token<2**32 or page_token==MARK:raise AdmissionGateError('Invalid maintenance connection identity')\n            if (not isinstance(page_cgroup,str) or page_cgroup=='/' or not re.fullmatch(r'/[a-zA-Z0-9_@./-]+',page_cgroup) or\n                    str(PurePosixPath(page_cgroup))!=page_cgroup or any(part in ('.','..') for part in page_cgroup.split('/')[1:])):\n                raise AdmissionGateError('Invalid maintenance socket cgroup')\n            group=page_cgroup[1:];level=len(group.split('/'))\n            if level>=255:raise AdmissionGateError('Maintenance socket cgroup is too deep')\n            for selected in public:\n                pages+='  '+selected+' ct mark != '+str(MARK)+' tcp flags & (syn | ack) == syn ct mark set 0\\n'\n                owner=selected+' ct mark != '+str(MARK)+' socket cgroupv2 level '+str(level)+' '+json.dumps(group)\n                # Missing next ancestors break this rule; existing descendants cannot be the root cgroup.\n                pages+='  '+owner+' socket cgroupv2 level '+str(level+1)+' != \"/\" counter reject with tcp reset\\n'\n                pages+='  '+owner+' tcp flags & (syn | ack) == syn ct mark set '+str(page_token)+' counter accept\\n'\n                pages+='  '+selected+' ct mark '+str(page_token)+' counter accept\\n'\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{pages}{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):\n        existing=self.table_exists()\n        self.batch(self.rules(ports,existing),check=True)\n        # Validate the supported socket expression without granting a live exception.\n        self.batch(self.rules(ports,existing,page_cgroup='/system.slice',page_token=1),check=True)\n    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))\n    def show_page(self,ports,cgroup,token):self.batch(self.rules(ports,self.table_exists(),page_cgroup=cgroup,page_token=token))\n    def open(self):\n        if self.table_exists():self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid,program=None):\n        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER); gate=LinuxAdmissionGate()\n    if path.exists() or path.is_symlink():\n        value=protected_json(path)\n        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports']); return\n    # Platform operations share the same admission owner and survive the window\n    # between durable intent and marker publication.\n    operations=Path('/var/lib/dsh-phalanx-updater/maintenance-operation.json')\n    if operations.exists() or operations.is_symlink():\n        root=operations.parent\n        info=root.lstat()\n        if root.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid platform operation owner')\n        job=protected_json(operations)\n        if job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):\n            raise AdmissionGateError('Unknown platform operation admission protocol')\n        if job['phase'] not in ('succeeded','restored'):\n            value=json.loads(job['marker'])\n            if value.get('schema')!=1 or value.get('operation')!=job['id']:raise AdmissionGateError('Invalid platform operation marker')\n            gate.close(value['ports']);return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close(protected_ports(values)); return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:\n        if len(sys.argv)==1:restore_boot_admission()\n        elif len(sys.argv)==7 and sys.argv[1]=='--serve-page':maintenance_serve(*sys.argv[2:])\n        elif len(sys.argv)==5 and sys.argv[1]=='--inspect-listener':inspect_listener(*sys.argv[2:])\n        elif len(sys.argv)==5 and sys.argv[1]=='--pin-listener':pin_listener(*sys.argv[2:])\n        else:raise AdmissionGateError('Unknown maintenance entry request')\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
+EXECUTOR_MODULES = ["updater.py","installer_executor.py","installer_executor_protocol.py","installer_executor_server.py","installer_executor_install.py","installer_deployment.py","installer_deployment_cli.py","installer_uninstall.py","installer_questions.py","installer_config.py","installer_progress.py","installer_host.py","installer_compatibility.py","installer_release.py","installer_upgrade_core.py","installer_upgrade_backup.py","installer_upgrade_gate.py","installer_upgrade_host.py","installer_upgrade_cli.py","installer_storage.py","installer_executor_bootstrap.py","installer_cleanup.py","installer_operations.py"]
+UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport hashlib\nimport signal\nimport math\nimport re\nimport socket\nimport threading\nimport stat\nimport json\nimport os\nfrom pathlib import Path, PurePosixPath\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\nimport base64\nimport array\nimport secrets\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\ndef protected_ports(values):\n    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]\n    if values.get('DSH_PHALANX_PREVIEW_PORT'):\n        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})\n    return endpoints\n\n\nclass AdmissionGateError(Exception):\n    code='admission.failed'\n\n\n\ndef maintenance_pages(target):\n    target=Path(target)\n    if target.is_symlink() or (target/'dist').is_symlink():raise AdmissionGateError('Invalid installed maintenance page directory')\n    pages={}\n    for locale in ('en','zh-CN'):\n        path=target/'dist'/('maintenance.'+locale+'.html')\n        try:descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)\n        except FileNotFoundError:continue\n        except OSError as error:raise AdmissionGateError('Installed maintenance page is unavailable') from error\n        with os.fdopen(descriptor,'rb') as file:\n            info=os.fstat(file.fileno())\n            if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0,os.geteuid()) or info.st_mode&0o022:\n                raise AdmissionGateError('Invalid installed maintenance page ownership')\n            page=file.read(262145)\n            if not page or len(page)>262144:raise AdmissionGateError('Invalid installed maintenance page size')\n            try:page.decode('utf-8')\n            except UnicodeError as error:raise AdmissionGateError('Invalid installed maintenance page encoding') from error\n            pages[locale]=page\n    if pages and len(pages)!=2:raise AdmissionGateError('Installed maintenance pages are incomplete')\n    return pages or None\n\n\ndef maintenance_locale(value):\n    languages=[]\n    for part in value.split(','):\n        fields=part.strip().split(';');tag=fields[0].lower()\n        try:quality=1 if len(fields)==1 else float(fields[1].strip().removeprefix('q='))\n        except ValueError:continue\n        if math.isfinite(quality) and 0<quality<=1:languages.append((tag,quality))\n    languages.sort(key=lambda item:item[1],reverse=True)\n    preferred=languages[0][0] if languages else 'en'\n    return 'zh-CN' if preferred=='zh' or preferred.startswith('zh-') else 'en'\n\n\nclass MaintenanceListener:\n    \"\"\"Owns only the temporary HTTP socket; close finishes before its port can be handed off.\"\"\"\n    def __init__(self,pages,address,port):\n        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n        family=socket.AF_INET6 if ipaddress.ip_address(address).version==6 else socket.AF_INET\n        class Handler(BaseHTTPRequestHandler):\n            protocol_version='HTTP/1.1'\n            def setup(handler):\n                super().setup();handler.connection.settimeout(3)\n            def log_message(handler,*args):pass\n            def respond(handler):\n                body=pages[maintenance_locale(handler.headers.get('Accept-Language','en'))]\n                handler.send_response_only(503)\n                for key,value in [('Content-Type','text/html; charset=utf-8'),('Content-Length',str(len(body))),('Retry-After','3'),('Cache-Control','no-store'),('Connection','close'),('Content-Security-Policy',\"frame-ancestors 'none'\"),('X-Content-Type-Options','nosniff')]:handler.send_header(key,value)\n                handler.end_headers();handler.close_connection=True\n                if handler.command!='HEAD':handler.wfile.write(body)\n            do_GET=do_HEAD=do_POST=do_PUT=do_PATCH=do_DELETE=do_OPTIONS=do_CONNECT=do_TRACE=respond\n        class Server(ThreadingHTTPServer):\n            address_family=family;allow_reuse_address=True;daemon_threads=True;block_on_close=False\n            def server_bind(server):\n                if family==socket.AF_INET6:server.socket.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,0)\n                super().server_bind()\n        self.server=Server((address,port),Handler);self.port=self.server.server_address[1];self.closed=False\n        self.thread=threading.Thread(target=self.server.serve_forever,name='dsh-phalanx-maintenance-http',daemon=True)\n        try:self.thread.start()\n        except BaseException:self.server.server_close();raise\n\n    def close(self):\n        if self.closed:return\n        self.server.shutdown();self.thread.join();self.server.server_close();self.closed=True\n\n\ndef process_started(path):return path.read_text().rsplit(')',1)[1].split()[19]\n\n\ndef maintenance_token(job,key):\n    used=job.setdefault('maintenanceTokens',[])\n    if not isinstance(used,list) or len(used)>4096 or any(type(value) is not int or not 0<value<2**32 or value==MARK for value in used):\n        raise AdmissionGateError('Invalid maintenance connection history')\n    previous=job.get(key)\n    if isinstance(previous,dict):\n        token=previous.get('token')\n        if type(token) is not int or not 0<token<2**32 or token==MARK:raise AdmissionGateError('Invalid maintenance connection identity')\n        if token not in used:used.append(token)\n        return token\n    token=secrets.randbits(32)\n    while token in (0,MARK) or token in used:token=secrets.randbits(32)\n    used.append(token);return token\n\n\nclass ManagedMaintenanceSocket:\n    \"\"\"PID1 keeps the exact listener bound independently of either serving process.\"\"\"\n    def __init__(self,host,job,role,key):\n        self.host=host;self.job=job;self.key=key\n        if str(uuid.UUID(job['id']))!=job['id']:raise AdmissionGateError('Invalid maintenance operation identity')\n        self.unit='dsh-phalanx-upgrade-'+role+'-'+job['id']+'.service';self.cgroup='/system.slice/'+self.unit\n        self.endpoint=protected_ports(job['source']['values'])[0]\n        self.program=str(host.path('/opt/dsh-phalanx/maintenance/gate.py'));self.role=role\n\n    def fdname(self):return self.role+'-'+self.job['id']+'-'+str(self.intent()['token'])\n\n    def stored(self,fields):\n        if fields.get('NFileDescriptorStore')!='1':raise AdmissionGateError('The maintenance listener is not pinned by PID1')\n        rows=json.loads(self.host.run(['systemd-analyze','--json=short','fdstore',self.unit]).stdout)\n        if not isinstance(rows,list) or len(rows)!=1:raise AdmissionGateError('Unexpected maintenance descriptor inventory')\n        row=rows[0];inode=row.get('inode')\n        if (type(inode) is not int or inode<=0 or row.get('fdname')!=self.fdname() or\n                type(row.get('type')) is not int or not stat.S_ISSOCK(row['type']) or row.get('path')!='socket:['+str(inode)+']'):\n            raise AdmissionGateError('Maintenance descriptor differs from its owner')\n        expected=self.intent().get('listener',{}).get('inode')\n        if expected is not None and expected!=inode:raise AdmissionGateError('A different platform listener was pinned')\n        result=self.host.run(['/usr/bin/python3','-I',self.program,'--inspect-listener',str(inode),self.endpoint['address'],str(self.endpoint['port'])])\n        if json.loads(result.stdout)!={'inode':inode,'address':self.endpoint['address'],'port':self.endpoint['port']}:\n            raise AdmissionGateError('Pinned maintenance endpoint differs from its owner')\n        return inode\n\n    def facts(self):\n        properties='LoadState,MainPID,Transient,User,Type,NotifyAccess,KillMode,Restart,ExecStart,ControlGroup,RemainAfterExit,FileDescriptorStoreMax,FileDescriptorStorePreserve,NFileDescriptorStore,CollectMode,ActiveState,Job'\n        result=self.host.run(['systemctl','show',self.unit,'--property='+properties],check=False)\n        fields=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)\n        if fields.get('LoadState')=='not-found':return None\n        if result.returncode!=0 or fields.get('LoadState')!='loaded':raise AdmissionGateError('Maintenance unit state is unavailable')\n        return fields\n\n    def verify(self,fields,*,listener=False):\n        intent=self.intent()\n        if intent is None or self.job.get(self.key)!=intent:raise AdmissionGateError('Maintenance unit is not owned by this operation')\n        for key,value in [('Transient','yes'),('User','root'),('Type','notify'),('NotifyAccess','main'),('KillMode','control-group'),('Restart','no'),('RemainAfterExit','yes'),('FileDescriptorStoreMax','1'),('FileDescriptorStorePreserve','yes'),('CollectMode','inactive')]:\n            if fields.get(key)!=value:raise AdmissionGateError('Maintenance unit configuration differs from its owner')\n        command=re.fullmatch(r'\\{ path=([^ ;]+) ; argv\\[\\]=([^;]+) ; ignore_errors=no ;[^{}]*\\}',fields.get('ExecStart',''))\n        if command is None or command[1]!='/usr/bin/python3' or command[2].split()!=self.arguments:\n            raise AdmissionGateError('Maintenance unit command differs from its owner')\n        raw_pid=fields.get('MainPID','')\n        if not raw_pid.isdecimal():raise AdmissionGateError('Invalid maintenance listener process')\n        pid=int(raw_pid);group=fields.get('ControlGroup','')\n        if group not in ('',self.cgroup) or pid and group!=self.cgroup:raise AdmissionGateError('Maintenance unit cgroup differs from its owner')\n        if pid:\n            process=self.host.path('/proc/'+str(pid))\n            actual=[item for item in (process/'cmdline').read_bytes().split(b'\\0') if item]\n            if (actual!=[os.fsencode(item) for item in self.arguments] or\n                    (process/'exe').resolve()!=self.host.path('/usr/bin/python3').resolve() or\n                    '0::'+self.cgroup not in (process/'cgroup').read_text().splitlines()):\n                raise AdmissionGateError('Maintenance listener process differs from its owner')\n        if fields.get('NFileDescriptorStore') not in ('0','1'):raise AdmissionGateError('Invalid maintenance descriptor count')\n        if fields['NFileDescriptorStore']=='1':self.stored(fields)\n        if listener and (fields['NFileDescriptorStore']!='1' or not pid or not self.host.pid_owns_listener(pid,self.endpoint['port'],ipaddress.ip_address(self.endpoint['address']))):\n            raise AdmissionGateError('Maintenance service does not own its expected listener')\n        return pid\n\n    def start(self):\n        if self.intent() is None:return None\n        fields=self.facts()\n        if fields is None:\n            if self.job.get(self.key)!=self.intent():raise AdmissionGateError('Save maintenance ownership before starting its listener')\n            self.host.run(['systemd-run','--unit='+self.unit,'--slice=system.slice',\n                           '--property=Type=notify','--property=NotifyAccess=main','--property=User=root',\n                           '--property=KillMode=control-group','--property=Restart=no','--property=WorkingDirectory=/',\n                           '--property=RemainAfterExit=yes','--property=FileDescriptorStoreMax=1',\n                           '--property=FileDescriptorStorePreserve=yes','--property=CollectMode=inactive',\n                           '--',*self.arguments])\n            fields=self.facts()\n        if fields is None:raise AdmissionGateError('Maintenance listener exited before admission could be verified')\n        self.verify(fields,listener=True)\n        return self.socket_cgroup\n\n    def stop(self):\n        fields=self.facts()\n        if fields is None:return\n        self.verify(fields)\n        result=self.host.run(['systemctl','stop',self.unit],check=False)\n        after=self.facts()\n        if after is not None:\n            if result.returncode!=0 or self.verify(after):raise AdmissionGateError('Maintenance listener did not stop')\n            if after.get('Job',''):raise AdmissionGateError('Maintenance listener still has a pending job')\n            if after.get('ActiveState')=='failed':\n                self.host.run(['systemctl','reset-failed',self.unit]);after=self.facts()\n            if after is not None:\n                self.verify(after)\n                if after.get('ActiveState')!='inactive' or after.get('Job',''):raise AdmissionGateError('Maintenance listener is not inactive')\n                self.host.run(['systemctl','clean','--what=fdstore',self.unit]);after=self.facts()\n                if after is not None and (self.verify(after) or after['NFileDescriptorStore']!='0'):\n                    raise AdmissionGateError('Maintenance descriptor was not released')\n        events=self.host.path('/sys/fs/cgroup'+self.cgroup+'/cgroup.events')\n        if events.exists() and dict(line.split() for line in events.read_text().splitlines()).get('populated')!='0':\n            raise AdmissionGateError('Maintenance unit still has active processes')\n\n\nclass MaintenanceUnit(ManagedMaintenanceSocket):\n    def __init__(self,host,job):\n        super().__init__(host,job,'page','maintenancePage');self.target=Path(job['source']['target']);self.token=None\n        self.socket_cgroup=self.cgroup\n    def intent(self):\n        pages=maintenance_pages(self.target)\n        if pages is None:return None\n        if self.token is None:self.token=maintenance_token(self.job,self.key)\n        return {'unit':self.unit,'source':str(self.target),'pages':{locale:hashlib.sha256(body).hexdigest() for locale,body in pages.items()},'token':self.token}\n    @property\n    def arguments(self):\n        return ['/usr/bin/python3','-I',self.program,'--serve-page',self.job['id'],str(self.target),self.endpoint['address'],str(self.endpoint['port']),str(self.intent()['token'])]\n\n\nclass ListenerPinUnit(ManagedMaintenanceSocket):\n    def __init__(self,host,job):\n        super().__init__(host,job,'listener','maintenanceListener')\n    def intent(self):\n        value=self.job.get(self.key)\n        if value is None:return None\n        if not isinstance(value,dict) or value.get('unit')!=self.unit or not isinstance(value.get('listener'),dict):\n            raise AdmissionGateError('Invalid platform listener ownership')\n        maintenance_token(self.job,self.key)\n        return {'unit':self.unit,'listener':value['listener'],'token':value['token']}\n    @property\n    def arguments(self):\n        value=self.intent();encoded=base64.urlsafe_b64encode(json.dumps(value['listener'],sort_keys=True,separators=(',',':')).encode()).decode()\n        return ['/usr/bin/python3','-I',self.program,'--pin-listener',self.job['id'],encoded,str(value['token'])]\n    @property\n    def socket_cgroup(self):return self.intent()['listener']['cgroup']\n\n\ndef duplicate_listener(value):\n    if sys.platform!='linux' or os.uname().machine not in ('x86_64','aarch64'):raise AdmissionGateError('Listener pinning requires the supported Linux host')\n    import ctypes,fcntl\n    pid=value['pid'];process=Path('/proc')/str(pid)\n    if process_started(process/'stat')!=value['started']:raise AdmissionGateError('Listener process identity changed')\n    descriptor=os.pidfd_open(pid)\n    try:\n        library=ctypes.CDLL(None,use_errno=True);copied=library.syscall(438,descriptor,value['fd'],0)\n        if copied<0:raise OSError(ctypes.get_errno(),'pidfd_getfd')\n    finally:os.close(descriptor)\n    try:\n        if os.fstat(copied).st_ino!=value['inode']:raise AdmissionGateError('Listener descriptor identity changed')\n        flags=fcntl.fcntl(copied,fcntl.F_GETFL);listener=socket.socket(fileno=copied);copied=None\n        try:\n            if fcntl.fcntl(listener.fileno(),fcntl.F_GETFL)!=flags:\n                fcntl.fcntl(listener.fileno(),fcntl.F_SETFL,flags);raise AdmissionGateError('Listener status flags must remain unchanged')\n            actual=listener.getsockname();address=ipaddress.ip_address(value['address'])\n            valid=(ipaddress.ip_address(actual[0])==address and actual[1]==value['port'] and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_TYPE)==socket.SOCK_STREAM and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_ACCEPTCONN)==1 and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT)==0 and\n                not (address.version==6 and address.is_unspecified and listener.getsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY)!=0))\n            if not valid:raise AdmissionGateError('Invalid exclusive maintenance listener')\n        except BaseException:listener.close();raise\n        return listener\n    finally:\n        if copied is not None:os.close(copied)\n\n\ndef inspect_listener(inode,address,port):\n    if not inode.isdecimal() or not port.isdecimal():raise AdmissionGateError('Invalid stored listener')\n    for path in Path('/proc/1/fd').iterdir():\n        try:link=os.readlink(path)\n        except FileNotFoundError:continue\n        if link=='socket:['+inode+']':\n            with duplicate_listener({'pid':1,'fd':int(path.name),'inode':int(inode),'started':process_started(Path('/proc/1/stat')),'address':address,'port':int(port)}):\n                print(json.dumps({'inode':int(inode),'address':address,'port':int(port)}));return\n    raise AdmissionGateError('PID1 no longer holds the listener')\n\n\ndef notify_listener(descriptor,name):\n    path=os.environ.get('NOTIFY_SOCKET')\n    if not path:raise AdmissionGateError('Maintenance listener requires its managed unit')\n    with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as notification:\n        notification.connect('\\0'+path[1:] if path.startswith('@') else path)\n        notification.sendmsg([('FDSTORE=1\\nFDPOLL=0\\nFDNAME='+name+'\\nREADY=1').encode()],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[descriptor]))])\n\n\ndef stopped_event():\n    stopped=threading.Event()\n    for name in (signal.SIGTERM,signal.SIGINT):signal.signal(name,lambda *_:stopped.set())\n    return stopped\n\n\ndef pin_listener(operation,encoded,token):\n    if str(uuid.UUID(operation))!=operation or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:\n        raise AdmissionGateError('Invalid listener pin request')\n    value=json.loads(base64.urlsafe_b64decode(encoded));process=Path('/proc')/str(value['pid'])\n    uid=int(next(line for line in (process/'status').read_text().splitlines() if line.startswith('Uid:')).split()[1])\n    if (uid!=value['uid'] or (process/'exe').resolve()!=Path(value['executable']).resolve() or\n            (process/'cwd').resolve()!=Path(value['directory']) or '0::'+value['cgroup'] not in (process/'cgroup').read_text().splitlines()):\n        raise AdmissionGateError('Platform listener differs from its verified source')\n    stopped=stopped_event()\n    with duplicate_listener(value) as listener:\n        notify_listener(listener.fileno(),'listener-'+operation+'-'+token);stopped.wait()\n\n\ndef maintenance_serve(operation,target,address,port,token):\n    if str(uuid.UUID(operation))!=operation or not port.isdecimal() or not 1<=int(port)<=65535 or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:\n        raise AdmissionGateError('Invalid maintenance listener request')\n    pages=maintenance_pages(Path(target))\n    if pages is None:raise AdmissionGateError('Installed source has no maintenance pages')\n    stopped=stopped_event()\n    listener=MaintenanceListener(pages,address,int(port))\n    try:\n        notify_listener(listener.server.socket.fileno(),'page-'+operation+'-'+token)\n        stopped.wait()\n    finally:listener.close()\n\nclass LinuxAdmissionGate:\n    def __init__(self, host=None):\n        self.host = host\n\n    def run(self,args,**kwargs):\n        command = ['nft', *args]\n        result = self.host.run(command, check=False, **kwargs) if self.host else subprocess.run(command,capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing,*,page_cgroup=None,page_token=None):\n        if not isinstance(ports,list) or len(ports) not in (2,3):raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[];public=[]\n        for index,endpoint in enumerate(ports):\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selected=[destination+' tcp dport '+str(endpoint['port'])]\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:selected.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n            selectors.extend(selected)\n            if index==0:public=selected\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        pages=''\n        if page_cgroup is not None:\n            if type(page_token) is not int or not 0<page_token<2**32 or page_token==MARK:raise AdmissionGateError('Invalid maintenance connection identity')\n            if (not isinstance(page_cgroup,str) or page_cgroup=='/' or not re.fullmatch(r'/[a-zA-Z0-9_@./-]+',page_cgroup) or\n                    str(PurePosixPath(page_cgroup))!=page_cgroup or any(part in ('.','..') for part in page_cgroup.split('/')[1:])):\n                raise AdmissionGateError('Invalid maintenance socket cgroup')\n            group=page_cgroup[1:];level=len(group.split('/'))\n            if level>=255:raise AdmissionGateError('Maintenance socket cgroup is too deep')\n            for selected in public:\n                pages+='  '+selected+' ct mark != '+str(MARK)+' tcp flags & (syn | ack) == syn ct mark set 0\\n'\n                owner=selected+' ct mark != '+str(MARK)+' socket cgroupv2 level '+str(level)+' '+json.dumps(group)\n                # Missing next ancestors break this rule; existing descendants cannot be the root cgroup.\n                pages+='  '+owner+' socket cgroupv2 level '+str(level+1)+' != \"/\" counter reject with tcp reset\\n'\n                pages+='  '+owner+' tcp flags & (syn | ack) == syn ct mark set '+str(page_token)+' counter accept\\n'\n                pages+='  '+selected+' ct mark '+str(page_token)+' counter accept\\n'\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{pages}{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):\n        existing=self.table_exists()\n        self.batch(self.rules(ports,existing),check=True)\n        # Validate the supported socket expression without granting a live exception.\n        self.batch(self.rules(ports,existing,page_cgroup='/system.slice',page_token=1),check=True)\n    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))\n    def show_page(self,ports,cgroup,token):self.batch(self.rules(ports,self.table_exists(),page_cgroup=cgroup,page_token=token))\n    def open(self):\n        if self.table_exists():self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid,program=None):\n        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER); gate=LinuxAdmissionGate()\n    if path.exists() or path.is_symlink():\n        value=protected_json(path)\n        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports']); return\n    # Platform operations share the same admission owner and survive the window\n    # between durable intent and marker publication.\n    operations=Path('/var/lib/dsh-phalanx-updater/maintenance-operation.json')\n    if operations.exists() or operations.is_symlink():\n        root=operations.parent\n        info=root.lstat()\n        if root.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid platform operation owner')\n        job=protected_json(operations)\n        if job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):\n            raise AdmissionGateError('Unknown platform operation admission protocol')\n        if job['phase'] not in ('succeeded','restored'):\n            value=json.loads(job['marker'])\n            if value.get('schema')!=1 or value.get('operation')!=job['id']:raise AdmissionGateError('Invalid platform operation marker')\n            gate.close(value['ports']);return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close(protected_ports(values)); return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:\n        if len(sys.argv)==1:restore_boot_admission()\n        elif len(sys.argv)==7 and sys.argv[1]=='--serve-page':maintenance_serve(*sys.argv[2:])\n        elif len(sys.argv)==5 and sys.argv[1]=='--inspect-listener':inspect_listener(*sys.argv[2:])\n        elif len(sys.argv)==5 and sys.argv[1]=='--pin-listener':pin_listener(*sys.argv[2:])\n        else:raise AdmissionGateError('Unknown maintenance entry request')\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
 """Deployment facts and read-only checks before large downloads or host changes."""
 import ipaddress
 import os
@@ -154,10 +195,12 @@ DOWNLOAD_SOURCE_PRESETS = json.loads("{\n  \"official\": {\n    \"npm\": \"https
 # END GENERATED DOWNLOAD SOURCE PRESETS
 
 DOWNLOAD_SOURCE_OPTIONS = {
-    'npm_registry': 'npm', 'pypi_index': 'pypi', 'container_mirror': 'containerMirror', 'ghcr_mirror': 'ghcrMirror',
-    'github_proxy_prefix': 'githubAssets', 'github_api_proxy_prefix': 'githubApi',
-    'browser_download_host': 'browser', 'chromium_arm64_download_host': 'browserChromiumArm64',
+    'npm_registry': 'npm', 'pypi_index': 'pypi', 'container_mirror': 'containerMirror',
+    'ghcr_mirror': 'ghcrMirror', 'github_proxy_prefix': 'githubAssets',
+    'github_api_proxy_prefix': 'githubApi', 'browser_download_host': 'browser',
+    'chromium_arm64_download_host': 'browserChromiumArm64',
 }
+
 DOWNLOAD_SOURCE_PREFIXES = ('containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi')
 
 
@@ -263,10 +306,29 @@ def download_source_environment(sources, architecture):
 CONFIG = '/etc/dsh-phalanx/environment'
 STATE = '/etc/dsh-phalanx/install-state.json'
 HOME_DIR = '/var/lib/dsh-phalanx'
+UNINSTALL_STATE = '/etc/dsh-phalanx/uninstall-state.json'
+
+
+def uninstall_record(host):
+    path = host.path(UNINSTALL_STATE)
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.parent.is_symlink() or path.is_symlink() or not path.is_file() or path.stat().st_uid != os.geteuid() or path.stat().st_mode & 0o077:
+        raise ConfigurationError('Uninstall receipt ownership cannot be verified')
+    if path.stat().st_size > 1048576:
+        raise ConfigurationError('Uninstall receipt exceeds its allowed size')
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict) or value.get('schema') != 1 or value.get('phase') not in ('removing', 'retained', 'purging'):
+        raise ConfigurationError('Invalid uninstall receipt')
+    return value
 
 
 def default_storage_root(data_root):
     return os.path.abspath(data_root)+'.durable'
+
+
+def unit_argument(value):
+    return '"'+str(value).replace('\\','\\\\').replace('"','\\"').replace('%','%%')+'"'
 
 
 def effective_user_data_root(values):
@@ -274,6 +336,11 @@ def effective_user_data_root(values):
 
 
 class ConfigurationError(ValueError):
+    pass
+
+
+class HiddenConfigurationConflict(ConfigurationError):
+    """An existing compatibility listener needs explicit offline maintenance."""
     pass
 
 
@@ -363,7 +430,7 @@ def validate_configuration(host, values):
         raise ConfigurationError('Initial legacy model provider must be deepseek-official; configure shared providers in administration after signup')
     if 'DSH_PHALANX_SESSION_SECRET' in values and len(values['DSH_PHALANX_SESSION_SECRET']) < 32:
         raise ConfigurationError('Session secret must contain at least 32 characters')
-    for address in filter(None, values['DSH_PHALANX_HOST_PUBLIC_ADDRESSES'].split(',')):
+    for address in filter(None, values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES', '').split(',')):
         if not ipaddress.IPv4Address(address.strip()).is_global:
             raise ConfigurationError('Host aliases must be public IPv4 literals')
     if any('\n' in value or '\r' in value or '\0' in value for value in values.values()):
@@ -435,12 +502,16 @@ def check_ports(host, args, values, successful, interactive):
                 host.tell(f'Private gateway port {number} is occupied; using {free} (saved in configuration).')
                 values[key] = str(free)
                 continue
+            if name == 'PREVIEW_PORT':
+                reason = f'已有兼容监听端口 {number} 不可用，已保留配置；请按服务管理文档处理后重试。' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else f'Existing compatibility listener port {number} is unavailable; configuration retained. Follow service management documentation before retrying.'
+                raise HiddenConfigurationConflict(reason)
             host.tell(f'{flag} {number} is unavailable: {conflict}. No occupying process was stopped.')
             if not interactive or successful:
                 raise ConfigurationError(f'Choose a free {flag} and rerun the installer; {conflict}')
-            values[key] = host.prompt(f'New {flag} value: ')
+            dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+            values[key] = dialogue.ask(f'新的 {flag} 值', f'New {flag} value', validate=validate_port)
             origin = urllib.parse.urlparse(values['DSH_PHALANX_PUBLIC_ORIGIN'])
-            if name == 'PORT' and origin.scheme == 'http' and origin.port == number:
+            if name == 'PORT' and origin.scheme == 'http' and origin.port == number and (getattr(args, 'dialogue', None) is None or args.dialogue.automatic_origin):
                 values['DSH_PHALANX_PUBLIC_ORIGIN'] = origin._replace(netloc=origin.netloc.rsplit(':', 1)[0]+':'+values[key]).geturl()
             if not values[key].isdigit() or not 1 <= int(values[key]) <= 65535:
                 raise ConfigurationError('Port must be between 1 and 65535')
@@ -456,8 +527,8 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
     if not modern and (args.user_data_root is not None or args.user_data_mount is not None):
         raise ConfigurationError('External user storage options require 0.1.1 or later')
     previous = read_configuration(host)
-    successful = installed_state(host) is not None
-    interactive = host.terminal_available()
+    successful = installed_state(host) is not None or uninstall_record(host) is not None
+    interactive = host.terminal_available() and not getattr(args, 'non_interactive', False)
     values = dict(previous)
     if protected_secrets:
         values.pop('DSH_PHALANX_SESSION_SECRET', None)
@@ -476,6 +547,8 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
                 if successful:
                     raise ConfigurationError('Existing successful installation configuration differs; use explicit offline configuration/storage maintenance')
             values[name] = str(value)
+    if getattr(args, 'server_ip', None) is not None:
+        validate_ip(args.server_ip)
     missing = []
     if not interactive:
         if 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
@@ -485,8 +558,10 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
         if not modern and args.model_key_file is None and 'DSH_PHALANX_MODEL_UPSTREAM_API_KEY' not in values:
             missing.append('--model-key-file')
         if missing:
-            raise ConfigurationError('Missing '+', '.join(missing)+'. Example: sudo bash install.sh --public-origin http://<host>:18080 --host-public-addresses ""'+(' --model-key-file /path/to/protected-key' if not modern else ''))
-    if 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
+            prefix = '非交互安装缺少参数：' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else 'Missing '
+            example = '。示例：' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else '. Example: '
+            raise ConfigurationError(prefix+', '.join(missing)+example+'sudo bash install.sh --public-origin http://<host>:18080 --host-public-addresses ""'+(' --model-key-file /path/to/protected-key' if not modern else ''))
+    if not modern and 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
         values['DSH_PHALANX_HOST_PUBLIC_ADDRESSES'] = host.prompt('All public IPv4 host aliases, comma-separated (empty if none): ')
     if args.model_key_file:
         path = args.model_key_file
@@ -512,19 +587,68 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
     for name, value in defaults.items():
         values.setdefault('DSH_PHALANX_'+name, value)
     if interactive and modern and not successful:
-        if args.port is None:
-            values['DSH_PHALANX_PORT'] = host.prompt('Entry port ['+values['DSH_PHALANX_PORT']+']: ') or values['DSH_PHALANX_PORT']
-        candidate = values.get('DSH_PHALANX_PUBLIC_ORIGIN') or access_candidate(host, values)
-        if args.public_origin is None:
-            values['DSH_PHALANX_PUBLIC_ORIGIN'] = host.prompt(f'Browser access URL [{candidate}]: ') or candidate
-        if host.prompt('Advanced gateway/storage settings? [y/N]: ').lower() == 'y':
-            gateway = host.prompt('Private gateway port ['+values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']+']: ')
-            args.gateway_chosen = args.gateway_chosen or bool(gateway)
-            values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'] = gateway or values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']
-            for name, label in (('USER_DATA_ROOT', 'User data directory'), ('USER_DATA_MOUNT', 'Existing data mount')):
-                selected = host.prompt(label+' ['+values.get('DSH_PHALANX_'+name, '')+']: ')
-                if selected:
-                    values['DSH_PHALANX_'+name] = selected
+        dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+        selection = configured_download_sources(host, values, args)
+        config = {'source': selection['preset'], 'overrides': selection.get('overrides', {}),
+                  'server_ip': getattr(args, 'server_ip', None), 'port': values['DSH_PHALANX_PORT'],
+                  'origin': values.get('DSH_PHALANX_PUBLIC_ORIGIN'), 'mapping': values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES'),
+                  'gateway': values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'], 'data': values.get('DSH_PHALANX_USER_DATA_ROOT', ''),
+                  'mount': values.get('DSH_PHALANX_USER_DATA_MOUNT', '')}
+        if config['origin'] and args.public_origin is None:
+            try:
+                previous_ip = str(ipaddress.ip_address(urllib.parse.urlsplit(config['origin']).hostname))
+            except ValueError:
+                previous_ip = None
+            config['server_ip'] = config['server_ip'] or previous_ip
+            dialogue.automatic_origin = previous_ip is not None and config['origin'] == entry_url(config['port'], previous_ip)
+        supplied = set()
+        if args.public_origin is not None: supplied.update(('server_ip', 'origin'))
+        if getattr(args, 'server_ip', None) is not None:
+            config['server_ip'] = validate_ip(args.server_ip)
+            supplied.add('server_ip')
+        if args.port is not None: supplied.add('port')
+        if args.host_public_addresses is not None: supplied.add('mapping')
+        dialogue.edit_common(config, supplied)
+        if dialogue.choose('展开高级设置？y/n', 'Open advanced settings? y/n', ('y', 'n'), 'n') == 'y':
+            dialogue.edit_advanced(config)
+        while True:
+            for name, key in (('port', 'PORT'), ('origin', 'PUBLIC_ORIGIN'), ('gateway', 'CONTAINER_GATEWAY_PORT')):
+                values['DSH_PHALANX_'+key] = config[name]
+            for name, key in (('mapping', 'HOST_PUBLIC_ADDRESSES'), ('data', 'USER_DATA_ROOT'), ('mount', 'USER_DATA_MOUNT')):
+                if config[name] is None or name != 'mapping' and not config[name]:
+                    values.pop('DSH_PHALANX_'+key, None)
+                else:
+                    values['DSH_PHALANX_'+key] = config[name]
+            apply_source_choice(args, config)
+            args.gateway_chosen = args.gateway_chosen or dialogue.gateway_chosen
+            try:
+                validate_configuration(host, values)
+                validate_storage(host, values)
+                check_ports(host, args, values, successful, interactive)
+                config['port'] = values['DSH_PHALANX_PORT']
+                config['gateway'] = values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']
+                config['origin'] = values['DSH_PHALANX_PUBLIC_ORIGIN']
+            except (ValueError, OSError) as error:
+                if isinstance(error, (Cancelled, HiddenConfigurationConflict)) or args.preview_port is not None or args.preview_origin is not None:
+                    raise
+                dialogue.tell('配置未通过校验，请修改后重试：'+operator_text(str(error), 'zh-CN'), 'Configuration validation failed; edit and retry: '+str(error))
+                dialogue.edit_common(config)
+                dialogue.edit_advanced(config)
+                continue
+            dialogue.summary({**config, 'data': config['data'] or effective_user_data_root(values)})
+            action = dialogue.choose('摘要：install 安装 / edit 修改 / cancel 取消', 'Summary: install / edit / cancel', ('install', 'edit', 'cancel'), 'install')
+            if action == 'install': break
+            if action == 'cancel':
+                raise Cancelled(dialogue.tr('安装已取消；保留已准备的依赖及现有数据。', 'Installation cancelled; prepared dependencies and existing data are retained.'))
+            section = dialogue.choose('修改：source 下载源 / common 常用 / advanced 高级', 'Edit: source / common / advanced', ('source', 'common', 'advanced'), 'common')
+            if section == 'source':
+                dialogue.edit_source(config)
+                apply_source_choice(args, config)
+                host.download_sources = resolve_download_sources({'preset': config['source'], 'overrides': config['overrides']})
+                if getattr(host, 'recheck_release', None) is not None: host.recheck_release()
+                dialogue.tell('已按新下载源重新核对版本。', 'Release rechecked using the new source.')
+            elif section == 'common': dialogue.edit_common(config)
+            else: dialogue.edit_advanced(config)
     values.setdefault('DSH_PHALANX_PUBLIC_ORIGIN', entry_url(values['DSH_PHALANX_PORT'], values['DSH_PHALANX_HOST']))
     values['DSH_PHALANX_DOWNLOAD_SOURCES'] = json.dumps(configured_download_sources(host, values, args), separators=(',', ':'))
     validate_configuration(host, values)
@@ -533,13 +657,213 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
     validate_configuration(host, values)
     if not successful:
         changes = sorted(key.removeprefix('DSH_PHALANX_') for key, value in values.items() if key in previous and previous[key] != value)
-        host.tell('Configuration: '+values['DSH_PHALANX_PUBLIC_ORIGIN']+'; entry port '+values['DSH_PHALANX_PORT']+'; private gateway '+values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])
-        host.tell('Platform data: '+values['DSH_PHALANX_DATA_ROOT']+'; user data: '+effective_user_data_root(values))
+        if modern:
+            if not interactive:
+                dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+                selection = configured_download_sources(host, values, args)
+                dialogue.summary({'source': selection['preset'], 'overrides': selection.get('overrides', {}), 'server_ip': getattr(args, 'server_ip', None),
+                                  'port': values['DSH_PHALANX_PORT'], 'origin': values['DSH_PHALANX_PUBLIC_ORIGIN'], 'gateway': values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'],
+                                  'mapping': values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES'), 'data': effective_user_data_root(values), 'mount': values.get('DSH_PHALANX_USER_DATA_MOUNT', '')})
+        else:
+            host.tell('Configuration: '+values['DSH_PHALANX_PUBLIC_ORIGIN']+'; entry port '+values['DSH_PHALANX_PORT']+'; private gateway '+values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])
+            host.tell('Platform data: '+values['DSH_PHALANX_DATA_ROOT']+'; user data: '+effective_user_data_root(values))
         if changes:
             host.tell('Retry changes: '+', '.join(changes)+'. Existing data will be preserved.')
-        if interactive and host.prompt('Continue with this configuration? [y/N]: ').lower() != 'y':
+        if interactive and not modern and host.prompt('Continue with this configuration? [y/N]: ').lower() != 'y':
             raise ConfigurationError('Installation cancelled before downloads or deployment changes')
     return values
+
+"""Shared installation questions and validation; callers own terminal and host effects."""
+import ipaddress
+import json
+from urllib.parse import urlsplit
+
+PROJECT = 'https://github.com/dake6767/dsh-phalanx'
+# Existing installer option spellings; synchronized by the preview contract tests.
+
+SOURCE_OPTIONS = DOWNLOAD_SOURCE_OPTIONS
+PREFIXES = ('containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi')
+
+
+class Cancelled(ValueError):
+    pass
+
+
+class InstallerQuestions:
+    def __init__(self, language, read, write, presets, *, automatic_origin=True, simulation=False):
+        self.simulation = simulation
+        self.language = language
+        self.read = read
+        self.write = write
+        self.presets = presets
+        self.mapping_choice = None
+        self.gateway_chosen = False
+        self.automatic_origin = automatic_origin
+
+    def tr(self, zh, en):
+        return zh if self.language == 'zh-CN' else en
+
+    def tell(self, zh, en):
+        self.write(self.tr(zh, en))
+
+    def ask(self, zh, en, default=None, validate=None):
+        while True:
+            label = self.tr(zh, en).replace(' / ', '\n  / ')
+            value = self.read('\n' + label + '\n  >' + (f' [{default}]' if default is not None else '') + ': ').strip()
+            if value.lower() == 'cancel':
+                raise Cancelled(self.tr('安装已取消；保留已准备的系统依赖和现有数据。', 'Installation cancelled; retain prepared OS dependencies and existing data.'))
+            if not value and default is not None:
+                value = default
+            try:
+                return validate(value) if validate else value
+            except ValueError:
+                self.tell('输入无效，请在此重新填写；其他答案保留。', 'Invalid input; retry here. Other answers are retained.')
+
+    def choose(self, zh, en, choices, default):
+        def check(value):
+            if value not in choices:
+                raise ValueError()
+            return value
+        return self.ask(zh, en, default, check)
+
+    def project_info(self):
+        self.tell('dsh-phalanx：面向小团队的多用户自托管 AI 平台，每位成员拥有独立用户空间。', 'dsh-phalanx: a multi-user, self-hosted AI platform for small teams, with an independent space for each member.')
+        self.tell(PROJECT, PROJECT)
+
+    def edit_source(self, config):
+        choice = self.choose('下载源：official 官方 / mainland 中国大陆 / custom 自定义（独立于语言）', 'Download source: official / mainland / custom (independent of language)', ('official', 'mainland', 'custom'), config['source'])
+        if choice == 'custom':
+            config['source'] = self.choose('自定义基础源 official/mainland', 'Custom base official/mainland', ('official', 'mainland'), config['source'])
+            while True:
+                category = self.choose('覆盖类别或 done：' + ', '.join(SOURCE_OPTIONS.values()), 'Override category or done: ' + ', '.join(SOURCE_OPTIONS.values()), (*SOURCE_OPTIONS.values(), 'done'), 'done')
+                if category == 'done':
+                    break
+                config['overrides'][category] = self.ask('来源 URL（不用真实凭据）', 'Source URL (no real credentials)', config['overrides'].get(category), lambda value: validate_source(category, value))
+        else:
+            config['source'] = choice
+        self.tell('显式逐类覆盖优先于基础源；切换基础源保留显式覆盖。', 'Explicit category overrides take precedence over the base; changing the base preserves explicit overrides.')
+
+    def show_sources(self, config):
+        presets = self.presets
+        effective = {**presets[config['source']], **config['overrides']}
+        self.tell('\n生效下载源：', '\nEffective download sources:')
+        for category, address in effective.items():
+            self.tell('  ' + category + ': ' + (address or '直连'), '  ' + category + ': ' + (address or 'direct'))
+        self.tell('', '')
+
+    def edit_common(self, config, supplied=()):
+        if 'server_ip' not in supplied:
+            config['server_ip'] = self.ask('服务器访问 IP（内网或公网）', 'Server access IP (LAN or public)', config['server_ip'], validate_ip)
+        if 'port' not in supplied:
+            config['port'] = self.ask('平台入口端口', 'Platform entry port', config['port'], validate_port)
+        suggestion = suggested_origin(config) if config['server_ip'] else config['origin']
+        if 'origin' not in supplied:
+            config['origin'] = self.ask('完整浏览器访问网址（可填实际 HTTPS 域名；不会部署证书或反向代理）', 'Full browser URL (actual HTTPS domain allowed; no certificate or reverse proxy deployment)', suggestion if self.automatic_origin else config['origin'], validate_origin)
+        if 'origin' not in supplied:
+            self.automatic_origin = config['origin'] == suggestion
+        if 'mapping' in supplied:
+            return
+        current = self.mapping_choice or ('list' if config['mapping'] else 'none')
+        choice = self.choose('是否设置过路由器端口转发或公网 NAT？\n  none 没有 / list 有 / undeclared 不确定（将阻止成员出网）', 'Port forwarding or public NAT?\n  none No / list Yes / undeclared Unsure (blocks member egress)', ('none', 'list', 'undeclared'), current)
+        self.mapping_choice = choice
+        if choice == 'list':
+            config['mapping'] = self.ask('完整公网 IPv4 清单，逗号分隔', 'Complete public IPv4 list, comma separated', config['mapping'] or None, validate_mapping_list)
+        else:
+            config['mapping'] = '' if choice == 'none' else None
+
+    def edit_advanced(self, config):
+        self.gateway_chosen = True
+        config['gateway'] = self.ask('内部网关端口', 'Internal gateway port', config['gateway'], validate_port)
+        config['data'] = self.ask('成员数据目录' + ('（模拟不创建）' if self.simulation else ''), 'Member data directory' + (' (not created)' if self.simulation else ''), config['data'], validate_optional_path)
+        config['mount'] = self.ask('已有数据挂载点' + ('（模拟不检查）' if self.simulation else ''), 'Existing data mount' + (' (not checked)' if self.simulation else ''), config['mount'], validate_optional_path)
+
+    def summary(self, config):
+        self.tell('\n── 配置摘要' + ('（模拟）' if self.simulation else '') + ' ──', '\n── Configuration summary' + (' (simulation)' if self.simulation else '') + ' ──')
+        self.show_sources(config)
+        labels = {'source': ('下载源', 'Download source'), 'server_ip': ('访问 IP', 'Access IP'), 'port': ('入口端口', 'Entry port'),
+                  'origin': ('浏览器网址', 'Browser URL'), 'gateway': ('内部网关端口', 'Internal gateway port'),
+                  'data': ('成员数据目录', 'Member data directory'), 'mount': ('数据挂载点', 'Data mount')}
+        for key, (zh, en) in labels.items():
+            self.tell(zh + ': ' + (str(config[key]) if config[key] not in ('', None) else '默认'), en + ': ' + (str(config[key]) if config[key] not in ('', None) else 'default'))
+        mapping = config['mapping']
+        self.tell('公网映射：' + ('未声明，成员出网被阻止' if mapping is None else mapping or '明确没有额外映射；允许正常公网访问'),
+                  'Public mappings: ' + ('undeclared; member egress blocked' if mapping is None else mapping or 'explicitly none; normal public access allowed'))
+        self.tell('宿主、私网、回环与已声明映射仍受保护。', 'Host, private, loopback and declared mapping targets remain protected.')
+
+
+def validate_source(category, value):
+    if value == '' and category in PREFIXES:
+        return value
+    url = urlsplit(value)
+    if len(value) > 2048 or any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value) or '\\' in value:
+        raise ValueError()
+    if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
+        raise ValueError()
+    if category in ('containerMirror', 'ghcrMirror') and url.scheme != 'https':
+        raise ValueError()
+    if url.port is not None and not 0 < url.port <= 65535:
+        raise ValueError()
+    return value.rstrip('/') + ('/' if category in PREFIXES else '')
+
+
+def validate_ip(value):
+    address = ipaddress.ip_address(value)
+    if address.is_unspecified or address.is_multicast:
+        raise ValueError()
+    return str(address)
+
+
+def validate_port(value):
+    if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= 65535:
+        raise ValueError()
+    return str(int(value))
+
+
+def validate_mapping(value):
+    if value:
+        for item in value.split(','):
+            if ipaddress.ip_address(item.strip()).version != 4 or not ipaddress.ip_address(item.strip()).is_global:
+                raise ValueError()
+    return value
+
+
+def validate_mapping_list(value):
+    if not value:
+        raise ValueError()
+    return validate_mapping(value)
+
+
+def validate_path(value):
+    if not value.startswith('/') or '\x00' in value:
+        raise ValueError()
+    return value
+
+
+def validate_origin(value):
+    url = urlsplit(value)
+    if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.path not in ('', '/') or url.query or url.fragment:
+        raise ValueError()
+    if url.port is not None and not 0 < url.port <= 65535:
+        raise ValueError()
+    return value.rstrip('/')
+
+
+def suggested_origin(config):
+    address = config['server_ip']
+    if ':' in address:
+        address = '[' + address + ']'
+    return f"http://{address}:{config['port']}"
+
+
+
+def validate_optional_path(value):
+    return validate_path(value) if value else ''
+
+
+def apply_source_choice(args, config):
+    args.download_source_preset = config['source']
+    for option, category in SOURCE_OPTIONS.items():
+        setattr(args, option, config['overrides'].get(category))
 
 """Structured installation events, operator output and private safe diagnostics."""
 import contextlib
@@ -551,12 +875,13 @@ import re
 import secrets
 import sys
 import threading
+import unicodedata
 import time
 
 
 # BEGIN GENERATED SYSTEM UPDATE CODES
 # Generated from src/domain/system-update-codes.json; do not edit this value.
-SYSTEM_UPDATE_CODES = json.loads("{\n  \"phases\": {\n    \"install.preflight\": {\n      \"en\": \"Checking installation requirements\",\n      \"zh-CN\": \"检查安装条件\"\n    },\n    \"install.lock\": {\n      \"en\": \"Acquiring the installation lock\",\n      \"zh-CN\": \"获取安装锁\"\n    },\n    \"install.release-selection\": {\n      \"en\": \"Selecting a verified release\",\n      \"zh-CN\": \"选择已验证版本\"\n    },\n    \"install.configuration\": {\n      \"en\": \"Reading installation configuration\",\n      \"zh-CN\": \"读取安装配置\"\n    },\n    \"install.download\": {\n      \"en\": \"Downloading and verifying assets\",\n      \"zh-CN\": \"下载并校验制品\"\n    },\n    \"install.existing-installation\": {\n      \"en\": \"Checking the installed release\",\n      \"zh-CN\": \"检查已安装版本\"\n    },\n    \"install.dependencies\": {\n      \"en\": \"Preparing host dependencies\",\n      \"zh-CN\": \"准备主机依赖\"\n    },\n    \"install.identity-storage\": {\n      \"en\": \"Preparing service identity and storage\",\n      \"zh-CN\": \"准备服务身份与存储\"\n    },\n    \"install.staging\": {\n      \"en\": \"Staging the verified platform\",\n      \"zh-CN\": \"暂存已验证平台\"\n    },\n    \"install.runtime-image\": {\n      \"en\": \"Preparing the runtime image\",\n      \"zh-CN\": \"准备运行镜像\"\n    },\n    \"install.database\": {\n      \"en\": \"Preparing the platform database\",\n      \"zh-CN\": \"准备平台数据库\"\n    },\n    \"install.executor\": {\n      \"en\": \"Installing the update executor\",\n      \"zh-CN\": \"安装升级执行器\"\n    },\n    \"install.activation\": {\n      \"en\": \"Starting the managed service\",\n      \"zh-CN\": \"启动托管服务\"\n    },\n    \"update.preparing\": {\n      \"en\": \"Downloading and verifying the update\",\n      \"zh-CN\": \"下载并校验更新\"\n    },\n    \"update.prepared\": {\n      \"en\": \"Ready to apply\",\n      \"zh-CN\": \"可以应用更新\"\n    },\n    \"update.prepare-failed\": {\n      \"en\": \"Download or verification failed\",\n      \"zh-CN\": \"下载或校验失败\"\n    },\n    \"update.stopping\": {\n      \"en\": \"Stopping the service and user instances\",\n      \"zh-CN\": \"停止平台与成员实例\",\n      \"step\": 1,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.backing-up\": {\n      \"en\": \"Backing up platform data\",\n      \"zh-CN\": \"备份平台数据\",\n      \"step\": 2,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.backed-up\": {\n      \"en\": \"Platform backup verified\",\n      \"zh-CN\": \"平台备份已验证\",\n      \"step\": 3,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.switching\": {\n      \"en\": \"Switching to the verified version\",\n      \"zh-CN\": \"切换到已验证版本\",\n      \"step\": 4,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.validating\": {\n      \"en\": \"Checking the new service\",\n      \"zh-CN\": \"检查新版本服务\",\n      \"step\": 5,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.committed\": {\n      \"en\": \"Update verified; reopening the service\",\n      \"zh-CN\": \"更新已验证，正在开放服务\",\n      \"step\": 6,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.succeeded\": {\n      \"en\": \"Update completed successfully\",\n      \"zh-CN\": \"升级成功\"\n    },\n    \"update.apply-failed\": {\n      \"en\": \"Update could not be applied\",\n      \"zh-CN\": \"无法应用更新\"\n    },\n    \"update.restoring\": {\n      \"en\": \"Restoring the previous version\",\n      \"zh-CN\": \"正在恢复旧版本\",\n      \"step\": 1,\n      \"total\": 2,\n      \"mode\": \"recovery\"\n    },\n    \"update.restoration-committed\": {\n      \"en\": \"Previous version verified; reopening the service\",\n      \"zh-CN\": \"旧版本已验证，正在开放服务\",\n      \"step\": 2,\n      \"total\": 2,\n      \"mode\": \"recovery\"\n    },\n    \"update.restored\": {\n      \"en\": \"Update failed; the previous version was restored\",\n      \"zh-CN\": \"升级失败，已恢复旧版本\"\n    },\n    \"update.recovery-failed\": {\n      \"en\": \"Recovery failed; operator action is required\",\n      \"zh-CN\": \"恢复失败，需要管理员处理\"\n    },\n    \"update.bootstrap\": {\n      \"en\": \"Updating the small executor\",\n      \"zh-CN\": \"更新小执行器\"\n    },\n    \"update.cleanup\": {\n      \"en\": \"Cleaning unused installation resources\",\n      \"zh-CN\": \"清理无用安装资源\"\n    }\n  },\n  \"outcomes\": {\n    \"update.available\": {\n      \"en\": \"Update available\",\n      \"zh-CN\": \"有可用更新\"\n    },\n    \"update.current\": {\n      \"en\": \"Already up to date\",\n      \"zh-CN\": \"已是最新版本\"\n    },\n    \"update.breakpoint-required\": {\n      \"en\": \"Update to the required intermediate version first\",\n      \"zh-CN\": \"需要先升级到断点版本\"\n    },\n    \"update.below-floor\": {\n      \"en\": \"The installed version is below the upgrade floor\",\n      \"zh-CN\": \"当前版本低于升级下限\"\n    },\n    \"update.channel-switch\": {\n      \"en\": \"A formal release is available for this candidate\",\n      \"zh-CN\": \"此候选版可以转为正式版\"\n    },\n    \"update.reader-update-required\": {\n      \"en\": \"Update the small executor first\",\n      \"zh-CN\": \"需要先更新小执行器\"\n    }\n  },\n  \"errors\": {\n    \"disk.insufficient\": {\n      \"en\": \"There is not enough disk space\",\n      \"zh-CN\": \"磁盘空间不足\"\n    },\n    \"disk.inspection-failed\": {\n      \"en\": \"Disk capacity could not be checked\",\n      \"zh-CN\": \"无法检查磁盘容量\"\n    },\n    \"database.unavailable\": {\n      \"en\": \"The platform database is unavailable\",\n      \"zh-CN\": \"平台数据库不可用\"\n    },\n    \"database.export-failed\": {\n      \"en\": \"The platform database could not be exported\",\n      \"zh-CN\": \"平台数据库导出失败\"\n    },\n    \"database.restore-failed\": {\n      \"en\": \"The platform database could not be restored\",\n      \"zh-CN\": \"平台数据库恢复失败\"\n    },\n    \"download.failed\": {\n      \"en\": \"The release download failed\",\n      \"zh-CN\": \"发布制品下载失败\"\n    },\n    \"release.metadata-invalid\": {\n      \"en\": \"The release declaration is invalid\",\n      \"zh-CN\": \"发布声明无效\"\n    },\n    \"release.checksum-failed\": {\n      \"en\": \"A release asset failed checksum verification\",\n      \"zh-CN\": \"发布制品校验失败\"\n    },\n    \"release.identity-mismatch\": {\n      \"en\": \"The release or running process identity does not match\",\n      \"zh-CN\": \"发布制品或运行进程身份不匹配\"\n    },\n    \"compatibility.unsupported\": {\n      \"en\": \"This release is incompatible with the installed platform\",\n      \"zh-CN\": \"此版本与已安装平台不兼容\"\n    },\n    \"operation.conflict\": {\n      \"en\": \"Another operation must finish or recover first\",\n      \"zh-CN\": \"需先完成或恢复另一个操作\"\n    },\n    \"operation.invalid\": {\n      \"en\": \"The selected operation or release changed\",\n      \"zh-CN\": \"所选操作或发布身份已变化\"\n    },\n    \"backup.failed\": {\n      \"en\": \"The platform backup failed\",\n      \"zh-CN\": \"平台备份失败\"\n    },\n    \"backup.invalid\": {\n      \"en\": \"The recovery backup is incomplete or damaged\",\n      \"zh-CN\": \"恢复备份不完整或已损坏\"\n    },\n    \"service.stop-failed\": {\n      \"en\": \"The managed service could not be stopped\",\n      \"zh-CN\": \"托管服务停止失败\"\n    },\n    \"service.start-failed\": {\n      \"en\": \"The managed service could not become ready\",\n      \"zh-CN\": \"托管服务未能就绪\"\n    },\n    \"admission.failed\": {\n      \"en\": \"The maintenance admission rule could not be changed\",\n      \"zh-CN\": \"维护准入规则切换失败\"\n    },\n    \"migration.failed\": {\n      \"en\": \"The platform database migration failed\",\n      \"zh-CN\": \"平台数据库迁移失败\"\n    },\n    \"recovery.failed\": {\n      \"en\": \"The previous version could not be restored\",\n      \"zh-CN\": \"旧版本恢复失败\"\n    },\n    \"cleanup.failed\": {\n      \"en\": \"Some installation resources could not be cleaned\",\n      \"zh-CN\": \"部分安装资源清理失败\"\n    },\n    \"operation.interrupted\": {\n      \"en\": \"The operation was interrupted before a result was recorded\",\n      \"zh-CN\": \"操作中断，尚未记录结果\"\n    },\n    \"unknown\": {\n      \"en\": \"An unclassified update error occurred\",\n      \"zh-CN\": \"发生未分类的升级错误\"\n    }\n  }\n}\n")
+SYSTEM_UPDATE_CODES = json.loads("{\n  \"phases\": {\n    \"install.preflight\": {\n      \"en\": \"Checking installation requirements\",\n      \"zh-CN\": \"检查安装条件\"\n    },\n    \"install.lock\": {\n      \"en\": \"Acquiring the installation lock\",\n      \"zh-CN\": \"获取安装锁\"\n    },\n    \"install.release-selection\": {\n      \"en\": \"Selecting a verified release\",\n      \"zh-CN\": \"选择已验证版本\"\n    },\n    \"install.configuration\": {\n      \"en\": \"Reading installation configuration\",\n      \"zh-CN\": \"读取安装配置\"\n    },\n    \"install.download\": {\n      \"en\": \"Downloading and verifying assets\",\n      \"zh-CN\": \"下载并校验制品\"\n    },\n    \"install.existing-installation\": {\n      \"en\": \"Checking the installed release\",\n      \"zh-CN\": \"检查已安装版本\"\n    },\n    \"install.dependencies\": {\n      \"en\": \"Preparing host dependencies\",\n      \"zh-CN\": \"准备主机依赖\"\n    },\n    \"install.identity-storage\": {\n      \"en\": \"Preparing service identity and storage\",\n      \"zh-CN\": \"准备服务身份与存储\"\n    },\n    \"install.staging\": {\n      \"en\": \"Staging the verified platform\",\n      \"zh-CN\": \"暂存已验证平台\"\n    },\n    \"install.runtime-image\": {\n      \"en\": \"Preparing the runtime image\",\n      \"zh-CN\": \"准备运行镜像\"\n    },\n    \"install.database\": {\n      \"en\": \"Preparing the platform database\",\n      \"zh-CN\": \"准备平台数据库\"\n    },\n    \"install.executor\": {\n      \"en\": \"Installing the update executor\",\n      \"zh-CN\": \"安装升级执行器\"\n    },\n    \"install.activation\": {\n      \"en\": \"Starting the managed service\",\n      \"zh-CN\": \"启动托管服务\"\n    },\n    \"update.preparing\": {\n      \"en\": \"Downloading and verifying the update\",\n      \"zh-CN\": \"下载并校验更新\"\n    },\n    \"update.prepared\": {\n      \"en\": \"Ready to apply\",\n      \"zh-CN\": \"可以应用更新\"\n    },\n    \"update.prepare-failed\": {\n      \"en\": \"Download or verification failed\",\n      \"zh-CN\": \"下载或校验失败\"\n    },\n    \"update.stopping\": {\n      \"en\": \"Stopping the service and user instances\",\n      \"zh-CN\": \"停止平台与成员实例\",\n      \"step\": 1,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.backing-up\": {\n      \"en\": \"Backing up platform data\",\n      \"zh-CN\": \"备份平台数据\",\n      \"step\": 2,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.backed-up\": {\n      \"en\": \"Platform backup verified\",\n      \"zh-CN\": \"平台备份已验证\",\n      \"step\": 3,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.switching\": {\n      \"en\": \"Switching to the verified version\",\n      \"zh-CN\": \"切换到已验证版本\",\n      \"step\": 4,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.validating\": {\n      \"en\": \"Checking the new service\",\n      \"zh-CN\": \"检查新版本服务\",\n      \"step\": 5,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.committed\": {\n      \"en\": \"Update verified; reopening the service\",\n      \"zh-CN\": \"更新已验证，正在开放服务\",\n      \"step\": 6,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.succeeded\": {\n      \"en\": \"Update completed successfully\",\n      \"zh-CN\": \"升级成功\"\n    },\n    \"update.apply-failed\": {\n      \"en\": \"Update could not be applied\",\n      \"zh-CN\": \"无法应用更新\"\n    },\n    \"update.restoring\": {\n      \"en\": \"Restoring the previous version\",\n      \"zh-CN\": \"正在恢复旧版本\",\n      \"step\": 1,\n      \"total\": 2,\n      \"mode\": \"recovery\"\n    },\n    \"update.restoration-committed\": {\n      \"en\": \"Previous version verified; reopening the service\",\n      \"zh-CN\": \"旧版本已验证，正在开放服务\",\n      \"step\": 2,\n      \"total\": 2,\n      \"mode\": \"recovery\"\n    },\n    \"update.restored\": {\n      \"en\": \"Update failed; the previous version was restored\",\n      \"zh-CN\": \"升级失败，已恢复旧版本\"\n    },\n    \"update.recovery-failed\": {\n      \"en\": \"Recovery failed; operator action is required\",\n      \"zh-CN\": \"恢复失败，需要管理员处理\"\n    },\n    \"update.bootstrap\": {\n      \"en\": \"Updating the small executor\",\n      \"zh-CN\": \"更新小执行器\"\n    },\n    \"update.cleanup\": {\n      \"en\": \"Cleaning unused installation resources\",\n      \"zh-CN\": \"清理无用安装资源\"\n    },\n    \"deployment.start\": {\n      \"en\": \"Starting the deployment\",\n      \"zh-CN\": \"启动部署\"\n    },\n    \"deployment.stop\": {\n      \"en\": \"Stopping the deployment\",\n      \"zh-CN\": \"停止部署\"\n    },\n    \"deployment.status\": {\n      \"en\": \"Inspecting deployment status\",\n      \"zh-CN\": \"查询部署状态\"\n    }\n  },\n  \"outcomes\": {\n    \"update.available\": {\n      \"en\": \"Update available\",\n      \"zh-CN\": \"有可用更新\"\n    },\n    \"update.current\": {\n      \"en\": \"Already up to date\",\n      \"zh-CN\": \"已是最新版本\"\n    },\n    \"update.breakpoint-required\": {\n      \"en\": \"Update to the required intermediate version first\",\n      \"zh-CN\": \"需要先升级到断点版本\"\n    },\n    \"update.below-floor\": {\n      \"en\": \"The installed version is below the upgrade floor\",\n      \"zh-CN\": \"当前版本低于升级下限\"\n    },\n    \"update.channel-switch\": {\n      \"en\": \"A formal release is available for this candidate\",\n      \"zh-CN\": \"此候选版可以转为正式版\"\n    },\n    \"update.reader-update-required\": {\n      \"en\": \"Update the small executor first\",\n      \"zh-CN\": \"需要先更新小执行器\"\n    }\n  },\n  \"errors\": {\n    \"disk.insufficient\": {\n      \"en\": \"There is not enough disk space\",\n      \"zh-CN\": \"磁盘空间不足\"\n    },\n    \"disk.inspection-failed\": {\n      \"en\": \"Disk capacity could not be checked\",\n      \"zh-CN\": \"无法检查磁盘容量\"\n    },\n    \"database.unavailable\": {\n      \"en\": \"The platform database is unavailable\",\n      \"zh-CN\": \"平台数据库不可用\"\n    },\n    \"database.export-failed\": {\n      \"en\": \"The platform database could not be exported\",\n      \"zh-CN\": \"平台数据库导出失败\"\n    },\n    \"database.restore-failed\": {\n      \"en\": \"The platform database could not be restored\",\n      \"zh-CN\": \"平台数据库恢复失败\"\n    },\n    \"download.failed\": {\n      \"en\": \"The release download failed\",\n      \"zh-CN\": \"发布制品下载失败\"\n    },\n    \"release.metadata-invalid\": {\n      \"en\": \"The release declaration is invalid\",\n      \"zh-CN\": \"发布声明无效\"\n    },\n    \"release.checksum-failed\": {\n      \"en\": \"A release asset failed checksum verification\",\n      \"zh-CN\": \"发布制品校验失败\"\n    },\n    \"release.identity-mismatch\": {\n      \"en\": \"The release or running process identity does not match\",\n      \"zh-CN\": \"发布制品或运行进程身份不匹配\"\n    },\n    \"compatibility.unsupported\": {\n      \"en\": \"This release is incompatible with the installed platform\",\n      \"zh-CN\": \"此版本与已安装平台不兼容\"\n    },\n    \"operation.conflict\": {\n      \"en\": \"Another operation must finish or recover first\",\n      \"zh-CN\": \"需先完成或恢复另一个操作\"\n    },\n    \"operation.invalid\": {\n      \"en\": \"The selected operation or release changed\",\n      \"zh-CN\": \"所选操作或发布身份已变化\"\n    },\n    \"backup.failed\": {\n      \"en\": \"The platform backup failed\",\n      \"zh-CN\": \"平台备份失败\"\n    },\n    \"backup.invalid\": {\n      \"en\": \"The recovery backup is incomplete or damaged\",\n      \"zh-CN\": \"恢复备份不完整或已损坏\"\n    },\n    \"service.stop-failed\": {\n      \"en\": \"The managed service could not be stopped\",\n      \"zh-CN\": \"托管服务停止失败\"\n    },\n    \"service.start-failed\": {\n      \"en\": \"The managed service could not become ready\",\n      \"zh-CN\": \"托管服务未能就绪\"\n    },\n    \"admission.failed\": {\n      \"en\": \"The maintenance admission rule could not be changed\",\n      \"zh-CN\": \"维护准入规则切换失败\"\n    },\n    \"migration.failed\": {\n      \"en\": \"The platform database migration failed\",\n      \"zh-CN\": \"平台数据库迁移失败\"\n    },\n    \"recovery.failed\": {\n      \"en\": \"The previous version could not be restored\",\n      \"zh-CN\": \"旧版本恢复失败\"\n    },\n    \"cleanup.failed\": {\n      \"en\": \"Some installation resources could not be cleaned\",\n      \"zh-CN\": \"部分安装资源清理失败\"\n    },\n    \"operation.interrupted\": {\n      \"en\": \"The operation was interrupted before a result was recorded\",\n      \"zh-CN\": \"操作中断，尚未记录结果\"\n    },\n    \"unknown\": {\n      \"en\": \"An unclassified update error occurred\",\n      \"zh-CN\": \"发生未分类的升级错误\"\n    }\n  }\n}\n")
 # END GENERATED SYSTEM UPDATE CODES
 
 
@@ -610,10 +935,79 @@ def previous_downtime(job,point=None):
     return value if type(value) in (int,float) and math.isfinite(value) and value>=0 else None
 
 
+
+def operator_text(value, language):
+    if language != 'zh-CN':
+        return value
+    known = {
+        'Starting': '开始', 'Step did not complete': '当前步骤未完成',
+        'Still working; waiting for this step to finish': '仍在执行，等待当前步骤完成',
+        'Fetching instance image': '拉取实例镜像', 'Loading instance image': '载入实例镜像',
+        'Verifying release checksums': '核对发布制品校验和', 'Staging verified platform': '暂存已核验的平台程序',
+        'Waiting for another installer to release the installation lock': '等待其他安装器释放安装锁',
+        'Diagnostic log unavailable; check disk space and permissions.': '诊断日志不可用，请检查磁盘空间和权限。',
+        'Installation requires a Linux amd64 host': '安装需要 Linux amd64 主机',
+        'Run the installer with sudo': '请使用 sudo 运行安装器',
+        'Host aliases must be public IPv4 literals': '公网映射清单必须填写公网 IPv4 地址',
+        'Invalid deployment configuration': '部署配置无效',
+        'Entry and private gateway ports must differ': '平台入口端口与内部网关端口必须不同',
+        'Public origin must be an HTTP(S) origin without credentials or path': '浏览器访问地址必须是HTTP(S)来源地址，不能包含凭据或路径',
+        'External user storage requires absolute root and mount paths': '外置成员存储需要同时填写数据目录与挂载点的绝对路径',
+        'User storage must be inside the declared independent data mount': '成员数据目录必须位于声明的独立数据挂载点内',
+        'Platform and external user storage must not overlap': '平台数据与外置成员存储目录不能重叠',
+        'The declared user data volume is not mounted; no directory was created': '声明的数据卷尚未挂载，未创建数据目录',
+        'User storage must be a directory, not a symbolic link': '成员存储必须是目录，不能是符号链接',
+        'Preview requires a separate listener port': '服务预览需要独立且有效的监听端口',
+        'Preview origin must use the same host and scheme on a different public port': '服务预览地址必须与平台地址使用相同主机和协议，以及不同的公开端口',
+        'No free private gateway port; specify --gateway-port': '没有可用的内部网关端口，请使用 --gateway-port 指定',
+        'Terminal input closed; retry with explicit noninteractive configuration': '终端输入已关闭，请使用明确的非交互参数重试',
+        'No terminal available; provide --public-origin and --host-public-addresses': '无可用终端，请提供 --public-origin 与 --host-public-addresses',
+        'Deployment host address inventory is required for public networking': '成员联网需要明确声明公网映射',
+    }
+    if value in known:
+        return known[value]
+    gateway = re.fullmatch(r'Private gateway port ([0-9]+) is occupied; using ([0-9]+) \(saved in configuration\).', value)
+    if gateway:
+        return '内部网关端口 '+gateway[1]+' 已占用，改用 '+gateway[2]+'（已保存）。'
+    conflict = re.fullmatch(r'(--[a-z-]+) ([0-9]+) is unavailable: (.*)\. No occupying process was stopped\.', value)
+    if conflict:
+        return conflict[1]+' '+conflict[2]+' 不可用：'+conflict[3]+'。未停止占用进程。'
+    retry = re.fullmatch(r'Choose a free (--[a-z-]+) and rerun the installer; (.*)', value)
+    if retry:
+        return '请选择可用的 '+retry[1]+' 后重新运行安装器；'+retry[2]
+    if value.endswith(' must be between 1 and 65535'):
+        return value.removesuffix(' must be between 1 and 65535') + ' 必须介于1和65535之间'
+    if value.startswith('Running '):
+        return '执行 ' + value.removeprefix('Running ')
+    return value
+
+
+def localized_error(code, phase, language):
+    if language != 'zh-CN' or code == 'unknown':
+        return None
+    if code == 'compatibility.unsupported' and phase == 'install.preflight':
+        return '当前主机环境不受支持'
+    return SYSTEM_UPDATE_CODES['errors'].get(code, {}).get('zh-CN')
+
+
+def display_width(value):
+    return sum(0 if unicodedata.combining(character) else 2 if unicodedata.east_asian_width(character) in ('W', 'F') else 1 for character in value)
+
+
+def fit_terminal(value, width):
+    result = ''
+    for character in value:
+        if display_width(result + character) > width:
+            break
+        result += character
+    return result
+
+
 class HumanProgressRenderer:
     """One transient line on capable terminals; bounded milestones on redirected output."""
-    def __init__(self, verbose=False):
+    def __init__(self, verbose=False, language='en'):
         self.verbose = verbose
+        self.language = language
         self.last = float('-inf')
         self.line = False
         self.paused = False
@@ -638,13 +1032,22 @@ class HumanProgressRenderer:
             detail += f" · {event['bytes']} bytes"
             if event.get('total', 0) and event['total'] >= event['bytes']:
                 detail += f" / {event['total']} bytes ({event['bytes'] * 100 / event['total']:.0f}%)"
-        line = f"[{event['phase']}] {event['status']} · {detail} · phase {event['phaseElapsed']:.1f}s / total {event['elapsed']:.1f}s"
+        if self.language == 'zh-CN':
+            phase = SYSTEM_UPDATE_CODES['phases'].get(event.get('phaseCode'), {}).get('zh-CN', event['phase'])
+            status = {'running':'进行中', 'completed':'完成', 'warning':'警告', 'failed':'失败', 'info':'信息', 'detail':'详情'}.get(event['status'], event['status'])
+            detail = phase if detail == event['phase'] else operator_text(detail, self.language)
+            translated_error = localized_error(event.get('errorCode'), event.get('phaseCode'), self.language)
+            if translated_error:
+                detail = translated_error
+            line = f"[{phase}] {status} · {detail} · 本阶段 {event['phaseElapsed']:.1f}s / 总计 {event['elapsed']:.1f}s"
+        else:
+            line = f"[{event['phase']}] {event['status']} · {detail} · phase {event['phaseElapsed']:.1f}s / total {event['elapsed']:.1f}s"
         line = ' '.join(line.split())
         if terminal:
             try: width = os.get_terminal_size(sys.stderr.fileno()).columns
             except (OSError, ValueError): width = 80
             # A current line must not wrap: finalized milestones can wrap normally.
-            if not final and len(line) >= width:
+            if not final and display_width(line) >= width:
                 # Keep facts at the right on narrow terminals; truncating the full
                 # line would erase both the changing progress and waiting time.
                 quantity = ''
@@ -652,11 +1055,11 @@ class HumanProgressRenderer:
                     quantity = f"{event['bytes']}B "
                     if event.get('total', 0) and event['total'] >= event['bytes']:
                         quantity = f"{event['bytes'] * 100 / event['total']:.0f}% "
-                suffix = f"{quantity}phase{event['phaseElapsed']:.0f}s total{event['elapsed']:.0f}s"
-                action = event.get('action') or event['message']
-                budget = max(0, width-2-len(suffix))
-                line = action[:budget] + ' ' + suffix
-            if not final: line = line.encode('ascii', errors='replace').decode()[:max(1, width-1)]
+                suffix = f"{quantity}阶段{event['phaseElapsed']:.0f}s 总计{event['elapsed']:.0f}s" if self.language == 'zh-CN' else f"{quantity}phase{event['phaseElapsed']:.0f}s total{event['elapsed']:.0f}s"
+                action = operator_text(event.get('action') or event['message'], self.language)
+                budget = max(0, width-2-display_width(suffix))
+                line = fit_terminal(action, budget) + ' ' + suffix
+            if not final: line = fit_terminal(line, max(1, width-1))
             sys.stderr.write(('\r\x1b[2K' if self.line else '') + line + ('\n' if final else ''))
             sys.stderr.flush(); self.line = not final
         else:
@@ -664,12 +1067,13 @@ class HumanProgressRenderer:
 
 
 class Progress:
-    def __init__(self, root=Path('/'), *, output='human', verbose=False, persist=True, clock=time.monotonic):
+    def __init__(self, root=Path('/'), *, output='human', verbose=False, persist=True, clock=time.monotonic, language='en'):
         self.output, self.verbose = output, verbose
+        self.language = language
         self.clock = clock
         self.started = self.phase_started = clock()
         self.current = {}
-        self.renderer = HumanProgressRenderer(verbose)
+        self.renderer = HumanProgressRenderer(verbose, language)
         self.phase = 'Preflight'; self.phase_code='install.preflight'
         self.secrets = set()
         self.observers = []
@@ -771,16 +1175,31 @@ class Progress:
         if self.output == 'json': print(json.dumps(receipt, indent=2))
         elif receipt['status'] == 'failed':
             self.host_status()
-            print('Installation failed during '+receipt['phase']+': '+receipt['reason'])
-            if receipt.get('diagnosticLog'): print('Diagnostic log: '+receipt['diagnosticLog'])
+            if self.language == 'zh-CN':
+                phase = SYSTEM_UPDATE_CODES['phases'].get(receipt.get('phaseCode'), {}).get('zh-CN', receipt['phase'])
+                error = localized_error(receipt.get('errorCode'), receipt.get('phaseCode'), self.language)
+                reason = operator_text(receipt['reason'], self.language)
+                print('安装失败，阶段 '+phase+'：'+(error or reason))
+                if error and error != reason:
+                    print('详细信息：'+reason)
+            else:
+                print('Installation failed during '+receipt['phase']+': '+receipt['reason'])
+            if receipt.get('diagnosticLog'):
+                print(('诊断日志：' if self.language == 'zh-CN' else 'Diagnostic log: ') + receipt['diagnosticLog'])
         else:
-            print(f"dsh-phalanx {receipt['version']} installed · {self.clock()-self.started:.1f}s\n")
+            print(f"dsh-phalanx {receipt['version']} " + ('安装完成' if self.language == 'zh-CN' else 'installed') + f" · {self.clock()-self.started:.1f}s\n")
             self.host_status()
             if receipt.get('initializationUrl'):
-                print('Next: open this link to create your administrator account\n'+receipt['initializationUrl']+'\n')
-            print('Admin: '+receipt['adminUrl']+'\nService: ready on this host')
-            print('External access: not verified; check browser access'+(f' to entry port {port}' if port else ''))
-            print('If using an HTTPS reverse proxy, check its route to this entry.\nAfter signup, configure shared models in the admin page.')
+                print(('下一步：打开此链接创建管理员账户' if self.language == 'zh-CN' else 'Next: open this link to create your administrator account') + '\n' + receipt['initializationUrl'] + '\n')
+            print(('管理入口：' if self.language == 'zh-CN' else 'Admin: ') + receipt['adminUrl'])
+            if self.language == 'zh-CN':
+                print('服务已在本机就绪；外部访问尚未验证，请检查浏览器访问地址与入口端口。')
+                print('使用HTTPS反向代理时请核对路由；注册后在管理页面配置共享模型。')
+            else:
+                print('Service: ready on this host')
+                print('External access: not verified; check browser access'+(f' to entry port {port}' if port else ''))
+                print('If using an HTTPS reverse proxy, check its route to this entry.\nAfter signup, configure shared models in the admin page.')
+            print('https://github.com/dake6767/dsh-phalanx')
             if self.verbose:
                 detail = {key:value for key,value in receipt.items() if key != 'initializationUrl'}
                 print(self.safe(json.dumps(detail, indent=2)), file=sys.stderr)
@@ -789,7 +1208,11 @@ class Progress:
         if self.host_admission is not None:
             facts = self.host_admission
             status = 'unsupported' if facts['family'] != 'debian' else 'verified' if facts['verified'] else 'unverified'
-            print('Host: '+facts['distribution']+' '+facts['version']+' ('+status+')')
+            if self.language == 'zh-CN':
+                label = {'verified':'已验证', 'unverified':'未验证', 'unsupported':'不支持'}[status]
+                print('主机：'+facts['distribution']+' '+facts['version']+'（'+label+'）')
+            else:
+                print('Host: '+facts['distribution']+' '+facts['version']+' ('+status+')')
 
     def upgrade_result(self,result):
         self.renderer.finish()
@@ -798,30 +1221,40 @@ class Progress:
         self.host_status()
         if 'check' in result:
             check=result['check']
-            print('System update: '+self.safe(check.get('outcomeCode',check['status'])))
-            if check.get('version'):print('Release: '+self.safe(check['version']))
-            if check.get('requiredVersion'):print('Required version: '+self.safe(check['requiredVersion']))
+            outcome = check.get('outcomeCode', check['status'])
+            label = SYSTEM_UPDATE_CODES['outcomes'].get(outcome, {}).get(self.language, outcome)
+            print(('系统更新：' if self.language == 'zh-CN' else 'System update: ')+self.safe(label)+(' ('+outcome+')' if label != outcome else ''))
+            if check.get('version'):print(('版本：' if self.language == 'zh-CN' else 'Release: ')+self.safe(check['version']))
+            if check.get('requiredVersion'):print(('所需版本：' if self.language == 'zh-CN' else 'Required version: ')+self.safe(check['requiredVersion']))
             if check.get('reason'):print(self.safe(check['reason']))
             return
         job=result['operation']
-        if job is None:print('No upgrade operation has been recorded.'); return
-        print('System update '+job['id']+': '+job['phase'])
-        print('Release: '+job['sourceVersion']+' → '+job['targetVersion'])
-        if job['phase']=='prepared':print('Download verified; current service is unchanged. Apply with --upgrade apply --operation '+job['id']+'.')
-        elif job['phase']=='succeeded':print('Selected release identity and readiness verified; work is open.')
-        elif job['phase']=='restored':print('Update failed. Previous data and service were restored and verified.')
-        elif job['phase']=='recovery-failed':print('Recovery failed; follow the server recovery instruction before resuming work.')
+        if job is None:print('尚无升级操作记录。' if self.language == 'zh-CN' else 'No upgrade operation has been recorded.'); return
+        phase = SYSTEM_UPDATE_CODES['phases'].get(update_phase_code(job['phase']), {}).get(self.language, job['phase'])
+        print(('系统更新 ' if self.language == 'zh-CN' else 'System update ')+job['id']+': '+phase)
+        print(('版本：' if self.language == 'zh-CN' else 'Release: ')+job['sourceVersion']+' → '+job['targetVersion'])
+        if job['phase']=='prepared':print(('下载已核验，当前服务保持运行。应用命令：' if self.language == 'zh-CN' else 'Download verified; current service is unchanged. Apply with ')+'--upgrade apply --operation '+job['id']+'.')
+        elif job['phase']=='succeeded':print('所选版本身份和就绪状态已核验，服务已开放。' if self.language == 'zh-CN' else 'Selected release identity and readiness verified; work is open.')
+        elif job['phase']=='restored':print('更新失败，已恢复并核验原数据和服务。' if self.language == 'zh-CN' else 'Update failed. Previous data and service were restored and verified.')
+        elif job['phase']=='recovery-failed':print('恢复失败，请按服务端恢复指引处理后再继续。' if self.language == 'zh-CN' else 'Recovery failed; follow the server recovery instruction before resuming work.')
         for key in ('failure','recoveryFailure','stopFailure','instruction'):
             if job.get(key):print(self.safe(job[key]))
-        if result.get('diagnosticLog'):print('Diagnostic log: '+result['diagnosticLog'])
+        if result.get('diagnosticLog'):print(('诊断日志：' if self.language == 'zh-CN' else 'Diagnostic log: ')+result['diagnosticLog'])
+
+    def cancel(self, reason):
+        self.renderer.finish()
+        if self.output == 'json':
+            print(json.dumps({'status':'cancelled', 'phase':self.phase, 'phaseCode':self.phase_code, 'reason':self.safe(reason)}))
+        else:
+            print(self.safe(reason))
 
     def failure(self, error):
         reason = self.safe(str(error))
         self.emit('failed', reason,errorCode=update_error_code(error))
         log = '/var/log/dsh-phalanx/'+self.log.name if self.log else None
-        print('Inspect the managed user service: sudo journalctl _SYSTEMD_USER_UNIT=dsh-phalanx.service _UID="$(id -u dsh-phalanx)" -n 80 --no-pager', file=sys.stderr)
-        print('Retry with sudo bash install.sh and corrected deployment flags; preserve the data directory.', file=sys.stderr)
-        if log: print('Diagnostic log: '+log, file=sys.stderr)
+        print(('查看托管用户服务日志：' if self.language == 'zh-CN' else 'Inspect the managed user service: ')+'sudo journalctl _SYSTEMD_USER_UNIT=dsh-phalanx.service _UID="$(id -u dsh-phalanx)" -n 80 --no-pager', file=sys.stderr)
+        print('请保留数据目录，修正配置后用 sudo bash install.sh 重试。已准备的系统依赖不会自动撤销。' if self.language == 'zh-CN' else 'Retry with sudo bash install.sh and corrected deployment flags; preserve the data directory. Prepared OS packages are not automatically removed.', file=sys.stderr)
+        if log: print(('诊断日志：' if self.language == 'zh-CN' else 'Diagnostic log: ')+log, file=sys.stderr)
         receipt = {'status':'failed', 'phase':self.phase, 'phaseCode':self.phase_code,'errorCode':update_error_code(error),'reason':reason, 'diagnosticLog':log}
         self.result(receipt)
 
@@ -857,6 +1290,14 @@ PACKAGES = ("git", "nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "d
 class InstallError(Exception):
     def __init__(self,message,*,code='unknown'):
         super().__init__(message);self.code=code
+
+
+def origin_authority(value):
+    public=urllib.parse.urlsplit(value)
+    hostname=ipaddress.ip_address(public.hostname).compressed if ':' in public.hostname else public.hostname.encode('idna').decode('ascii')
+    authority='['+hostname+']' if ':' in hostname else hostname
+    if public.port is not None and public.port!={'http':80,'https':443}[public.scheme]:authority+=':'+str(public.port)
+    return authority
 
 
 def install_failure(code):
@@ -1065,6 +1506,7 @@ class Host:
         self.command = command or subprocess.run
         self.injected_command = command is not None
         self.progress = None
+        self.non_interactive = False
         self.system = system or platform.system()
         self.machine = machine or platform.machine()
         self.uid = os.geteuid() if uid is None else uid
@@ -1123,7 +1565,7 @@ class Host:
             raise InstallError(f"{arguments[0]} failed (exit {result.returncode}): {result.stderr[:1500]}")
         return result
 
-    def request(self, url, *, authority=None, socket_mark=None, max_bytes=None):
+    def request(self, url, *, authority=None, socket_mark=None, max_bytes=None, timeout=60):
         category = None
         if authority is None:
             address = urllib.parse.urlsplit(url)
@@ -1150,7 +1592,7 @@ class Host:
             handlers.append(ReadinessHandler())
         opener=urllib.request.build_opener(*handlers)
         try:
-            with opener.open(request,timeout=60) as response:
+            with opener.open(request,timeout=timeout) as response:
                 chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
                 while True:
                     block=response.read(65536)
@@ -1232,10 +1674,19 @@ class Host:
     def open_image_inspector(self, uid):
         return OwnedImageInspector(self,uid)
 
+    def operator(self, text):
+        if self.progress:
+            with self.progress.input():
+                print(self.progress.safe(text), file=sys.stderr)
+        else:
+            print(text, file=sys.stderr)
+
     def tell(self, text, **facts):
         self.progress.emit('info', message=text, **facts) if self.progress else print(text, file=sys.stderr)
 
     def terminal_available(self):
+        if self.non_interactive:
+            return False
         try:
             with open('/dev/tty', 'r') as terminal:
                 return terminal.isatty()
@@ -1265,13 +1716,18 @@ class Host:
         return None
 
     def prompt(self, label, secret=False):
+        if self.non_interactive:
+            raise InstallError('Noninteractive input requires explicit configuration and confirmation flags')
         try:
             with (self.progress.input() if self.progress else contextlib.nullcontext()), open("/dev/tty", "r") as terminal, open("/dev/tty", "w") as display:
                 if secret:
                     return getpass.getpass(label, stream=display)
                 display.write(label)
                 display.flush()
-                return terminal.readline().strip()
+                answer = terminal.readline()
+                if not answer:
+                    raise InstallError('Terminal input closed; retry with explicit noninteractive configuration')
+                return answer.strip()
         except OSError:
             raise InstallError("No terminal available; provide --public-origin and --host-public-addresses")
 
@@ -1308,11 +1764,7 @@ class Host:
     def ready(self, uid, port, listen_address, public_origin, *, path="/login", socket_mark=None, timeout=90, on_listener=None):
         entry = entry_url(port, listen_address)
         address = ipaddress.ip_address(urllib.parse.urlparse(entry).hostname)
-        public = urllib.parse.urlparse(public_origin)
-        hostname = ipaddress.ip_address(public.hostname).compressed if ":" in public.hostname else public.hostname.encode("idna").decode("ascii")
-        authority = f"[{hostname}]" if ":" in hostname else hostname
-        if public.port is not None and public.port != {"http": 80, "https": 443}[public.scheme]:
-            authority += f":{public.port}"
+        authority = origin_authority(public_origin)
         deadline = self.clock()+timeout
         http_failed = False
         while True:
@@ -2828,8 +3280,12 @@ def maintenance_serve(operation,target,address,port,token):
     finally:listener.close()
 
 class LinuxAdmissionGate:
+    def __init__(self, host=None):
+        self.host = host
+
     def run(self,args,**kwargs):
-        result=subprocess.run(['nft',*args],capture_output=True,text=True,**kwargs)
+        command = ['nft', *args]
+        result = self.host.run(command, check=False, **kwargs) if self.host else subprocess.run(command,capture_output=True,text=True,**kwargs)
         if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')
         return result.stdout
 
@@ -2983,8 +3439,13 @@ import uuid
 EXECUTOR='/opt/dsh-phalanx/updater'
 BANKS='/opt/dsh-phalanx/updaters'
 EXECUTOR_UNIT='/etc/systemd/system/dsh-phalanx-updater.service'
+GLOBAL_CLI='/usr/local/bin/dsh-phalanx'
+GLOBAL_CLI_PROGRAM='#!/bin/sh\n# dsh-phalanx managed deployment command\nexec /usr/bin/python3 -B /opt/dsh-phalanx/updater/installer_deployment_cli.py "$@"\n'
 MODULES=globals().get('EXECUTOR_MODULES') or json.loads(Path(__file__).with_name('executor-files.json').read_text())
-PRE_OPERATIONS_MODULES=[name for name in MODULES if name!='installer_operations.py']
+PRE_UNINSTALL_MODULES=[name for name in MODULES if name!='installer_uninstall.py']
+PRE_DEPLOYMENT_MODULES=[name for name in PRE_UNINSTALL_MODULES if name not in ('installer_deployment.py','installer_deployment_cli.py')]
+PRE_QUESTIONS_MODULES=[name for name in PRE_DEPLOYMENT_MODULES if name!='installer_questions.py']
+PRE_OPERATIONS_MODULES=[name for name in PRE_QUESTIONS_MODULES if name!='installer_operations.py']
 PRE_CLEANUP_MODULES=[name for name in PRE_OPERATIONS_MODULES if name!='installer_cleanup.py']
 LEGACY_MODULES=[name for name in PRE_CLEANUP_MODULES if name not in ('installer_storage.py','installer_executor_bootstrap.py')]
 REQUIRED=set(MODULES)|{'updater.service.in','executor-files.json'}
@@ -3001,7 +3462,7 @@ def executor_package(directory,commit=None):
     if commit is not None and value['sourceCommit']!=commit:raise InstallError('Executor and selected platform source differ')
     files=value.get('files')
     declared=json.loads((directory/'executor-files.json').read_text())
-    if declared not in (MODULES,PRE_OPERATIONS_MODULES,PRE_CLEANUP_MODULES,LEGACY_MODULES):raise InstallError('Executor dependency inventory differs from its protocol')
+    if declared not in (MODULES,PRE_UNINSTALL_MODULES,PRE_DEPLOYMENT_MODULES,PRE_QUESTIONS_MODULES,PRE_OPERATIONS_MODULES,PRE_CLEANUP_MODULES,LEGACY_MODULES):raise InstallError('Executor dependency inventory differs from its protocol')
     required=set(declared)|{'updater.service.in','executor-files.json'}
     if not isinstance(files,dict) or required!=set(files) or len(files)>32 or set(path.name for path in directory.iterdir())!=set(files)|{'manifest.json'}:
         raise InstallError('Executor package inventory is incomplete or unexpected')
@@ -3026,6 +3487,21 @@ def executor_pointer(host):
     return os.readlink(path) if path.is_symlink() else None
 
 
+def verify_global_cli_path(host):
+    path=host.path(GLOBAL_CLI)
+    if not path.exists() and not path.is_symlink():return
+    if path.is_symlink() or not path.is_file() or path.stat().st_uid!=os.geteuid() or path.read_text()!=GLOBAL_CLI_PROGRAM:
+        raise InstallError('The global dsh-phalanx command path belongs to another program; retain it and resolve the conflict')
+
+
+def install_global_cli(host):
+    verify_global_cli_path(host)
+    host.mkdir('/usr/local/bin',mode=None)
+    path=host.path(GLOBAL_CLI)
+    if not path.exists() or path.stat().st_mode&0o7777!=0o755:
+        host.atomic(GLOBAL_CLI,GLOBAL_CLI_PROGRAM,0o755)
+
+
 def install_executor(host,uid,gid,target,commit,*,initial_only=False,activate=False,repair=False):
     source=Path(target)/'updater';identity=executor_package(source,commit)
     try:current=installed_executor(host)
@@ -3034,6 +3510,8 @@ def install_executor(host,uid,gid,target,commit,*,initial_only=False,activate=Fa
         if not repair or not pointer.is_symlink() or pointer.resolve().parent!=host.path(BANKS):raise
         current=None
     if initial_only and current is not None:return current
+    management=(source/'installer_deployment_cli.py').is_file()
+    if management:verify_global_cli_path(host)
     host.mkdir(BANKS)
     if current!=identity:
         parent=host.path(BANKS)
@@ -3047,7 +3525,9 @@ def install_executor(host,uid,gid,target,commit,*,initial_only=False,activate=Fa
     LinuxAdmissionGate().install(host,uid,program=(source/'installer_upgrade_gate.py').read_text())
     unit=(source/'updater.service.in').read_text().replace('@UID@',str(uid)).replace('@GID@',str(gid))
     if '@UID@' in unit or '@GID@' in unit:raise InstallError('Executor unit identity could not be bound')
-    host.atomic(EXECUTOR_UNIT,unit,0o644);host.run(['systemctl','daemon-reload']);host.run(['systemctl','enable','dsh-phalanx-updater.service'])
+    host.atomic(EXECUTOR_UNIT,unit,0o644)
+    if management:install_global_cli(host)
+    host.run(['systemctl','daemon-reload']);host.run(['systemctl','enable','dsh-phalanx-updater.service'])
     if activate:activate_executor(host)
     return identity
 
@@ -3523,6 +4003,37 @@ CURRENT='/opt/dsh-phalanx/current'
 UNIT='/var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service'
 
 
+def read_upgrade_operation(host,operation=None):
+    pointer=host.path(UPGRADE_ROOT)/'current'
+    if operation is None:
+        if not pointer.exists():return None
+        operation=pointer.read_text().strip()
+    path=host.path(UPGRADE_ROOT)/operation_id(operation)/'operation.json'
+    if path.is_symlink():raise InstallError('Upgrade journal cannot be a symbolic link')
+    if not path.exists():return None
+    value=json.loads(read_owned(path,os.geteuid()))
+    if not isinstance(value,dict) or value.get('id')!=operation or not isinstance(value.get('phase'),str):raise InstallError('Invalid protected upgrade operation')
+    return value
+
+
+def installed_source(host,manifest=None):
+    state=installed_state(host)
+    if state is None:raise InstallError('A successful managed installation is required',code='release.identity-mismatch')
+    if manifest is None:manifest=json.loads(host.path(MANIFEST).read_text())
+    if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][asset_names(manifest)[0]]:
+        raise InstallError('Installed release manifest and receipt disagree',code='release.identity-mismatch')
+    values=read_configuration(host)
+    account=host.run(['getent','passwd','dsh-phalanx']).stdout.strip().split(':')
+    if len(account)!=7 or account[5]!='/var/lib/dsh-phalanx' or account[6]!='/usr/sbin/nologin' or int(account[2])==0:
+        raise InstallError('Managed service identity is incompatible',code='release.identity-mismatch')
+    current=host.path(CURRENT)
+    if not current.is_symlink():raise InstallError('Current release must be a managed symbolic link',code='release.identity-mismatch')
+    target=current.resolve()
+    if target.parent!=host.path('/opt/dsh-phalanx/releases') or (target/'.artifact-sha256').read_text()!=state['platformSha256']:
+        raise InstallError('Running release path or artifact identity is inconsistent',code='release.identity-mismatch')
+    return {'receipt':state,'manifest':manifest,'channel':installed_channel(state),'values':values,'target':str(target),'uid':int(account[2]),'gid':int(account[3])}
+
+
 def plugin_startup_timeout(host,values,manifest):
     target=manifest['targetVersion']+'/'+manifest['dshRevision']
     try:library=platform_facts(host,values,'plugin-budget-rows')
@@ -3555,13 +4066,7 @@ class UpgradeHost:
     def path(self,job):return self.root/operation_id(job['id'])
 
     def operation(self,operation=None):
-        pointer=self.root/'current'
-        if operation is None:
-            if not pointer.exists():return None
-            operation=pointer.read_text().strip()
-        path=self.root/operation_id(operation)/'operation.json'
-        if path.is_symlink():raise InstallError('Upgrade journal cannot be a symbolic link')
-        return json.loads(path.read_text()) if path.exists() else None
+        return read_upgrade_operation(self.host,operation)
 
     def save(self,job):
         directory=self.path(job); directory.mkdir(mode=0o700,exist_ok=True)
@@ -3608,21 +4113,7 @@ class UpgradeHost:
         sync_directory(self.host.path('/etc/dsh-phalanx'))
 
     def source(self,manifest=None):
-        state=installed_state(self.host)
-        if state is None:raise InstallError('A successful managed installation is required',code='release.identity-mismatch')
-        if manifest is None:manifest=json.loads(self.host.path(MANIFEST).read_text())
-        if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][asset_names(manifest)[0]]:
-            raise InstallError('Installed release manifest and receipt disagree',code='release.identity-mismatch')
-        values=read_configuration(self.host)
-        account=self.host.run(['getent','passwd','dsh-phalanx']).stdout.strip().split(':')
-        if len(account)!=7 or account[5]!='/var/lib/dsh-phalanx' or account[6]!='/usr/sbin/nologin' or int(account[2])==0:
-            raise InstallError('Managed service identity is incompatible',code='release.identity-mismatch')
-        current=self.host.path(CURRENT)
-        if not current.is_symlink():raise InstallError('Current release must be a managed symbolic link',code='release.identity-mismatch')
-        target=current.resolve()
-        if target.parent!=self.host.path('/opt/dsh-phalanx/releases') or (target/'.artifact-sha256').read_text()!=state['platformSha256']:
-            raise InstallError('Running release path or artifact identity is inconsistent',code='release.identity-mismatch')
-        return {'receipt':state,'manifest':manifest,'channel':installed_channel(state),'values':values,'target':str(target),'uid':int(account[2]),'gid':int(account[3])}
+        return installed_source(self.host,manifest)
 
     def begin(self,target):
         source=self.source();previous=previous_downtime(self.operation(),self.time_point())
@@ -3742,7 +4233,7 @@ class UpgradeHost:
             target=stage_platform(self.host,directory,manifest)
             command=supply_image(self.host,job['source']['uid'],directory,manifest,self.bundle is not None)
         engine=install_executor(self.host,job['source']['uid'],job['source']['gid'],self.host.path(target),manifest['commit'],initial_only=True,activate=True)
-        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256'],'executor':executor_package(self.host.path(target)/'updater',manifest['commit']),'currentExecutor':engine}
+        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256'],'executor':executor_package(self.host.path(target)/'updater',manifest['commit']),'currentExecutor':engine,'managementCli':(self.host.path(target)/'updater/installer_deployment_cli.py').is_file()}
 
     @install_failure('admission.failed')
     def close_admission(self,source):self.admission.close(self.ports(source))
@@ -3837,6 +4328,7 @@ class UpgradeHost:
                           admissionProgram=self.host.path('/opt/dsh-phalanx/maintenance/gate.py'),
                           admissionUnit=self.host.path('/etc/systemd/system/dsh-phalanx-maintenance.service'),
                           admissionOrder=self.host.path('/etc/systemd/system/user@'+str(job['source']['uid'])+'.service.d/dsh-phalanx-maintenance.conf'))
+            if job['prepared'].get('managementCli') is True:result['globalCli']=self.host.path(GLOBAL_CLI)
         master=job.get('database',{}).get('facts',{}).get('masterKeyPath')
         config=job['source']['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE')
         for key,path in [('databaseMaster',master),('databaseConfiguration',str(self.host.path(config)) if config else None)]:
@@ -4023,18 +4515,22 @@ def read_owned(path,uid,mode=0o600):
     finally:os.close(descriptor)
 
 
+def read_platform_operation(host):
+    path=host.path(JOURNAL)
+    if not path.exists() and not path.is_symlink():return None
+    job=json.loads(read_owned(path,os.geteuid()))
+    if not isinstance(job,dict) or job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):
+        raise InstallError('Unknown protected platform operation')
+    return job
+
+
 class PlatformOperations:
     def __init__(self,host,port):
         self.host=host;self.port=port;root=host.mkdir('/var/lib/dsh-phalanx-updater',0o700)
         if root.stat().st_uid!=os.geteuid():raise InstallError('Invalid platform operation directory owner')
 
     def load(self):
-        path=self.host.path(JOURNAL)
-        if not path.exists() and not path.is_symlink():return None
-        job=json.loads(read_owned(path,os.geteuid()))
-        if job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):
-            raise InstallError('Unknown protected platform operation')
-        return job
+        return read_platform_operation(self.host)
 
     def save(self,job):self.host.atomic(JOURNAL,json.dumps(job)+'\n')
 
@@ -4535,10 +5031,6 @@ import urllib.parse
 DATABASE_UNIT = HOME_DIR+'/.config/systemd/user/dsh-phalanx-postgres.service'
 
 
-def unit_argument(value):
-    return '"'+str(value).replace('\\','\\\\').replace('"','\\"').replace('%','%%')+'"'
-
-
 def database_backup_notice(host, info):
     if info:
         host.tell('Keep an offline backup of the master-key file at '+info['masterKeyPath']+'. Losing this file loses access to encrypted platform secrets.')
@@ -4602,6 +5094,864 @@ def prepare_builtin_database(host, uid, gid, target, values, manifest):
     values['DSH_PHALANX_DATABASE_CONFIG_FILE']=config
     return info
 
+"""Observe and control one verified deployment, keeping partial observations explicit."""
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import ipaddress
+import urllib.parse
+import json
+import os
+from pathlib import Path
+import re
+
+PLATFORM='dsh-phalanx.service'
+DATABASE='dsh-phalanx-postgres.service'
+UPDATER='dsh-phalanx-updater.service'
+FENCE='dsh-phalanx-maintenance.service'
+DEPLOYMENT_TERMINAL=('succeeded','restored','prepare-failed','apply-failed')
+
+
+@contextmanager
+def deployment_lease(host):
+    path=host.mkdir('/run/lock',mode=None)/'dsh-phalanx-install.lock'
+    descriptor=os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
+    with os.fdopen(descriptor,'r+') as lock:
+        try:
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+        else:
+            yield True
+
+
+class Deployment:
+    def __init__(self,host):
+        self.host=host
+
+    def journal_root(self):
+        root=self.host.path(UPGRADE_ROOT)
+        if root.exists() or root.is_symlink():
+            if root.is_symlink() or not root.is_dir() or root.stat().st_uid!=os.geteuid() or root.stat().st_mode&0o777!=0o700:
+                raise InstallError('Invalid protected upgrade journal directory')
+        return root
+
+    def pending(self):
+        self.journal_root()
+        marker=self.host.path(MAINTENANCE)
+        pending=[]
+        if marker.exists() or marker.is_symlink():
+            if marker.is_symlink() or not marker.is_file():raise InstallError('Invalid maintenance marker')
+            pending.append({'kind':'maintenance','phase':'recovery-required'})
+        value=read_platform_operation(self.host)
+        if value and value['phase'] not in ('succeeded','restored'):
+            pending.append({'kind':value['action'],'phase':value['phase'],'id':value['id']})
+        value=read_upgrade_operation(self.host)
+        if value and (value['phase'] not in DEPLOYMENT_TERMINAL or value.get('cleanup',{}).get('status') in ('running','failed')):
+            pending.append({'kind':'update','phase':value['phase'],'id':value['id']})
+        return pending
+
+    def task_count(self,group,*,active):
+        if not group:
+            if active:raise InstallError('Active service has no observable control group')
+            return 0
+        if not group.startswith('/') or '..' in Path(group).parts or '\0' in group:
+            raise InstallError('Invalid service control group')
+        root=self.host.path('/sys/fs/cgroup'+group)
+        if not root.exists():
+            if active:raise InstallError('Active service control group is unavailable')
+            return 0
+        if root.is_symlink() or not root.is_dir():raise InstallError('Invalid service control group')
+        identities=set()
+        for file in [root/'cgroup.procs',*root.glob('**/cgroup.procs')]:
+            if file.is_symlink():raise InstallError('Invalid control group process observation')
+            for pid in file.read_text().split():
+                if not pid.isdecimal() or int(pid)<1:raise InstallError('Invalid control group process identity')
+                identities.add(int(pid))
+        return len(identities)
+
+    def service(self,name,unit,source,*,system=False,idle=False):
+        arguments=['systemctl',*([] if system else ['--user']),'show',unit,'--property=LoadState,ActiveState,SubState,MainPID,ControlPID,ControlGroup,UnitFileState']
+        response=self.host.run(arguments,check=False) if system else self.host.user(source['uid'],arguments,check=False)
+        values=dict(line.split('=',1) for line in response.stdout.splitlines() if '=' in line)
+        if response.returncode!=0 or values.get('LoadState')!='loaded':
+            raise InstallError('Cannot observe managed '+name+' service')
+        state=values.get('ActiveState')
+        if state not in ('active','inactive','failed','activating','deactivating','reloading'):
+            raise InstallError('Unknown managed '+name+' service state')
+        for key in ('MainPID','ControlPID'):
+            if not values.get(key,'').isdecimal():raise InstallError('Incomplete managed service process facts')
+        if values.get('ControlGroup') and Path(values['ControlGroup']).name!=unit:raise InstallError('Service control group differs from its unit')
+        quiescent_fence=idle and state=='active' and values.get('SubState')=='exited' and values['MainPID']=='0' and values['ControlPID']=='0'
+        tasks=self.task_count(values.get('ControlGroup',''),active=state not in ('inactive','failed') and not quiescent_fence)
+        running=state=='active' and tasks>0
+        projection='running' if running else 'idle' if idle and state=='active' and tasks==0 and values.get('SubState')=='exited' else 'stopped' if state=='inactive' and tasks==0 else 'residual'
+        return {'name':name,'state':projection,'unit':unit,'scope':'system' if system else 'user','activeState':state,'subState':values.get('SubState'),'tasks':tasks,'mainPid':int(values['MainPID']),'autostart':values.get('UnitFileState','unknown')}
+
+    def member_containers(self,source):
+        owner=hashlib.sha256(str(Path(source['values']['DSH_PHALANX_DATA_ROOT']).resolve()).encode()).hexdigest()
+        response=self.host.user(source['uid'],['podman','ps','--all','--filter','label=dsh-phalanx.community=1','--filter','label=dsh-phalanx.community-root='+owner,'--format','json'])
+        rows=json.loads(response.stdout)
+        if not isinstance(rows,list):raise InstallError('Invalid member container observation')
+        for row in rows:
+            if not isinstance(row,dict) or not isinstance(row.get('Labels'),dict):raise InstallError('Invalid member container observation')
+            labels=row['Labels']
+            identity=row.get('Id',row.get('ID'))
+            if labels.get('dsh-phalanx.community')!='1' or labels.get('dsh-phalanx.community-root')!=owner or not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):
+                raise InstallError('Member container ownership is inconsistent')
+            if row.get('State') not in ('running','paused','stopping','created','configured','exited','stopped'):
+                raise InstallError('Unknown member container state')
+        return rows
+
+    def database_selection(self,source):
+        configured=source['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE')
+        if not configured:return None
+        path=self.host.path(configured)
+        owner=path.stat().st_uid
+        if owner not in (os.geteuid(),source['uid']):raise InstallError('Database configuration owner is inconsistent')
+        value=json.loads(read_owned(path,owner))
+        if not isinstance(value,dict) or value.get('selection') not in (None,'builtin','external'):raise InstallError('Unknown selected database configuration')
+        return value.get('selection')
+
+    def builtin_containers(self,source):
+        response=self.host.user(source['uid'],['podman','ps','--all','--filter','label=dsh.phalanx.database=builtin','--filter','name=dsh-phalanx-postgres','--format','json'])
+        rows=json.loads(response.stdout)
+        if not isinstance(rows,list):raise InstallError('Invalid built-in database container observation')
+        expected=self.host.path(default_storage_root(source['values']['DSH_PHALANX_DATA_ROOT'])+'/postgres').resolve()
+        owned=[]
+        for row in rows:
+            if not isinstance(row,dict):raise InstallError('Invalid built-in database container observation')
+            identity=row.get('Id',row.get('ID'))
+            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):raise InstallError('Invalid built-in database container identity')
+            details=json.loads(self.host.user(source['uid'],['podman','inspect',identity]).stdout)
+            if not isinstance(details,list) or len(details)!=1:raise InstallError('Cannot inspect built-in database ownership')
+            detail=details[0]
+            if not isinstance(detail,dict) or not isinstance(detail.get('Config'),dict) or not isinstance(detail['Config'].get('Labels'),dict) or not isinstance(detail.get('Mounts'),list) or any(not isinstance(mount,dict) for mount in detail['Mounts']):raise InstallError('Invalid built-in database ownership observation')
+            if detail.get('Name','').lstrip('/')!='dsh-phalanx-postgres':continue
+            labels=detail.get('Config',{}).get('Labels',{})
+            mounts=[mount for mount in detail.get('Mounts',[]) if mount.get('Destination')=='/var/lib/postgresql/data']
+            if labels.get('dsh.phalanx.database')!='builtin' or len(mounts)!=1 or mounts[0].get('Type')!='bind' or Path(mounts[0].get('Source','')).resolve()!=expected:
+                raise InstallError('Built-in database container ownership differs from this deployment')
+            if row.get('State') not in ('running','paused','stopping','created','configured','exited','stopped'):raise InstallError('Unknown built-in database container state')
+            owned.append(row)
+        return owned
+
+    def upgrade_jobs(self,source):
+        root=self.journal_root()
+        if not root.exists():return []
+        jobs=[]
+        for directory in root.iterdir():
+            if not re.fullmatch('[a-f0-9-]{36}',directory.name):continue
+            operation_id(directory.name)
+            if directory.is_symlink() or not directory.is_dir():raise InstallError('Invalid upgrade journal ownership')
+            path=directory/'operation.json'
+            if not path.exists():continue
+            job=read_upgrade_operation(self.host,directory.name)
+            if job.get('id')!=directory.name:raise InstallError('Upgrade journal identity differs from its directory')
+            saved=job.get('source',{}).get('values',{}).get('DSH_PHALANX_DATA_ROOT')
+            if saved and Path(saved).resolve()==Path(source['values']['DSH_PHALANX_DATA_ROOT']).resolve():jobs.append(job)
+        return jobs
+
+    def maintenance_workers(self,source):
+        response=self.host.run(['systemctl','list-units','--all','--plain','--no-legend','--no-pager','dsh-phalanx-upgrade-*.service'])
+        jobs={job['id']:job for job in self.upgrade_jobs(source)}
+        units=[]
+        for line in response.stdout.splitlines():
+            name=line.split()[0]
+            match=re.fullmatch(r'dsh-phalanx-upgrade-(page|listener)-([a-f0-9-]{36})\.service',name)
+            if not match or match[2] not in jobs:raise InstallError('Cannot verify independent maintenance unit ownership')
+            kind=MaintenanceUnit if match[1]=='page' else ListenerPinUnit
+            worker=kind(self.host,jobs[match[2]])
+            facts=worker.facts()
+            if facts is not None:
+                worker.verify(facts)
+                units.append((worker,facts))
+        return units
+
+    def archive_containers(self,source):
+        jobs=self.upgrade_jobs(source)
+        owners={hashlib.sha256(str(self.host.path(UPGRADE_ROOT+'/'+job['id']+'/backup/database')).encode()).hexdigest() for job in jobs if 'database' in job}
+        if not owners:return []
+        result=self.host.run(['podman','ps','--all','--filter','label=dsh.phalanx.upgrade-archive-owner','--format','json'])
+        rows=json.loads(result.stdout)
+        if not isinstance(rows,list):raise InstallError('Invalid database tool container observation')
+        owned=[]
+        for row in rows:
+            if not isinstance(row,dict) or not isinstance(row.get('Labels'),dict):raise InstallError('Invalid database tool container observation')
+            owner=row['Labels'].get('dsh.phalanx.upgrade-archive-owner')
+            if owner not in owners:continue
+            identity=row.get('Id',row.get('ID'))
+            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):raise InstallError('Invalid owned database tool container identity')
+            if row.get('State') not in ('running','paused','stopping','created','configured','exited','stopped'):raise InstallError('Unknown database tool container state')
+            owned.append(row)
+        return owned
+
+    def inspect(self):
+        result={'state':'not-installed','components':[],'errors':[],'operations':[]}
+        try:
+            removal=uninstall_record(self.host)
+        except (OSError,ValueError) as error:
+            return {**result,'state':'query-failed','errors':[{'component':'installation','reason':str(error)}]}
+        if removal and removal['phase']!='retained':
+            return {**result,'state':'maintenance','operations':[{'kind':'uninstall','phase':removal['phase']}]}
+        state=self.host.path(STATE)
+        if not state.exists() and not state.is_symlink():
+            if removal and not self.host.path(UNIT).exists():return result
+            if any(self.host.path(path).exists() or self.host.path(path).is_symlink() for path in (CONFIG,UNIT)):
+                result.update(state='partial',errors=[{'component':'installation','reason':'Incomplete installation; preserve configuration and retry installation'}])
+            return result
+        try:
+            source=installed_source(self.host)
+            result['version']=source['receipt']['version']
+        except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:
+            result.update(state='query-failed',errors=[{'component':'installation','reason':str(error)}])
+            return result
+        def collect(name,read):
+            try:result['components'].append(read())
+            except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:
+                result['components'].append({'name':name,'state':'unknown'})
+                result['errors'].append({'component':name,'reason':str(error)})
+        for name,unit,system,idle in (('platform',PLATFORM,False,False),('updater',UPDATER,True,False),('maintenance-fence',FENCE,True,True)):
+            collect(name,lambda name=name,unit=unit,system=system,idle=idle:self.service(name,unit,source,system=system,idle=idle))
+        database=self.host.path('/var/lib/dsh-phalanx/.config/systemd/user/'+DATABASE)
+        if database.exists():collect('builtin-database',lambda:self.service('builtin-database',DATABASE,source))
+        try:result['databaseSelection']=self.database_selection(source)
+        except (OSError,ValueError,KeyError,TypeError,InstallError) as error:
+            result['databaseSelection']='unknown'
+            result['errors'].append({'component':'builtin-database','reason':str(error)})
+        def database_containers():
+            rows=self.builtin_containers(source)
+            active=sum(row['State'] in ('running','paused','stopping') for row in rows)
+            return {'name':'builtin-database-containers','state':'running' if active else 'stopped','running':active}
+        collect('builtin-database-containers',database_containers)
+        def members():
+            rows=self.member_containers(source)
+            running=sum(row['State'] in ('running','paused','stopping') for row in rows)
+            return {'name':'members','state':'running' if running else 'stopped','running':running,'total':len(rows)}
+        collect('members',members)
+        def maintenance():
+            rows=self.maintenance_workers(source)
+            active=sum(int(facts['MainPID'])>0 or facts.get('NFileDescriptorStore')!='0' for _,facts in rows)
+            return {'name':'maintenance-workers','state':'running' if active else 'stopped','running':active}
+        def archives():
+            rows=self.archive_containers(source)
+            active=sum(row['State'] in ('running','paused','stopping') for row in rows)
+            return {'name':'upgrade-tools','state':'running' if active else 'stopped','running':active}
+        collect('maintenance-workers',maintenance)
+        collect('upgrade-tools',archives)
+        try:result['operations']=self.pending()
+        except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:result['errors'].append({'component':'maintenance','reason':str(error)})
+        platform=next(row for row in result['components'] if row['name']=='platform')
+        if platform['state']=='running' and not result['operations']:
+            try:
+                values=source['values'];port=int(values['DSH_PHALANX_PORT']);entry=entry_url(port,values['DSH_PHALANX_HOST'])
+                address=ipaddress.ip_address(urllib.parse.urlsplit(entry).hostname)
+                if not self.host.pid_owns_listener(platform['mainPid'],port,address):raise InstallError('Managed platform process does not own the configured listener')
+                initialization=result.get('databaseSelection') is None
+                self.host.request(entry+('/login' if initialization else '/readyz'),authority=origin_authority(values['DSH_PHALANX_PUBLIC_ORIGIN']),max_bytes=65536,timeout=5)
+                platform['initializationRequired']=initialization
+                platform['ready']=True
+            except (OSError,ValueError,KeyError,TypeError,InstallError) as error:
+                platform['ready']=False
+                result['errors'].append({'component':'platform','reason':str(error)})
+        states={row['name']:row['state'] for row in result['components']}
+        required=[row['state'] for row in result['components'] if row['name'] not in ('members','maintenance-fence','maintenance-workers','upgrade-tools','builtin-database-containers') and not (row['name']=='builtin-database' and result.get('databaseSelection')=='external')]
+        database_consistent=(states.get('builtin-database')=='running')==(states['builtin-database-containers']=='running')
+        if result['errors']:result['state']='query-failed'
+        elif result['operations']:result['state']='maintenance'
+        elif required and all(state=='running' for state in required) and states['maintenance-fence'] in ('idle','stopped') and states['maintenance-workers']=='stopped' and states['upgrade-tools']=='stopped' and database_consistent:result['state']='running'
+        elif all(state in ('stopped','idle') for state in states.values()):result['state']='stopped'
+        else:result['state']='partial'
+        return result
+
+    def verify_service_files(self,source):
+        files=[(UNIT,('EnvironmentFile='+CONFIG,'ExecStart=/opt/dsh-phalanx/current/start','WorkingDirectory=/var/lib/dsh-phalanx')),
+               ('/etc/systemd/system/'+UPDATER,('ExecStart=/usr/bin/python3 -B /opt/dsh-phalanx/updater/updater.py','KillMode=control-group'))]
+        database='/var/lib/dsh-phalanx/.config/systemd/user/'+DATABASE
+        if self.host.path(database).exists():
+            files.append((database,('--name','dsh-phalanx-postgres','dsh.phalanx.database=builtin','PartOf=dsh-phalanx.service',unit_argument(str(self.host.path(default_storage_root(source['values']['DSH_PHALANX_DATA_ROOT'])+'/postgres'))+':/var/lib/postgresql/data'))))
+        for name,required in files:
+            path=self.host.path(name)
+            if path.is_symlink() or not path.is_file() or path.stat().st_mode&0o022:
+                raise InstallError('Managed service file ownership cannot be verified: '+name)
+            if path.stat().st_uid not in (os.geteuid(),source['uid']) or name.startswith('/etc/systemd/') and path.stat().st_uid!=os.geteuid():raise InstallError('Managed service file owner differs: '+name)
+            text=path.read_text()
+            if any(fragment not in text for fragment in required):raise InstallError('Managed service definition differs: '+name)
+
+    def change(self,action,*,confirmed=True):
+        with deployment_lease(self.host) as acquired:
+            if acquired:
+                return self.change_locked(action,confirmed=confirmed)
+            result={**self.inspect(),'steps':[],'changed':False,'conflict':True}
+            result['errors'].append({'component':'operation','reason':'Another installation or maintenance operation owns the deployment lock'})
+            return result
+
+    def change_locked(self,action,*,confirmed=True):
+        result={'steps':[],'changed':False}
+        before=self.inspect()
+        result.update(before)
+        if any(operation['kind']=='uninstall' for operation in before.get('operations', [])):
+            result['conflict']=True
+            result['errors'].append({'component':'operation','reason':'Complete the recorded uninstall before changing services'})
+            return result
+        if before['state']=='not-installed':
+            if action=='start':result['errors'].append({'component':'installation','reason':'Install the deployment before starting it'})
+            return result
+        try:
+            pending=self.pending()
+            if pending:
+                result.update(state='maintenance',operations=pending,conflict=True)
+                result['errors'].append({'component':'operation','reason':'Complete or recover the existing maintenance operation first'})
+                return result
+            source=installed_source(self.host)
+            self.verify_service_files(source)
+            self.builtin_containers(source)
+        except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:
+            result['errors'].append({'component':'installation','reason':str(error)})
+            return result
+        goal='stopped' if action=='stop' else 'running'
+        if before['state']==goal and not before['errors']:return result
+        if action=='stop' and not confirmed:
+            result['confirmationRequired']=True
+            result['errors'].append({'component':'confirmation','reason':'stop interrupts tasks; pass --yes to explicitly accept interruption'})
+            return result
+        states={row['name']:row for row in before['components']}
+        def step(name,operation,call):
+            row={'component':name,'action':operation}
+            try:
+                call();row['status']='completed'
+            except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:
+                row.update(status='failed',reason=str(error))
+            result['steps'].append(row)
+        def service(name,unit,*,system=False):
+            row=states.get(name)
+            if not row or row['state']=='unknown':return
+            target=('stopped','idle') if action=='stop' else ('running','idle') if name=='maintenance-fence' else ('running',)
+            if row['state'] in target:return
+            arguments=['systemctl',*([] if system else ['--user']),action,unit]
+            step(name,action,lambda:self.host.run(arguments) if system else self.host.user(source['uid'],arguments))
+        if action=='stop':service('updater',UPDATER,system=True)
+        try:
+            for worker,_ in self.maintenance_workers(source):step('maintenance:'+worker.unit,'stop',worker.stop)
+            for row in self.archive_containers(source):
+                identity=row.get('Id',row.get('ID'))
+                step('upgrade-tool:'+identity,'stop',lambda identity=identity:self.host.run(['podman','rm','--force','--ignore','--time','0',identity]))
+        except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:
+            result['steps'].append({'component':'maintenance-workers','action':'stop','status':'failed','reason':str(error)})
+        if action=='stop':
+            service('platform',PLATFORM)
+            try:
+                for row in self.member_containers(source):
+                    identity=row.get('Id',row.get('ID'))
+                    step('member:'+identity,'stop',lambda identity=identity:self.host.user(source['uid'],['podman','rm','--force','--ignore','--time','0',identity]))
+            except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:
+                result['steps'].append({'component':'members','action':'stop','status':'failed','reason':str(error)})
+            service('builtin-database',DATABASE)
+            try:
+                for row in self.builtin_containers(source):
+                    identity=row.get('Id',row.get('ID'))
+                    step('builtin-database:'+identity,'stop',lambda identity=identity:self.host.user(source['uid'],['podman','rm','--force','--ignore','--time','0',identity]))
+            except (OSError,ValueError,KeyError,TypeError,InstallError) as error:
+                result['steps'].append({'component':'builtin-database','action':'stop','status':'failed','reason':str(error)})
+        else:
+            service('maintenance-fence',FENCE,system=True)
+            if before.get('databaseSelection')!='external':service('builtin-database',DATABASE)
+            service('platform',PLATFORM)
+            service('updater',UPDATER,system=True)
+            if any(row['component']=='platform' and row['status']=='completed' for row in result['steps']):
+                step('platform','readiness',lambda:self.host.ready(source['uid'],int(source['values']['DSH_PHALANX_PORT']),source['values']['DSH_PHALANX_HOST'],source['values']['DSH_PHALANX_PUBLIC_ORIGIN']))
+        observed=self.inspect()
+        result.update(observed)
+        result['changed']=any(row['status']=='completed' and row['action']!='readiness' for row in result['steps'])
+        for row in result['steps']:
+            if row['status']=='failed':result['errors'].append({'component':row['component'],'reason':row['reason']})
+        goal='stopped' if action=='stop' else 'running'
+        if result['state']!=goal:result['errors'].append({'component':'deployment','reason':'Some managed components have not reached '+goal+'; inspect component results and retry'})
+        return result
+
+"""Remove the installed program and service files for a verified deployment."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import stat
+import sys
+
+
+def uninstall_data_paths(values):
+    data = values['DSH_PHALANX_DATA_ROOT']
+    return list(dict.fromkeys([
+        CONFIG, MANIFEST, data, default_storage_root(data), effective_user_data_root(values),
+        '/var/lib/dsh-phalanx/keys', UPGRADE_ROOT,
+    ]))
+
+
+class Uninstall:
+    def __init__(self, host):
+        self.host = host
+        self.deployment = Deployment(host)
+        self.cleanup = UpgradeCleanup(host, host.path(UPGRADE_ROOT))
+
+    def path(self, name):
+        relative = Path(name)
+        if not relative.is_absolute() or relative == Path('/') or '..' in relative.parts or str(relative) != name:
+            raise InstallError('Invalid uninstall path')
+        path = self.host.path(name)
+        for parent in path.parents:
+            if parent == self.host.root:
+                break
+            if parent.is_symlink():
+                raise InstallError('Uninstall path has a symbolic-link parent: '+name)
+        return path
+
+    def signature(self, name):
+        path = self.path(name)
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return None
+        result = {'device': info.st_dev, 'inode': info.st_ino, 'mode': info.st_mode, 'owner': info.st_uid}
+        if stat.S_ISLNK(info.st_mode):
+            result['target'] = os.readlink(path)
+        elif stat.S_ISREG(info.st_mode):
+            with path.open('rb') as file:
+                result['sha256'] = hashlib.file_digest(file, 'sha256').hexdigest()
+        elif not stat.S_ISDIR(info.st_mode):
+            raise InstallError('Unsupported uninstall resource type: '+name)
+        return result
+
+    def named(self, path):
+        return '/'+str(path.relative_to(self.host.root))
+
+    def program_paths(self, source):
+        self.deployment.verify_service_files(source)
+        verify_global_cli_path(self.host)
+        result = [UNIT, '/var/lib/dsh-phalanx/.config/systemd/user/'+DATABASE, EXECUTOR_UNIT]
+        drop_in = '/etc/systemd/system/user@'+str(source['uid'])+'.service.d/dsh-phalanx-maintenance.conf'
+        gate = '/opt/dsh-phalanx/maintenance/gate.py'
+        fence = '/etc/systemd/system/'+FENCE
+        owner = os.geteuid()
+        for name, expected in [
+            (drop_in, '[Unit]\nRequires=dsh-phalanx-maintenance.service\nAfter=dsh-phalanx-maintenance.service\n'),
+            (fence, '[Unit]\nDescription=dsh-phalanx upgrade admission\nBefore=user@'+str(source['uid'])+'.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\n'),
+        ]:
+            path = self.path(name)
+            if path.is_symlink() or not path.is_file() or path.stat().st_uid != owner or path.stat().st_mode & 0o022 or path.read_text() != expected:
+                raise InstallError('Unverified deployment service definition: '+name)
+        executor = self.path(EXECUTOR)
+        bank = executor.resolve()
+        if not executor.is_symlink() or bank.parent != self.path(BANKS):
+            raise InstallError('Unverified deployment executor link')
+        executor_package(bank, source['receipt']['commit'])
+        gate_file = self.path(gate)
+        if gate_file.is_symlink() or not gate_file.is_file() or gate_file.stat().st_uid != owner or gate_file.read_bytes() != (bank/'installer_upgrade_gate.py').read_bytes():
+            raise InstallError('Unverified deployment admission program')
+        result.extend([drop_in, fence, GLOBAL_CLI, CURRENT, EXECUTOR, gate])
+        manifests = [source['manifest']]
+        journal = self.path(UPGRADE_ROOT)
+        if journal.exists():
+            known, _ = self.cleanup.inventory(source)
+            manifests.extend(known.values())
+        for manifest in manifests:
+            sha = manifest['files'][asset_names(manifest)[0]]
+            name = '/opt/dsh-phalanx/releases/'+manifest['tag']+'-'+sha[:16]
+            path = self.path(name)
+            if not path.exists() and not path.is_symlink():
+                continue
+            if path.is_symlink() or not path.is_dir() or path.stat().st_uid != owner or (path/'.artifact-sha256').read_text() != sha:
+                raise InstallError('Unverified deployment release directory: '+name)
+            result.append(name)
+        if self.named(Path(source['target'])) not in result:
+            raise InstallError('The current release is outside the verified inventory')
+        commits = {manifest['commit'] for manifest in manifests}
+        for candidate in self.path(BANKS).iterdir():
+            if not any(candidate.name.startswith(commit+'-') for commit in commits):
+                continue
+            identity = executor_package(candidate)
+            if candidate.stat().st_uid != owner or identity['sourceCommit'] not in commits or not candidate.name.startswith(identity['sourceCommit']+'-'+identity['packageSha256'][:16]+'-'):
+                raise InstallError('Unverified deployment executor bank')
+            result.append(self.named(candidate))
+        result.append(STATE)
+        return list(dict.fromkeys(result))
+
+    def data_paths(self, source):
+        values = source['values']
+        data_root = values['DSH_PHALANX_DATA_ROOT']
+        if data_root != '/var/lib/dsh-phalanx/data':
+            raise InstallError('Cannot verify the configured platform data root for uninstall')
+        if values.get('DSH_PHALANX_DATABASE_CONFIG_FILE') not in (None, '/var/lib/dsh-phalanx/keys/database.json'):
+            raise InstallError('Cannot verify the configured database key directory for uninstall')
+        names = [data_root, default_storage_root(data_root), '/var/lib/dsh-phalanx/keys', UPGRADE_ROOT,
+                 CONFIG, MANIFEST, '/etc/dsh-phalanx/install-draft']
+        entries = {name: self.signature(name) for name in names}
+        for name in (CONFIG, MANIFEST, STATE):
+            entry = self.signature(name)
+            if entry is None or not stat.S_ISREG(entry['mode']) or entry['owner'] != os.geteuid() or entry['mode'] & 0o022:
+                raise InstallError('Unverified deployment metadata: '+name)
+        for name in (data_root, default_storage_root(data_root), '/var/lib/dsh-phalanx/keys'):
+            if entries[name] is None:
+                continue
+            path = self.path(name)
+            if (not stat.S_ISDIR(entries[name]['mode']) or entries[name]['mode'] & 0o022
+                    or self.host.user(source['uid'], ['test', '-O', str(path)], check=False).returncode):
+                raise InstallError('Unverified local deployment data: '+name)
+        self.deployment.journal_root()
+        return entries
+
+    def mount_record(self, path):
+        rows = json.loads(self.host.run(['findmnt', '--json', '--target', str(path), '--output', 'TARGET,MAJ:MIN,SOURCE,FSTYPE']).stdout)['filesystems']
+        if not isinstance(rows, list) or len(rows) != 1:
+            raise InstallError('Cannot verify the retained storage mount')
+        return rows[0]
+
+    def external_proof(self, source):
+        values = source['values']
+        name = values['DSH_PHALANX_USER_DATA_ROOT']
+        mount_name = values['DSH_PHALANX_USER_DATA_MOUNT']
+        path = self.path(name)
+        mount = self.path(mount_name)
+        if path == mount or not path.is_relative_to(mount) or path.is_symlink():
+            raise InstallError('External member data must be a dedicated directory below its mounted volume')
+        validate_storage(self.host, values)
+        facts = platform_facts(self.host, values, 'user-storage')
+        if not isinstance(facts, dict) or not isinstance(facts.get('binding'), dict):
+            raise InstallError('Cannot verify external member storage against the deployment database')
+        binding = facts['binding']
+        marker_name = name+'/.dsh-phalanx-storage.json'
+        marker = self.signature(marker_name)
+        if (binding['path'] != name or marker is None or not stat.S_ISREG(marker['mode'])
+                or json.loads(self.path(marker_name).read_text()) != {'id': binding['id'], 'owner': facts['owner']}):
+            raise InstallError('External member storage marker does not match the deployment')
+        entry = self.signature(name)
+        if entry is None or not stat.S_ISDIR(entry['mode']):
+            raise InstallError('External member storage is unavailable')
+        mounted = self.mount_record(path)
+        if mounted.get('target') != str(mount):
+            raise InstallError('External member storage mount changed')
+        return {'root': name, 'entry': entry, 'marker': marker, 'mount': mounted}
+
+    def retained_keys(self):
+        root = '/var/lib/dsh-phalanx/keys'
+        return {name: self.signature(name) for name in [
+            root+'/database.json', root+'/builtin-database.json', root+'/master.key',
+        ]}
+
+    def verify_reinstall(self, plan):
+        if self.signature(CONFIG) != plan['data'][CONFIG]:
+            raise InstallError('The retained deployment configuration changed')
+        for name, expected in plan['keys'].items():
+            if self.signature(name) != expected:
+                raise InstallError('The retained database configuration or key changed: '+name)
+        for name in (plan['dataRoot'], default_storage_root(plan['dataRoot']), '/var/lib/dsh-phalanx/keys'):
+            if self.signature(name) != plan['data'][name]:
+                raise InstallError('The retained data directory changed: '+name)
+        if plan['externalProof']:
+            self.purge_paths(plan)
+
+    def plan(self, source):
+        external_root = source['values'].get('DSH_PHALANX_USER_DATA_ROOT')
+        proof = None
+        if external_root:
+            try:
+                proof = self.external_proof(source)
+            except (OSError, ValueError, KeyError, TypeError, InstallError):
+                # Unavailable external ownership does not prevent retaining those files.
+                pass
+        return {
+            'schema': 1, 'phase': 'removing', 'uid': source['uid'],
+            'dataRoot': source['values']['DSH_PHALANX_DATA_ROOT'],
+            'release': {key: source['receipt'][key] for key in ('version', 'candidate', 'commit', 'platformSha256', 'imageDigest')},
+            'externalRoot': external_root, 'externalProof': proof,
+            'data': self.data_paths(source),
+            'keys': self.retained_keys(),
+            'retained': uninstall_data_paths(source['values']),
+            'programs': {name: self.signature(name) for name in self.program_paths(source)},
+            'completed': [],
+        }
+
+    def write(self, plan):
+        self.host.atomic(UNINSTALL_STATE, json.dumps(plan, ensure_ascii=False)+'\n')
+
+    def verify_quiet(self, plan, *, fence_stopped=False):
+        account = self.host.run(['getent', 'passwd', 'dsh-phalanx']).stdout.strip().split(':')
+        if len(account) != 7 or account[2] != str(plan['uid']) or account[5:] != ['/var/lib/dsh-phalanx', '/usr/sbin/nologin']:
+            raise InstallError('The managed service identity changed')
+        source = {'uid': plan['uid'], 'values': {'DSH_PHALANX_DATA_ROOT': plan['dataRoot']}}
+        units = [('dsh-phalanx.service', False), (DATABASE, False), (UPDATER, True)]
+        if fence_stopped:
+            units.append((FENCE, True))
+        for unit, system in units:
+            args = ['systemctl', *(['--user'] if not system else []), 'show', unit,
+                    '--property=LoadState,ActiveState,SubState,MainPID,ControlPID,ControlGroup,UnitFileState']
+            response = self.host.run(args, check=False) if system else self.host.user(plan['uid'], args, check=False)
+            values = dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
+            loaded = values.get('LoadState') == 'loaded'
+            stopped = values.get('ActiveState') in ('inactive', 'failed')
+            valid = (response.returncode == 0 and loaded and values.get('MainPID') == '0' and values.get('ControlPID') == '0'
+                     or values.get('LoadState') == 'not-found' and values.get('MainPID', '0') == '0' and values.get('ControlPID', '0') == '0')
+            if not valid or not stopped or self.deployment.task_count(values.get('ControlGroup', ''), active=False):
+                raise InstallError('Managed service has not stopped: '+unit)
+        if self.deployment.member_containers(source) or self.deployment.builtin_containers(source) or self.deployment.maintenance_workers(source) or self.deployment.archive_containers(source):
+            raise InstallError('Managed workloads remain after stopping')
+
+    def remove(self, name, expected, uid):
+        current = self.signature(name)
+        if current is None:
+            return
+        if current != expected:
+            raise InstallError('Uninstall resource changed after ownership verification: '+name)
+        path = self.path(name)
+        if stat.S_ISDIR(current['mode']):
+            mounts = json.loads(self.host.run(['findmnt', '--json', '--list', '--output', 'TARGET']).stdout)['filesystems']
+            if any(Path(row['target']).is_relative_to(path) for row in mounts):
+                raise InstallError('Uninstall resource contains a mount: '+name)
+            if self.cleanup.mounted(path, uid) or self.cleanup.process_reference(path):
+                raise InstallError('A process or container is using '+name)
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        self.host.sync_directory(path.parent)
+
+    def remove_programs(self, plan, result):
+        self.verify_quiet(plan)
+        uid = plan['uid']
+        LinuxAdmissionGate(self.host).open()
+        for unit, name, system in [('dsh-phalanx.service', UNIT, False), (UPDATER, EXECUTOR_UNIT, True)]:
+            if self.signature(name) is None:
+                continue
+            if self.signature(name) != plan['programs'][name]:
+                raise InstallError('Autostart definition changed: '+name)
+            if system:
+                self.host.run(['systemctl', 'disable', unit])
+            else:
+                self.host.user(uid, ['systemctl', '--user', 'disable', unit])
+        drop_in = '/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf'
+        self.remove(drop_in, plan['programs'][drop_in], uid)
+        self.host.run(['systemctl', 'daemon-reload'])
+        fence = '/etc/systemd/system/'+FENCE
+        if self.signature(fence) is not None:
+            if self.signature(fence) != plan['programs'][fence]:
+                raise InstallError('Maintenance service definition changed')
+            self.host.run(['systemctl', 'stop', FENCE])
+        self.verify_quiet(plan, fence_stopped=True)
+        for name, expected in plan['programs'].items():
+            self.remove(name, expected, uid)
+            if name not in plan['completed']:
+                plan['completed'].append(name)
+                self.write(plan)
+            result['changed'] = True
+        self.host.user(uid, ['systemctl', '--user', 'daemon-reload'])
+        self.host.run(['systemctl', 'daemon-reload'])
+        self.verify_quiet(plan, fence_stopped=True)
+        plan['phase'] = 'retained'
+        self.write(plan)
+
+    def verify_retained(self, plan):
+        if any(self.signature(name) is not None for name in plan['programs']):
+            raise InstallError('A reinstall has started; complete it before managing retained data')
+        self.verify_quiet(plan, fence_stopped=True)
+
+    def verify_absent(self):
+        paths = (
+            STATE, CONFIG, MANIFEST, CURRENT, UNIT, EXECUTOR, EXECUTOR_UNIT, GLOBAL_CLI, UPGRADE_ROOT,
+            '/etc/dsh-phalanx/install-draft', '/etc/dsh-phalanx/maintenance', '/etc/systemd/system/'+FENCE,
+            '/opt/dsh-phalanx/maintenance/gate.py', '/var/lib/dsh-phalanx/.config/systemd/user/'+DATABASE,
+            '/var/lib/dsh-phalanx/.config/systemd/user/default.target.wants/dsh-phalanx.service',
+            '/etc/systemd/system/multi-user.target.wants/'+UPDATER,
+            '/var/lib/dsh-phalanx/data', '/var/lib/dsh-phalanx/data.durable', '/var/lib/dsh-phalanx/keys',
+        )
+        if any(self.signature(name) is not None for name in paths):
+            raise InstallError('Cannot verify ownership of incomplete installation or retained data')
+        for name in (BANKS, '/opt/dsh-phalanx/releases'):
+            path = self.path(name)
+            if path.is_symlink() or (path.exists() and (not path.is_dir() or any(path.iterdir()))):
+                raise InstallError('Cannot verify ownership of incomplete installation or retained data')
+        for path in self.path('/etc/systemd/system').glob('user@*.service.d/dsh-phalanx-maintenance.conf'):
+            if self.signature(self.named(path)) is not None:
+                raise InstallError('Cannot verify ownership of incomplete installation or retained data')
+
+    def purge_paths(self, plan):
+        entries = dict(plan['data'])
+        if plan['externalRoot']:
+            proof = plan['externalProof']
+            if not proof or proof['root'] != plan['externalRoot']:
+                raise InstallError('Cannot verify retained external storage. Reinstall and start the retained deployment to verify it before purging.')
+            name = proof['root']
+            current = self.signature(name)
+            if self.mount_record(self.path(name).parent) != proof['mount']:
+                raise InstallError('The retained external storage mount changed')
+            if current is None and plan['phase'] != 'purging':
+                raise InstallError('The retained external member directory is missing')
+            if current is not None:
+                marker = self.signature(name+'/.dsh-phalanx-storage.json')
+                if marker != proof['marker'] and (plan['phase'] != 'purging' or marker is not None):
+                    raise InstallError('The retained external storage marker changed')
+            entries = {name: proof['entry'], **entries}
+        return entries
+
+    def purge_data(self, plan, result):
+        self.verify_retained(plan)
+        entries = self.purge_paths(plan)
+        for name, expected in entries.items():
+            current = self.signature(name)
+            if current is not None and current != expected:
+                raise InstallError('Retained data changed after ownership verification: '+name)
+        plan['phase'] = 'purging'
+        self.write(plan)
+        for name, expected in entries.items():
+            self.remove(name, expected, plan['uid'])
+            if name not in plan['completed']:
+                plan['completed'].append(name)
+                self.write(plan)
+            result['changed'] = True
+        self.path(UNINSTALL_STATE).unlink()
+        plan['completed'].append(UNINSTALL_STATE)
+        self.host.sync_directory(self.path(UNINSTALL_STATE).parent)
+        result['retained'] = []
+        result['state'] = 'purged'
+
+    def execute(self, args, result):
+        with deployment_lease(self.host) as acquired:
+            if not acquired:
+                result['conflict'] = True
+                raise InstallError('Another installation or maintenance operation owns the deployment lock')
+            record = uninstall_record(self.host)
+            if record is None and self.signature(STATE) is None:
+                self.verify_absent()
+                result['state'] = 'purged' if args.purge else 'uninstalled'
+                return
+            if record is None:
+                source = installed_source(self.host)
+                if self.deployment.pending():
+                    result['conflict'] = True
+                    raise InstallError('Complete or recover the existing maintenance operation first')
+                plan = self.plan(source)
+            else:
+                plan = record
+                if self.deployment.pending():
+                    result['conflict'] = True
+                    raise InstallError('Complete or recover the existing maintenance operation first')
+            result['retained'] = [*plan['retained'], UNINSTALL_STATE]
+            result['remove'] = list(plan['programs'])
+            result['completed'] = plan['completed']
+            result['release'] = plan['release']['version']
+            if args.purge:
+                if plan['externalRoot']:
+                    result['remove'].append(plan['externalRoot'])
+                result['remove'].extend(plan['data'])
+                result['remove'].append(UNINSTALL_STATE)
+                self.purge_paths(plan)
+            elif plan['phase'] == 'retained':
+                self.verify_retained(plan)
+                result['state'] = 'uninstalled'
+                return
+            elif plan['phase'] == 'purging':
+                raise InstallError('Repeat the explicit purge to complete the recorded removal')
+            if not self.confirm(args, result):
+                return
+            if record is None:
+                stopped = self.deployment.change_locked('stop', confirmed=True)
+                result['changed'] = stopped['changed']
+                if stopped['state'] != 'stopped' or stopped['errors']:
+                    result['errors'].extend(stopped['errors'])
+                    raise InstallError('The deployment must stop before uninstalling')
+                self.write(plan)
+            if plan['phase'] == 'removing':
+                self.remove_programs(plan, result)
+            if args.purge:
+                self.purge_data(plan, result)
+            else:
+                result['state'] = 'uninstalled'
+
+    def confirm(self, args, result):
+        interactive = args.output == 'human' and not getattr(args, 'non_interactive', False) and self.host.terminal_available()
+        if args.output == 'human':
+            render_scope(result, args)
+        elif args.yes:
+            render_scope(result, args, file=sys.stderr)
+        if args.yes:
+            return True
+        if not interactive:
+            result['confirmationRequired'] = True
+            raise InstallError('Uninstall requires explicit confirmation with --yes')
+        question = InstallerQuestions(args.language, self.host.prompt, self.host.operator, {})
+        word = 'PURGE' if args.purge else 'yes'
+        try:
+            answer = question.ask('输入 '+word+' 确认；cancel 取消', 'Type '+word+' to confirm; cancel to cancel', 'cancel')
+            if answer == word:
+                return True
+        except Cancelled:
+            pass
+        result['cancelled'] = True
+        return False
+
+
+def render_scope(result, args, *, file=None):
+    def line(text):
+        print(text, file=file, flush=True)
+    zh = args.language == 'zh-CN'
+    line('将移除' if zh else 'Remove')
+    for name in result['remove']:
+        line('  '+name)
+    line('保留' if zh else 'Retain')
+    removed = [Path(name) for name in result['remove']]
+    for name in result['retained']:
+        if not any(Path(name).is_relative_to(path) for path in removed):
+            line('  '+name)
+    line('  外部 PostgreSQL、系统账户、依赖、共享资源和挂载卷' if zh else '  External PostgreSQL, OS accounts and dependencies, shared resources and mounted volumes')
+    line('运行中的任务会中断。' if zh else 'Running tasks will be interrupted.')
+
+
+def uninstall_command(host, args):
+    result = {
+        'schema': 1, 'command': 'uninstall', 'phaseCode': 'deployment.uninstall', 'state': 'partial',
+        'status': 'failed', 'changed': False, 'retained': [], 'remove': [], 'completed': [], 'errors': [],
+        'preservedResources': ['external-postgresql', 'system-accounts', 'system-dependencies', 'shared-resources', 'mounted-volumes'],
+    }
+    try:
+        if host.uid != 0 or host.system != 'Linux':
+            raise InstallError('Use sudo on the installed Linux host')
+        Uninstall(host).execute(args, result)
+        result['status'] = 'cancelled' if result.get('cancelled') else 'succeeded'
+    except (OSError, ValueError, KeyError, TypeError, InstallError, AdmissionGateError) as error:
+        result['errors'].append({'component': 'deployment', 'reason': str(error)})
+    safe = Progress(host.root, persist=False, language=args.language).safe
+    for error in result['errors']:
+        error['reason'] = safe(error['reason'])
+    result['retained'] = [name for name in result['retained'] if os.path.lexists(host.path(name))]
+    result['pending'] = [name for name in result['remove'] if name not in result['completed']]
+    if args.output == 'json':
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        zh = args.language == 'zh-CN'
+        if result['status'] == 'cancelled':
+            print('已取消。' if zh else 'Cancelled.')
+        elif result['status'] == 'succeeded':
+            if not result['changed'] and not result.get('release'):
+                print('未发现本部署的程序或数据。' if zh else 'No deployment programs or data were found.')
+            elif result['state'] == 'purged':
+                print('已清理本部署本地数据。' if zh else 'Local deployment data removed.')
+            else:
+                print('已卸载，保留数据与恢复记录。' if zh else 'Uninstalled. Data and the recovery receipt are retained.')
+                if result.get('release'):
+                    print(('重新安装同一版本以恢复：' if zh else 'Reinstall the same release to recover: ')+result['release'])
+                    print(('清理保留数据：' if zh else 'Purge retained data: ')+'sudo bash install.sh --uninstall --purge')
+        else:
+            print('卸载未完成，检查分项后重试同一命令。' if zh else 'Uninstall is incomplete. Review the result and retry the same command.')
+            for error in result['errors']:
+                print(error['reason'])
+            for key, label in [
+                ('completed', '已完成' if zh else 'Completed'),
+                ('pending', '待完成' if zh else 'Pending'),
+                ('retained', '仍保留' if zh else 'Still present'),
+            ]:
+                if result[key]:
+                    print(label)
+                    for name in result[key]:
+                        print('  '+name)
+    return 1 if result['status'] == 'failed' else 0
+
 """Debian-family installation command. Host owns filesystem and operating-system I/O."""
 import argparse
 import hashlib
@@ -4659,6 +6009,9 @@ def options(arguments):
         def error(self, message): raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Debian-family Linux amd64")
     parser.add_argument("--version", default="latest")
+    parser.add_argument("--language", choices=("zh-CN", "en"), default="zh-CN")
+    parser.add_argument("--non-interactive", action="store_true")
+    parser.add_argument("--server-ip")
     parser.add_argument('--download-source-preset', choices=('official', 'mainland'), help='Select download defaults; initial installation defaults to official')
     for option in DOWNLOAD_SOURCE_OPTIONS:
         parser.add_argument('--'+option.replace('_', '-'), help='GitHub API prefix used only by plugin prechecks from GitHub' if option == 'github_api_proxy_prefix' else 'Override this download category for the selected preset')
@@ -4666,6 +6019,8 @@ def options(arguments):
     parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
     parser.add_argument("--dev-image-reuse-rehearsal", action="store_true", help="Allow an explicit same-version upgrade between shared-image rehearsal candidates")
     parser.add_argument("--upgrade", choices=("check","prepare","apply","status","recover","bootstrap","cleanup"))
+    parser.add_argument("--uninstall", action="store_true", help="Remove the deployment while retaining data")
+    parser.add_argument("--purge", action="store_true", help="With --uninstall, remove verified local deployment data")
     parser.add_argument("--operation", help="Exact prepared upgrade operation identity")
     parser.add_argument("--yes", action="store_true", help="Accept immediate service/task interruption for an upgrade")
     parser.add_argument("--output", choices=("human", "json"), default="human")
@@ -4680,8 +6035,8 @@ def options(arguments):
     parser.add_argument("--port", type=int)
     parser.add_argument("--gateway-port", type=int, help="Private loopback model/network gateway port")
     parser.add_argument("--public-origin")
-    parser.add_argument("--preview-port", type=int, help="Separate private application preview listener")
-    parser.add_argument("--preview-origin", help="Same-host HTTP(S) preview origin on a different public port")
+    parser.add_argument("--preview-port", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--preview-origin", help=argparse.SUPPRESS)
     parser.add_argument('--user-data-root', help='User home/workspace directory on an existing mounted data volume')
     parser.add_argument('--user-data-mount', help='Exact expected mount point containing the user data directory')
     return parser.parse_args(arguments)
@@ -4751,7 +6106,7 @@ def prepare_user_storage(host, uid, gid, values):
     # identity validation; adoption and migration are never implicit here.
 
 
-def activate(host, uid, gid, target, values, manifest, version, *, database_changed=False):
+def activate(host, uid, gid, target, values, manifest, version, *, database_changed=False, preserve_configuration=False):
     database_dependency = 'Requires=dsh-phalanx-postgres.service\nAfter=dsh-phalanx-postgres.service\n' if values.get('DSH_PHALANX_DATABASE_CONFIG_FILE') else ''
     unit = ('[Unit]\nDescription=dsh-phalanx community platform\nAfter=network-online.target\n'+database_dependency+'\n[Service]\nType=simple\n'+
             f'EnvironmentFile={CONFIG}\nEnvironment=XDG_RUNTIME_DIR=/run/user/{uid} XDG_CONFIG_HOME={HOME_DIR}/.config\nWorkingDirectory={HOME_DIR}\nExecStart={CURRENT}/start\n'+
@@ -4765,13 +6120,16 @@ def activate(host, uid, gid, target, values, manifest, version, *, database_chan
     persisted = dict(values)
     if old_config is not None and 'DSH_PHALANX_CONTAINER_GATEWAY_PORT=' not in old_config and installed_state(host) and values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'] == '3081':
         persisted.pop('DSH_PHALANX_CONTAINER_GATEWAY_PORT')
-    text = environment_text(persisted)
+    if preserve_configuration and old_config is None:
+        raise InstallError('The retained deployment configuration is missing')
+    text = old_config if preserve_configuration else environment_text(persisted)
     active = host.user(uid, ["systemctl", "--user", "is-active", "--quiet", "dsh-phalanx.service"], check=False).returncode == 0
     unchanged = previous == str(host.path(target)) and old_config == text and old_unit == unit
     if not unchanged or not active or database_changed:
-        host.mkdir("/etc/dsh-phalanx", 0o750)
-        host.atomic(CONFIG, text, 0o640)
-        host.run(["chown", f"0:{gid}", str(host.path("/etc/dsh-phalanx")), str(host.path(CONFIG))])
+        if not preserve_configuration:
+            host.mkdir("/etc/dsh-phalanx", 0o750)
+            host.atomic(CONFIG, text, 0o640)
+            host.run(["chown", f"0:{gid}", str(host.path("/etc/dsh-phalanx")), str(host.path(CONFIG))])
         host.atomic(UNIT, unit, 0o644)
         host.run(["chown", "-R", f"{uid}:{gid}", str(host.path(HOME_DIR+"/.config/systemd"))])
         replacement = host.path(CURRENT+".next")
@@ -4789,7 +6147,7 @@ def activate(host, uid, gid, target, values, manifest, version, *, database_chan
             if previous is not None:
                 current.unlink(missing_ok=True)
                 current.symlink_to(previous)
-                if old_config is not None:
+                if old_config is not None and not preserve_configuration:
                     host.atomic(CONFIG, old_config, 0o640)
                     host.run(["chown", f"0:{gid}", str(host.path(CONFIG))])
                 if old_unit is not None:
@@ -4824,16 +6182,42 @@ def main(arguments=None, host=None):
     host = host or Host()
     arguments = sys.argv[1:] if arguments is None else arguments
     output = 'json' if '--output=json' in arguments or any(arguments[i:i+2] == ['--output','json'] for i in range(len(arguments))) else 'human'
+    arguments = list(arguments)
+    language = 'zh-CN'
+    for index, argument in enumerate(arguments):
+        if argument == '--language' and index+1 < len(arguments): language = arguments[index+1]
+        elif argument.startswith('--language='): language = argument.split('=', 1)[1]
+    explicit_language = any(argument == '--language' or argument.startswith('--language=') for argument in arguments)
+    if not explicit_language and '--non-interactive' not in arguments and host.terminal_available():
+        chooser = InstallerQuestions('zh-CN', host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+        chooser.tell('方括号 [] 内是默认值，回车采用；输入 cancel 取消。', 'Values in [] are defaults; press Enter to accept, or type cancel.')
+        try:
+            language = chooser.choose('语言 / Language: zh-CN 简体中文 / en English', 'Language: zh-CN / en', ('zh-CN', 'en'), 'zh-CN')
+            arguments += ['--language', language]
+        except (ValueError, EOFError, KeyboardInterrupt):
+            if output == 'json': print(json.dumps({'status':'cancelled','phase':'Language'}))
+            else: print('已取消 / Cancelled')
+            return 0
     try:
-        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=False)
+        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=False, language=language)
     except OSError as error:
-        report = Progress(host.root, output=output, persist=False)
+        report = Progress(host.root, output=output, persist=False, language=language)
         report.failure(error)
         return 1
     host.progress = report
     try:
         with report.stage('Preflight',phase_code='install.preflight'):
             args = options(arguments)
+            if args.purge and not args.uninstall:raise InstallError('--purge requires --uninstall')
+            if args.uninstall:
+                if args.upgrade:raise InstallError('--uninstall cannot be combined with --upgrade')
+                return uninstall_command(host,args)
+            host.non_interactive = args.non_interactive
+            args.dialogue = InstallerQuestions(args.language, host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS, automatic_origin=args.public_origin is None)
+            if args.output == 'human':
+                if host.terminal_available() and not args.non_interactive:
+                    args.dialogue.tell('方括号 [] 内是默认值，直接回车采用；输入 cancel 取消。', 'Values in [] are defaults; press Enter to accept, or type cancel.')
+                args.dialogue.project_info()
             host.image_reuse_rehearsal = args.dev_image_reuse_rehearsal
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
             if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
@@ -4855,15 +6239,36 @@ def main(arguments=None, host=None):
                         announced_wait = True
                         host.pause(1)
             host.install_lock_fd=file.fileno()
+            retained=uninstall_record(host)
+            if retained and (retained['phase']!='retained' or args.upgrade):
+                raise InstallError('Complete the recorded uninstall or reinstall the retained deployment before upgrading')
             # A first installation has no platform database yet and reads only local configuration; once a
             # platform is installed, the administrator's saved choice applies to every later run.
             installed = bool(args.upgrade) or host.path('/etc/dsh-phalanx/install-state.json').exists()
-            host.download_sources = resolve_download_sources(configured_download_sources(host, read_configuration(host), args, platform_running=installed))
+            selection = configured_download_sources(host, read_configuration(host), args, platform_running=installed)
+            if not installed and not args.non_interactive and host.terminal_available() and args.download_source_preset is None:
+                source_config = {'source': selection['preset'], 'overrides': selection.get('overrides', {})}
+                args.dialogue.edit_source(source_config)
+                apply_source_choice(args, source_config)
+                selection = {'preset': source_config['source'], 'overrides': source_config['overrides']}
+            host.download_sources = resolve_download_sources(selection)
             if args.upgrade:return upgrade_command(host,args,temporary)
             if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
             with report.stage('Release selection',phase_code='install.release-selection'):
                 selected=select_release(host,args,Path(temporary))
             proposed=selected[1]
+            if retained:
+                Uninstall(host).verify_reinstall(retained)
+                previous=retained['release']
+                expected=(previous['candidate'],previous['commit'],previous['platformSha256'],previous['imageDigest'])
+                actual=(proposed['tag'],proposed['commit'],proposed['files'][asset_names(proposed)[0]],proposed['image']['digest'])
+                if actual!=expected:
+                    raise InstallError('Reinstall the exact retained release first: '+previous['version'])
+            def recheck_release():
+                checked = select_release(host, args, Path(temporary))
+                if checked[1] != proposed:
+                    raise InstallError('The selected release changed with the download source; retry to review the new release', code='operation.invalid')
+            host.recheck_release = recheck_release
             with report.stage('Configuration',phase_code='install.configuration'):
                 values=configuration(host,args,target_version=proposed['targetVersion'],entry_url=entry_url,access_candidate=access_candidate)
                 report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
@@ -4890,12 +6295,13 @@ def main(arguments=None, host=None):
                     host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
                     if manifest.get('schema')==2:install_executor(host,uid,gid,host.path(previous),manifest['commit'],activate=True,repair=True)
                     database_info=prepare_builtin_database(host,uid,gid,previous,values,manifest)
-                    receipt=activate(host,uid,gid,previous,values,manifest,state['version'],database_changed=bool(database_info and database_info['unitChanged']))
+                    receipt=activate(host,uid,gid,previous,values,manifest,state['version'],
+                                     database_changed=bool(database_info and database_info['unitChanged']), preserve_configuration=bool(retained))
             else:
                 with report.stage('Dependencies',phase_code='install.dependencies'):
                     dependencies(host)
                     host.check_capabilities()
-                if state is None: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
+                if state is None and not retained: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
                 with report.stage('Identity and directories',phase_code='install.identity-storage'):
                     uid,gid=identity(host); prepare_user_storage(host,uid,gid,values)
                 with report.stage('Platform verification and staging',phase_code='install.staging'): target=stage_platform(host,directory,manifest)
@@ -4908,14 +6314,22 @@ def main(arguments=None, host=None):
                 if manifest.get('schema')==2:
                     with report.stage('Update executor',phase_code='install.executor'):install_executor(host,uid,gid,host.path(target),manifest['commit'],activate=True)
                 with report.stage('Service activation',phase_code='install.activation'):
-                    receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'],database_changed=bool(database_info and database_info['unitChanged']))
+                    receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'],
+                                     database_changed=bool(database_info and database_info['unitChanged']), preserve_configuration=bool(retained))
+            if retained:
+                journal=host.path(UNINSTALL_STATE)
+                journal.unlink()
+                host.sync_directory(journal.parent)
             report.result(receipt,port=values['DSH_PHALANX_PORT'])
             database_backup_notice(host,database_info)
         return 0
     except KeyboardInterrupt:
         report.failure(InstallError('Interrupted by operator; an accepted system update may require --upgrade recover.'))
         return 130
-    except (InstallError,OSError,ValueError,KeyError,TypeError,tarfile.TarError) as error:
+    except Cancelled as error:
+        report.cancel(str(error))
+        return 0
+    except (InstallError,OSError,ValueError,KeyError,TypeError,EOFError,tarfile.TarError) as error:
         report.failure(error)
         return 1
 

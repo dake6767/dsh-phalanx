@@ -1,4 +1,5 @@
 import { BUILTIN_NATIVE_PRESET_IDS } from '../domain/native-features.js'
+import { DSH_SETTINGS_UPDATE } from './settings-protocol.js'
 import { DSH_RPC_PREFIX } from './session-protocol.js'
 
 export const NATIVE_PRESET_DEFAULT = 'phalanxNativePresets/default'
@@ -46,7 +47,7 @@ export async function repairNativePresetDefault(disabledIds: readonly string[], 
     if (writes++ >= 3) throw new Error('Native Agent preset default changed repeatedly during startup')
     try {
       await remote(
-        'settings/update',
+        DSH_SETTINGS_UPDATE,
         { ns: 'agent-preset-registry', patch: { selectedDefault: selection.fallback }, expectedRevision: current.revision },
         signal,
       )

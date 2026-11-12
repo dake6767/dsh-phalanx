@@ -122,6 +122,12 @@ HTML 和 HTM 文件打开时默认允许脚本交互，不受 **Show coding view
 
 ## 私有 HTTP 服务预览
 
+所有新建账号（含首次管理员）的 home 和 workspace 均放在用户数据根的 `_spaces/<spaceId>` 下。已有账号继续按存储的目录映射访问，不搬迁或删除旧目录。
+
+成员管理中，成员行「…」菜单的第一项是「切换到该成员 DSH」。目标用户名固定，每次都须输入该成员密码；失败保留管理员身份，取消返回成员管理。成功后进入目标 DSH，目标是管理员也一样；原管理员保留在浏览器的已登录账户列表中。最多十个账户，容量不足时明确拒绝，不挤出其他账户。
+
+同一菜单在重置 DSH 环境紧上方显示「启动实例」或「重启实例」。重启需确认任务会中断，配置、插件和持久文件保留。禁用账户及正在处理中的实例不能启动或重启；其他人改变状态后可刷新页面重新查看。
+
 DSH 侧栏不再显示平台的服务预览按钮。既有认证预览路由仍可使用：登录后打开 `<平台地址>/service-preview/`，可查看服务端口、应用路径以及可复制给助手的指引。使用既有执行工具在自己的实例中启动应用。例如使用端口 `4300`，应将静态资源、API 和 WebSocket 的基础路径配置为入口显示的完整前缀 `/preview/<spaceId>/4300/<预览凭据>/`；应用会收到完整前缀。可信浏览器链接为 `<平台地址>/service-preview/<spaceId>/4300/<应用路径>`。前缀错误可能导致页面不存在或资源失效，修正应用配置后重新加载。不支持重定向和 Service Worker。
 
 部署者需配置独立的预览监听端口和浏览器来源。首次安装时，在 `--public-origin http://192.0.2.10:18080` 之外添加 `--preview-port 18081 --preview-origin http://192.0.2.10:18081`。已有安装按[服务管理](#服务管理与恢复)说明，在受保护的环境文件中同时设置 `DSH_PHALANX_PREVIEW_PORT="18081"` 和 `DSH_PHALANX_PREVIEW_ORIGIN="http://192.0.2.10:18081"`，然后重启服务。示例 IP 应替换为实际部署主机。预览监听沿用平台绑定地址，端口不能与平台或私有网关相同；未配置时入口会提示缺失条件。
@@ -144,7 +150,29 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 平台归档和镜像 digest 来自同一 manifest，校验值、tag 提交、镜像身份必须匹配。镜像从 `ghcr.io/dake6767/dsh-phalanx` 按 digest 拉取。安装器不注册自动升级；正式发布时会验证匿名下载和镜像拉取。
 
-安装无需模型密钥。确认浏览器访问地址（或用 `--public-origin` 指定）和全部公网 IPv4，包括 NAT 别名；仅在没有公网 IPv4 时提交空清单。打开安装器输出的 `initializationUrl`，填写管理员用户名和密码后自动登录，进入可跳过的首个模型表单，邮箱可选。可保存一家供应商和一个启用的默认模型，也可选择**暂时跳过，完成安装**进入 `/admin`。仅校验格式，保存不代表已验证模型可用；已有部署不会被强制引导。模型尚未配置时，终端和 workspace 仍可用。
+安装无需模型密钥。首屏选择简体中文或English，默认中文；也可用
+`--language en` 明确选择英文。首次查询版本前选择官方（默认）、中国大陆或
+自定义下载源，语言不改变来源。先填写服务器访问IP与入口端口（默认18080），
+再确认建议的HTTP浏览器地址，或改成实际HTTP/HTTPS域名；填写网址不会自动
+部署证书或反向代理。方括号里是默认值，回车采用。高级网关与存储设置按需
+展开，无效输入原地重填，摘要支持修改和取消。
+
+端口转发/公网NAT单独声明，默认“没有”，回车确认。显式
+`--host-public-addresses ''` 表示没有额外公网回连别名，允许正常公网访问，
+继续保护宿主、私网、回环和声明的NAT目标；未声明仍阻止成员出网。
+服务器访问IP和共享公网出口地址不能代替映射声明。
+
+无人值守安装须提供明确配置并关闭终端问答：
+
+```sh
+sudo bash install.sh --non-interactive --language zh-CN \
+  --public-origin http://192.0.2.10:18080 --host-public-addresses '' --output json
+```
+
+将示例网址替换为实际浏览器地址。JSON只选择结构化输出；
+`--non-interactive` 才会在有终端时也关闭问答。升级中断仍需独立的 `--yes` 确认。
+
+打开安装器输出的 `initializationUrl`，填写管理员用户名和密码后自动登录，进入可跳过的首个模型表单，邮箱可选。可保存一家供应商和一个启用的默认模型，也可选择**暂时跳过，完成安装**进入 `/admin`。仅校验格式，保存不代表已验证模型可用；已有部署不会被强制引导。模型尚未配置时，终端和 workspace 仍可用。
 
 在 Model management（`/admin/models`）选择供应商协议，添加密钥和独立模型行，显式保存。Base URL 保留该协议要求的前缀：Anthropic Messages 下 DeepSeek 为 `https://api.deepseek.com/anthropic`，火山 Coding Plan 为 `https://ark.cn-beijing.volces.com/api/coding`，网关追加 `/v1/messages`；OpenAI Chat Completions 或 OpenAI Responses 下按供应商要求保留版本前缀（如 `https://api.deepseek.com/v1`），网关追加 `/chat/completions` 或 `/responses`。停用或删除默认模型及其供应商前，先选择启用中的替代默认。成员模型目录随配置更新，无需重启平台。
 
@@ -442,7 +470,43 @@ N 替换为精确候选编号。安装器完整校验两份归档并导入自己
 
 ## 服务管理与恢复
 
-在已安装主机运行以下命令，仅操作安装器的用户服务：
+在已安装 Linux 主机使用全局部署管理命令：
+
+```sh
+sudo dsh-phalanx status
+sudo dsh-phalanx stop
+sudo dsh-phalanx start
+sudo dsh-phalanx stop --yes --language en --output json
+```
+
+`status` 只查询，分项显示平台、成员实例、内置数据库和升级维护任务；部分残留或查询失败会返回非零退出码。`stop` 会中断成员任务，交互终端要求确认，自动执行时须明确传入 `--yes`。它停止本部署可核实归属的服务、成员容器及独立维护任务，保留数据、密钥和原开机自启设置。外部数据库、共享 HTTPS edge 和其他部署的资源分别管理。`start` 使用原配置启动，按现有常驻策略恢复成员实例；已中断的任务不会自动续跑。重复启动或停止已经达到目标状态的部署不会重启组件。
+
+安装、升级或数据库维护正在进行时，启动和停止会拒绝冲突操作；先完成或恢复原操作，再重试。部分停止失败时查看分项结果，修复条件后可重复执行；不要把部分成功当作整套停机完成。
+
+### 卸载与恢复部署
+
+```sh
+sudo dsh-phalanx uninstall
+sudo dsh-phalanx uninstall --purge
+```
+
+默认卸载会停止部署、移除受管程序和服务，并解除部署的开机自启。成员空间、
+平台数据库、匹配的主密钥、受保护配置和恢复记录会成套保留。卸载结果会给出
+原版本。用该版本的已验证安装器和制品运行
+`sudo bash install.sh --version <报告的版本>`，可恢复原部署。
+重新安装会先核对保留的配置和密钥。
+
+明确选择 `--purge` 后，命令会在确认前列出清理范围，删除已核验归属的本地
+部署数据，包括内置数据库和外置卷内本部署的专用成员目录。默认卸载后，
+可用已验证安装器运行 `sudo bash install.sh --uninstall --purge` 清理保留数据。
+外部 PostgreSQL、系统账户、依赖、共享资源和挂载卷本身保留。请保持配置的
+数据卷已挂载。如果卸载前数据库无法核实外置成员目录的归属，先恢复原部署并
+启动，再验证该绑定后清理。非交互执行用 `--yes` 明确确认影响。
+
+非零退出表示尚未完成。修正报告中的条件后重试同一命令。全局入口已移除时，
+用对应的 `install.sh --uninstall` 命令接续。
+
+以下底层命令仅操作平台用户服务，适合配置修改后的重启：
 
 ```sh
 sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user status dsh-phalanx.service
@@ -453,13 +517,19 @@ sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl
 
 stop 不取消开机启动。相同前缀下用 `systemctl --user disable --now` 暂停启动，`enable --now` 恢复。HTTPS edge 单独管理，不为操作平台而重启共享 nginx。
 
-修改已有配置时，用 sudo 编辑 `/etc/dsh-phalanx/environment`，再重启该服务。保留所有权和 0640 权限；配置含共享模型和会话凭据，不能贴入问题报告。一致性备份前停服，保存受保护配置、平台根与用户根及原权限。普通重启重建自有容器，保留原生配置、文件和成员容器主机名。升级时继承已有自有容器的主机名；备份或迁移安装时应保留私有平台数据根。已被残留锁阻塞的应用配置须按应用自身流程恢复；平台不会删除成员文件中的锁。删除账户保留文件；不提供自动数据擦除和灾难恢复。
+修改已有配置时，用 sudo 编辑 `/etc/dsh-phalanx/environment`，再重启该服务。保留所有权和 0640 权限；配置含共享模型和会话凭据，不能贴入问题报告。一致性备份前停服，保存受保护配置、平台根与用户根及原权限。普通重启重建自有容器，保留原生配置、文件和成员容器主机名。升级时继承已有自有容器的主机名；备份或迁移安装时应保留私有平台数据根。已被残留锁阻塞的应用配置须按应用自身流程恢复；平台不会删除成员文件中的锁。删除账户保留文件。需要清理本部署本地数据时，参见上面的卸载流程。
 
 安装失败时保留配置及数据，修复所报告的网络、依赖或端口问题，用同一已验证版本重试。归档哈希不符须重新获取原始配套资产，不能编辑校验清单。激活失败会自动恢复；主动回退需要此前完成版本、配套镜像/配置及升级前的一致备份。不提供新版 DSH 已写数据的自动反向迁移。
 
 ## 配置与支持范围
 
-`bash install.sh --help` 列出首次安装参数：上游 URL/供应商/模型、受保护密钥文件、公网 IPv4 清单、监听及端口、准确公开 origin、私有网关端口。默认模型为 DeepSeek official 的 `deepseek-chat`，后端 `0.0.0.0:18080`，网关 loopback 3081，采用容器模式。`--gateway-port` 只改私有端口，不改绑定地址。HTTPS 后须提供含外部端口的准确 origin。完整公网 IPv4 清单用于拒绝用户代理访问宿主别名；缺少该信息则关闭外部代理访问。
+`bash install.sh --help` 列出语言、非交互模式、下载源、服务器访问IP、
+公网映射声明、监听及入口端口、完整浏览器origin和内部网关/存储设置。
+后端默认 `0.0.0.0:18080`、内部网关loopback 3081，采用容器模式，模型在
+初始化后通过管理页配置。`--gateway-port` 只改内部端口，不改绑定地址。
+HTTPS 后须提供含外部端口的准确origin。明确空映射允许正常公网访问，
+继续拒绝已知宿主、私网、回环及声明的别名；缺少声明时关闭成员外部代理访问。
+
 
 安装器支持符合[主机要求](#主机要求)的 Debian 系 amd64 主机。[贡献指南](../CONTRIBUTING.md)描述 Mac 开发模式，不承诺容器隔离。Linux 测试验证容器行为，已有服务器不能证明全新安装。项目不提供开放注册、自动升级或支持 SLA。候选验收和普通 CI 不等于完成公共发布验收。
 
@@ -510,8 +580,8 @@ stop 不取消开机启动。相同前缀下用 `systemctl --user disable --now`
 ## 安装输出与诊断
 
 
-默认输出英文完成摘要，重定向时也一样。阶段、耗时、真实下载字节、镜像/依赖日志和等待
-提示写 stderr，不估计总体百分比。自动化必须显式传 `--output json`，stdout 仅有一份最终
+默认输出中文完成摘要，重定向时也一样；通过 `--language en` 选择英文。阶段、耗时、真实下载字节、镜像/依赖日志和等待
+提示写 stderr，不估计总体百分比。自动化应提供明确部署参数，并传 `--non-interactive --output json`；stdout 仅有一份最终
 结果；失败有结构化结果及非零退出。`--verbose` 提供脱敏命令与产物身份。
 
 每次运行在 `/var/log/dsh-phalanx/` 保存脱敏阶段 JSONL，目录0700、文件0600。失败显示日志
@@ -629,3 +699,39 @@ sudo bash install.sh --upgrade recover --output json
 
 
 <span id="使用记录"></span>
+
+## CLI 模拟体验
+
+在尝试拟定的安装及部署管理命令之前，可在源码工作树使用 Python 3
+反复体验。独立预览支持 macOS 和 Linux，不代表 macOS 获得正式安装支持。
+
+```sh
+python3 scripts/install/preview.py
+python3 scripts/install/preview.py --language en
+python3 scripts/install/preview.py stop
+python3 scripts/install/preview.py uninstall --purge
+python3 scripts/install/preview.py status --state partial --output json
+```
+
+预览不下载制品、不改系统、不操作真实服务、不删除文件，也不索取凭据。
+所有进度与结果都是模拟。先选语言，再独立选择下载源；选择 `custom`
+可在首次版本查询前配置基础预设与逐类 URL 覆盖，显式覆盖优先且在切换
+基础预设时保留。任何问答输入
+`cancel` 均可退出。摘要支持先 `edit` 修改，再 `install`。高级设置演示
+内部网关与成员存储。HTTPS 浏览器网址假定你已经部署证书和反向代理。
+方括号里的值是默认值，直接回车采用。端口转发/公网 NAT 问题默认选择
+`none`（没有），回车即确认；如果外网经转发访问本服务器，应选择 `list`
+（有）。非交互输入仍须显式声明映射。`none` 与 `undeclared`（不确定）
+不同，后者继续阻止成员出网。
+
+非交互体验使用 `--server-ip 192.0.2.10 --host-public-addresses ''
+--non-interactive`；`--output json` 同样使用非交互输入，仅输出一份 JSON，
+含 `simulation: true` 与 `changed: false`。`--help --output json` 以 JSON
+列出预览参数。`--fail-stage lookup|prepare|download|deploy|ready` 演示
+安装各阶段失败，`--fail-stage operation` 演示管理命令部分失败；去掉该
+参数重试。管理命令通过 `--state` 体验不同观察状态；非交互 stop/uninstall
+需 `--yes`。这些参数不影响真实安装器。真实卸载后的保留数据管理见上面的卸载流程。
+
+模拟没有真实主机适配器；问答、输入校验、下载源选择、摘要和项目介绍
+已与真实安装器共用问答模块。生命周期执行仍为模拟，真实实现需保持
+阶段错误与保留数据说明和公开终端契约一致。模拟成功不作为真实安装证据。

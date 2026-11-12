@@ -1,5 +1,7 @@
-import { DSH_BUNDLE_ENABLE, DSH_BUNDLE_LIST, DSH_BUNDLE_INSTALL } from './plugin-manager-protocol.js'
+import { DSH_BUNDLE_ENABLE, DSH_BUNDLE_LIST, DSH_BUNDLE_INSTALL, DSH_BUNDLE_REMOVE, DSH_BUNDLE_UPDATE, DSH_PLUGIN_ENABLE } from './plugin-manager-protocol.js'
 import { DSH_RPC_PREFIX } from './session-protocol.js'
+import { nativeReplacementImports, nativeReplacementModule } from './native-plugin-replacement.js'
+import { DSH_SETTINGS_UPDATE, DSH_SETTINGS_REPLACE, DSH_SETTINGS_MUTATE } from './settings-protocol.js'
 import { nativeFeatureLocale } from './native-feature-locale.js'
 import {
   nativeInstallVerifierModule,
@@ -26,6 +28,8 @@ export interface NativePluginPolicyConfiguration {
 /** One member policy owns all intercepted bundle routes, including custom-market exclusions. */
 export function nativePluginPolicyModule(configuration: NativePluginPolicyConfiguration): string {
   return `${nativeInstallVerifierModule}
+${nativeReplacementImports}
+${nativeReplacementModule}
 ${nativeFeatureLocale}
 export const name='phalanx-native-plugin-policy';
 export const inject=['connection','typertGateway','settings'];
@@ -34,7 +38,14 @@ export function apply(ctx) {
   const verifier=configuration.publicKey ? createVerifier(configuration.publicKey,configuration.subject,configuration.generation) : undefined;
   const customMarketBundle='@deepseek-ai/dsh-experimental-plugin-market-bundle';
   let mutations=Promise.resolve();
-  const serialized=operation=>{const result=mutations.then(operation);mutations=result.catch(()=>{});return result;};
+  let pendingMutations=0;
+  const replacements=new Map();
+  const serialized=operation=>{
+    pendingMutations++;
+    const result=mutations.then(operation).finally(()=>{pendingMutations--});
+    mutations=result.catch(()=>{});
+    return result;
+  };
   const history=async(mode,signal)=>{
     if (!configuration.history) return [];
     const url=process.env[${JSON.stringify(NATIVE_PLUGIN_HISTORY_ENV)}];
@@ -51,7 +62,17 @@ export function apply(ctx) {
     const [namespace,method]=endpoint.split('/');
     return ctx.typertGateway.invoke({namespace,method,args,peer:ctx.connection.browserPeer,signal});
   };
-  for (const endpoint of ${JSON.stringify([DSH_BUNDLE_LIST, DSH_BUNDLE_ENABLE, DSH_BUNDLE_INSTALL])}) {
+  for (const endpoint of ${JSON.stringify([
+    DSH_BUNDLE_LIST,
+    DSH_BUNDLE_ENABLE,
+    DSH_BUNDLE_INSTALL,
+    DSH_BUNDLE_REMOVE,
+    DSH_BUNDLE_UPDATE,
+    DSH_PLUGIN_ENABLE,
+    DSH_SETTINGS_UPDATE,
+    DSH_SETTINGS_REPLACE,
+    DSH_SETTINGS_MUTATE,
+  ])}) {
     const privateInstall=endpoint===${JSON.stringify(DSH_BUNDLE_INSTALL)};
     const paths=[${JSON.stringify(DSH_RPC_PREFIX)}+endpoint,...(privateInstall && verifier ? [${JSON.stringify(NATIVE_PLATFORM_INSTALL_PATH)}] : [])];
     for (const path of paths) ctx.connection.fetch.register({
@@ -68,12 +89,13 @@ export function apply(ctx) {
         const groupDenied=()=>deny('group-native-feature',nativeFeatureChinese(ctx,request)
           ? '平台已禁用自行添加插件，请联系管理员' : 'The platform has disabled adding plugins. Contact your administrator.');
         const args=body.payload.args;
+        const signed=path===${JSON.stringify(NATIVE_PLATFORM_INSTALL_PATH)};
+        if (signed) {
+          const authorization={proof:request.headers.get(${JSON.stringify(NATIVE_INSTALL_PROOF_HEADER)}),signature:request.headers.get(${JSON.stringify(NATIVE_INSTALL_SIGNATURE_HEADER)})};
+          const verified=verifier.check(authorization,request.method,path,raw);
+          if (!verified.ok) return deny('platform-install-'+verified.reason,'Platform installation authorization is unavailable.');
+        } else if (privateInstall && !configuration.allowInstall) return groupDenied();
         const perform=async()=>{
-          if (path===${JSON.stringify(NATIVE_PLATFORM_INSTALL_PATH)}) {
-            const authorization={proof:request.headers.get(${JSON.stringify(NATIVE_INSTALL_PROOF_HEADER)}),signature:request.headers.get(${JSON.stringify(NATIVE_INSTALL_SIGNATURE_HEADER)})};
-            const verified=verifier.check(authorization,request.method,path,raw);
-            if (!verified.ok) return deny('platform-install-'+verified.reason,'Platform installation authorization is unavailable.');
-          } else if (privateInstall && !configuration.allowInstall) return groupDenied();
           if (endpoint===${JSON.stringify(DSH_BUNDLE_ENABLE)} && args.name===customMarketBundle && args.enabled===true)
             return deny('platform-managed','Custom plugin markets are unavailable in this platform.');
           if (endpoint===${JSON.stringify(DSH_BUNDLE_ENABLE)} && args.enabled===true && !configuration.allowInstall) {
@@ -87,7 +109,23 @@ export function apply(ctx) {
             && ['applied','restart-required'].includes(value?.application)) await history('refresh',request.signal);
           return reply({ok:true,value:endpoint===${JSON.stringify(DSH_BUNDLE_LIST)} ? value.filter(bundle=>bundle.name!==customMarketBundle) : value});
         };
-        try { return await (endpoint===${JSON.stringify(DSH_BUNDLE_LIST)} ? perform() : serialized(perform)); }
+        try {
+          if (signed && args.replacement !== undefined) {
+            const id=args.options?.requestId;
+            if (typeof id!=='string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) return deny('invalid-update','Invalid update request.');
+            const existing=replacements.get(id);
+            if (existing) return existing.raw===raw ? reply({ok:true,value:await existing.result}) : deny('invalid-update','Update request changed.');
+            for (const [key,operation] of replacements) if (operation.until<=Date.now()) replacements.delete(key);
+            if (pendingMutations || replacements.size>=128)
+              return reply({ok:true,value:{replacement:'changed',reason:'native-busy'}});
+            const operation={raw,until:Infinity,result:serialized(()=>replaceNativeBundle(invoke,args))};
+            replacements.set(id,operation);
+            const done=()=>{operation.until=Date.now()+15*60*1000};
+            void operation.result.then(done,done);
+            return reply({ok:true,value:await operation.result});
+          }
+          return await (endpoint===${JSON.stringify(DSH_BUNDLE_LIST)} ? perform() : serialized(perform));
+        }
         catch(error) {
           if (error?.isDSHRemoteError===true) return reply({ok:false,error:{code:error.code,message:error.message,details:error.details}});
           return reply({ok:false,error:{code:'gateway/invocation-unavailable',message:'Plugin management or history recording is unavailable. Check the native state before retrying.',details:{endpoint}}});

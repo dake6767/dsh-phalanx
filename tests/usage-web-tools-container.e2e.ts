@@ -134,7 +134,7 @@ it('retains native search usage across installed restarts and rejects unavailabl
       cookie = await cookieHeader(member.context(), origin)
     const prompt = async (marker: string) => {
       const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', {
-        request: { cwd: instanceWorkspacePath(defaultWorkspacePath(runtime.dataRoot, 'member'), 'container' in runtime) },
+        request: { cwd: instanceWorkspacePath(await defaultWorkspacePath(runtime.dataRoot, 'member'), 'container' in runtime) },
       })
       await rpc.remoteRpc(origin, cookie, 'session/prompt', {
         request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] },

@@ -93,6 +93,7 @@
 }
 
 .plugin-settings-panel > .plugin-detail-section,
+.native-feature-settings > .plugin-detail-section,
 .plugin-settings-panel .skill-content > section {
   padding: 16px;
   gap: 10px;
@@ -102,7 +103,7 @@
 .plugin-settings-panel > .plugin-detail-section + .plugin-detail-section {
   margin-top: 12px;
 }
-.plugin-settings-panel > .plugin-detail-section h2 { margin: 0; color: var(--foreground); font-weight: 600; }
+.plugin-settings-panel > .plugin-detail-section h2, .native-feature-settings > .plugin-detail-section h2 { margin: 0; color: var(--foreground); font-weight: 600; }
 .plugin-settings-panel > .plugin-removal { border-color: color-mix(in oklab, var(--danger-ink) 30%, var(--separator)); }
 .plugin-catalog-origin { margin-top: 16px; font-size: 13px; }
 

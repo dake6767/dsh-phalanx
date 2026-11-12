@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual installed Linux DSH, preset declarations, settings and Client slots.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
@@ -11,7 +12,6 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { openNativeSettings, selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
@@ -151,7 +151,7 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     await api('experts', { action: 'publish', id: expert.id, published: true, revision: library.revision, confirmed: true })
     const expertPath = `groups/${account.groupId}/experts`
     await api(expertPath, { names: [expert.id], revision: (await api(expertPath)).revision, confirmed: true })
-    const home = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home')
+    const home = join(await memberSpacePath(root, 'member'), 'home')
     await mkdir(join(home, 'Documents/deepseek-harness/default-workspace'), { recursive: true, mode: 0o700 })
     const observer = join(home, 'preset-fixture')
     await mkdir(observer, { mode: 0o700 })

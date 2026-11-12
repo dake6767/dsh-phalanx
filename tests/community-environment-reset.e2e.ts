@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,7 +8,6 @@ import { afterEach, expect, it } from 'vitest'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityEnvironmentResetResult } from '../src/domain/admin-contract.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { DSH_CONTAINER_HOME, DSH_PATCH_CONFIG, dshWebProfilePath } from '../src/dsh/profile-layout.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
@@ -113,7 +113,7 @@ it('repairs actual broken config and required user plugin from the admin page, p
       context,
       page,
       origin,
-      instanceWorkspacePath(defaultWorkspacePath(root, username), runtime.container !== undefined),
+      instanceWorkspacePath(await defaultWorkspacePath(root, username), runtime.container !== undefined),
       runtime.container !== undefined,
     )
     await runCommunityTerminal(
@@ -132,7 +132,7 @@ it('repairs actual broken config and required user plugin from the admin page, p
   await alice.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
   const peerClosed = bob.closed()
   expect(bob.opened()).toBeGreaterThan(0)
-  const home = join(effectiveUserDataRoot({ dataRoot: root }), 'alice/home')
+  const home = join(await memberSpacePath(root, 'alice'), 'home')
   const patch = join(dshWebProfilePath(home), DSH_PATCH_CONFIG)
   const failRestart = async () => {
     await alice.page.goto(`${origin}/recovery?restart=1`)

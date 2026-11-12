@@ -47,7 +47,7 @@ describe('community account lifecycle through real DSH', () => {
     return await application.start()
   }
   const workspace = async (context: BrowserContext, page: Page, origin: string, username: string) => {
-    await selectCommunityWorkspace(context, page, origin, defaultWorkspacePath(root!, username))
+    await selectCommunityWorkspace(context, page, origin, await defaultWorkspacePath(root!, username))
   }
   const connect = async (origin: string, context: BrowserContext) => {
     const cookie = await cookieHeader(context, origin)
@@ -108,7 +108,7 @@ describe('community account lifecycle through real DSH', () => {
     await workspace(memberContext, member, origin, 'member')
     const marker = 'COMMUNITY_FILE_RETAINED'
     const octal = [...marker].map(character => `\\${character.charCodeAt(0).toString(8).padStart(3, '0')}`).join('')
-    const retainedFile = `${defaultWorkspacePath(root, 'member')}/account-retained.txt`
+    const retainedFile = `${await defaultWorkspacePath(root, 'member')}/account-retained.txt`
     await terminal(member, `printf '${octal}' > '${retainedFile}'; cat '${retainedFile}'`, marker)
     const device = await newValidationContext(browser)
     await signIn(await device.newPage(), origin, 'member', 'member-password')
@@ -198,7 +198,7 @@ describe('community account lifecycle through real DSH', () => {
     const recreatedContext = await newValidationContext(browser)
     const recreated = await recreatedContext.newPage()
     await signIn(recreated, origin, 'member', 'password')
-    await selectCommunityWorkspace(recreatedContext, recreated, origin, defaultWorkspacePath(root, `_spaces/${newSpaceId}`))
+    await selectCommunityWorkspace(recreatedContext, recreated, origin, await defaultWorkspacePath(root, 'member'))
     await terminal(recreated, "test ! -e account-retained.txt && printf 'NEW_%s' SPACE", 'NEW_SPACE')
   })
 })

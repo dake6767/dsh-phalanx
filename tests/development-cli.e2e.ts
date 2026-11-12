@@ -88,7 +88,7 @@ it('starts the documented development command and supplies a member native strea
   const context = await newValidationContext(browser),
     page = await context.newPage()
   await signInCommunity(page, origin, 'member', 'member-password')
-  await selectCommunityWorkspace(context, page, origin, defaultWorkspacePath(root, 'member'))
+  await selectCommunityWorkspace(context, page, origin, await defaultWorkspacePath(root, 'member'))
   const composer = page.locator('[data-composer-input]')
   await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.')
   await composer.press('Enter')

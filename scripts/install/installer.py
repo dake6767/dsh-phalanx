@@ -24,13 +24,15 @@ import shutil
 import socket
 import errno
 from installer_database import prepare_builtin_database, database_backup_notice  # embedded-database
-from installer_config import configuration, installed_state, validate_storage, environment_text, read_configuration  # embedded-config
+from installer_config import configuration, installed_state, validate_storage, environment_text, read_configuration, uninstall_record, UNINSTALL_STATE  # embedded-config
 from installer_upgrade_host import plugin_startup_timeout  # embedded-upgrade-host
 from installer_host import Host, InstallError, entry_url, PACKAGES  # embedded-host
 from installer_progress import Progress  # embedded-progress
+from installer_questions import InstallerQuestions, Cancelled, apply_source_choice  # embedded-questions
 from installer_executor_install import install_executor  # embedded-executor-install
 from installer_upgrade_cli import upgrade_command  # embedded-upgrade-cli
-from installer_config import DOWNLOAD_SOURCE_OPTIONS, configured_download_sources, resolve_download_sources  # embedded-config
+from installer_uninstall import uninstall_command, Uninstall  # embedded-uninstall
+from installer_config import DOWNLOAD_SOURCE_OPTIONS, DOWNLOAD_SOURCE_PRESETS, configured_download_sources, resolve_download_sources  # embedded-config
 
 ACCOUNT = "dsh-phalanx"
 HOME_DIR = "/var/lib/dsh-phalanx"
@@ -64,6 +66,9 @@ def options(arguments):
         def error(self, message): raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Debian-family Linux amd64")
     parser.add_argument("--version", default="latest")
+    parser.add_argument("--language", choices=("zh-CN", "en"), default="zh-CN")
+    parser.add_argument("--non-interactive", action="store_true")
+    parser.add_argument("--server-ip")
     parser.add_argument('--download-source-preset', choices=('official', 'mainland'), help='Select download defaults; initial installation defaults to official')
     for option in DOWNLOAD_SOURCE_OPTIONS:
         parser.add_argument('--'+option.replace('_', '-'), help='GitHub API prefix used only by plugin prechecks from GitHub' if option == 'github_api_proxy_prefix' else 'Override this download category for the selected preset')
@@ -71,6 +76,8 @@ def options(arguments):
     parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
     parser.add_argument("--dev-image-reuse-rehearsal", action="store_true", help="Allow an explicit same-version upgrade between shared-image rehearsal candidates")
     parser.add_argument("--upgrade", choices=("check","prepare","apply","status","recover","bootstrap","cleanup"))
+    parser.add_argument("--uninstall", action="store_true", help="Remove the deployment while retaining data")
+    parser.add_argument("--purge", action="store_true", help="With --uninstall, remove verified local deployment data")
     parser.add_argument("--operation", help="Exact prepared upgrade operation identity")
     parser.add_argument("--yes", action="store_true", help="Accept immediate service/task interruption for an upgrade")
     parser.add_argument("--output", choices=("human", "json"), default="human")
@@ -85,8 +92,8 @@ def options(arguments):
     parser.add_argument("--port", type=int)
     parser.add_argument("--gateway-port", type=int, help="Private loopback model/network gateway port")
     parser.add_argument("--public-origin")
-    parser.add_argument("--preview-port", type=int, help="Separate private application preview listener")
-    parser.add_argument("--preview-origin", help="Same-host HTTP(S) preview origin on a different public port")
+    parser.add_argument("--preview-port", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--preview-origin", help=argparse.SUPPRESS)
     parser.add_argument('--user-data-root', help='User home/workspace directory on an existing mounted data volume')
     parser.add_argument('--user-data-mount', help='Exact expected mount point containing the user data directory')
     return parser.parse_args(arguments)
@@ -156,7 +163,7 @@ def prepare_user_storage(host, uid, gid, values):
     # identity validation; adoption and migration are never implicit here.
 
 
-def activate(host, uid, gid, target, values, manifest, version, *, database_changed=False):
+def activate(host, uid, gid, target, values, manifest, version, *, database_changed=False, preserve_configuration=False):
     database_dependency = 'Requires=dsh-phalanx-postgres.service\nAfter=dsh-phalanx-postgres.service\n' if values.get('DSH_PHALANX_DATABASE_CONFIG_FILE') else ''
     unit = ('[Unit]\nDescription=dsh-phalanx community platform\nAfter=network-online.target\n'+database_dependency+'\n[Service]\nType=simple\n'+
             f'EnvironmentFile={CONFIG}\nEnvironment=XDG_RUNTIME_DIR=/run/user/{uid} XDG_CONFIG_HOME={HOME_DIR}/.config\nWorkingDirectory={HOME_DIR}\nExecStart={CURRENT}/start\n'+
@@ -170,13 +177,16 @@ def activate(host, uid, gid, target, values, manifest, version, *, database_chan
     persisted = dict(values)
     if old_config is not None and 'DSH_PHALANX_CONTAINER_GATEWAY_PORT=' not in old_config and installed_state(host) and values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'] == '3081':
         persisted.pop('DSH_PHALANX_CONTAINER_GATEWAY_PORT')
-    text = environment_text(persisted)
+    if preserve_configuration and old_config is None:
+        raise InstallError('The retained deployment configuration is missing')
+    text = old_config if preserve_configuration else environment_text(persisted)
     active = host.user(uid, ["systemctl", "--user", "is-active", "--quiet", "dsh-phalanx.service"], check=False).returncode == 0
     unchanged = previous == str(host.path(target)) and old_config == text and old_unit == unit
     if not unchanged or not active or database_changed:
-        host.mkdir("/etc/dsh-phalanx", 0o750)
-        host.atomic(CONFIG, text, 0o640)
-        host.run(["chown", f"0:{gid}", str(host.path("/etc/dsh-phalanx")), str(host.path(CONFIG))])
+        if not preserve_configuration:
+            host.mkdir("/etc/dsh-phalanx", 0o750)
+            host.atomic(CONFIG, text, 0o640)
+            host.run(["chown", f"0:{gid}", str(host.path("/etc/dsh-phalanx")), str(host.path(CONFIG))])
         host.atomic(UNIT, unit, 0o644)
         host.run(["chown", "-R", f"{uid}:{gid}", str(host.path(HOME_DIR+"/.config/systemd"))])
         replacement = host.path(CURRENT+".next")
@@ -194,7 +204,7 @@ def activate(host, uid, gid, target, values, manifest, version, *, database_chan
             if previous is not None:
                 current.unlink(missing_ok=True)
                 current.symlink_to(previous)
-                if old_config is not None:
+                if old_config is not None and not preserve_configuration:
                     host.atomic(CONFIG, old_config, 0o640)
                     host.run(["chown", f"0:{gid}", str(host.path(CONFIG))])
                 if old_unit is not None:
@@ -229,16 +239,42 @@ def main(arguments=None, host=None):
     host = host or Host()
     arguments = sys.argv[1:] if arguments is None else arguments
     output = 'json' if '--output=json' in arguments or any(arguments[i:i+2] == ['--output','json'] for i in range(len(arguments))) else 'human'
+    arguments = list(arguments)
+    language = 'zh-CN'
+    for index, argument in enumerate(arguments):
+        if argument == '--language' and index+1 < len(arguments): language = arguments[index+1]
+        elif argument.startswith('--language='): language = argument.split('=', 1)[1]
+    explicit_language = any(argument == '--language' or argument.startswith('--language=') for argument in arguments)
+    if not explicit_language and '--non-interactive' not in arguments and host.terminal_available():
+        chooser = InstallerQuestions('zh-CN', host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+        chooser.tell('方括号 [] 内是默认值，回车采用；输入 cancel 取消。', 'Values in [] are defaults; press Enter to accept, or type cancel.')
+        try:
+            language = chooser.choose('语言 / Language: zh-CN 简体中文 / en English', 'Language: zh-CN / en', ('zh-CN', 'en'), 'zh-CN')
+            arguments += ['--language', language]
+        except (ValueError, EOFError, KeyboardInterrupt):
+            if output == 'json': print(json.dumps({'status':'cancelled','phase':'Language'}))
+            else: print('已取消 / Cancelled')
+            return 0
     try:
-        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=False)
+        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=False, language=language)
     except OSError as error:
-        report = Progress(host.root, output=output, persist=False)
+        report = Progress(host.root, output=output, persist=False, language=language)
         report.failure(error)
         return 1
     host.progress = report
     try:
         with report.stage('Preflight',phase_code='install.preflight'):
             args = options(arguments)
+            if args.purge and not args.uninstall:raise InstallError('--purge requires --uninstall')
+            if args.uninstall:
+                if args.upgrade:raise InstallError('--uninstall cannot be combined with --upgrade')
+                return uninstall_command(host,args)
+            host.non_interactive = args.non_interactive
+            args.dialogue = InstallerQuestions(args.language, host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS, automatic_origin=args.public_origin is None)
+            if args.output == 'human':
+                if host.terminal_available() and not args.non_interactive:
+                    args.dialogue.tell('方括号 [] 内是默认值，直接回车采用；输入 cancel 取消。', 'Values in [] are defaults; press Enter to accept, or type cancel.')
+                args.dialogue.project_info()
             host.image_reuse_rehearsal = args.dev_image_reuse_rehearsal
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
             if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
@@ -260,15 +296,36 @@ def main(arguments=None, host=None):
                         announced_wait = True
                         host.pause(1)
             host.install_lock_fd=file.fileno()
+            retained=uninstall_record(host)
+            if retained and (retained['phase']!='retained' or args.upgrade):
+                raise InstallError('Complete the recorded uninstall or reinstall the retained deployment before upgrading')
             # A first installation has no platform database yet and reads only local configuration; once a
             # platform is installed, the administrator's saved choice applies to every later run.
             installed = bool(args.upgrade) or host.path('/etc/dsh-phalanx/install-state.json').exists()
-            host.download_sources = resolve_download_sources(configured_download_sources(host, read_configuration(host), args, platform_running=installed))
+            selection = configured_download_sources(host, read_configuration(host), args, platform_running=installed)
+            if not installed and not args.non_interactive and host.terminal_available() and args.download_source_preset is None:
+                source_config = {'source': selection['preset'], 'overrides': selection.get('overrides', {})}
+                args.dialogue.edit_source(source_config)
+                apply_source_choice(args, source_config)
+                selection = {'preset': source_config['source'], 'overrides': source_config['overrides']}
+            host.download_sources = resolve_download_sources(selection)
             if args.upgrade:return upgrade_command(host,args,temporary)
             if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
             with report.stage('Release selection',phase_code='install.release-selection'):
                 selected=select_release(host,args,Path(temporary))
             proposed=selected[1]
+            if retained:
+                Uninstall(host).verify_reinstall(retained)
+                previous=retained['release']
+                expected=(previous['candidate'],previous['commit'],previous['platformSha256'],previous['imageDigest'])
+                actual=(proposed['tag'],proposed['commit'],proposed['files'][asset_names(proposed)[0]],proposed['image']['digest'])
+                if actual!=expected:
+                    raise InstallError('Reinstall the exact retained release first: '+previous['version'])
+            def recheck_release():
+                checked = select_release(host, args, Path(temporary))
+                if checked[1] != proposed:
+                    raise InstallError('The selected release changed with the download source; retry to review the new release', code='operation.invalid')
+            host.recheck_release = recheck_release
             with report.stage('Configuration',phase_code='install.configuration'):
                 values=configuration(host,args,target_version=proposed['targetVersion'],entry_url=entry_url,access_candidate=access_candidate)
                 report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
@@ -295,12 +352,13 @@ def main(arguments=None, host=None):
                     host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
                     if manifest.get('schema')==2:install_executor(host,uid,gid,host.path(previous),manifest['commit'],activate=True,repair=True)
                     database_info=prepare_builtin_database(host,uid,gid,previous,values,manifest)
-                    receipt=activate(host,uid,gid,previous,values,manifest,state['version'],database_changed=bool(database_info and database_info['unitChanged']))
+                    receipt=activate(host,uid,gid,previous,values,manifest,state['version'],
+                                     database_changed=bool(database_info and database_info['unitChanged']), preserve_configuration=bool(retained))
             else:
                 with report.stage('Dependencies',phase_code='install.dependencies'):
                     dependencies(host)
                     host.check_capabilities()
-                if state is None: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
+                if state is None and not retained: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
                 with report.stage('Identity and directories',phase_code='install.identity-storage'):
                     uid,gid=identity(host); prepare_user_storage(host,uid,gid,values)
                 with report.stage('Platform verification and staging',phase_code='install.staging'): target=stage_platform(host,directory,manifest)
@@ -313,14 +371,22 @@ def main(arguments=None, host=None):
                 if manifest.get('schema')==2:
                     with report.stage('Update executor',phase_code='install.executor'):install_executor(host,uid,gid,host.path(target),manifest['commit'],activate=True)
                 with report.stage('Service activation',phase_code='install.activation'):
-                    receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'],database_changed=bool(database_info and database_info['unitChanged']))
+                    receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'],
+                                     database_changed=bool(database_info and database_info['unitChanged']), preserve_configuration=bool(retained))
+            if retained:
+                journal=host.path(UNINSTALL_STATE)
+                journal.unlink()
+                host.sync_directory(journal.parent)
             report.result(receipt,port=values['DSH_PHALANX_PORT'])
             database_backup_notice(host,database_info)
         return 0
     except KeyboardInterrupt:
         report.failure(InstallError('Interrupted by operator; an accepted system update may require --upgrade recover.'))
         return 130
-    except (InstallError,OSError,ValueError,KeyError,TypeError,tarfile.TarError) as error:
+    except Cancelled as error:
+        report.cancel(str(error))
+        return 0
+    except (InstallError,OSError,ValueError,KeyError,TypeError,EOFError,tarfile.TarError) as error:
         report.failure(error)
         return 1
 

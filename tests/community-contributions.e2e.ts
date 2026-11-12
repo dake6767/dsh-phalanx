@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -12,7 +13,6 @@ import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication as createCommunityApplication } from './support/candidate-application.js'
@@ -80,7 +80,7 @@ it.skip.each(['standard', 'minimal'])('hidden in 0.1.32: requires foreground con
       member = await browser.newPage({ locale: 'en' })
     await signInCommunity(admin, origin, 'admin', 'password', true)
     await signInCommunity(member, origin, 'member', 'password')
-    const workspace = defaultWorkspacePath(root, 'member'),
+    const workspace = await defaultWorkspacePath(root, 'member'),
       skill = join(workspace, 'team-guide')
     await mkdir(skill, { recursive: true })
     await writeFile(join(skill, 'SKILL.md'), '---\n"name": >-\n  team-guide\ndescription: Our team workflow\n---\n# Team guide\nShare useful steps.\n')
@@ -189,7 +189,7 @@ it.skip.each(['standard', 'minimal'])('hidden in 0.1.32: requires foreground con
           else if (entry.isFile()) expect((await readFile(path)).includes(Buffer.from('platform-contribution-fixture-secret')), path).toBe(false)
         }
       }
-      await scan(join(effectiveUserDataRoot({ dataRoot: root }), 'member'))
+      await scan(join(await memberSpacePath(root, 'member')))
       await scan(join(root, 'skills/members', (await accounts.get('member'))!.spaceId))
       if (preset === 'standard') {
         await admin.getByRole('button', { name: 'Finish adoption', exact: true }).click()

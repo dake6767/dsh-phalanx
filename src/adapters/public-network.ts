@@ -80,7 +80,7 @@ export class NodeNetworkTransport implements NetworkTransport {
   }
 }
 
-/** Explicit public aliases are required: interfaces cannot reveal cloud NAT mappings. */
+/** A declaration is required; an explicit empty list means no additional public aliases. */
 export class NodeNetworkResolver implements CommunityNetworkResolver {
   constructor(
     private readonly publicOrigin?: string,
@@ -90,7 +90,7 @@ export class NodeNetworkResolver implements CommunityNetworkResolver {
     return resolveNetwork(hostname)
   }
   async hostAddresses(): Promise<readonly string[]> {
-    if (this.hostPublicAddresses === undefined || this.hostPublicAddresses.length === 0) {
+    if (this.hostPublicAddresses === undefined) {
       throw new Error('Deployment host address inventory is required for public networking')
     }
     return [

@@ -1,3 +1,4 @@
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { execFile } from 'node:child_process'
 import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -64,11 +65,11 @@ it('allows only confirmed same-origin administrator repair, privately backs up t
     )
   ).cookie
   const entry = login.headers.get('location')!
-  const home = join(effectiveUserDataRoot({ dataRoot: root }), 'alice/home')
+  const home = join(await memberSpacePath(root, 'alice'), 'home')
   const patch = join(home, '.dsh/profiles/web/cordis.patch.yml')
   await mkdir(join(home, '.dsh/retained-records'), { recursive: true })
   await writeFile(join(home, 'personal.txt'), 'KEEP_HOME')
-  await writeFile(join(effectiveUserDataRoot({ dataRoot: root }), 'alice/workspace/project.txt'), 'KEEP_PROJECT')
+  await writeFile(join(await memberSpacePath(root, 'alice'), 'workspace/project.txt'), 'KEEP_PROJECT')
   await writeFile(join(home, '.dsh/retained-records/chat.txt'), 'KEEP_RECORD')
   await writeFile(patch, 'BROKEN_CONFIG_FIXTURE\n')
   const endpoint = `${origin}/admin/api/accounts/alice/reset-environment`
@@ -87,7 +88,7 @@ it('allows only confirmed same-origin administrator repair, privately backs up t
   expect(await readFile(join(result.backup.location, 'files/.dsh/profiles/web/cordis.patch.yml'), 'utf8')).toBe('BROKEN_CONFIG_FIXTURE\n')
   expect(await readFile(join(result.backup.location, 'README.txt'), 'utf8')).toContain('target container')
   expect(await readFile(join(home, 'personal.txt'), 'utf8')).toBe('KEEP_HOME')
-  expect(await readFile(join(effectiveUserDataRoot({ dataRoot: root }), 'alice/workspace/project.txt'), 'utf8')).toBe('KEEP_PROJECT')
+  expect(await readFile(join(await memberSpacePath(root, 'alice'), 'workspace/project.txt'), 'utf8')).toBe('KEEP_PROJECT')
   expect(await readFile(join(home, '.dsh/retained-records/chat.txt'), 'utf8')).toBe('KEEP_RECORD')
   expect(await readFile(patch, 'utf8')).not.toContain('BROKEN_CONFIG_FIXTURE')
   const retry = await post({ confirmed: true })

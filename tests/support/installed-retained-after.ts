@@ -10,6 +10,7 @@ import type {
 } from '../../src/domain/admin-contract.js'
 import type { UsageModelView } from '../../src/domain/usage-record.js'
 import { runCommunityTerminal, signInCommunity } from '../fixtures/community-native-browser.js'
+import { refreshAppCenter, setAppCenterVisibility } from './app-center-visibility.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
 import { retainedPluginSnapshot, retainedCatalogSnapshot, retainedContributionSnapshot, retainedOfficialCatalog } from './installed-retained-contributions.js'
 import { installedShellArgument, installedUserDataRoot } from './installed-storage-layout.js'
@@ -123,6 +124,7 @@ export async function assertRetainedUpgradeAfter(input: {
   ).toBe(303)
   await signInCommunity(member, origin, 'member', 'password')
   expect(new URL(member.url()).pathname).toBe(memberEntry)
+  await refreshAppCenter(member, false)
   const importedKernel = await instances.assertImported(deploymentInputs)
   await expect
     .poll(async () => retainedDependencyState(await get('runtime-dependencies')), { timeout: 300000 })
@@ -132,6 +134,7 @@ export async function assertRetainedUpgradeAfter(input: {
   expect(groups.some(group => group.id === groupId)).toBe(true)
   for (const group of groups) {
     const native: CommunityNativeFeatureGroup = await get(`groups/${group.id}/native-features`)
+    expect(native.showAppCenter, group.id).toBe(false)
     expect(native.features.map(({ id }) => id).sort()).toEqual([
       'plugin-install',
       'preset-cordis',
@@ -251,7 +254,9 @@ export async function assertRetainedUpgradeAfter(input: {
   await assertPaused('after-restart')
   await trial()
   const retainedSession = await call('AFTER_RECORDS_RESTART')
-  await member.getByRole('button', { name: 'Platform App Center', exact: true }).waitFor()
+  await refreshAppCenter(member, false)
+  await setAppCenterVisibility(admin.request, origin, groupId)
+  await refreshAppCenter(member, true)
   for (const label of ['Usage records', 'Self-reported usage', 'Usage record retention']) expect(await member.getByText(label, { exact: true }).count()).toBe(0)
 
   expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
@@ -259,6 +264,7 @@ export async function assertRetainedUpgradeAfter(input: {
   expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
   return {
     retainedSession,
+    appCenterHiddenForExistingGroups: true,
     importedKernel,
     usageExecutionRecordsPreserved: beforeUsage.execution.items.length,
     usageMcpRecordsPreserved: beforeUsage.mcp.items.length,

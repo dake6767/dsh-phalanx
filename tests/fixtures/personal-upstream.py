@@ -3,10 +3,17 @@
 No forwarding, real credentials, request-body logging or persistent state.
 Run in the test network namespace, never as a production service.
 """
-import argparse, json, threading
+import argparse, json, threading, ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 COUNTS={'model':0,'search':0};LOCK=threading.Lock();MARKER='PUBLIC_TAVILY_FIXTURE_OK'
-args=argparse.ArgumentParser();args.add_argument('--host',required=True);args.add_argument('--port',type=int,default=18443);options=args.parse_args()
+args = argparse.ArgumentParser()
+args.add_argument('--host', required=True)
+args.add_argument('--port', type=int, default=18443)
+args.add_argument('--cert')
+args.add_argument('--key')
+args.add_argument('--tls-port', type=int, default=18444)
+options = args.parse_args()
+
 def text_events(text):
  return [{'type':'message_start','message':{'usage':{'input_tokens':3,'output_tokens':0}}},{'type':'content_block_start','index':0,'content_block':{'type':'text','text':''}},{'type':'content_block_delta','index':0,'delta':{'type':'text_delta','text':text}},{'type':'content_block_stop','index':0},{'type':'message_delta','delta':{'stop_reason':'end_turn'},'usage':{'output_tokens':20}},{'type':'message_stop'}]
 def tool_events(name, data):
@@ -57,6 +64,33 @@ class Handler(BaseHTTPRequestHandler):
       data[key]=['fixture query'] if prop.get('type')=='array' else (1 if prop.get('type') in ('number','integer') else 'fixture query')
      events=tool_events('web_search',data)
   self.send(200,''.join('event: '+e['type']+'\ndata: '+json.dumps(e)+'\n\n' for e in events),'text/event-stream')
-server=ThreadingHTTPServer((options.host,options.port),Handler)
-timer=threading.Timer(7200,server.shutdown);timer.daemon=True;timer.start()
-server.serve_forever()
+if bool(options.cert) != bool(options.key):
+    args.error('Both TLS certificate and key are required')
+context = None
+if options.cert:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(options.cert, options.key)
+server = ThreadingHTTPServer((options.host, options.port), Handler)
+tls_server = None
+tls_thread = None
+try:
+    if context is not None:
+        tls_server = ThreadingHTTPServer((options.host, options.tls_port), Handler)
+        tls_server.socket = context.wrap_socket(tls_server.socket, server_side=True)
+        tls_thread = threading.Thread(target=tls_server.serve_forever, daemon=True)
+        tls_thread.start()
+    def stop():
+        server.shutdown()
+        if tls_server is not None:
+            tls_server.shutdown()
+    timer = threading.Timer(7200, stop)
+    timer.daemon = True
+    timer.start()
+    server.serve_forever()
+finally:
+    server.server_close()
+    if tls_server is not None:
+        if tls_thread is not None:
+            tls_server.shutdown()
+            tls_thread.join()
+        tls_server.server_close()

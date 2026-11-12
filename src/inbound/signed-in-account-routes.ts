@@ -67,8 +67,8 @@ export function createSignedInAccountRoutes(deps: {
     /** Display facts for the server-rendered login page. */
     loginChoices: views,
     /** Cookie for a successful login, or the cap marker when the browser already remembers ten accounts. */
-    forLogin(request: IncomingMessage, account: CommunityAccountRecord, token: string): string | 'full' {
-      const updated = upsertSignedInAccount(deps.sessions, request.headers.cookie, account, token)
+    forLogin(request: IncomingMessage, account: CommunityAccountRecord, token: string, preserved?: SignedInAccountEntry): string | 'full' {
+      const updated = upsertSignedInAccount(deps.sessions, request.headers.cookie, account, token, preserved)
       return updated === 'full' ? 'full' : serializeSignedInAccountsCookie(deps.sessions, updated, deps.origin())
     },
     list: async (request: IncomingMessage, response: ServerResponse): Promise<void> => {

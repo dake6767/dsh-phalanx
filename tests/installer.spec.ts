@@ -51,3 +51,8 @@ it('prepares a digest-verified rootless PostgreSQL service and private bootstrap
   const result = spawnSync('python3', ['tests/fixtures/installer-database.py'], { encoding: 'utf8' })
   expect(result.status, result.stderr).toBe(0)
 })
+
+it('runs the shared bilingual installation flow, rechecks sources and retains hidden explicit configuration', () => {
+  const result = spawnSync('python3', ['tests/fixtures/installer-bilingual.py'], { encoding: 'utf8', timeout: 30000 })
+  expect(result.status, result.stderr).toBe(0)
+})

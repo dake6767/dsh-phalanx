@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { assertSkillArtifactsLayout } from './support/skill-artifacts-layout.js'
 import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm, readdir, readlink } from 'node:fs/promises'
@@ -26,13 +26,9 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)(
     assertPinnedDshRevision(runtimeSettings)
     const root = await mkdtemp(join(tmpdir(), 'skills-runtime-')),
       dataRoot = join(root, 'platform')
-    const home = join(effectiveUserDataRoot({ dataRoot: dataRoot }), 'member/home'),
-      mountedHome = runtimeSettings.containerImage ? CONTAINER_HOME : home
+
     const overlay = join(root, 'skills-fixture.json')
-    await writeFile(
-      overlay,
-      JSON.stringify([{ id: 'session-log-deepseek', disabled: true }, { insert: [{ id: 'skills-observer', name: join(mountedHome, 'skills-observer.mjs') }] }]),
-    )
+    await writeFile(overlay, '[]')
     const runtime = { ...runtimeSection(dataRoot, 'https://example.test', runtimeSettings), patches: [overlay] }
     let startupFailure: unknown
     const realStart = CommunityRuntimeDriver.prototype.start
@@ -115,6 +111,15 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)(
       })
       expect(account.status).toBe(201)
       const memberAccount = (await account.json()) as { spaceId: string }
+      const home = join(await memberSpacePath(dataRoot, 'member'), 'home')
+      const mountedHome = runtimeSettings.containerImage ? CONTAINER_HOME : home
+      await writeFile(
+        overlay,
+        JSON.stringify([
+          { id: 'session-log-deepseek', disabled: true },
+          { insert: [{ id: 'skills-observer', name: join(mountedHome, 'skills-observer.mjs') }] },
+        ]),
+      )
       await mkdir(home, { recursive: true, mode: 0o700 })
       await copyFile(fileURLToPath(new URL('./fixtures/skill-observer.mjs', import.meta.url)), join(home, 'skills-observer.mjs'))
       await upload('VERSION_ONE')

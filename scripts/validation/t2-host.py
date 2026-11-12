@@ -53,6 +53,7 @@ def execute(args, temporary):
     peer_created = namespace_created = link_created = trust_created = primary_created = False
     fixture = None
     port_server = None
+    lifecycle = None
     try:
         port_socket = temporary / 'port-owners.sock'
         port_server = runpy.run_path(str(Path(__file__).with_name('port-owners.py')))['start'](port_socket, identity.pw_uid)
@@ -100,11 +101,15 @@ def execute(args, temporary):
         if getattr(args, 'manual_retries', False): environment['DSH_PHALANX_LINUX_FILE_RETRY'] = 'manual'
         if args.identity: environment['DSH_PHALANX_T2_IDENTITY'] = str(Path(args.identity).resolve())
         if args.source_preset == 'mainland': environment['DSH_PHALANX_E2E_NPM_MIRROR'] = '1'
+        if not args.smoke and (not args.files or 'tests/installed-deployment-lifecycle.e2e.ts' in args.files.split(',')):
+            guardian=runpy.run_path(str(source/'tests/fixtures/deployment-host.py'))['DeploymentFixture']
+            lifecycle=guardian(source,args.commit,temporary/'lifecycle-control',result,identity.pw_uid,identity.pw_gid)
+            environment['DSH_PHALANX_LIFECYCLE_CONTROL']=str(lifecycle.capability)
         if not args.smoke:
             tls = temporary / 'tls'
             tls.mkdir()
             run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-keyout', tls / 'key.pem',
-                 '-out', tls / 'cert.pem', '-subj', '/CN=T2-preview', '-addext', 'subjectAltName=IP:127.0.0.1',
+                 '-out', tls / 'cert.pem', '-subj', '/CN=T2-preview', '-addext', 'subjectAltName=IP:127.0.0.1,IP:11.254.254.254',
                  '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'extendedKeyUsage=serverAuth'], capture_output=True)
             run(['chown', '-R', account+':'+account, tls])
             nss = Path(identity.pw_dir) / '.pki/nssdb'
@@ -126,7 +131,7 @@ def execute(args, temporary):
             # The namespace has no default route. This fixture cannot forward traffic.
             with (result / 'fixture.log').open('w') as log:
                 fixture = subprocess.Popen(['ip', 'netns', 'exec', namespace, *user(account,
-                    ['python3', str(work / 'tests/fixtures/personal-upstream.py'), '--host', '11.254.254.254'])], stdout=log, stderr=log)
+                    ['python3', str(work / 'tests/fixtures/personal-upstream.py'), '--host', '11.254.254.254', '--cert', str(tls / 'cert.pem'), '--key', str(tls / 'key.pem')])], stdout=log, stderr=log)
             run(['curl', '--noproxy', '*', '--fail', '--silent', '--retry', '20', '--retry-connrefused', '--retry-delay', '1',
                  'http://11.254.254.254:18443/fixture/health'], stdout=subprocess.DEVNULL)
             address = run(['curl', '--fail', '--silent', '--show-error', '--retry', '2', 'https://api.ipify.org'], capture_output=True, text=True).stdout.strip()
@@ -134,6 +139,7 @@ def execute(args, temporary):
                 raise ValueError('Could not measure the host public IPv4 inventory')
             environment.update({'DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES': address,
                 'DSH_PHALANX_E2E_PERSONAL_UPSTREAM': 'http://11.254.254.254:18443/fixture',
+                'DSH_PHALANX_E2E_PUBLIC_HTTPS_UPSTREAM': 'https://11.254.254.254:18444/fixture/health',
                 'DSH_PHALANX_PREVIEW_TEST_CERT': str(tls / 'cert.pem'), 'DSH_PHALANX_PREVIEW_TEST_KEY': str(tls / 'key.pem'),
                 'NODE_EXTRA_CA_CERTS': str(tls / 'cert.pem')})
         run(user(account, ['node', 'scripts/validation/t2.mjs', *(['--smoke'] if args.smoke else []), *(['--files', args.files] if args.files else []), *(['--shard', args.shard] if args.shard else []), str(result)], environment), cwd=work)
@@ -151,6 +157,7 @@ def execute(args, temporary):
             except subprocess.TimeoutExpired:
                 fixture.kill()
                 fixture.wait(timeout=15)
+        if lifecycle: attempt('deployment lifecycle guardian', lifecycle.close)
         attempt('container diagnostics', containers)
         if port_server:
             attempt('port ownership service', port_server.shutdown)

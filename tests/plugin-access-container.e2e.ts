@@ -1,7 +1,8 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { showAppCenterForFixture } from './support/app-center-visibility.js'
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { prepareAndConfirmNpmPlugin } from './support/plugin-intake.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { pluginChoices } from './support/plugin-facts.js'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
@@ -81,7 +82,7 @@ it.skipIf(!runtimeSettings.containerImage)(
         .map(row => row.split(';')[0])
         .join('; ')
       expect((await request('accounts', { username: 'member', password: 'password', email: '' })).status).toBe(201)
-      const home = join(effectiveUserDataRoot(runtime), 'member/home')
+      const home = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home')
       await mkdir(home, { recursive: true, mode: 0o700 })
       await writeFile(join(home, 'access-probe.mjs'), await readFile(new URL('./fixtures/plugin-access-probe.mjs', import.meta.url), 'utf8'))
       await prepareAndConfirmNpmPlugin(request, `${packageName}@0.1.8`)
@@ -106,6 +107,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       }
       expect((await request('plugins/access' + query, config)).status).toBe(200)
       const group = ((await (await request('groups')).json()) as CommunityGroupView[]).find(row => row.isDefault)!
+      await showAppCenterForFixture(origin, 'admin', 'password')
       expect(
         (
           await request(`groups/${group.id}/plugins`, {

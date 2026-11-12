@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -11,7 +12,6 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { openCommunityHttpEntry } from './support/community-http-entry.js'
@@ -129,7 +129,7 @@ it('yields only conflicting personal MCP entries and restores member intent acro
     const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
     carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim()
     const before = JSON.parse(await execFileText('podman', ['inspect', carrier]))[0]
-    const home = join(effectiveUserDataRoot(runtime), 'member/home/.dsh'),
+    const home = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home/.dsh'),
       patch = join(home, 'cordis.patch.yml')
     const personalCommand =
       "require('readline').createInterface({input:process.stdin}).on('line',s=>{const b=JSON.parse(s);if(b.id===undefined)return;const result=b.method==='initialize'?{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'personal',version:'1'}}:b.method==='tools/list'?{tools:[{name:'personal_echo',inputSchema:{type:'object',properties:{}}}]}:{content:[{type:'text',text:'personal'}]};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:b.id,result})+String.fromCharCode(10))})"
@@ -141,7 +141,7 @@ it('yields only conflicting personal MCP entries and restores member intent acro
     })
     // Personal definitions live in the native profile; home overrides must not replace their configuration.
     const profilePatch = join(home, 'profiles/web/cordis.patch.yml')
-    const faultRoot = join(effectiveUserDataRoot(runtime), 'member/home')
+    const faultRoot = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home')
     await writeFile(
       join(faultRoot, 'mcp-fault.mjs'),
       `import { existsSync, readFileSync, writeFileSync } from 'node:fs';

@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { prepareAndConfirmNpmPlugin } from './support/plugin-intake.js'
 import { createHash } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
@@ -9,7 +10,6 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import type { CommunityGroupView, CommunityManagedGroupView, CommunityPluginView } from '../src/domain/admin-contract.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication as createCommunityApplication } from './support/candidate-application.js'
 import { openCommunityHttpEntry } from './support/community-http-entry.js'
@@ -180,7 +180,7 @@ it.skipIf(!runtimeSettings.containerImage)(
         )
         .toEqual([])
       expect(details.plugins.flatMap(plugin => plugin.failures)).toEqual([])
-      const memberHome = join(effectiveUserDataRoot(runtime), 'member/home')
+      const memberHome = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home')
       await writeFile(join(memberHome, 'KEEP_ME'), 'member content')
       await writeFile(join(memberHome, 'FAIL_MANAGED'), 'fail only in this member')
       const restart = await fetch(origin + '/recovery/restart', {

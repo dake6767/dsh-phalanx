@@ -66,8 +66,10 @@ it('converts an installed candidate to the same-version formal channel with acco
     expect((await post('accounts', { username: 'channel-member', password: 'channel-fixture-password', email: '' })).status()).toBe(201)
     await login(member, 'channel-member')
     const accounts = await get('accounts')
+    const account = accounts.items.find((row: { username: string; spaceId: string }) => row.username === 'channel-member')
+    expect(account.spaceId).toMatch(/^[a-f0-9]{32}$/u)
     const user = 'runuser -u dsh-phalanx --',
-      file = '/var/lib/dsh-phalanx/data.durable/users/channel-member/home/channel-owned.txt'
+      file = `/var/lib/dsh-phalanx/data.durable/users/_spaces/${account.spaceId}/home/channel-owned.txt`
     await remote(`${user} mkdir -p ${installedShellArgument(file.slice(0, file.lastIndexOf('/')))}`)
     await remote(`${user} sh -c ${installedShellArgument(`printf '%s' CHANNEL_MEMBER_DATA > ${installedShellArgument(file)}`)}`)
     const memberBefore = await remote(`sha256sum ${installedShellArgument(file)} && stat -c '%s:%Y:%y' ${installedShellArgument(file)}`)

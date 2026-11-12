@@ -143,6 +143,18 @@
     "update.cleanup": {
       "en": "Cleaning unused installation resources",
       "zh-CN": "清理无用安装资源"
+    },
+    "deployment.start": {
+      "en": "Starting the deployment",
+      "zh-CN": "启动部署"
+    },
+    "deployment.stop": {
+      "en": "Stopping the deployment",
+      "zh-CN": "停止部署"
+    },
+    "deployment.status": {
+      "en": "Inspecting deployment status",
+      "zh-CN": "查询部署状态"
     }
   },
   "outcomes": {

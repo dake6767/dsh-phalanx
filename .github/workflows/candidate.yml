@@ -52,8 +52,9 @@ jobs:
       source_commit: ${{ needs.trust.outputs.commit }}
     permissions:
       contents: read
+  # Checks and Linux run in parallel; development image, build, image and release still require both.
   t2:
-    needs: [trust, checks]
+    needs: trust
     uses: ./.github/workflows/linux-t2.yml
     with:
       source_commit: ${{ needs.trust.outputs.commit }}
@@ -64,7 +65,7 @@ jobs:
     permissions:
       contents: read
   development_image:
-    needs: [trust, t2]
+    needs: [trust, checks, t2]
     uses: ./.github/workflows/publish-development-image.yml
     with:
       source_commit: ${{ needs.trust.outputs.commit }}

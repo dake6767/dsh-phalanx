@@ -7,13 +7,13 @@ import { repositorySql, repositoryTransaction, type RowRepositoryConnection } fr
 export class PostgresUserStorageFacts implements UserStorageFacts {
   constructor(private readonly connection: RowRepositoryConnection) {}
   read(): Promise<UserStorageRecord | undefined> {
-    return readStorage(repositorySql(this.connection))
+    return readUserStorageRecord(repositorySql(this.connection))
   }
   async createOwner(candidate: string): Promise<UserStorageRecord> {
     if (!/^[a-f0-9]{32}$/u.test(candidate)) throw new Error('Invalid platform storage identity')
     return await repositoryTransaction(this.connection, async sql => {
       await sql.query('INSERT INTO dsh_phalanx.user_storage_identity(id,owner,revision) VALUES(1,$1,0) ON CONFLICT(id) DO NOTHING', [candidate])
-      return (await readStorage(sql))!
+      return (await readUserStorageRecord(sql))!
     })
   }
   async saveBinding(expectedRevision: number, binding: UserStorageBinding | null): Promise<UserStorageRecord> {
@@ -31,12 +31,12 @@ export class PostgresUserStorageFacts implements UserStorageFacts {
           [binding.path, binding.id, binding.mount],
         )
       else await sql.query('DELETE FROM dsh_phalanx.user_storage_binding WHERE id=1')
-      return (await readStorage(sql))!
+      return (await readUserStorageRecord(sql))!
     })
   }
 }
 
-async function readStorage(sql: PlatformSql): Promise<UserStorageRecord | undefined> {
+export async function readUserStorageRecord(sql: PlatformSql): Promise<UserStorageRecord | undefined> {
   const row = (
     await sql.query<{ owner: string; revision: string; path: string | null; storage_id: string | null; mount: string | null }>(
       `SELECT i.owner,i.revision,b.path,b.storage_id,b.mount FROM dsh_phalanx.user_storage_identity i

@@ -13,6 +13,7 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 import { openCommunitySidebar, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
+import { refreshAppCenter, setAppCenterVisibility } from './support/app-center-visibility.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { latestHumanText, streamText } from './support/real-dsh-model.js'
 import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
@@ -148,6 +149,8 @@ it('toggles granted and published MCP through the native app center and preserve
         })
       ).status,
     ).toBe(200)
+    const visibilityAdmin = await browser.newContext({ extraHTTPHeaders: { cookie: admin } })
+    await setAppCenterVisibility(visibilityAdmin.request, origin, account.groupId)
     await signInCommunity(page, origin, 'member', 'password')
     const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
     carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim()
@@ -229,6 +232,14 @@ it('toggles granted and published MCP through the native app center and preserve
     await store.click()
     await expect.poll(() => store.getAttribute('aria-checked')).toBe('true')
     expect(await prompt('SELECTED')).toEqual(['mcp__p-store__read'])
+    await setAppCenterVisibility(visibilityAdmin.request, origin, account.groupId, false)
+    await refreshAppCenter(page, false)
+    expect(await prompt('SELECTED_WHILE_HIDDEN')).toEqual(['mcp__p-store__read'])
+    await setAppCenterVisibility(visibilityAdmin.request, origin, account.groupId)
+    await refreshAppCenter(page, true)
+    await open()
+    await expect.poll(() => store.getAttribute('aria-checked')).toBe('true')
+    await visibilityAdmin.close()
     diagnosticFailure = true
     expect((await (await post('mcp/test', { name: 'p-store' })).json()).testStatus).toBe('failed')
     diagnosticFailure = false

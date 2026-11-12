@@ -39,8 +39,7 @@ export class PostgresCommunityAccountStore implements CommunityAccountStorePort,
       assertCommunityGroupRole(requiredCommunityGroup(groups, groupId), firstAdmin)
       const now = Date.now(),
         spaceId = randomBytes(16).toString('hex')
-      const retired = (await sql.query('SELECT 1 FROM dsh_phalanx.retired_accounts WHERE username=$1', [input.username])).length > 0
-      const storageKey = retired ? `_spaces/${spaceId}` : input.username
+      const storageKey = `_spaces/${spaceId}`
       const [row] = await sql.query<AccountRow>(
         `INSERT INTO dsh_phalanx.accounts(username,email,password_hash,admin,created_at,updated_at,space_id,storage_key,group_id)
         VALUES($1,$2,$3,$4,$5,$5,$6,$7,$8) RETURNING *`,

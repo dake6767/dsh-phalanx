@@ -174,7 +174,7 @@ export async function runInstalledBusiness(rebuildProjections = false) {
     const group = (await api('groups')).find((row: { isDefault: boolean }) => row.isDefault)
     expect(group).toBeDefined()
     const account = await api('accounts', { username: context.member, password: context.password, email: '', groupId: group.id })
-    const home = join(context.userDataRoot, context.member, 'home')
+    const home = join(context.userDataRoot, '_spaces', account.spaceId, 'home')
     await mkdir(home, { recursive: true, mode: 0o700 })
     for (const [fixture, target] of [
       ['plugin-access-probe.mjs', 'access-probe.mjs'],
@@ -485,7 +485,7 @@ export async function runInstalledBusiness(rebuildProjections = false) {
       expect(JSON.parse(output.subarray(0, split).toString())).toEqual({ credential: true, memberEnvironment: null, argv: ['hot', 'two words'] })
       expect(output.subarray(split + 1)).toEqual(input)
       stage = 'workspace-result'
-      const ownedFile = join(context.userDataRoot, context.member, 'workspace/owned-result.txt')
+      const ownedFile = join(context.userDataRoot, '_spaces', account.spaceId, 'workspace/owned-result.txt')
       expect(await readFile(ownedFile, 'utf8')).toBe('created')
       expect((await stat(ownedFile)).uid).toBe(process.getuid!())
       stage = 'plugin-inventory'

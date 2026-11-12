@@ -137,7 +137,7 @@ it.skipIf(!runtimeSettings.containerImage)(
         .poll(
           async () => {
             try {
-              return await readFile(join(effectiveUserDataRoot(runtime), 'member/workspace/started'), 'utf8')
+              return await readFile(join(effectiveUserDataRoot(runtime), 'member', 'workspace/started'), 'utf8')
             } catch {
               return ''
             }
@@ -151,7 +151,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       await dependencies.remove(actor, input.name)
       expect(await storage.store.list()).toEqual([])
       expect(await readdir(join(root, 'runtime-dependencies/.trees'))).toContain(prepared.id)
-      await writeFile(join(effectiveUserDataRoot(runtime), 'member/workspace/release'), 'release')
+      await writeFile(join(effectiveUserDataRoot(runtime), 'member', 'workspace/release'), 'release')
       expect(await running).toBe(0)
       expect(heldOutput.join('')).toBe('prepared-requirement\n')
       expect(await readdir(join(root, 'runtime-dependencies/.trees'))).toEqual([])

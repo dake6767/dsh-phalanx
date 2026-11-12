@@ -1,3 +1,4 @@
+import { persistedMemberSpacePath } from '../support/persisted-member-space.js'
 import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -5,7 +6,6 @@ import { fileURLToPath } from 'node:url'
 import { readBootstrapCredential } from '../../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../../src/adapters/community-runtime-driver.js'
 import { createCommunityApplication } from '../../src/composition/community-application.js'
-import { effectiveUserDataRoot } from '../../src/domain/storage-layout.js'
 import { openCommunityHttpEntry } from '../support/community-http-entry.js'
 import { communityEntryUrl } from '../support/community-space.js'
 import { runtimeSettings } from '../support/real-dsh-kit.js'
@@ -70,7 +70,11 @@ export async function openOfficeSession<Input extends Pick<OfficeFactsInput, 'ro
   const runtime = { ...base, environment: { ...base.environment, TMPDIR: '/tmp' }, patches: [overlay] }
   const inventory = process.env.DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES
   assert(runtimeSettings.containerImage === undefined || inventory?.trim(), 'Provide the measured validation host public IPv4 inventory for member networking')
+  const platformDatabaseConfigFile = '/etc/dsh-phalanx/database.json'
+  const spacePath = (username: string) => persistedMemberSpacePath(root, platformDatabaseConfigFile, username)
+  const workspacePath = async (username: string) => join(await spacePath(username), 'home/Documents/deepseek-harness/default-workspace')
   const app = createCommunityApplication({
+    platformDatabaseConfigFile,
     listen: { host: '127.0.0.1', port: 0 },
     ...(inventory ? { network: { hostPublicAddresses: inventory.split(',').map(value => value.trim()) } } : {}),
     runtime,
@@ -79,11 +83,6 @@ export async function openOfficeSession<Input extends Pick<OfficeFactsInput, 'ro
   })
   try {
     const origin = await app.start()
-    await mkdir(join(effectiveUserDataRoot({ dataRoot: root }), 'member/home'), { recursive: true, mode: 0o700 })
-    await writeFile(
-      join(effectiveUserDataRoot({ dataRoot: root }), 'member/home/observer.mjs'),
-      observer.replace('AbortSignal.timeout(20000)', 'AbortSignal.timeout(150000)'),
-    )
     const login = async (username: string) =>
       fetch(origin + '/login', {
         method: 'POST',
@@ -120,6 +119,8 @@ export async function openOfficeSession<Input extends Pick<OfficeFactsInput, 'ro
     if (!accounts.items.some((row: { username: string }) => row.username === 'member')) {
       await api('accounts', { username: 'member', email: '', password: 'office-facts-fixture-password', groupId: group.id })
     }
+    await mkdir(join(await spacePath('member'), 'home'), { recursive: true, mode: 0o700 })
+    await writeFile(join(await spacePath('member'), 'home/observer.mjs'), observer.replace('AbortSignal.timeout(20000)', 'AbortSignal.timeout(150000)'))
     const enter = async (username = 'member') => {
       const response = await login(username)
       assert(response.status === 303 && response.headers.get('location') !== '/recovery', 'Member could not enter DSH')
@@ -161,6 +162,8 @@ export async function openOfficeSession<Input extends Pick<OfficeFactsInput, 'ro
     return {
       input,
       root,
+      spacePath,
+      workspacePath,
       runtime,
       origin,
       adminCookie,

@@ -1,3 +1,4 @@
+import { dshProfileWriterLoader } from './profile-writer.js'
 import { join } from 'node:path'
 import { SHARED_MCP_REQUEST_CEILING_MS } from '../domain/mcp-service.js'
 import { mcpSecrets } from '../domain/mcp-protocol.js'
@@ -97,6 +98,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
+${dshProfileWriterLoader}
 export const name = 'phalanx-mcp-watch'
 export const inject = ['loader', 'hmr', 'profileContext']
 export async function apply(ctx, config) {
@@ -104,7 +106,7 @@ export async function apply(ctx, config) {
   const require = createRequire(process.argv[1])
   const webRequire = createRequire(require.resolve('@deepseek-ai/dsh-web-app'))
   const { readPluginInventory } = await import(pathToFileURL(webRequire.resolve('@deepseek-ai/dsh-host-plugin-inventory')))
-  const { withFileLock, writeFileAtomic } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-atomic-write')))
+  const { withFileLock, writeFileAtomic } = await loadDshProfileWriter(require, pathToFileURL)
   const { loadProfileDirectory, loadOptionalPatches, composeEntries, readProfilePatches, reconcileProfilePatches } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')))
   const configRequire = createRequire(webRequire.resolve('@deepseek-ai/dsh-plugin-manager'))
   const { parseDocument, isSeq, isMap, isScalar } = configRequire('yaml')

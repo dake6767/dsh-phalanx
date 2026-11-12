@@ -43,6 +43,48 @@ class TransactionPort:
     def safe(self,message):return message
 
 class SharedUpgrade(unittest.TestCase):
+    def test_previous_executor_inventory_remains_readable_after_questions_are_added(self):
+        import hashlib
+        from installer_executor_install import executor_package
+        source = Path(__file__).resolve().parents[2]/'scripts/install'
+        # The previous release's complete inventory has no interactive questions module.
+        modules = [name for name in json.loads((source/'executor-files.json').read_text()) if name not in ('installer_questions.py','installer_deployment.py','installer_deployment_cli.py','installer_uninstall.py')]
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory)
+            files = {}
+            for name in [*modules, 'updater.service.in', 'executor-files.json']:
+                data = json.dumps(modules).encode() if name == 'executor-files.json' else (source/name).read_bytes()
+                (package/name).write_bytes(data)
+                files[name] = hashlib.sha256(data).hexdigest()
+            (package/'manifest.json').write_text(json.dumps({'schema':1, 'sourceCommit':'a'*40, 'files':files}))
+            self.assertEqual(executor_package(package)['sourceCommit'], 'a'*40)
+            (package/'installer_host.py').write_text('tampered')
+            with self.assertRaisesRegex(Exception, 'checksum mismatch'):
+                executor_package(package)
+
+    def test_upgrade_snapshot_restores_absent_or_existing_global_cli_without_changing_legacy_roles(self):
+        from installer_upgrade_host import UpgradeHost
+        from installer_upgrade_backup import PlatformBackup
+        with tempfile.TemporaryDirectory() as directory:
+            host=installer.Host(Path(directory),lambda *args,**kwargs:None,system='Linux',machine='x86_64',uid=0)
+            port=UpgradeHost(host)
+            job={'source':{'uid':1001,'values':{}},'prepared':{'executor':{'sourceCommit':'a'*40}}}
+            old_roles=port.carriers(job)
+            self.assertNotIn('globalCli',old_roles)
+            job['prepared']['managementCli']=True
+            roles=port.carriers(job)
+            self.assertEqual(set(roles)-set(old_roles),{'globalCli'})
+            for path in roles.values():path.parent.mkdir(parents=True,exist_ok=True)
+            entry=roles['globalCli']
+            data=Path(directory)/'data';data.mkdir()
+            for original in (None,b'prior managed command'):
+                if original is not None:entry.write_bytes(original);entry.chmod(0o755)
+                backup=PlatformBackup(data,Path(directory)/('existing' if original else 'absent'),roles)
+                receipt=backup.create()
+                entry.write_text('new command');entry.chmod(0o755)
+                backup.restore(receipt)
+                self.assertEqual(entry.read_bytes() if entry.exists() else None,original)
+
     def test_post_commit_cleanup_failure_never_enters_recovery_and_retry_does_not_stop(self):
         from installer_upgrade_core import UpgradeCore
         port=TransactionPort();core=UpgradeCore(port)

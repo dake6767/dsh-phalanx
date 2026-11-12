@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; installed rootless DSH and offline-prechecked fixture archives.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
@@ -9,7 +10,6 @@ import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { expertFixturePackage, packExpertPlugin } from './fixtures/expert-plugin.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
@@ -80,8 +80,7 @@ it.skipIf(!runtimeSettings.containerImage)(
     }
     const address = (server: typeof model) => `http://127.0.0.1:${(server.address() as { port: number }).port}`
     const runtime = { ...runtimeSection(join(root, 'platform'), address(model), runtimeSettings), environment: { FAIL_EXPERT: '1' } }
-    const home = join(effectiveUserDataRoot(runtime), 'member/home'),
-      overlay = join(root, 'observer.json')
+    const overlay = join(root, 'observer.json')
     await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'expert-test-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]))
     runtime.patches.push(overlay)
     const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'expert-plugins-installed-fixture-secret', runtime })
@@ -120,6 +119,7 @@ it.skipIf(!runtimeSettings.containerImage)(
         },
       })
       const account = await api('accounts', { username: 'member', password: 'password', email: '' })
+      const home = join(await memberSpacePath(runtime.dataRoot, 'member'), 'home')
       await mkdir(home, { recursive: true })
       await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'observer.mjs'))
       const packages: string[] = []

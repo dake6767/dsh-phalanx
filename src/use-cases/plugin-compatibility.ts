@@ -51,7 +51,7 @@ export class PluginCompatibility {
       await this.store.save(next)
       next = (await this.store.list()).find(value => value.packageName === row.packageName)!
       try {
-        const current = withSourceCommit(await this.check(row, row.current, next.identities?.[row.version]), row.current)
+        const current = withSourceCommit(await this.check(row, row.current, row.current?.integrity ?? next.identities?.[row.version]), row.current)
         next = { ...next, current, stage: 'available', incompatible: false, published: next.restorePublication === true, restorePublication: false }
       } catch (error) {
         this.rethrowFatal(error)
@@ -59,7 +59,10 @@ export class PluginCompatibility {
       }
       if (row.replacement) {
         try {
-          const prepared = await this.check(row.replacement, row.replacement.prepared, next.identities?.[row.replacement.version])
+          const prepared = withSourceCommit(
+            await this.check(row.replacement, row.replacement.prepared, row.replacement.prepared?.integrity ?? next.identities?.[row.replacement.version]),
+            row.replacement.prepared,
+          )
           next = {
             ...next,
             replacement: {

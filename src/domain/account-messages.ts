@@ -1,4 +1,9 @@
 export const en = {
+  'Switch to this member’s DSH': 'Switch to this member’s DSH',
+  'Start instance': 'Start instance',
+  'Instance operation completed.': 'Instance operation completed.',
+  'Configuration, plugins and persistent files are preserved.': 'Configuration, plugins and persistent files are preserved.',
+
   'Stop the platform service and the target container, then follow {path}. Backups are retained until the deployer removes them explicitly.':
     'Stop the platform service and the target container, then follow {path}. Backups are retained until the deployer removes them explicitly.',
   'Manage accounts, access and user instances in one place.': 'Manage accounts, access and user instances in one place.',
@@ -103,6 +108,11 @@ export const en = {
   'Account profile': 'Account profile',
 } as const
 export const zhCN = {
+  'Switch to this member’s DSH': '切换到该成员 DSH',
+  'Start instance': '启动实例',
+  'Instance operation completed.': '实例操作已完成。',
+  'Configuration, plugins and persistent files are preserved.': '配置、插件和持久文件会保留。',
+
   'Stop the platform service and the target container, then follow {path}. Backups are retained until the deployer removes them explicitly.':
     '请先停止平台服务和目标容器，再按 {path} 中的说明恢复。备份将保留，直到部署者主动删除。',
   'Manage accounts, access and user instances in one place.': '统一管理账户、访问权限和用户实例。',

@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { withPluginFacts } from './support/plugin-facts.js'
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -113,7 +113,7 @@ it.skip('hidden in 0.1.32: rejects a hard-coded upstream then prefills one crede
     await signInCommunity(admin, origin, 'admin', 'password', true)
     await signInCommunity(member, origin, 'member', 'password')
     await signInCommunity(coworker, origin, 'coworker', 'password')
-    const workspace = defaultWorkspacePath(root, 'member'),
+    const workspace = await defaultWorkspacePath(root, 'member'),
       directory = join(workspace, 'team-plugin')
     await mkdir(directory, { recursive: true })
     await writeFile(
@@ -135,7 +135,7 @@ it.skip('hidden in 0.1.32: rejects a hard-coded upstream then prefills one crede
       join(directory, 'cordis.patch.yml'),
       JSON.stringify([{ insert: [{ id: 'team-contribution-fixture', name: '@example/team-contribution' }] }]),
     )
-    const home = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home')
+    const home = join(await memberSpacePath(root, 'member'), 'home')
     const packed = JSON.parse(await execFileText('npm', ['pack', directory, '--ignore-scripts', '--json', '--pack-destination', home])) as Array<{
       filename: string
     }>
@@ -263,7 +263,7 @@ it.skip('hidden in 0.1.32: rejects a hard-coded upstream then prefills one crede
         else if (entry.isFile()) expect((await readFile(path)).includes(Buffer.from('platform-contribution-fixture-secret')), path).toBe(false)
       }
     }
-    await scan(join(effectiveUserDataRoot({ dataRoot: root }), 'coworker'))
+    await scan(join(await memberSpacePath(root, 'coworker')))
     expect(
       JSON.stringify(await (await admin.request.get(origin + '/admin/api/plugins/upstreams?packageName=%40example%2Fteam-contribution')).json()),
     ).not.toContain('platform-contribution-fixture-secret')

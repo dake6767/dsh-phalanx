@@ -44,6 +44,23 @@ it('persists the first administrator and completed bootstrap for another Postgre
   })
 })
 
+it('allocates opaque directories for every new account and preserves existing mappings', async () => {
+  await fixture(async (writer, reader, database) => {
+    const admin = await writer.createFirstAdmin({ username: 'admin', email: '', password: 'password' })
+    const member = await writer.create({ username: 'member', email: '', password: 'password' })
+    expect(await reader.getSpace('admin')).toEqual({ spaceId: admin.spaceId, storageKey: `_spaces/${admin.spaceId}` })
+    expect(await reader.getSpace('member')).toEqual({ spaceId: member.spaceId, storageKey: `_spaces/${member.spaceId}` })
+    // A persisted pre-upgrade mapping remains authoritative.
+    await database.query("UPDATE dsh_phalanx.accounts SET storage_key='member' WHERE username='member'")
+    await writer.resetPassword('member', 'replacement-password')
+    expect(await reader.getSpace('member')).toEqual({ spaceId: member.spaceId, storageKey: 'member' })
+    await writer.delete('member')
+    const recreated = await writer.create({ username: 'member', email: '', password: 'password' })
+    expect(recreated.spaceId).not.toBe(member.spaceId)
+    expect(await reader.getSpace('member')).toEqual({ spaceId: recreated.spaceId, storageKey: `_spaces/${recreated.spaceId}` })
+  })
+})
+
 it('keeps existing memberships when the default group changes and assigns future members to the new default', async () => {
   await fixture(async (writer, reader) => {
     const first = await writer.create({ username: 'first', email: '', password: 'password' })

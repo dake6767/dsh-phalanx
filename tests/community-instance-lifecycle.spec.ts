@@ -611,3 +611,84 @@ it('drains admitted launches and reset writes before exposing a quiescent bounda
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+it('atomically refuses overlapping administrator operations and removes a launch whose authorization changed', async () => {
+  let release!: () => void, entered!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const started = new Promise<void>(resolve => {
+    entered = resolve
+  })
+  let authorized = true
+  const active = new Set<number>()
+  const instance = { userId: 'alice', processId: 101, origin: 'http://localhost:4101', launchUrl: 'http://localhost:4101' }
+  const runtime = new CommunityInstanceLifecycle(
+    {
+      rebuild: async () => [],
+      alive: async () => true,
+      detach: async () => {},
+      start: async () => {
+        entered()
+        await gate
+        active.add(101)
+        return instance
+      },
+      stop: async value => {
+        active.delete(value.processId)
+      },
+    },
+    async () => ({ url: 'http://localhost/models', token: 'fixture' }),
+  )
+  const check = async () => {
+    if (!authorized) throw Error('Authority changed')
+  }
+  const start = runtime.operateMember('alice', 'start', 'https://community.example', check)
+  await started
+  await expect(runtime.operateMember('alice', 'start', 'https://community.example', check)).rejects.toMatchObject({ reason: 'draining' })
+  authorized = false
+  const denied = expect(start).rejects.toThrow('Authority changed')
+  release()
+  await denied
+  expect(active.size).toBe(0)
+  expect(runtime.status('alice').state).toBe('stopped')
+  await runtime.stopAll()
+})
+
+it('keeps the captured carrier through a plugin replacement before a confirmed restart', async () => {
+  let processId = 100
+  const stops: number[] = []
+  const runtime = new CommunityInstanceLifecycle(
+    {
+      rebuild: async () => [],
+      start: async userId => ({ userId, processId: ++processId, origin: 'http://localhost:4101', launchUrl: 'http://localhost:4101' }),
+      alive: async () => true,
+      stop: async instance => {
+        stops.push(instance.processId)
+      },
+      detach: async () => {},
+    },
+    async () => ({ url: 'http://localhost/models', token: 'fictional-token' }),
+  )
+  const first = await runtime.ensure('alice', 'https://community.example')
+  let resolve!: () => void
+  const promise = new Promise<void>(done => {
+    resolve = done
+  })
+  const work = runtime.withPluginReplacement(first, () => promise)
+  try {
+    expect(await runtime.reclaim('alice', async () => true)).toBe('busy')
+    const restart = runtime.restart('alice', 'https://community.example')
+    expect(runtime.status('alice')).toEqual({ state: 'draining', instance: first })
+    expect(stops).toEqual([])
+    resolve()
+    await work
+    const second = await restart
+    expect(second.processId).not.toBe(first.processId)
+    expect(stops).toEqual([first.processId])
+    await expect(runtime.withPluginReplacement(first, async () => {})).rejects.toMatchObject({ reason: 'draining' })
+  } finally {
+    resolve()
+    await runtime.stopAll()
+  }
+})

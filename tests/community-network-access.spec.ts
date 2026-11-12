@@ -1,3 +1,4 @@
+import { NodeNetworkResolver } from '../src/adapters/public-network.js'
 import { accountState } from './support/account-state.js'
 import { describe, expect, it } from 'vitest'
 import { CommunityModelAuthorization } from '../src/use-cases/community-model-authorization.js'
@@ -25,6 +26,20 @@ describe('community public network access', () => {
       grant: { username: 'alice', address: '1.1.1.1', hostname: 'own.example', port: 8443 },
     })
     expect((await access.authorize({ hostname: 'own.example', port: 8443 }, undefined)).status).toBe(407)
+  })
+  it('allows an explicitly empty mapping inventory while retaining origin, private-target and authentication protection', async () => {
+    const authorization = new CommunityModelAuthorization(
+      accountState(() => ({ username: 'alice', spaceId: 'space-alice', disabled: false, admin: false, sessionEpoch: 0 })),
+      { resolve: token => (token === 'alice-token' ? { username: 'alice', spaceId: 'space-alice' } : undefined) },
+    )
+    const access = new CommunityNetworkAccess(authorization, new NodeNetworkResolver('https://8.8.8.8', []))
+    expect(await access.authorize({ hostname: '1.1.1.1', port: 443 }, 'alice-token')).toMatchObject({ status: 200, grant: { address: '1.1.1.1' } })
+    for (const hostname of ['8.8.8.8', '127.0.0.1', '10.0.0.1', '169.254.169.254']) {
+      expect((await access.authorize({ hostname, port: 443 }, 'alice-token')).status).toBe(403)
+    }
+    expect((await access.authorize({ hostname: '1.1.1.1', port: 443 }, undefined)).status).toBe(407)
+    const undeclared = new CommunityNetworkAccess(authorization, new NodeNetworkResolver('https://8.8.8.8'))
+    expect((await undeclared.authorize({ hostname: '1.1.1.1', port: 443 }, 'alice-token')).status).toBe(502)
   })
   it('pins public IPv4 from a dual-stack DNS answer without opening IPv6 access', async () => {
     const { access } = fixture(async () => ['2606:4700:4700::1111', '1.1.1.1'])

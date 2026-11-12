@@ -1,4 +1,5 @@
 // Validation: T3 development checkout; real credentials: none; requires native DSH source mode for the retrieval upstream seam.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile, readdir, stat } from 'node:fs/promises'
@@ -10,7 +11,6 @@ import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import type { CommunityModelSettings } from '../src/domain/admin-contract.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { DSH_PATCH_CONFIG, dshWebProfilePath } from '../src/dsh/profile-layout.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { runCommunityTerminal, selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
@@ -295,7 +295,7 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   page.setDefaultTimeout(20_000)
   await signInCommunity(page, origin, 'alice', 'password')
   if ('container' in runtime) throw new Error('This scenario requires native DSH source mode')
-  await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'alice'), false), false)
+  await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(await defaultWorkspacePath(root, 'alice'), false), false)
   const cookie = await cookieHeader(context, origin)
   const rpc = createRealDshRpc()
 
@@ -324,7 +324,7 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
     .click()
   await page.locator('[data-composer-input]').waitFor()
   // Search reaches the platform gateway and the upstream receives the platform key, never the member token.
-  const memberHome = join(effectiveUserDataRoot({ dataRoot: root }), 'alice', 'home')
+  const memberHome = join(await memberSpacePath(root, 'alice'), 'home')
   const memberCheck = async (command: string, output: string): Promise<string> => {
     await runCommunityTerminal(page, `${command}; printf '%s' '${output}'`, output)
     return await readFile(join(memberHome, '.e2e-check'), 'utf8')
@@ -337,7 +337,7 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
     await accounts.close()
   }
   expect(memberToken).toMatch(/^[A-Za-z0-9_-]{43}$/u)
-  const homeProfile = join(dshWebProfilePath(join(effectiveUserDataRoot({ dataRoot: root }), 'alice', 'home')), DSH_PATCH_CONFIG)
+  const homeProfile = join(dshWebProfilePath(join(await memberSpacePath(root, 'alice'), 'home')), DSH_PATCH_CONFIG)
   const composer = page.locator('[data-composer-input]')
   const ask = async (text: string, marker: string) => {
     await composer.fill(text)

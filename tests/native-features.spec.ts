@@ -16,15 +16,21 @@ function fixture() {
   let administrator = true
   const actor: CommunityAccountActor = { username: 'admin', spaceId: 'a'.repeat(32), sessionEpoch: 0 }
   const rows: NativeFeatureRows = {
-    readGroup: async groupId => (groups.has(groupId) ? structuredClone(settings.get(groupId) ?? { groupId, revision: 'none', disabledIds: [] }) : undefined),
+    readGroup: async groupId =>
+      groups.has(groupId) ? structuredClone(settings.get(groupId) ?? { groupId, revision: 'none', disabledIds: [], showAppCenter: false }) : undefined,
     forMember: async member => {
       const account = members.get(member.username)
       return account?.spaceId === member.spaceId ? rows.readGroup(account.groupId) : undefined
     },
-    save: async (groupId, disabledIds, expectedRevision) => {
+    save: async (groupId, disabledIds, expectedRevision, showAppCenter) => {
       if (!groups.has(groupId) || (settings.get(groupId)?.revision ?? 'none') !== expectedRevision)
         throw new BusinessRuleError('conflict', 'Changed', 'native-features-stale')
-      const saved = { groupId, disabledIds: [...disabledIds], revision: 'revision-' + ++revision }
+      const saved = {
+        groupId,
+        disabledIds: [...disabledIds],
+        revision: 'revision-' + ++revision,
+        showAppCenter: showAppCenter ?? settings.get(groupId)?.showAppCenter ?? false,
+      }
       settings.set(groupId, saved)
       return saved
     },
@@ -76,10 +82,13 @@ it('rechecks administrator authority before reading or saving any group state', 
 
 it('keeps unknown stored choices while returning only supported restrictions to a member', async () => {
   const world = fixture()
-  world.settings.set('team', { groupId: 'team', revision: 'existing', disabledIds: ['future-feature'] })
+  world.settings.set('team', { groupId: 'team', revision: 'existing', disabledIds: ['future-feature'], showAppCenter: false })
   const view = await world.service.group(world.actor, 'team')
-  await world.service.save(world.actor, 'team', { revision: view.revision, disabledIds: ['terminal'] })
+  const visible = await world.service.save(world.actor, 'team', { revision: view.revision, showAppCenter: true })
+  expect(world.settings.get('team')?.disabledIds).toEqual(['future-feature'])
+  await world.service.save(world.actor, 'team', { revision: visible.revision, disabledIds: ['terminal'] })
   expect(world.settings.get('team')?.disabledIds).toEqual(['future-feature', 'terminal'])
+  expect(world.settings.get('team')?.showAppCenter).toBe(true)
   expect(await world.service.resolve({ username: 'member', spaceId: 'b'.repeat(32) })).toEqual({ disabledIds: ['terminal'] })
 })
 
@@ -106,7 +115,7 @@ it('refuses missing owners and stale member-space identities instead of assuming
 
 it('refuses an old catalog form rather than clearing a previously unknown selection after a build adds that feature', async () => {
   const world = fixture()
-  world.settings.set('team', { groupId: 'team', revision: 'stored-revision', disabledIds: ['future-feature'] })
+  world.settings.set('team', { groupId: 'team', revision: 'stored-revision', disabledIds: ['future-feature'], showAppCenter: false })
   const oldForm = await world.service.group(world.actor, 'team')
   expect(oldForm.features.some(feature => feature.id === 'future-feature')).toBe(false)
   const current = new NativeFeatures(nativeFeatureCatalog([{ ...nativeFeatureCatalog()[0]!, id: 'future-feature' }]), world.persistence)

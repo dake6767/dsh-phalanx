@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { withPluginFacts } from './support/plugin-facts.js'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -67,7 +67,7 @@ it.skip('hidden in 0.1.32: packs a local plugin in real DSH, privately prechecks
     })
     await signInCommunity(admin, origin, 'admin', 'password', true)
     await signInCommunity(member, origin, 'member', 'password')
-    const workspace = defaultWorkspacePath(root, 'member'),
+    const workspace = await defaultWorkspacePath(root, 'member'),
       directory = join(workspace, 'team-plugin')
     await mkdir(directory, { recursive: true })
     await writeFile(
@@ -87,7 +87,7 @@ it.skip('hidden in 0.1.32: packs a local plugin in real DSH, privately prechecks
       join(directory, 'cordis.patch.yml'),
       JSON.stringify([{ insert: [{ id: 'team-contribution-fixture', name: '@example/team-contribution' }] }]),
     )
-    const home = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home')
+    const home = join(await memberSpacePath(root, 'member'), 'home')
     const packed = JSON.parse(await execFileText('npm', ['pack', directory, '--ignore-scripts', '--json', '--pack-destination', home])) as Array<{
       filename: string
     }>

@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,7 +7,6 @@ import { chromium, type Browser, type BrowserContext } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { DSH_PATCH_CONFIG, dshWebProfilePath } from '../src/dsh/profile-layout.js'
 import { SESSION_LIST } from '../src/dsh/session-protocol.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
@@ -88,7 +88,7 @@ it('logs out without cancelling a running task and recovers its own failed resta
       context,
       page,
       origin,
-      instanceWorkspacePath(defaultWorkspacePath(root, username), runtime.container !== undefined),
+      instanceWorkspacePath(await defaultWorkspacePath(root, username), runtime.container !== undefined),
       runtime.container !== undefined,
     )
     await page.getByRole('button', { name: /^Platform account:/u }).waitFor()
@@ -350,7 +350,7 @@ it('logs out without cancelling a running task and recovers its own failed resta
     .last()
     .click()
   await alice.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
-  const patch = join(dshWebProfilePath(join(effectiveUserDataRoot({ dataRoot: root }), 'alice', 'home')), DSH_PATCH_CONFIG)
+  const patch = join(dshWebProfilePath(join(await memberSpacePath(root, 'alice'), 'home')), DSH_PATCH_CONFIG)
   const original = await readFile(patch)
   // Fixture fault injection: invalidate only Alice's persisted profile after a healthy native session.
   await writeFile(patch, 'broken-profile: true\n')

@@ -1,6 +1,6 @@
 import { featureVisible } from '../../src/domain/release-visibility'
 import { useNativeFeatures } from './useNativeFeatures'
-import CommunityGroupNativeFeatures from './CommunityGroupNativeFeatures'
+import CommunityGroupFeatureSettings from './CommunityGroupFeatureSettings'
 import type { CommunityExpertGroup } from '../../src/domain/admin-contract'
 import { communityGroupExperts, saveCommunityGroupExperts } from './community-api'
 import CommunityGroupMcp from './CommunityGroupMcp'
@@ -391,7 +391,7 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
                 <Tabs.Indicator />
               </Tabs.Tab>
               <Tabs.Tab id="native-features">
-                {t('DSH native features')}
+                {t('Feature settings')}
                 <Tabs.Indicator />
               </Tabs.Tab>
             </Tabs.List>
@@ -498,7 +498,7 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
             </CommunityGrantSection>
           </Tabs.Panel>
           <Tabs.Panel id="native-features" className="plugin-settings-panel">
-            <CommunityGroupNativeFeatures data={native.data} disabled={native.disabled} onChange={native.setDisabled} busy={busy} saved={native.saved} />
+            <CommunityGroupFeatureSettings settings={native} busy={busy} />
           </Tabs.Panel>
         </Tabs>
       </CommunityDialog>

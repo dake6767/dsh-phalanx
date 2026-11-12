@@ -27,19 +27,23 @@ export async function nativeFeatureRoute(
 export function nativeFeatureInput(value: unknown): CommunityNativeFeatureInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid()
   const body = value as Record<string, unknown>
+  const { revision, disabledIds, showAppCenter } = body
   if (
-    Object.keys(body).length !== 2 ||
-    Object.keys(body).some(key => !['revision', 'disabledIds'].includes(key)) ||
-    typeof body.revision !== 'string' ||
-    !body.revision.length ||
-    body.revision.length > 65536 ||
-    !Array.isArray(body.disabledIds) ||
-    body.disabledIds.length > 1000 ||
-    body.disabledIds.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9-]{0,79}$/u.test(id)) ||
-    new Set(body.disabledIds).size !== body.disabledIds.length
+    Object.keys(body).some(key => !['revision', 'disabledIds', 'showAppCenter'].includes(key)) ||
+    (Object.hasOwn(body, 'showAppCenter') && typeof showAppCenter !== 'boolean') ||
+    typeof revision !== 'string' ||
+    !revision.length ||
+    revision.length > 65536 ||
+    (Object.hasOwn(body, 'disabledIds') &&
+      (!Array.isArray(disabledIds) ||
+        disabledIds.length > 1000 ||
+        disabledIds.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9-]{0,79}$/u.test(id)) ||
+        new Set(disabledIds).size !== disabledIds.length))
   )
     throw invalid()
-  return { revision: body.revision, disabledIds: body.disabledIds }
+  if (Array.isArray(disabledIds)) return { revision, disabledIds, ...(typeof showAppCenter === 'boolean' ? { showAppCenter } : {}) }
+  if (typeof showAppCenter === 'boolean') return { revision, showAppCenter }
+  throw invalid()
 }
 function invalid() {
   return new CommunityRequestError(400, 'Review the available native features and try again.', 'native-features-invalid')

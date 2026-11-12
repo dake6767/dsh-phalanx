@@ -38,10 +38,12 @@ export function communityLoginPage(
   accounts: readonly SignedInAccountView[] = [],
   prefillUsername?: string,
   hasRememberedAccounts = false,
+  directedSpace?: string,
 ): string {
   const t = (key: Parameters<typeof platformText>[1]) => platformText(locale, key)
   const prefill = prefillUsername === undefined ? '' : ` value="${htmlText(prefillUsername)}"`
-  const form = `<form method="post" action="/login"><label>${t('Username')}<input name="username" autocomplete="username"${prefill}${prefillUsername === undefined ? ' autofocus' : ''} required></label><label>${t('Password')}<input name="password" type="password" autocomplete="current-password" required${prefillUsername === undefined ? '' : ' autofocus'}></label><button type="submit">${t('Sign in')} <span aria-hidden="true">→</span></button></form><p class="login-help">${t('Need an account? Contact your administrator.')}</p>`
+  const action = directedSpace && prefillUsername ? `/login?member=${encodeURIComponent(prefillUsername)}&space=${encodeURIComponent(directedSpace)}` : '/login'
+  const form = `<form method="post" action="${htmlText(action)}"><label>${t('Username')}<input name="username" autocomplete="username"${prefill}${directedSpace ? ' readonly' : ''}${prefillUsername === undefined ? ' autofocus' : ''} required></label><label>${t('Password')}<input name="password" type="password" autocomplete="current-password" required${prefillUsername === undefined ? '' : ' autofocus'}></label><button type="submit">${t('Sign in')} <span aria-hidden="true">→</span></button></form><p class="login-help">${directedSpace ? `<a href="/admin">${t('Cancel')}</a>` : t('Need an account? Contact your administrator.')}</p>`
   const content =
     accounts.length === 0
       ? `<p class="entry-eyebrow">${t('YOUR WORKSPACE AWAITS')}</p><h1>${t('Sign in to dsh-phalanx')}</h1><p>${t('Use the account provided by your administrator.')}</p>${pageError(error)}${form}${hasRememberedAccounts ? `<p><a href="/login?accounts=1">${t('Choose an account')}</a></p>` : ''}`

@@ -1,4 +1,5 @@
 // Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
+import { setAppCenterVisibility } from './support/app-center-visibility.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, lstat, mkdtemp, readdir, writeFile } from 'node:fs/promises'
@@ -159,6 +160,8 @@ it('serves both shipped market presets to two installed DSH members and recovers
       ).toBe(200)
     }
     expect((await post(`groups/${groupIds.alice}/mcp`, { names: ['p-amap'] })).status()).toBe(200)
+    await setAppCenterVisibility(admin.request, origin, groupIds.alice)
+    await setAppCenterVisibility(admin.request, origin, groupIds.bob)
     const members: { name: string; cookie: string; sessionId: string }[] = []
     const call = async (member: (typeof members)[number], marker: string) => {
       await rpc.remoteRpc(origin, member.cookie, 'session/prompt', {

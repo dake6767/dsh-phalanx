@@ -182,7 +182,7 @@ class HostAdmission(unittest.TestCase):
             for path in binary.iterdir(): path.chmod(0o755)
             environment = root / 'environment'
             environment.write_text('source() { ID=rocky; ID_LIKE="rhel fedora"; VERSION_ID=9; }\n')
-            result = subprocess.run(['bash', str(Path(__file__).resolve().parents[2] / 'install.sh'), '--output', 'json'],
+            result = subprocess.run(['bash', str(Path(__file__).resolve().parents[2] / 'install.sh'), '--output', 'json', '--language', 'en', '--non-interactive'],
                 capture_output=True, text=True, env={**os.environ, 'PATH': str(binary)+':'+os.environ['PATH'],
                     'BASH_ENV': str(environment), 'BOOTSTRAP_APT_MARKER': str(root / 'apt-called'),
                     'BOOTSTRAP_PYTHON_MARKER': str(root / 'python-called')})
@@ -288,7 +288,7 @@ class HostAdmission(unittest.TestCase):
                     host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
                     host.request = lambda *args, **kwargs: b'login'
                     with contextlib.redirect_stdout(output := io.StringIO()), contextlib.redirect_stderr(progress := io.StringIO()):
-                        self.assertEqual(installer.main([*machine.make_bundle(), '--output', mode], host), 0, output.getvalue())
+                        self.assertEqual(installer.main([*machine.make_bundle(), '--output', mode, '--language', 'en'], host), 0, output.getvalue())
                     if mode == 'json':
                         self.assertEqual(json.loads(output.getvalue())['hostAdmission'], {
                             'distribution': distribution, 'version': version, 'family': 'debian', 'verified': verified,
@@ -313,7 +313,7 @@ class HostAdmission(unittest.TestCase):
                 self.assertIn('only Debian-family', result['reason'])
                 self.assertEqual(result['hostAdmission']['family'], 'unsupported')
                 with contextlib.redirect_stdout(human := io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    self.assertEqual(installer.main([*arguments, '--output', 'human'], host), 1)
+                    self.assertEqual(installer.main([*arguments, '--output', 'human', '--language', 'en'], host), 1)
                 self.assertIn('(unsupported)', human.getvalue())
                 self.assertNotIn('(unverified)', human.getvalue())
                 self.assertEqual(machine.calls, [])

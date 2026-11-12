@@ -1,4 +1,5 @@
 // Validation: T4 only; real credentials: required (provider keys and member WeCom authorization). Never selected by T2.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -19,7 +20,7 @@ import type {
   CommunitySkillView,
   CommunitySuiteCatalogView,
 } from '../src/domain/admin-contract.js'
-import { durableStorageRoot, effectiveUserDataRoot } from '../src/domain/storage-layout.js'
+import { durableStorageRoot } from '../src/domain/storage-layout.js'
 import { suiteRuntimeDependencyDefinition, type SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
 import {
   runCommunityTerminal,
@@ -354,8 +355,8 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       const page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1100 } })
       page.setDefaultTimeout(60000)
       await signInCommunity(page, origin, 'suite-member', 'password')
-      await selectCommunityWorkspace(page.context(), page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'suite-member'), true), true)
-      const workspace = defaultWorkspacePath(root, 'suite-member')
+      await selectCommunityWorkspace(page.context(), page, origin, instanceWorkspacePath('', true), true)
+      const workspace = await defaultWorkspacePath(root, 'suite-member')
       const mountedWorkspace = instanceWorkspacePath(workspace, true)
       const container = async () =>
         (
@@ -404,7 +405,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
             { timeout: 600000, interval: 2000 },
           )
           .toBe('authorized')
-        const credentials = await lstat(join(effectiveUserDataRoot({ dataRoot: root }), 'suite-member', 'home', '.config', 'wecom', 'credentials.enc'))
+        const credentials = await lstat(join(await memberSpacePath(root, 'suite-member'), 'home', '.config', 'wecom', 'credentials.enc'))
         expect(credentials.isFile()).toBe(true)
         expect(credentials.size).toBeGreaterThan(0)
         expect(credentials.uid).toBe(process.getuid!())
@@ -519,9 +520,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
             }
             return false
           }
-          expect(await scan(join(effectiveUserDataRoot({ dataRoot: root }), 'suite-member')), 'Platform credentials absent from member-readable files').toBe(
-            false,
-          )
+          expect(await scan(join(await memberSpacePath(root, 'suite-member'))), 'Platform credentials absent from member-readable files').toBe(false)
           await receipt('member-' + task.id, {
             passed: true,
             newNativeSession: true,

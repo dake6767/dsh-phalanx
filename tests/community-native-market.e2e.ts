@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { showAppCenterForFixture } from './support/app-center-visibility.js'
 import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -27,6 +28,7 @@ it('renders the platform market with native DSH controls, theme and locale while
   const browser = await chromium.launch({ headless: true })
   try {
     const origin = await app.start()
+    await showAppCenterForFixture(origin, 'admin', 'password')
     const page = await browser.newPage({ locale: 'en', colorScheme: 'light' })
     page.setDefaultTimeout(30_000)
     if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await page.context().newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
@@ -132,15 +134,23 @@ it('renders the platform market with native DSH controls, theme and locale while
     await adminPage.waitForURL(url => url.origin === origin && /^\/app\/[^/]+\/$/u.test(url.pathname))
     for (const reload of [false, true]) {
       if (reload) await adminPage.reload()
-      await adminPage.getByRole('button', { name: /^Platform account:/u }).waitFor()
+      // Closing the admin console can return focus to a different tab.
+      await adminPage.bringToFront()
+      const accountTrigger = adminPage.getByRole('button', { name: /^Platform account:/u })
+      await accountTrigger.waitFor()
       expect(await adminPage.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
-      await adminPage.getByRole('button', { name: /^Platform account:/u }).click()
-      await expect.poll(() => adminPage.getByRole('menuitem').first().textContent()).toBe('Go to admin console')
-      await adminPage.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
-      await adminPage.getByRole('menuitem', { name: 'Log out', exact: true }).waitFor()
+      await accountTrigger.press('Enter')
+      const adminConsoleItem = adminPage.getByRole('menuitem', { name: 'Go to admin console', exact: true })
+      const accountMenu = adminPage.getByRole('menu').filter({ has: adminConsoleItem })
+      await expect.poll(() => accountMenu.getByRole('menuitem').first().textContent()).toBe('Go to admin console')
+      await accountMenu.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
+      await accountMenu.getByRole('menuitem', { name: 'Log out', exact: true }).waitFor()
+      await expect.poll(() => accountMenu.evaluate(menu => menu.contains(menu.ownerDocument.activeElement))).toBe(true)
       await adminPage.keyboard.press('Home')
       const originalUrl = adminPage.url()
-      const [consolePage] = await Promise.all([adminPage.waitForEvent('popup'), adminPage.keyboard.press('Enter')])
+      await expect.poll(() => adminConsoleItem.evaluate(element => element.matches(':focus'))).toBe(true)
+      // The destination is a separate tab without a window opener.
+      const [consolePage] = await Promise.all([adminContext.waitForEvent('page'), adminPage.keyboard.press('Enter')])
       await consolePage.waitForURL(origin + '/admin')
       await consolePage.locator('#admin-sidebar').waitFor()
       expect(await consolePage.evaluate(() => window.opener === null)).toBe(true)
@@ -310,6 +320,8 @@ it('renders the platform market with native DSH controls, theme and locale while
       { label: 'Skills', component: 'SkillsPanel', path: '/market/api/skills' },
       { label: 'MCP services', component: 'McpPanel', path: '/market/api/mcp' },
     ]) {
+      const signature = new RegExp('function ' + tab.component + '\\(\\)\\s*\\{', 'u')
+      expect(platformPluginClient).toMatch(signature)
       for (const phase of ['initialization', 'render', 'request']) {
         const context = await browser.newContext({ locale: 'en' })
         const isolatedPage = await context.newPage()
@@ -329,10 +341,10 @@ it('renders the platform market with native DSH controls, theme and locale while
               await route.fulfill({ response })
               return
             }
-            const signature = 'function ' + tab.component + '(){'
-            const failed = platformPluginClient.replace(
-              signature,
-              phase === 'initialization' ? "throw new Error('Fixture tab initialization');" + signature : signature + "throw new Error('Fixture tab render');",
+            const failed = platformPluginClient.replace(signature, declaration =>
+              phase === 'initialization'
+                ? "throw new Error('Fixture tab initialization');" + declaration
+                : declaration + "throw new Error('Fixture tab render');",
             )
             injected++
             await route.fulfill({ response, body: body.replace(platformPluginClient, failed) })

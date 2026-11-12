@@ -109,22 +109,20 @@ export async function configureRetainedUpgrade(input: {
   const trialApi = { get, post: (path: string, input: object) => post(path, input, executionTrialTimeout) }
   await withAdministratorSkill(trialApi, 'retained-skill', () => retainedExecutionTrial(trialApi, 'baseline', trialEvidence, redact))
   for (const kind of ['managed', 'selected']) {
-    const packs = await get('skill-packs')
-    expect(
-      (
-        await post('skill-packs', {
-          action: 'save',
-          revision: packs.revision,
-          pack: {
-            name: 'retained-pack-' + kind,
-            description: 'Retained workflow',
-            skills: ['retained-skill'],
-            instructions: 'Keep the existing workflow.',
-            published: kind === 'selected',
-          },
-        })
-      ).status(),
-    ).toBe(200)
+    const name = 'retained-pack-' + kind
+    const published = kind === 'selected'
+    const saved = await post('skill-packs', {
+      action: 'save',
+      revision: (await get('skill-packs')).revision,
+      pack: { name, description: 'Retained workflow', skills: ['retained-skill'], instructions: 'Keep the existing workflow.', published },
+    })
+    expect(saved.status(), await saved.text()).toBe(200)
+    // Older releases publish on save. Since 0.1.33, publication is a separate action.
+    if (published && (await saved.json()).published !== true) {
+      const publication = await post('skill-packs', { action: 'publish', name, published, revision: (await get('skill-packs')).revision })
+      expect(publication.status(), await publication.text()).toBe(200)
+    }
+    expect((await get('skill-packs')).packs).toContainEqual(expect.objectContaining({ name, published }))
   }
   const grantPath = `groups/${groupId}/skills`,
     grant = await get(grantPath)
@@ -133,10 +131,10 @@ export async function configureRetainedUpgrade(input: {
       await post(grantPath, { action: 'save', names: ['retained-skill'], packs: ['retained-pack-managed'], revision: grant.revision, confirmed: true })
     ).status(),
   ).toBe(200)
-  expect(
-    (
-      await member.request.post(origin + '/market/api/skill-packs', { headers: { origin }, data: { name: 'retained-pack-selected', action: 'install' } })
-    ).status(),
-  ).toBe(200)
+  const selected = await member.request.post(origin + '/market/api/skill-packs', {
+    headers: { origin },
+    data: { name: 'retained-pack-selected', action: 'install' },
+  })
+  expect(selected.status(), await selected.text()).toBe(200)
   return { memberEntry, groupId: groupId as string }
 }

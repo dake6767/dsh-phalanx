@@ -7,6 +7,7 @@ import type { Clock } from '../ports/clock.js'
 
 /** Member-bound access to retained checked bytes; callers decide market or preinstall eligibility. */
 export class NativePluginDownloads {
+  private readonly activeUpdates = new Map<string, () => Promise<() => boolean>>()
   constructor(
     private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>,
     private readonly library: Pick<PluginLibraryStorePort, 'list'>,
@@ -15,6 +16,34 @@ export class NativePluginDownloads {
     private readonly runtimeRevision: string,
   ) {}
   async issue(actor: CommunityAccountActor, packageName: string) {
+    const { plugin, token } = await this.grant(actor, packageName)
+    return { plugin, url: this.url('plugin-archive', token) }
+  }
+  async issueUpdate(actor: CommunityAccountActor, packageName: string, authorize: () => Promise<() => boolean>) {
+    const { plugin, token } = await this.grant(actor, packageName)
+    if (this.activeUpdates.has(token)) throw this.denied()
+    this.activeUpdates.set(token, authorize)
+    return {
+      plugin,
+      url: this.url('plugin-archive', token),
+      authorizationUrl: this.url('plugin-update', token),
+      release: () => {
+        this.activeUpdates.delete(token)
+      },
+    }
+  }
+  async confirmUpdate(token: string, username: string) {
+    const authorize = this.activeUpdates.get(token)
+    if (!authorize) throw this.denied()
+    await this.read(token, username)
+    const current = await authorize()
+    if (this.activeUpdates.get(token) !== authorize) throw this.denied()
+    if (!current()) throw new BusinessRuleError('conflict', 'The available plugin update changed.', 'plugin-update-changed')
+  }
+  private url(kind: 'plugin-archive' | 'plugin-update', token: string) {
+    return `http://plugins.dsh-phalanx.invalid/${kind}/${token}.tgz`
+  }
+  private async grant(actor: CommunityAccountActor, packageName: string) {
     const account = await this.accounts.get(actor.username)
     if (!account || account.disabled || account.spaceId !== actor.spaceId || account.sessionEpoch !== actor.sessionEpoch)
       throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
@@ -28,7 +57,7 @@ export class NativePluginDownloads {
       integrity: plugin.integrity,
       expiresAt: this.clock.now() + 60_000,
     })
-    return { plugin, url: `http://plugins.dsh-phalanx.invalid/plugin-archive/${token}.tgz` }
+    return { plugin, token }
   }
   async read(token: string, username: string) {
     const grant = this.tokens.read(token),

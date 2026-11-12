@@ -189,7 +189,7 @@ describe('community account persistence on PostgreSQL', () => {
     const store = await open()
     await store.createFirstAdmin({ username: 'admin', email: 'admin@example.test', password: 'password' })
     const original = await store.create({ username: 'member', email: 'member@example.test', password: 'password' })
-    expect(await store.getSpace('member')).toEqual({ spaceId: original.spaceId, storageKey: 'member' })
+    expect(await store.getSpace('member')).toEqual({ spaceId: original.spaceId, storageKey: `_spaces/${original.spaceId}` })
     await expect(store.delete('admin')).rejects.toMatchObject({ kind: 'conflict' })
     await store.delete('member')
     expect(await store.getState('member')).toBeUndefined()

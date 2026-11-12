@@ -1,16 +1,41 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { join } from 'node:path'
-import { DSH_CONTAINER_PROFILE } from '../dsh/profile-layout.js'
+import { MEMBER_PLUGIN_ARCHIVE_DIRECTORY, nativeArchiveVerification, nativeArchiveResolution } from '../dsh/native-plugin-replacement.js'
 import { memberPluginArchiveWorker } from './member-plugin-archive-worker.js'
 import type { ContainerConfig } from '../domain/community-config.js'
 import { PLUGIN_UPLOAD_MAX_BYTES } from '../domain/plugin-library.js'
 import { containerClientEnvironment } from './runtime-command.js'
 
-export const MEMBER_PLUGIN_ARCHIVE_DIRECTORY = join(DSH_CONTAINER_PROFILE, '.phalanx-market')
 /** Inventory reports the current dependency source, independently of installation history. */
-export function isRetainedMemberPluginArchive(source: unknown): boolean {
+export function retainedMemberPluginArchiveIntegrity(source: unknown): string | undefined {
   const prefix = 'file:' + MEMBER_PLUGIN_ARCHIVE_DIRECTORY + '/'
-  return typeof source === 'string' && source.startsWith(prefix) && /^[a-f0-9]{128}\.tgz$/u.test(source.slice(prefix.length))
+  if (typeof source !== 'string' || !source.startsWith(prefix)) return undefined
+  const match = /^([a-f0-9]{128})\.tgz$/u.exec(source.slice(prefix.length))
+  return match ? 'sha512-' + Buffer.from(match[1]!, 'hex').toString('base64') : undefined
+}
+
+export async function verifyMemberPluginArchive(
+  container: ContainerConfig,
+  name: string,
+  packageName: string,
+  integrity: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (!/^sha512-[A-Za-z0-9+/]{86}==$/u.test(integrity)) return false
+  const path = join(MEMBER_PLUGIN_ARCHIVE_DIRECTORY, Buffer.from(integrity.slice(7), 'base64').toString('hex') + '.tgz')
+  const verify = `const {createHash}=require('node:crypto'), {constants}=require('node:fs'), {open}=require('node:fs/promises'), {join,resolve}=require('node:path');
+${nativeArchiveVerification}
+${nativeArchiveResolution}
+const deadline=setTimeout(()=>process.exit(1),8500);
+resolvedArchive(process.argv[1],process.argv[2],process.argv[3]).then(ok=>{process.exitCode=ok?0:1},()=>{process.exitCode=1}).finally(()=>clearTimeout(deadline));`
+  return await new Promise(resolve => {
+    execFile(
+      container.runtime,
+      ['exec', name, 'node', '-e', verify, packageName, path, integrity],
+      { env: containerClientEnvironment(), signal, timeout: 10000, maxBuffer: 4096 },
+      error => resolve(!error),
+    )
+  })
 }
 
 /** Keep a checked local tarball: an expiring URL must never become a profile dependency. */

@@ -1,3 +1,7 @@
+import { parseCookie } from 'cookie-es'
+import { PLATFORM_COOKIE } from './platform-session.js'
+import { CommunityAuthenticationError } from '../domain/community-account.js'
+import { handleCommunityFailure } from './community-errors.js'
 import { accountChangeCookie } from './account-change-cookie.js'
 import { currentSignedInSession } from './platform-signed-in-accounts.js'
 import { requestedPlatformDatabaseConnection } from '../domain/platform-database.js'
@@ -35,9 +39,21 @@ export function communityAccountRoutes(deps: {
     account: CommunityAccountRecord,
     cookies: readonly string[],
     remember: 'remembered-accounts' | 'bootstrap',
+    directed?: { target: CommunityAccountRecord; actor: CommunityAccountRecord },
   ): Promise<void> => {
     const token = deps.sessions.issue(account)
-    const remembered = deps.signedInAccounts.forLogin(request, account, token)
+    const remembered = deps.signedInAccounts.forLogin(
+      request,
+      account,
+      token,
+      directed
+        ? {
+            userId: directed.actor.username,
+            marker: deps.sessions.storageAccountMarker(directed.actor.spaceId),
+            token: parseCookie(request.headers.cookie ?? '')[PLATFORM_COOKIE]!,
+          }
+        : undefined,
+    )
     if (remembered === 'full' && remember === 'remembered-accounts') {
       // The browser already remembers ten accounts; none is displaced and the sign-in is refused.
       const { locale, preference } = requestLanguage(request)
@@ -51,13 +67,16 @@ export function communityAccountRoutes(deps: {
           }),
           locale,
           preference,
-          await deps.signedInAccounts.loginChoices(request),
+          directed ? [] : await deps.signedInAccounts.loginChoices(request),
+          directed?.target.username,
+          false,
+          directed?.target.spaceId,
         ),
       )
       return
     }
     response.writeHead(303, {
-      location: remember === 'bootstrap' ? '/admin/initial-model' : account.admin ? '/admin' : communitySpacePath(account.spaceId),
+      location: remember === 'bootstrap' ? '/admin/initial-model' : account.admin && !directed ? '/admin' : communitySpacePath(account.spaceId),
       'cache-control': 'no-store',
       ...loginStorageHeaders(request, deps.sessions, account.spaceId, origin, [
         platformSessionCookie(token, deps.sessions.maxAgeSeconds, origin),
@@ -69,6 +88,20 @@ export function communityAccountRoutes(deps: {
     })
     response.end()
   }
+  const directedTarget = async (request: IncomingMessage) => {
+    const query = new URL(request.url ?? '/', deps.origin()).searchParams
+    if (!query.has('member')) return undefined
+    const session = currentSignedInSession(deps.sessions, request)
+    if (!session) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+    const actor = await deps.onboarding.viewer(session.userId)
+    if (actor.spaceId !== session.spaceId || actor.sessionEpoch !== session.sessionEpoch)
+      throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+    const target = (await deps.onboarding.list(actor.username)).find(
+      account => account.username === query.get('member') && account.spaceId === query.get('space'),
+    )
+    if (!target || target.disabled) throw new BusinessRuleError('missing', 'Account is no longer active', 'account-inactive')
+    return { actor, target }
+  }
   return {
     enter: async (request: IncomingMessage, response: ServerResponse, username: string): Promise<void> => {
       const account = await deps.entry.account(username)
@@ -78,6 +111,11 @@ export function communityAccountRoutes(deps: {
     loginForm: async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
       const { locale, preference } = requestLanguage(request)
       const query = new URL(request.url ?? '/', deps.origin()).searchParams
+      const directed = await directedTarget(request)
+      if (directed) {
+        sendHtml(response, 200, communityLoginPage(undefined, locale, preference, [], directed.target.username, false, directed.target.spaceId))
+        return
+      }
       const other = query.get('other')
       const username = query.get('username')
       const choices = other === null && username === null ? await deps.signedInAccounts.loginChoices(request) : []
@@ -153,8 +191,22 @@ export function communityAccountRoutes(deps: {
     login: async (request: IncomingMessage, response: ServerResponse, origin: URL): Promise<void> => {
       assertCommunityOrigin(request, origin)
       const form = await readCommunityForm(request)
-      const { account, cookies } = await deps.entry.signIn(form.get('username') ?? '', form.get('password') ?? '')
-      await signedIn(request, response, origin, account, cookies, 'remembered-accounts')
+      const directed = await directedTarget(request)
+      try {
+        const { account, cookies } = await deps.entry.signIn(directed?.target.username ?? form.get('username') ?? '', form.get('password') ?? '')
+        if (directed) {
+          const current = await directedTarget(request)
+          if (!current || account.spaceId !== current.target.spaceId || account.sessionEpoch !== current.target.sessionEpoch)
+            throw new CommunityAuthenticationError('Account is no longer active', 'account-inactive')
+        }
+        await signedIn(request, response, origin, account, cookies, 'remembered-accounts', directed)
+      } catch (error) {
+        if (!directed) throw error
+        const { locale, preference } = requestLanguage(request)
+        handleCommunityFailure(response, error, false, detail =>
+          communityLoginPage(platformError(locale, detail), locale, preference, [], directed.target.username, false, directed.target.spaceId),
+        )
+      }
     },
   }
 }

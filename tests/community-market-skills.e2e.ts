@@ -1,4 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { appCenterButton, refreshAppCenter, setAppCenterVisibility } from './support/app-center-visibility.js'
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +10,6 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
-import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { openNativeSettings, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
@@ -55,6 +56,7 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     const member = await browser.newPage({ locale: 'en' })
     member.setDefaultTimeout(10000)
     if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await member.context().newCDPSession(member)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
+    await setAppCenterVisibility(admin.request, origin)
     await signInCommunity(member, origin, 'member', 'password')
     expect(
       (
@@ -69,7 +71,18 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     await member.getByRole('button', { name: 'Close skill details', exact: true }).click()
     await member.getByRole('button', { name: 'Install', exact: true }).click()
     await member.getByText('Installed (self-selected skill)', { exact: true }).waitFor()
-    const owned = join(effectiveUserDataRoot({ dataRoot: root }), 'member/home/.agents/skills/example-skill')
+    const skills = await (await member.request.get(origin + '/market/api/skills')).json()
+    await setAppCenterVisibility(admin.request, origin, 'default', false)
+    await refreshAppCenter(member, false)
+    const hiddenSkills = await member.request.get(origin + '/market/api/skills')
+    expect(hiddenSkills.ok()).toBe(true)
+    expect(await hiddenSkills.json()).toEqual(skills)
+    await setAppCenterVisibility(admin.request, origin)
+    await refreshAppCenter(member, true)
+    await appCenterButton(member).click()
+    await member.getByRole('tab', { name: 'Skills', exact: true }).click()
+    await member.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
+    const owned = join(await memberSpacePath(root, 'member'), 'home/.agents/skills/example-skill')
     await mkdir(owned, { recursive: true })
     await writeFile(join(owned, 'SKILL.md'), validSkill)
     await member.getByRole('button', { name: 'Reload skills', exact: true }).click()

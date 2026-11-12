@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { setAppCenterVisibility } from './support/app-center-visibility.js'
 import { once } from 'node:events'
 import { mkdtemp, realpath } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -44,6 +45,7 @@ it('hides paused entry points while retaining their data and native member reaso
     admin.setDefaultTimeout(30000)
     member.setDefaultTimeout(30000)
     await signInCommunity(admin, origin, 'admin', 'password', true)
+    await setAppCenterVisibility(admin.request, origin)
     const api = async (path: string, data?: object) => {
       const response = data
         ? await admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })

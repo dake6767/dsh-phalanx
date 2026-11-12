@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
@@ -10,7 +11,7 @@ import { expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
-import { durableStorageRoot, effectiveUserDataRoot } from '../src/domain/storage-layout.js'
+import { durableStorageRoot } from '../src/domain/storage-layout.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { openCommunityHttpEntry } from './support/community-http-entry.js'
@@ -194,7 +195,7 @@ it('keeps a persistent member browser usable after dependency replacement and pl
       },
     })
     await enter()
-    await writeFile(join(effectiveUserDataRoot({ dataRoot: root }), 'admin/workspace/input.html'), '<h1>BROWSER_RESTART_OK</h1>')
+    await writeFile(join(await memberSpacePath(root, 'admin'), 'workspace/input.html'), '<h1>BROWSER_RESTART_OK</h1>')
     const downloadHost = process.env.DSH_PHALANX_PLAYWRIGHT_DOWNLOAD_HOST
     await api('mcp', {
       action: 'save',
