@@ -12,6 +12,7 @@ const installFields = new Set([
   'dependencyNames',
   'pluginPackage',
   'contentHash',
+  'locked',
   'status',
   'entries',
   'requestId',
@@ -36,6 +37,7 @@ function checked(record: CatalogInstallRecord): CatalogInstallRecord {
     typeof record.version !== 'string' ||
     !record.version ||
     !['installing', 'installed', 'failed', 'uninstalling', 'updating'].includes(record.status) ||
+    (record.locked !== undefined && (record.locked !== true || record.category !== 'dependency')) ||
     !Array.isArray(record.entries) ||
     !Number.isFinite(record.updatedAt) ||
     typeof record.log !== 'string'

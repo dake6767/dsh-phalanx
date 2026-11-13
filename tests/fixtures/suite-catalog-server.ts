@@ -212,7 +212,7 @@ export async function legacySuiteCatalogFixture(
     const common = {
       id: preset.id,
       version: strictVersion(preset.version),
-      engines: { platform: '>=0.1.18' },
+      engines: { platform: items.some(item => 'serviceSlots' in item && item.serviceSlots) ? '>=0.1.35' : '>=0.1.18' },
       adapters: [],
       title: preset.title,
       description: preset.description,

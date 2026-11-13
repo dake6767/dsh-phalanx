@@ -10,13 +10,13 @@ import type { SuiteCatalogAdapterCall, SuiteCatalogDocumentEntry, SuiteCatalogRu
 import { readSuiteCatalog, suiteAdapterValidationContext } from '../../src/domain/suite-catalog-reader.js'
 import type { SuiteCatalogEntry } from '../../src/domain/suite-catalog.js'
 import { createCatalogSigningKey, signCatalog } from './suite-catalog-signing.js'
-import { onlineCatalogEntries } from './suite-catalog-online.js'
+import { catalogEquivalencePlatformVersion, onlineCatalogEntries } from './suite-catalog-online.js'
 
 const key = createCatalogSigningKey()
 
 /** The signed fixture catalog, read through the production trust boundary. */
 export function fixtureCatalog(): readonly SuiteCatalogEntry[] {
-  const read = readSuiteCatalog(signCatalog(onlineCatalogEntries, key).bytes, { trustedKeys: [key], platformVersion: '0.1.19' })
+  const read = readSuiteCatalog(signCatalog(onlineCatalogEntries, key).bytes, { trustedKeys: [key], platformVersion: catalogEquivalencePlatformVersion })
   if (read.status !== 'ok') throw new Error('fixture catalog was rejected')
   return read.entries.map(row => row.entry)
 }

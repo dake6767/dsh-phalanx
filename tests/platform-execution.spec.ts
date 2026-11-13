@@ -1,3 +1,4 @@
+import { configureServiceBackend, installServiceDefinition } from '../src/domain/installed-services.js'
 import { describe, expect, it } from 'vitest'
 import type { ExecutionConfiguration, ExecutionEvent } from '../src/domain/platform-execution.js'
 import { ExecutionFailure } from '../src/domain/platform-execution.js'
@@ -246,17 +247,71 @@ it.each([
   ['project', '--base-u=https://member.example.test'],
   ['--b', 'https://member.example.test'],
   ['--key-e', 'OTHER_KEY'],
+  ['project', '-b', 'minimax'],
+  ['-bminimax'],
+  ['-b=minimax'],
+  ['-vbminimax'],
+  ['-1bminimax'],
+  ['-?bminimax'],
 ])('refuses protected options and parser abbreviations before credentials reach a runner: %j', async (...argv) => {
   const f = fixture()
-  f.configure({ commands: [Object.assign({ command: 'news-cli', blocked: [] }, { blockedOptions: ['--base-url', '--key-env'] })] })
+  f.configure({ commands: [Object.assign({ command: 'news-cli', blocked: [] }, { blockedOptions: ['--base-url', '--key-env', '-b'] })] })
   f.request.argv = argv
   expect(await f.run()).toBe(0)
   expect(f.calls).toEqual([])
 })
 it('allows ordinary options and literal protected-option text after the option terminator', async () => {
   const f = fixture()
-  f.configure({ commands: [Object.assign({ command: 'news-cli', blocked: [] }, { blockedOptions: ['--base-url'] })] })
-  f.request.argv = ['--model', 'fixture-model', '--', '--base-url']
+  f.configure({
+    commands: [Object.assign({ command: 'news-cli', blocked: [] }, { blockedOptions: ['--base-url', '-b'], shortOptionsWithValue: ['-o', '-f', '-m'] })],
+  })
+  f.request.argv = ['-obuild', '-fbrief.png', '-mbfl-model', '--', '--base-url', '-b']
   expect(await f.run()).toBe(7)
   expect(f.calls).toHaveLength(1)
+})
+
+it('projects only the backend selected by the actual delegated command and refuses ambiguous arguments', async () => {
+  const f = fixture()
+  const label = { en: 'News', 'zh-CN': '新闻' }
+  let services = installServiceDefinition({ id: 'fixture', version: '1' }, [
+    {
+      id: 'search',
+      label,
+      commands: ['news-cli'],
+      backends: ['alpha', 'beta'].map(id => ({
+        id,
+        label,
+        selector: { kind: 'option' as const, name: '--provider', value: id },
+        fields: [{ name: 'NEWS_KEY', type: 'secret' as const, required: true }],
+      })),
+    },
+  ])!
+  for (const backend of ['alpha', 'beta']) {
+    services = configureServiceBackend(services, { slot: 'search', backend, action: 'save', values: { NEWS_KEY: 'fictional-' + backend } })
+    services = configureServiceBackend(services, { slot: 'search', backend, action: 'enable' })
+  }
+  f.configure({ services, suiteOrigin: 'suite:fixture' })
+  f.request.argv = ['--provider=beta']
+  await expect(f.run()).resolves.toBe(7)
+  expect(f.calls[0]?.environment).toEqual({ NEWS_KEY: 'fictional-beta' })
+  for (const args of [['--provider=beta', '--provider', 'alpha'], ['--prov=beta'], ['--', '--provider=beta']]) {
+    f.request.argv = args
+    await expect(f.run()).rejects.toMatchObject({ code: 'disabled' })
+  }
+  expect(f.calls).toHaveLength(1)
+  f.configure({
+    commands: [
+      { command: 'news-cli', blocked: [] },
+      { command: 'local-cli', blocked: [] },
+    ],
+    variables: [{ name: 'OPTIONAL', value: '', secret: true }],
+    optionalVariables: ['OPTIONAL'],
+  })
+  f.request.command = 'local-cli'
+  f.request.argv = []
+  await expect(f.run()).resolves.toBe(7)
+  expect(f.calls[1]?.environment).toEqual({ OPTIONAL: '' })
+  f.configure({ services: { ...services, ownerVersion: 'unrelated-source' } })
+  await expect(f.run()).rejects.toMatchObject({ code: 'not-ready' })
+  expect(f.calls).toHaveLength(2)
 })

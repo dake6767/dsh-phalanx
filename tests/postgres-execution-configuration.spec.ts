@@ -34,6 +34,29 @@ it('reopens execution configuration with protected secret variables and intact n
     awaitingPreparation: true,
     approvedContribution: 'approval',
     suiteOrigin: 'suite:example',
+    services: {
+      identity: { id: 'example', version: '1.0.0' },
+      slots: [
+        {
+          id: 'chat',
+          label: { en: 'Chat', 'zh-CN': '对话' },
+          commands: ['scripts/run.py'],
+          backends: [
+            {
+              id: 'gateway',
+              label: { en: 'Gateway', 'zh-CN': '网关' },
+              fields: [
+                { name: 'API_KEY', type: 'secret', required: true },
+                { name: 'API_URL', type: 'url', required: true },
+              ],
+            },
+          ],
+        },
+      ],
+      settings: [
+        { slot: 'chat', backend: 'gateway', enabled: true, values: { API_KEY: 'fictional-protected-service-key', API_URL: 'https://service.example/v1' } },
+      ],
+    } as const,
     optionalVariables: ['REGION'],
     runtimeDependencies: ['python'],
   }
@@ -52,12 +75,16 @@ it('reopens execution configuration with protected secret variables and intact n
       checks: [],
       log: '',
     })
-    await store.save('skill:example', configuration)
+    const revision = await store.save('skill:example', configuration)
+    expect((await store.get('skill:example'))?.rowRevision).toBe(revision)
+    expect(await store.save('skill:example', configuration, revision)).toBe(revision)
     expect(await configurationOf(store, 'skill:example')).toEqual(configuration)
     const rows =
       JSON.stringify(await database.query('SELECT * FROM dsh_phalanx.execution_configurations')) +
       JSON.stringify(await database.query('SELECT * FROM dsh_phalanx.execution_variables'))
     expect(rows).not.toContain('fictional-execution-private-key')
+    expect(rows).not.toContain('fictional-protected-service-key')
+    expect(rows).toContain('https://service.example/v1')
     expect(rows).toContain('region-one')
     expect(rows).toContain('PRIVATE_KEY')
     const reopened = new PostgresExecutionConfigurations(other)
@@ -73,7 +100,7 @@ it('reopens execution configuration with protected secret variables and intact n
 it('waits for execution configuration COMMIT before refreshing projections or returning an administrator response', async () => {
   const root = await mkdtemp(join(tmpdir(), 'postgres-execution-response-'))
   const database = await openTestDatabase(root)
-  let release!: () => void, pendingWrite: Promise<void> | undefined
+  let release!: () => void, pendingWrite: Promise<string> | undefined
   try {
     const store = new PostgresExecutionConfigurations(database)
     await seedExecutionOwners(database, ['skill:example', 'skill:keep', 'skill:remove'])

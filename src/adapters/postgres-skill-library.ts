@@ -1,4 +1,5 @@
 import { BusinessRuleError } from '../domain/business-error.js'
+import type { CommunitySkillPackMember } from '../domain/skill-admin-contract.js'
 import type { LibrarySkill } from '../domain/skill-library.js'
 import type { SkillLibraryStorePort } from '../ports/skill-library.js'
 import { PostgresRuntimeReferences } from './postgres-runtime-references.js'
@@ -46,6 +47,15 @@ export class PostgresSkillLibraryStore implements SkillLibraryStorePort {
       ...(row.publication_receipt === null ? {} : { contributionPublicationReceipt: row.publication_receipt }),
       ...(row.distribution_receipt === null ? {} : { contributionDistributionReceipt: row.distribution_receipt }),
     }))
+  }
+  async packCandidates(search: string, after: string, limit: number): Promise<readonly CommunitySkillPackMember[]> {
+    const rows = await repositorySql(this.connection).query<{ name: string; description: string; conflict: boolean | null }>(
+      `SELECT name,description,conflict FROM dsh_phalanx.skills
+       WHERE name COLLATE "C" > $1 AND (strpos(lower(name),$2)>0 OR strpos(lower(description),$2)>0)
+       ORDER BY name COLLATE "C" LIMIT $3`,
+      [after, search, limit],
+    )
+    return rows.map(({ name, description, conflict }) => ({ name, description, ...(conflict ? { conflict } : {}) }))
   }
   async save(skill: LibrarySkill, expectedRevision: number | 'none' | undefined = skill.rowRevision): Promise<void> {
     const values = [

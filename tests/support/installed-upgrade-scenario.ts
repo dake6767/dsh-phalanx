@@ -1,7 +1,13 @@
 import { cleanupOwned } from '../fixtures/owned-cleanup.js'
 import { installedMigrationRecovery, type InstalledExternalUpgradeDatabase } from './installed-migration-recovery.js'
 import { installedUpgradeObserver, type InstalledObserverIdentity } from './installed-upgrade-observer.js'
-import { bootstrapInstalledUpgrade, checkBootstrappedUpdater } from './installed-upgrade-bootstrap.js'
+import {
+  assertLargeUpgradeJournal,
+  assertUpgradeCapacity,
+  bootstrapInstalledUpgrade,
+  checkBootstrappedUpdater,
+  seedLargeUpgradeInventory,
+} from './installed-upgrade-bootstrap.js'
 import { compareVersions } from '../../scripts/release/compatibility.mjs'
 import { randomUUID } from 'node:crypto'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
@@ -24,7 +30,7 @@ import { acceptanceProgress } from './acceptance-progress.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
 import { assertRetainedUpgradeAfter } from './installed-retained-after.js'
 import { seedPausedUpgradeState } from './installed-retained-paused.js'
-import { configureRetainedUpgrade } from './installed-retained-configure.js'
+import { assertBaselineInstanceResources, configureRetainedUpgrade, signInRetainedUpgrade } from './installed-retained-configure.js'
 import {
   publishRetainedPlugins,
   retainedCatalogSha256,
@@ -36,11 +42,12 @@ import {
   seedRetainedPluginLibrary,
 } from './installed-retained-contributions.js'
 import { createRetainedUpgradeUpstream } from './installed-retained-upstream.js'
-import { installedShellArgument, installedUserDataRoot } from './installed-storage-layout.js'
+import { seedInstalledMemberMarker } from './installed-storage-layout.js'
 import { cookieHeader, createRealDshRpc } from './real-dsh-rpc.js'
 import { instanceWorkspacePath } from './real-dsh-runtime.js'
 import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
 import { enterUpgradedMember, saveUpgradeSession, removeUpgradeSession } from './installed-upgrade-sessions.js'
+import { assertLegacyUpgradePlugin, seedLegacyUpgradePlugin } from './installed-upgrade-legacy-plugin.js'
 
 export interface InstalledUpgradeHost {
   /** Administrator origin of the formally installed baseline. */
@@ -87,9 +94,12 @@ export async function runInstalledUpgrade({
   const scope = formalUpgradeScope(await readdir('releases/acceptance'), targetVersion, source)
   if (!scope.upgrade || scope.previous === undefined) throw Error(`Version ${targetVersion} has no formal previous release to upgrade from`)
   const baselineVersion = scope.previous
+  const baselineUsesSpaceStorage = compareVersions(baselineVersion, '0.1.34') >= 0
   const policyTransition = baselineVersion === '0.1.23' && targetVersion === '0.1.24'
   const executorInventoryTransition = baselineVersion === '0.1.33' && targetVersion === '0.1.34'
-  const bootstrapRequired = policyTransition || executorInventoryTransition || (baselineVersion === '0.1.26' && targetVersion === '0.1.27')
+  const executorJournalTransition = baselineVersion === '0.1.34' && targetVersion === '0.1.35'
+  const bootstrapRequired =
+    policyTransition || executorInventoryTransition || executorJournalTransition || (baselineVersion === '0.1.26' && targetVersion === '0.1.27')
   const databaseRollback = compareVersions(baselineVersion, '0.1.26') >= 0 && compareVersions(targetVersion, '0.1.27') >= 0
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as {
     commit: string
@@ -110,7 +120,7 @@ export async function runInstalledUpgrade({
       host: (await remote('cat /etc/machine-id')).trim(),
       baseline: baseline.commit,
       transport,
-      scenario: 'formal-upgrade-with-paused-data-v7',
+      scenario: 'formal-upgrade-with-paused-data-v8',
       database: JSON.stringify(database?.identity ?? { kind: 'builtin' }),
       retainedFixtures: retainedFixtureIdentity,
       retainedCatalogSha256,
@@ -131,11 +141,13 @@ export async function runInstalledUpgrade({
       'previous-updater-check',
       ...(bootstrapRequired ? ['updater-bootstrap', 'updater-check'] : []),
       ...(databaseRollback ? ['observer-start', 'migration-recovery'] : []),
+      ...(executorJournalTransition ? ['large-backup-inventory'] : []),
       'capacity',
       'image-transition',
       'browser-session',
       'upgrade',
       'enter',
+      ...(executorJournalTransition ? ['legacy-plugin-after'] : []),
       'after',
       ...(realReply ? ['real-reply'] : []),
       ...(combination ? ['instance-combination'] : []),
@@ -238,18 +250,23 @@ export async function runInstalledUpgrade({
       ).toBe(303)
       return instances.prepareBaseline(transport === 'offline')
     })
-    const { memberEntry, groupId } = await progress.step('configure', () =>
-      configureRetainedUpgrade({ instances, upstream, admin, origin, get, post, member, executionTrialTimeout, trialEvidence, redact }),
+    const { memberEntry, groupId, memberStorageKey } = await progress.step('configure', () =>
+      configureRetainedUpgrade(baselineUsesSpaceStorage, {
+        instances,
+        upstream,
+        admin,
+        origin,
+        get,
+        post,
+        member,
+        executionTrialTimeout,
+        trialEvidence,
+        redact,
+      }),
     )
-    if (['updater-check', 'observer-start', 'migration-recovery'].includes(progress.report().resumeFrom ?? '')) {
-      // These recorded resume points follow the completed baseline and bootstrap.
-      // Recreate browser authentication without replaying retained fixture writes.
-      expect(
-        (await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status(),
-      ).toBe(303)
-      await signInCommunity(member, origin, 'member', 'password')
-      expect(new URL(member.url()).pathname).toBe(memberEntry)
-    }
+    // Resume after baseline setup by restoring authentication without replaying fixture writes.
+    if (['updater-check', 'observer-start', 'migration-recovery'].includes(progress.report().resumeFrom ?? ''))
+      await signInRetainedUpgrade(admin, member, origin, memberEntry)
     const retainedApi = { get, post, origin, admin, member, groupId }
     await progress.step('retained-catalog', async () => {
       await seedRetainedCatalog(retainedApi)
@@ -350,44 +367,37 @@ export async function runInstalledUpgrade({
       mcp: (await get('usage-records?username=member&capability=p-selected&operation=echo')) as CommunityUsageRecords,
       models: (await get('usage-models')) as CommunityModelUsage,
     })
-    const { originalPid, beforeCalls, beforeExposed, beforeUsage, beforeUsageSettings, beforeLimits } = await progress.step('before', async () => {
-      await signInCommunity(member, origin, 'member', 'password')
-      await call('BEFORE_OS_UPGRADE')
-      await callPlugin('RETAINED_PLUGIN_BEFORE')
-      await runCommunityTerminal(member, 'officecli --version', '1.0.157')
-      await member.getByRole('button', { name: 'Platform App Center', exact: true }).waitFor()
-      for (const label of ['Usage records', 'Self-reported usage', 'Usage record retention'])
-        expect(await member.getByText(label, { exact: true }).count()).toBe(0)
-      await expect.poll(async () => (await history()).execution.items.length).toBe(1)
-      await expect.poll(async () => (await history()).mcp.items.length).toBeGreaterThan(0)
-      const beforeUsage = await history(),
-        beforeUsageSettings = await get('usage-settings')
-      expect(beforeUsageSettings).toEqual({ retentionDays: 13 })
-      expect(beforeUsage.execution.items[0]).toMatchObject({
-        username: 'admin',
-        outcome: 'succeeded',
-        capability: { id: 'skill:retained-skill', operation: 'retained' },
-      })
-      if (deploymentInputs.persisted) await instances.assertImported(deploymentInputs)
-      else {
-        const absentResources = await admin.request.get(origin + '/admin/api/instance-resources')
-        expect(absentResources.status()).toBe(404)
-        expect(await absentResources.json()).toMatchObject({ code: 'not-found' })
-      }
-      instances.assertBaselineLimits(await instances.kernel(), deploymentInputs)
-      const beforeLimits = (await get('execution/settings')).limits
+    const { originalPid, beforeCalls, beforeExposed, beforeUsage, beforeUsageSettings, beforeLimits, legacyPlugin } = await progress.step(
+      'before',
+      async () => {
+        await signInCommunity(member, origin, 'member', 'password')
+        await call('BEFORE_OS_UPGRADE')
+        await callPlugin('RETAINED_PLUGIN_BEFORE')
+        await runCommunityTerminal(member, 'officecli --version', '1.0.157')
+        await member.getByRole('button', { name: 'Platform App Center', exact: true }).waitFor()
+        for (const label of ['Usage records', 'Self-reported usage', 'Usage record retention'])
+          expect(await member.getByText(label, { exact: true }).count()).toBe(0)
+        await expect.poll(async () => (await history()).execution.items.length).toBe(1)
+        await expect.poll(async () => (await history()).mcp.items.length).toBeGreaterThan(0)
+        const beforeUsage = await history(),
+          beforeUsageSettings = await get('usage-settings')
+        expect(beforeUsageSettings).toEqual({ retentionDays: 13 })
+        expect(beforeUsage.execution.items[0]).toMatchObject({
+          username: 'admin',
+          outcome: 'succeeded',
+          capability: { id: 'skill:retained-skill', operation: 'retained' },
+        })
+        await assertBaselineInstanceResources(instances, deploymentInputs, admin, origin)
+        const beforeLimits = (await get('execution/settings')).limits
 
-      await remote(
-        'sudo -u dsh-phalanx sh -c ' +
-          installedShellArgument(
-            'printf MEMBER_DATA_PRESERVED > ' + installedShellArgument((await installedUserDataRoot(remote)) + '/member/home/upgrade-owned.txt'),
-          ),
-      )
-      const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
-      const originalPid = (await remote(pidCommand)).trim()
-      expect(Number(originalPid)).toBeGreaterThan(0)
-      return { originalPid, beforeCalls: { ...calls }, beforeExposed: upstreamState.exposed, beforeUsage, beforeUsageSettings, beforeLimits }
-    })
+        await seedInstalledMemberMarker(remote, memberStorageKey)
+        const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
+        const originalPid = (await remote(pidCommand)).trim()
+        expect(Number(originalPid)).toBeGreaterThan(0)
+        const legacyPlugin = executorJournalTransition ? await seedLegacyUpgradePlugin({ admin, member, origin, remote, memberStorageKey }) : undefined
+        return { originalPid, beforeCalls: { ...calls }, beforeExposed: upstreamState.exposed, beforeUsage, beforeUsageSettings, beforeLimits, legacyPlugin }
+      },
+    )
     let expectedPid = originalPid
     Object.assign(calls, beforeCalls)
     upstreamState.exposed ||= beforeExposed
@@ -421,7 +431,8 @@ export async function runInstalledUpgrade({
           run: () => remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade bootstrap --output json`, 300000),
           platformPid: async () => (await remote(pidCommand)).trim(),
           expectedPid,
-          platformStatus: executorInventoryTransition ? async () => (await admin.request.get(origin + '/readyz')).status() : undefined,
+          platformStatus:
+            executorInventoryTransition || executorJournalTransition ? async () => (await admin.request.get(origin + '/readyz')).status() : undefined,
           candidate,
           requests: release.requests,
         }),
@@ -464,18 +475,10 @@ export async function runInstalledUpgrade({
       )
       expectedPid = recovered.pid
     }
-    insufficient = await progress.step('capacity', async () => {
-      await remote('sudo mkdir -p /var/lib/dsh-phalanx-updater && sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/lib/dsh-phalanx-updater')
-      try {
-        insufficient = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade prepare --output json`, 1800000, [1]))
-        expect(insufficient).toMatchObject({ status: 'upgrade', operation: { phase: 'prepare-failed', space: { sufficient: false } } })
-        expect((await remote(pidCommand)).trim()).toBe(expectedPid)
-        await remote('sudo test ! -e /etc/dsh-phalanx/maintenance')
-      } finally {
-        await remote('sudo umount /var/lib/dsh-phalanx-updater')
-      }
-      return insufficient
-    })
+    if (executorJournalTransition) await progress.step('large-backup-inventory', () => seedLargeUpgradeInventory(remote))
+    insufficient = await progress.step('capacity', () =>
+      assertUpgradeCapacity(remote, `sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade prepare --output json`, pidCommand, expectedPid),
+    )
     // An unchanged image upgrades in place; the image-change path is then not covered, and the receipt says so.
     const sameDigest = release.manifest.image.digest === baseline.imageDigest
     await progress.step('image-transition', async () => {
@@ -652,12 +655,15 @@ export async function runInstalledUpgrade({
           preparationReusedFromFailedAttempt: Boolean(retainedPreparation),
           archiveSha256: release.manifest.files[archive],
           webApplied: true,
+          ...(executorJournalTransition ? { journalBytes: await assertLargeUpgradeJournal(remote, prepared.id) } : {}),
         }
       } finally {
         await application.close()
       }
     })
-    await progress.step('enter', () => enterUpgradedMember({ admin, member, origin, memberEntry, remote, candidate, browserSession }))
+    await progress.step('enter', () => enterUpgradedMember({ admin, member, origin, memberEntry, remote, candidate, browserSession, memberStorageKey }))
+    if (executorJournalTransition)
+      await progress.step('legacy-plugin-after', () => assertLegacyUpgradePlugin({ admin, member, origin, remote, memberStorageKey }, legacyPlugin!))
     await progress.step('after', () =>
       assertRetainedUpgradeAfter({
         remote,
@@ -668,6 +674,8 @@ export async function runInstalledUpgrade({
         member,
         origin,
         memberEntry,
+        memberStorageKey,
+        appCenterOptIn: baselineUsesSpaceStorage,
         instances,
         deploymentInputs,
         get,
@@ -766,7 +774,7 @@ export async function runInstalledUpgrade({
       })
     if (combination)
       await progress.step('instance-combination', () =>
-        instances.verifyCombination(memberEntry, progress.saved<{ retainedSession: string }>('after')!.retainedSession),
+        instances.verifyCombination(memberEntry, progress.saved<{ retainedSession: string }>('after')!.retainedSession, memberStorageKey),
       )
     if (observer) {
       await progress.step('observer-finish', () => observer!.finish(true))
@@ -775,6 +783,7 @@ export async function runInstalledUpgrade({
     await removeUpgradeSession(browserSession)
     await progress.finish()
     passed = true
+    return { memberStorageKey }
   } catch (error) {
     throw new Error(redact(error instanceof Error ? (error.stack ?? String(error)) : String(error)))
   } finally {

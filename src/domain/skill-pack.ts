@@ -1,14 +1,26 @@
 import type { LibrarySkill } from './skill-library.js'
 
+export interface SkillPackDisplay {
+  readonly displayName?: string
+  readonly description?: string
+}
+
 export interface SkillPack {
   readonly rowRevision?: number
   readonly suiteOrigin?: string
   readonly name: string
   readonly description: string
+  readonly catalogDisplayName?: string
+  readonly displayOverrides?: SkillPackDisplay
   readonly skills: readonly string[]
   readonly instructions: string
   readonly published: boolean
   readonly note?: LibrarySkill
+}
+
+export function skillPackDisplay(pack: SkillPack) {
+  const displayName = pack.displayOverrides?.displayName ?? pack.catalogDisplayName
+  return { ...(displayName === undefined ? {} : { displayName }), description: pack.displayOverrides?.description ?? pack.description }
 }
 
 export function assertSkillPackRow(row: SkillPack): void {

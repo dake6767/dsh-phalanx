@@ -1,3 +1,5 @@
+import { configureServiceBackend, installedServiceConflict, installedServiceView } from '../domain/installed-services.js'
+import { suiteInstallOrigin } from '../domain/suite-install.js'
 import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
@@ -20,6 +22,34 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
     private readonly upstreams: Pick<PluginUpstreamsPort, 'list'>,
     private readonly syntax: PluginAccessSyntaxPort,
   ) {}
+  async services(actor: CommunityAccountActor, packageName: string) {
+    const { current } = await this.catalogServices(actor, packageName)
+    return { ...installedServiceView(current.configuration), revision: current.revision }
+  }
+  async saveServices(actor: CommunityAccountActor, packageName: string, revision: string, change: unknown) {
+    const { current, origin } = await this.catalogServices(actor, packageName)
+    if (current.revision !== revision || !this.store.saveInstalledServices) throw installedServiceConflict()
+    const configuration = configureServiceBackend(current.configuration, change)
+    if (origin === null && configuration.settings.some(row => row.enabled))
+      throw new BusinessRuleError('invalid', 'Detached catalog backends cannot be enabled.', 'execution-config-invalid')
+    const committed = await this.store.saveInstalledServices(packageName, origin, configuration, revision)
+    return { ...installedServiceView(configuration), revision: committed ?? revision }
+  }
+  private async catalogServices(actor: CommunityAccountActor, packageName: string) {
+    await this.assertAdmin(actor, packageName)
+    const current = await this.store.installedServices?.(packageName)
+    const plugin = (await this.library.list()).find(row => row.packageName === packageName && !row.removing)
+    const origin = plugin?.suiteOrigin ?? null
+    if (
+      !plugin ||
+      !current ||
+      (origin !== null &&
+        (origin !== suiteInstallOrigin(current.configuration.identity.id) ||
+          (current.configuration.ownerVersion && current.configuration.ownerVersion !== plugin.current?.integrity)))
+    )
+      throw new BusinessRuleError('missing', 'This catalog service is not installed.', 'suite-not-installed')
+    return { current, origin }
+  }
   async view(actor: CommunityAccountActor, packageName: string): Promise<CommunityPluginAccessView> {
     await this.assertAdmin(actor, packageName)
     const settings = await this.store.get(packageName),
@@ -44,6 +74,9 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
     )
     const previous = await this.store.get(packageName)
     const merged = mergePluginAccessInput(input, previous, source => this.syntax.parse(source))
+    const resources = (await this.library.list()).find(row => row.packageName === packageName)?.suiteResourceEnvironment ?? []
+    if (resources.some(row => !merged.environment.some(value => value.name === row.name && value.value === row.value)))
+      throw new BusinessRuleError('conflict', 'The catalog owns this plugin resource binding.', 'plugin-access-invalid', { reason: 'dependency' })
     const { entries } = pluginAccessConfiguration(
       merged,
       source => this.syntax.parse(source),

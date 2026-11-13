@@ -32,7 +32,10 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
   identity(input: RuntimeDependencyDefinition): string {
     const values: unknown[] = [input.prepareCommand, input.pathDirectories, input.checkCommand ?? '', this.image]
     if (input.type === 'python-library') values.push(input.type, input.packages)
-    if (input.type === 'resource') values.push(input.type)
+    if (input.type === 'resource') {
+      values.push(input.type)
+      if (this.isolated) values.push('read-only-mount-copyable-files')
+    }
     return createHash('sha256').update(JSON.stringify(values)).digest('hex')
   }
   collect(retained: readonly string[]): Promise<void> {
@@ -189,7 +192,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       }
       signal.throwIfAborted()
       const identity = this.identity(input)
-      await this.artifacts.publish(stage, id, identity, log())
+      await this.artifacts.publish(stage, id, identity, log(), { copyableFiles: input.type === 'resource' && this.isolated })
       published = true
       return {
         id,

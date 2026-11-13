@@ -142,6 +142,7 @@ export class SuiteCatalogQueries {
     return {
       id,
       version: entry.version,
+      ...(entry.contentHash ? { contentHash: entry.contentHash } : {}),
       available,
       ...(reason ? { reason } : {}),
       creates,

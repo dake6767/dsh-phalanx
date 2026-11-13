@@ -1,5 +1,5 @@
-import { assertPluginIdentity } from './plugin-library.js'
-import type { SuiteCatalogPluginItem } from './suite-catalog.js'
+import { assertGithubRepository, assertPluginIdentity } from './plugin-library.js'
+import type { SuiteCatalogPluginArchive, SuiteCatalogPluginItem } from './suite-catalog.js'
 
 /** Catalog plugin declarations never carry administrator credentials. */
 export function readCatalogPluginItem(value: Record<string, unknown>): SuiteCatalogPluginItem {
@@ -36,5 +36,20 @@ export function readCatalogPluginItem(value: Record<string, unknown>): SuiteCata
     runtimeDependencies: names(value.runtimeDependencies),
     catalogDependencies: names(value.catalogDependencies),
     access: { environment: access.environment.map(row => ({ name: row.name, value: row.value })), entriesYaml: access.entriesYaml },
+  }
+}
+
+/** A catalog archive is a packed plugin asset with no caller-controlled host, query, or request headers. */
+export function readCatalogPluginArchive(value: unknown): SuiteCatalogPluginArchive | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).join(',') !== 'url') return
+  const { url } = value as { readonly url: unknown }
+  if (typeof url !== 'string' || url.length > 1024) return
+  const match = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/releases\/download\/[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*\.tgz$/u.exec(url)
+  if (!match || match[0] !== url) return
+  try {
+    assertGithubRepository(match[1]!)
+    return { url }
+  } catch {
+    return
   }
 }

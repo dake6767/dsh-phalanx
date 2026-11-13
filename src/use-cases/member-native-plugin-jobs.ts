@@ -4,9 +4,11 @@ import type { CommunityNativePluginJob } from '../domain/admin-contract.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import { CommunityRuntimeUnavailableError, type CommunityRuntimePort, type CommunityUserInstance } from '../ports/community-runtime.js'
 import type { PluginInstallation, PluginInstallationsPort } from '../ports/plugin-installations.js'
+import type { MemberNativeServiceSettings } from './member-native-service-settings.js'
+import type { NativePluginServiceAccess } from './native-plugin-service-access.js'
 import type { MemberNativePlugins } from './member-native-plugins.js'
 import type { InstalledMarketPlugin } from '../ports/plugin-market.js'
-import type { NativePluginReplacement } from '../ports/member-native-plugins.js'
+import type { NativePluginApplication, NativePluginReplacement } from '../ports/member-native-plugins.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 import { PluginPreinstallCancelled } from '../domain/plugin-preinstall.js'
 
@@ -17,7 +19,19 @@ type Update = {
   readonly instance: CommunityUserInstance
   readonly assertCurrent: () => Promise<() => boolean>
 }
-type PreinstallOutcome = 'succeeded' | 'skipped' | 'failed' | 'cancelled'
+type PreinstallOutcome = 'succeeded' | 'skipped' | 'failed' | 'cancelled' | 'restart-required'
+type InstallReceipt = {
+  readonly record: PluginInstallation
+  readonly application: NativePluginApplication
+  readonly artifact: string
+  readonly preparationId: string | undefined
+  readonly epoch: number
+}
+type ReceiptRetry = {
+  readonly instance: CommunityUserInstance
+  readonly plugin: PreparedPlugin
+  readonly current: () => Promise<boolean>
+}
 type Job = {
   readonly spaceId: string
   readonly packageName: string
@@ -34,19 +48,39 @@ type Job = {
 export class MemberNativePluginJobs {
   private readonly shutdown = new AbortController()
   private readonly jobs = new Map<string, Job>()
+  // Only a live carrier with a verified signed completion can retry writing a missing receipt.
+  private readonly receipts = new WeakMap<CommunityUserInstance, Map<string, InstallReceipt>>()
   private preinstallSequence = 0
   constructor(
     private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>,
     private readonly runtime: Pick<CommunityRuntimePort, 'ensure' | 'withPluginReplacement'>,
     private readonly native: MemberNativePlugins,
     private readonly records: Pick<PluginInstallationsPort, 'get' | 'save'>,
+    private readonly services?: Pick<NativePluginServiceAccess, 'describeDelivery'>,
+    private readonly settings?: Pick<MemberNativeServiceSettings, 'apply' | 'cancelSpace'>,
   ) {}
+  async adapted(packageName: string): Promise<boolean> {
+    return Boolean(await this.services?.describeDelivery(packageName))
+  }
+  archiveReserved(instance: CommunityUserInstance, integrity: string): boolean {
+    return [...(this.receipts.get(instance)?.values() ?? [])].some(
+      ({ record }) => record.integrity === integrity && (record.serviceOrigin !== undefined || record.resourceOrigin !== undefined),
+    )
+  }
+  canRetryReceipt(actor: CommunityAccountActor, instance: CommunityUserInstance, plugin: PreparedPlugin, actual: InstalledMarketPlugin): boolean {
+    return (
+      actual.retainedArchive === true &&
+      actual.version === plugin.version &&
+      actual.archiveIntegrity === plugin.integrity &&
+      this.matchingReceipt(actor, instance, plugin, 'selected') !== undefined
+    )
+  }
   async delivery(actor: CommunityAccountActor, packageName: string) {
     await this.current(actor)
     return (await this.records.get(actor.spaceId)).find(row => row.packageName === packageName)
   }
-  async install(actor: CommunityAccountActor, packageName: string, origin: URL, requestId: string): Promise<CommunityNativePluginJob> {
-    return await this.start(actor, packageName, origin, requestId, 'install')
+  async install(actor: CommunityAccountActor, packageName: string, origin: URL, requestId: string, retry?: ReceiptRetry): Promise<CommunityNativePluginJob> {
+    return await this.start(actor, packageName, origin, requestId, 'install', undefined, retry)
   }
   async remove(actor: CommunityAccountActor, packageName: string, origin: URL, requestId: string): Promise<CommunityNativePluginJob> {
     return await this.start(actor, packageName, origin, requestId, 'uninstall')
@@ -146,6 +180,7 @@ export class MemberNativePluginJobs {
     requestId: string,
     action: CommunityNativePluginJob['action'],
     update?: Update,
+    retry?: ReceiptRetry,
   ) {
     await this.current(actor)
     if (this.shutdown.signal.aborted || !/^[a-zA-Z0-9_-]{1,128}$/u.test(requestId)) throw this.conflict()
@@ -157,7 +192,7 @@ export class MemberNativePluginJobs {
     }
     if (this.busy(actor.spaceId, packageName)) throw this.conflict()
     const job = this.create(actor, packageName, requestId, action, update?.source ?? 'selected', update)
-    job.work = this.run(job, actor, origin).finally(() => this.prune())
+    job.work = this.run(job, actor, origin, undefined, retry).finally(() => this.prune())
     return job.view
   }
   private busy(spaceId: string, packageName: string) {
@@ -188,6 +223,7 @@ export class MemberNativePluginJobs {
     actor: CommunityAccountActor,
     origin: URL,
     preinstall?: { readonly plugin: PreparedPlugin; readonly instance: CommunityUserInstance; readonly current: () => Promise<boolean> },
+    retry?: ReceiptRetry,
   ): Promise<void> {
     const signal = AbortSignal.any([this.shutdown.signal, job.abort.signal])
     try {
@@ -198,33 +234,93 @@ export class MemberNativePluginJobs {
         job.view = { ...job.view, phase }
       }
       const update = job.update
-      const application = update
-        ? {
-            application: await this.runUpdate(update, actor, origin, signal, job.view.requestId, progress),
-            version: update.replacement.next.version,
-            integrity: update.replacement.next.integrity,
-          }
-        : preinstall
-          ? await this.native.preinstall(actor, preinstall.plugin, instance, origin, signal, job.view.requestId, preinstall.current, progress)
-          : job.view.action === 'install'
-            ? await this.native.install(actor, job.packageName, instance, origin, signal, job.view.requestId, progress)
-            : { application: await this.native.remove(actor, job.packageName, instance, origin, signal) }
+      const previous =
+        this.services && (update || job.view.action === 'uninstall')
+          ? (await this.records.get(actor.spaceId)).find(row => row.packageName === job.packageName)
+          : undefined
+      const binding =
+        job.view.action === 'install' || (update && (previous?.serviceOrigin || previous?.resourceOrigin))
+          ? await this.services?.describeDelivery(job.packageName)
+          : undefined
+      const expected = retry ?? preinstall
+      const retained = expected && this.matchingReceipt(actor, instance, expected.plugin, job.source)
+      if (
+        retry &&
+        (retry.instance !== instance ||
+          !retained ||
+          (retained.record.serviceOrigin && retained.record.serviceOrigin !== binding?.serviceOrigin) ||
+          (retained.record.resourceOrigin && retained.record.resourceOrigin !== binding?.resourceOrigin) ||
+          !(await retry.current()))
+      )
+        throw this.conflict()
+      const verified = retained && expected && (await this.native.hasDelivery(expected.plugin, instance, origin, signal)) ? retained : undefined
+      if (retained && !verified) this.receipts.get(instance)?.delete(job.packageName)
+      if (retry && !verified) throw this.conflict()
+      const application = verified
+        ? { application: verified.application, version: verified.record.version, integrity: verified.record.integrity }
+        : update
+          ? {
+              application: await this.runUpdate(update, actor, origin, signal, job.view.requestId, progress),
+              version: update.replacement.next.version,
+              integrity: update.replacement.next.integrity,
+            }
+          : preinstall
+            ? await this.native.preinstall(actor, preinstall.plugin, instance, origin, signal, job.view.requestId, preinstall.current, progress)
+            : job.view.action === 'install'
+              ? await this.native.install(actor, job.packageName, instance, origin, signal, job.view.requestId, progress)
+              : { application: await this.native.remove(actor, job.packageName, instance, origin, signal) }
+      let record: PluginInstallation | undefined
+      if (application && 'version' in application && application.integrity !== undefined) {
+        const checked = binding?.version === application.version && binding.integrity === application.integrity ? binding : undefined
+        const serviceOrigin = checked?.serviceOrigin && (!update || previous?.serviceOrigin === checked.serviceOrigin) ? checked.serviceOrigin : undefined
+        const resourceOrigin = checked?.resourceOrigin && (!update || previous?.resourceOrigin === checked.resourceOrigin) ? checked.resourceOrigin : undefined
+        record = verified?.record ?? {
+          packageName: job.packageName,
+          source: job.source,
+          version: application.version,
+          integrity: application.integrity,
+          ...(serviceOrigin ? { serviceOrigin } : {}),
+          ...(resourceOrigin ? { resourceOrigin } : {}),
+        }
+        if ('prepared' in application && application.prepared) {
+          let receipts = this.receipts.get(instance)
+          if (!receipts) this.receipts.set(instance, (receipts = new Map()))
+          receipts.set(job.packageName, {
+            record,
+            application: application.application,
+            artifact: application.prepared.artifact,
+            preparationId: application.prepared.preparationId,
+            epoch: actor.sessionEpoch,
+          })
+        }
+      }
       if (!update) signal.throwIfAborted()
       await this.current(actor)
       if (preinstall && !(await preinstall.current())) throw new PluginPreinstallCancelled()
+      if (retry && !(await retry.current())) throw this.conflict()
       if (!application) {
         job.outcome = 'skipped'
         job.view = { ...job.view, status: 'succeeded', phase: 'complete', application: 'applied' }
         return
       }
-      if ('version' in application && application.integrity !== undefined)
+      if (record) {
+        await this.records.save(actor.spaceId, record)
+        this.receipts.get(instance)?.delete(job.packageName)
+        if (record.serviceOrigin && application.application === 'applied')
+          await this.settings?.apply(actor, instance, job.packageName, origin).catch(() => undefined)
+      } else if (job.view.action === 'uninstall' && previous && (previous.serviceOrigin || previous.resourceOrigin)) {
         await this.records.save(actor.spaceId, {
-          packageName: job.packageName,
-          source: job.source,
-          version: application.version,
-          integrity: application.integrity,
+          packageName: previous.packageName,
+          source: previous.source,
+          version: previous.version,
+          ...(previous.integrity ? { integrity: previous.integrity } : {}),
         })
-      job.outcome = 'succeeded'
+      }
+      if (job.view.action === 'uninstall') this.receipts.get(instance)?.delete(job.packageName)
+      job.outcome =
+        application.application === 'restart-required' && preinstall?.instance.preinstallPlan?.firstEntry?.includes(job.packageName)
+          ? 'restart-required'
+          : 'succeeded'
       job.view = { ...job.view, status: 'succeeded', phase: 'complete', application: application.application }
     } catch (error) {
       job.outcome = signal.aborted || error instanceof PluginPreinstallCancelled ? 'cancelled' : 'failed'
@@ -240,6 +336,25 @@ export class MemberNativePluginJobs {
       job.view = { ...job.view, status: 'failed', phase: 'complete', failure, ...(restartRequired ? { application: 'restart-required' } : {}) }
     }
   }
+  private matchingReceipt(
+    actor: CommunityAccountActor,
+    instance: CommunityUserInstance,
+    plugin: PreparedPlugin,
+    source: PluginInstallation['source'],
+  ): InstallReceipt | undefined {
+    const retained = this.receipts.get(instance)?.get(plugin.packageName)
+    if (!retained) return undefined
+    if (
+      retained.epoch === actor.sessionEpoch &&
+      retained.record.source === source &&
+      retained.record.version === plugin.version &&
+      retained.record.integrity === plugin.integrity &&
+      retained.artifact === plugin.artifact &&
+      retained.preparationId === plugin.preparationId
+    )
+      return retained
+    return undefined
+  }
   private async runUpdate(
     update: Update,
     actor: CommunityAccountActor,
@@ -254,6 +369,7 @@ export class MemberNativePluginJobs {
   async cancelSpace(spaceId: string): Promise<void> {
     const running = [...this.jobs.values()].filter(job => job.spaceId === spaceId && job.view.status === 'running')
     for (const job of running) job.abort.abort()
+    await this.settings?.cancelSpace(spaceId)
     await Promise.allSettled(running.map(job => job.work))
   }
   private prune(): void {

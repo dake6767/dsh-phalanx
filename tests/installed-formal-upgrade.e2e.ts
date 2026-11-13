@@ -9,7 +9,7 @@ import { newValidationContext } from './fixtures/browser-evidence.js'
 import { runCommunityTerminal, selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
 import { runInstalledUpgrade } from './support/installed-upgrade-scenario.js'
 import { installedExternalDatabaseFixture } from './support/installed-maintenance-observer.js'
-import { installedShellArgument, installedUserDataRoot } from './support/installed-storage-layout.js'
+import { installedMemberHome, installedShellArgument, installedUserDataRoot } from './support/installed-storage-layout.js'
 import { instanceWorkspacePath } from './support/real-dsh-runtime.js'
 
 it('upgrades the installed formal previous release to this build and preserves administrator and member data', async () => {
@@ -54,7 +54,7 @@ it('upgrades the installed formal previous release to this build and preserves a
     database = { bootstrap: fixture.bootstrap, identity: { kind: 'external', configurationSha256: fixture.configurationSha256, containerId } }
   }
   const origin = 'http://127.0.0.1:18080'
-  await runInstalledUpgrade({
+  const { memberStorageKey } = await runInstalledUpgrade({
     origin,
     address: '127.0.0.1',
     remote,
@@ -127,7 +127,9 @@ it('upgrades the installed formal previous release to this build and preserves a
     await signInCommunity(retainedMember, origin, 'member', 'password')
     await selectCommunityWorkspace(retained, retainedMember, origin, workspace, true)
     await runCommunityTerminal(retainedMember, 'cat "$HOME/upgrade-owned.txt"', 'MEMBER_DATA_PRESERVED')
-    expect(await remote('sudo -n cat ' + installedShellArgument(`${users}/member/home/upgrade-owned.txt`))).toBe('MEMBER_DATA_PRESERVED')
+    expect(await remote('sudo -n cat ' + installedShellArgument((await installedMemberHome(remote, memberStorageKey)) + '/upgrade-owned.txt'))).toBe(
+      'MEMBER_DATA_PRESERVED',
+    )
   } finally {
     await browser.close()
   }

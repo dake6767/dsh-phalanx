@@ -4011,7 +4011,8 @@ def read_upgrade_operation(host,operation=None):
     path=host.path(UPGRADE_ROOT)/operation_id(operation)/'operation.json'
     if path.is_symlink():raise InstallError('Upgrade journal cannot be a symbolic link')
     if not path.exists():return None
-    value=json.loads(read_owned(path,os.geteuid()))
+    # This root-written journal includes backup inventories that grow with the deployment.
+    value=json.loads(read_owned(path,os.geteuid(),max_bytes=None))
     if not isinstance(value,dict) or value.get('id')!=operation or not isinstance(value.get('phase'),str):raise InstallError('Invalid protected upgrade operation')
     return value
 
@@ -4505,11 +4506,11 @@ INITIALIZATION_RECOVERY_PROGRAM = "// Generated recovery program. All writes use
 # END GENERATED INITIALIZATION RECOVERY PROGRAM
 
 
-def read_owned(path,uid,mode=0o600):
+def read_owned(path,uid,mode=0o600,*,max_bytes=262144):
     descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
     try:
         info=os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid!=uid or stat.S_IMODE(info.st_mode)!=mode or info.st_size>262144:
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=uid or stat.S_IMODE(info.st_mode)!=mode or (max_bytes is not None and info.st_size>max_bytes):
             raise InstallError('Invalid protected maintenance carrier')
         with os.fdopen(os.dup(descriptor),'r') as stream:return stream.read()
     finally:os.close(descriptor)

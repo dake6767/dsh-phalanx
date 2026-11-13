@@ -1,3 +1,4 @@
+import { installedServicesRoute } from './installed-services-route.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import type { CommunityExecutionInput } from '../domain/admin-contract.js'
@@ -13,8 +14,13 @@ export async function executionAdminRoute(
   administration: ExecutionAdministration,
   origin: URL,
 ): Promise<boolean> {
-  if (!['/admin/api/skills/execution', '/admin/api/skills/execution/prepare'].includes(url.pathname)) return false
+  const services = url.pathname === '/admin/api/skills/execution/services'
+  if (!services && !['/admin/api/skills/execution', '/admin/api/skills/execution/prepare'].includes(url.pathname)) return false
   const owner = 'skill:' + (url.searchParams.get('name') ?? '')
+  if (services) {
+    await installedServicesRoute(request, response, actor, owner, administration, origin)
+    return true
+  }
   if (request.method === 'GET') sendCommunityJson(response, 200, await administration.view(actor, owner))
   else if (request.method === 'POST') {
     assertCommunityOrigin(request, origin)

@@ -1,3 +1,4 @@
+import { NATIVE_PLUGIN_SERVICE_PATH } from '../use-cases/native-plugin-service-access.js'
 import { NATIVE_PLUGIN_HISTORY_PATH } from '../dsh/native-plugin-install.js'
 import { monitorRuntimeProxy } from './proxy-error.js'
 import { SKILL_USAGE_PATH } from '../dsh/skill-usage.js'
@@ -48,6 +49,7 @@ export function createGatewayOnlyServer(deps: {
   readonly contributions?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly execution?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly mcp?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
+  readonly nativeServices?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly pluginUpstreams?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly maintenance?: CommunityMaintenancePort
   readonly connections: SessionRegistryPort
@@ -83,6 +85,7 @@ export function createGatewayOnlyServer(deps: {
         deps.mcp
       )
         await deps.mcp(request, response)
+      else if (url.pathname.startsWith(NATIVE_PLUGIN_SERVICE_PATH) && deps.nativeServices) await deps.nativeServices(request, response)
       else if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
       else if (Object.values(MODEL_GATEWAY_PATHS).includes(url.pathname)) await deps.model(request, response)
       else if (webTools !== undefined && deps.webTools) await deps.webTools(request, response, webTools)

@@ -1,3 +1,4 @@
+import { catalogResourceBindingReady, catalogResourceBindings, matchesCatalogResource } from '../domain/suite-resource-bindings.js'
 import type { SuiteCatalogEntry, SuiteReplacedEntry } from '../domain/suite-catalog.js'
 import { suiteInstallOrigin, type SuiteInstallRecord } from '../domain/suite-install.js'
 import { unownedManualDependency, type RuntimeDependency } from '../domain/runtime-dependency.js'
@@ -95,11 +96,20 @@ export async function planSharedDependencies(
     conflicts: string[] = [],
     missing: string[] = []
   let busy = false
+  const bindings = catalogResourceBindings(entry)
   for (const id of entry.dependencies) {
     const record = installs.find(row => row.id === id)
     const dependency = entries.find(row => row.id === id)
+    const pins = bindings.filter(binding => binding.dependency === id)
+    const declaredLocked = dependency?.category === 'dependency' && dependency.locked
+    const locked = declaredLocked || record?.locked
     // A signed catalog must declare every shared dependency needed to install the suite.
-    if (!dependency) {
+    if (
+      !dependency ||
+      (entry.category === 'plugin' && locked && !pins.length) ||
+      (pins.length > 0 && (dependency.category !== 'dependency' || pins.some(binding => !catalogResourceBindingReady(binding, dependency)))) ||
+      (locked && record?.status === 'installed' && (!declaredLocked || !matchesCatalogResource(dependency, record)))
+    ) {
       missing.push(id)
       continue
     }
@@ -107,7 +117,7 @@ export async function planSharedDependencies(
     const commands = dependency.items.flatMap(item => (item.kind === 'runtime-dependency' ? item.commands : []))
     const libraries = dependency.items.filter(item => item.kind === 'runtime-dependency')
     const python = libraries.length > 0 && libraries.every(item => item.type === 'python-library')
-    const own = (await dependencies.manualProviders(commands, python ? libraries.flatMap(item => item.packages ?? []) : undefined))[0]
+    const own = locked ? undefined : (await dependencies.manualProviders(commands, python ? libraries.flatMap(item => item.packages ?? []) : undefined))[0]
     if (record?.status === 'installed') reuse.push(id)
     else if (record && record.status !== 'failed') busy = true
     else if (own) manual.push({ id, name: own.name })

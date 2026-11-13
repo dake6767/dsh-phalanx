@@ -176,7 +176,7 @@ it('cannot create execution configuration or references after its source skill w
   const database = await openTestDatabase(root)
   const store = new PostgresExecutionConfigurations(database)
   let release!: () => void
-  let deleting: Promise<void> | undefined, saving: Promise<void> | undefined
+  let deleting: Promise<void> | undefined, saving: Promise<string> | undefined
   try {
     await seedExecutionOwners(database, ['skill:removed'])
     await store.initialize()
@@ -384,7 +384,7 @@ it('rejects a stale writer waiting on a configuration lock before decoding a new
     gate = new Promise<void>(resolve => {
       release = resolve
     })
-  let writer: Promise<void> | undefined, stale: Promise<void> | undefined
+  let writer: Promise<void> | undefined, stale: Promise<string> | undefined
   try {
     await seedExecutionOwners(database, ['skill:secret-wait'])
     await storage.initialize()
@@ -435,7 +435,7 @@ it('does not overwrite a first configuration created between an absent-row lock 
     gate = new Promise<void>(resolve => {
       release = resolve
     })
-  let pending: Promise<void> | undefined
+  let pending: Promise<string | void> | undefined
   try {
     await seedExecutionOwners(database, ['skill:new-race'])
     await storage.initialize()

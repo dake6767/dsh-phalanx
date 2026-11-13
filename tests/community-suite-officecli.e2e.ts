@@ -89,14 +89,15 @@ it('installs a suite through the wizard with grants and publication, then uninst
     await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
     const card = page.locator('.plugin-library-card').filter({ hasText: 'Fixture suite' })
     await card.getByText('Not installed', { exact: true }).waitFor()
-    await card.getByRole('button', { name: 'Install', exact: true }).click()
+    await card.getByRole('button', { name: 'View catalog entry Fixture suite', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Fixture suite' })
     await dialog.getByText('This entry will install:', { exact: true }).waitFor()
     await dialog.getByText('Skill pack · fixture-suite · 2 skills').waitFor()
     await dialog.getByText(`Grant to ${group!.name}`, { exact: true }).click()
     await dialog.getByText('Publish to the platform app center', { exact: true }).click()
     await dialog.getByRole('button', { name: 'Install entry', exact: true }).click()
-    await card.getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
+    await dialog.getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
+    await dialog.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
     const installations = (await (await page.request.get(origin + '/admin/api/suites')).json()).installations
     expect(installations[0]).toMatchObject({
       id: 'fixture-suite',
@@ -119,7 +120,7 @@ it('installs a suite through the wizard with grants and publication, then uninst
     const dependency = await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=suite-cli')).json()
     expect(dependency).toMatchObject({ source: 'suite-catalog', stage: 'ready', current: { commands: ['suite-cli'] } })
     await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click()
-    await page.locator('.plugin-library-card').filter({ hasText: 'fixture-suite' }).getByText('From “Fixture suite”', { exact: true }).waitFor()
+    await page.locator('.plugin-library-card').filter({ hasText: 'Fixture suite' }).getByText('From “Fixture suite”', { exact: true }).waitFor()
     await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click()
     await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
     await card.getByRole('button', { name: 'Uninstall', exact: true }).click()

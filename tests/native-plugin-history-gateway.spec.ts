@@ -13,6 +13,10 @@ it('derives history identity from the member token, reauthorizes after the body,
       },
     },
     {
+      archiveReserved: async (...args) => {
+        calls.push(args.slice(0, 3))
+        return true
+      },
       request: async (...args) => {
         calls.push(args.slice(0, 3))
         return ['observed-package']
@@ -42,6 +46,15 @@ it('derives history identity from the member token, reauthorizes after the body,
     })
     expect(forged.status).toBe(400)
     expect(calls).toHaveLength(1)
+    const integrity = 'sha512-' + Buffer.alloc(64, 1).toString('base64')
+    const archive = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-api-key': 'fixture', 'content-type': 'application/json' },
+      body: JSON.stringify({ generation: 'launch', mode: 'archive', integrity }),
+    })
+    expect(archive.status).toBe(200)
+    expect(await archive.json()).toEqual({ reserved: true })
+    expect(calls[1]).toEqual([{ username: 'member', spaceId: 'space' }, 'launch', integrity])
   } finally {
     server.closeAllConnections()
     await new Promise<void>(resolve => server.close(() => resolve()))

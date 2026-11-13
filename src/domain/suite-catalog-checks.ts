@@ -1,4 +1,5 @@
 import { pythonPackagePin, pythonPackagePins } from './python-library.js'
+import { catalogResourceBindingReady, matchesCatalogResource, type CatalogResourceBinding } from './suite-resource-bindings.js'
 import type { SuiteCatalogArchitecture } from './suite-catalog.js'
 
 /** Hosts the five download-source classes cover; mirrors the bundled download-source presets. */
@@ -37,6 +38,9 @@ const packageArguments = (line: string, prefix: RegExp): readonly string[] => {
 export interface SuiteCatalogCheckEntry {
   readonly id: string
   readonly category: 'dependency' | 'suite' | 'plugin'
+  readonly version?: string
+  readonly contentHash?: string
+  readonly locked?: boolean
   readonly items: readonly {
     readonly kind: string
     readonly type?: 'python-library' | 'resource'
@@ -54,6 +58,8 @@ export interface SuiteCatalogCheckEntry {
     readonly access?: import('./admin-contract.js').CommunityPluginAccessInput
     readonly runtimeDependencies?: readonly string[]
     readonly catalogDependencies?: readonly string[]
+    readonly resourceBindings?: readonly CatalogResourceBinding[]
+    readonly resourceFiles?: readonly { readonly path: string; readonly executable?: true }[]
   }[]
   readonly dependencies?: readonly string[]
   readonly skills?: readonly { readonly type: string; readonly url: string; readonly commit: string }[]
@@ -131,8 +137,10 @@ export function suiteCatalogViolations(entries: readonly SuiteCatalogCheckEntry[
   const dependencies = new Set(entries.filter(entry => entry.category === 'dependency').map(entry => entry.id))
   for (const entry of entries) {
     violations.push(...suiteEntryViolations(entry))
-    for (const dependency of entry.dependencies ?? [])
+    for (const dependency of entry.dependencies ?? []) {
       if (!dependencies.has(dependency)) violations.push(`${entry.id}: requires unknown catalog dependency ${dependency}`)
+    }
+    violations.push(...suiteResourceBindingViolations(entry, entries))
   }
   const providers = new Map<string, { entry: string; python: boolean }>()
   const packages = new Map<string, { entry: string; identity: string }>()
@@ -157,4 +165,21 @@ export function suiteCatalogViolations(entries: readonly SuiteCatalogCheckEntry[
         }
       }
   return [...new Set(violations)]
+}
+
+export function suiteResourceBindingViolations(entry: SuiteCatalogCheckEntry, entries: readonly SuiteCatalogCheckEntry[]): readonly string[] {
+  if (entry.category !== 'plugin') return []
+  const bindings = entry.items.flatMap(item => item.resourceBindings ?? [])
+  const violations: string[] = []
+  for (const id of entry.dependencies ?? []) {
+    if (entries.some(row => row.id === id && row.locked) && !bindings.some(binding => binding.dependency === id))
+      violations.push(`${entry.id}: locked dependency ${id} requires an explicit resource binding`)
+  }
+  for (const binding of bindings) {
+    const dependency = entries.find(row => row.id === binding.dependency && row.category === 'dependency')
+    if (!matchesCatalogResource(binding, dependency)) violations.push(`${entry.id}: resource binding requires exact locked dependency ${binding.dependency}`)
+    else if (!catalogResourceBindingReady(binding, dependency))
+      violations.push(`${entry.id}: resource binding path ${binding.path} is not covered by required files of ${binding.dependency}`)
+  }
+  return violations
 }

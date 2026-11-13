@@ -117,7 +117,7 @@ it('cascades group and account facts while retaining a replacement delivery unti
     await local.set(member.spaceId, ['plugin'])
     await history.save(member.spaceId, { packageName: 'plugin', version: '1.0.0', source: 'preinstall' })
     await history.save(member.spaceId, { packageName: 'plugin', version: '1.2.0', source: 'selected' })
-    await history.clearPreinstalls(member.spaceId)
+    await history.resetForSpace(member.spaceId)
     expect(await history.get(member.spaceId)).toEqual([{ packageName: 'plugin', version: '1.2.0', source: 'selected' }])
     const beforeGroupRemoval = grants.authorizationRevision()
     await accounts.deleteGroup(group.id)

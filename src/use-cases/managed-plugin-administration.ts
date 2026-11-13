@@ -1,3 +1,4 @@
+import type { CatalogPluginDistributionIdentity } from '../domain/plugin-group-contract.js'
 import { pluginGroupRevision } from '../domain/plugin-group-revision.js'
 import type { CommunityManagedGroupView } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -59,6 +60,13 @@ export class ManagedPluginAdministration {
       ),
       pendingMembers: (await this.pending(id)).map(account => account.username),
     }
+  }
+  async preinstallCatalog(actor: CommunityAccountActor, id: string, plugin: CatalogPluginDistributionIdentity): Promise<CommunityManagedGroupView> {
+    await this.assertAdmin(actor)
+    assertOrdinaryGroup(requiredCommunityGroup(await this.accounts.listGroups(), id))
+    if (!this.grants.preinstallCatalog) throw new BusinessRuleError('invalid', 'Select plugins from the library.', 'plugin-grant-invalid')
+    await this.grants.preinstallCatalog(id, plugin, this.runtimeRevision)
+    return await this.group(actor, id)
   }
   async save(
     actor: CommunityAccountActor,
@@ -213,7 +221,8 @@ export class ManagedPluginAdministration {
         const status = this.runtime.status(account.username)
         if (status.state !== 'ready') return false
         // Use the running carrier's native inventory when computing its effective access.
-        const currentAccess = (await this.pluginAccess?.snapshot(account.username, status.instance.nativePluginSnapshot)) ?? []
+        const currentAccess =
+          (await this.pluginAccess?.snapshot(account.username, status.instance.nativePluginSnapshot, status.instance.nativeArchiveSnapshot)) ?? []
         const current = this.runtime.status(account.username)
         if (current.state !== 'ready' || current.instance !== status.instance) return true
         return (

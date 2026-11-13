@@ -143,13 +143,24 @@ if (process.argv[2] === 'upload') {
   const compile = ${managedPluginPatch.toString()};
   const compiled = compile(parsed, prefix, name => {
     const candidate = name.startsWith('.') ? resolve(dirname(patchPath), name) : name;
-    const resolved = own.resolve(candidate);
+    let resolved;
+    try { resolved = own.resolve(candidate); }
+    catch (error) {
+      // Native bundles can reference a provider shipped by the pinned DSH runtime.
+      if (error.code !== 'MODULE_NOT_FOUND' || !/^@deepseek-ai[/][a-z0-9][a-z0-9._-]*$/.test(candidate)) throw error;
+      resolved = runtime.resolve(candidate);
+    }
     if (resolved.startsWith(root + '/')) return '/artifact/node_modules/' + relative(root, resolved);
     if (resolved.startsWith('/opt/dsh/')) return resolved;
     fail('plugin-package-invalid');
   });
   const metadata = JSON.parse(await readFile(join(prepared, 'manifest.json'), 'utf8'));
   await writeFile(join(prepared, 'manifest.json'), JSON.stringify({ ...metadata, expertEligible: compiled.expertEligible }));
+  const entryIds = rows => rows.flatMap(row => {
+    if (row.disabled === true) return [];
+    return row.group ? entryIds(row.config) : row.name.startsWith('/opt/dsh/') ? [row.id] : [];
+  });
+  await writeFile(join(prepared, 'precheck-entries.json'), JSON.stringify(compiled.entries.flatMap(entryIds)));
   for (let i = 0; i < compiled.entries.length; i++) await writeFile(join(prepared, prefix + '-entries-' + i + '.json'), JSON.stringify(compiled.entries[i]));
   for (const patch of compiled.overlays) for (const row of patch.insert ?? []) row.config.path = '/artifact/' + row.config.path;
   await writeFile(join(prepared, 'managed.patch.json'), JSON.stringify(compiled.overlays));

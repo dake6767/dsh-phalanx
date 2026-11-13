@@ -3,6 +3,7 @@ import { expect, it } from 'vitest'
 import { RuntimeDependencyConsumers } from '../src/use-cases/runtime-dependency-consumers.js'
 import { MemberRuntimeDependencies } from '../src/use-cases/member-runtime-dependencies.js'
 import { MemberEffectiveSkills } from '../src/use-cases/member-effective-skills.js'
+import { BusinessRuleError } from '../src/domain/business-error.js'
 import type { LibrarySkill } from '../src/domain/skill-library.js'
 it('unions owned skill dependencies across direct grants, packs and selections independently of member shadowing', async () => {
   let granted = ['team'],
@@ -114,7 +115,12 @@ it('freezes one skill-plugin-MCP union from the observed inventory and deduplica
   const dependencies = new MemberRuntimeDependencies(
     { list: async () => [account] },
     effective,
-    { ready: names => names.map(version) },
+    {
+      ready: names => {
+        if (names.includes('missing')) throw new BusinessRuleError('missing', 'Runtime dependency is unavailable.', 'runtime-dependency-unavailable')
+        return names.map(version)
+      },
+    },
     undefined,
     undefined,
     async () => [version('sdk')],
@@ -125,6 +131,14 @@ it('freezes one skill-plugin-MCP union from the observed inventory and deduplica
   expect(plan.bindings.sdk?.mountedPath).toBe('/fixed/sdk')
   expect((await dependencies.plan('space', [])).bindings).toEqual({})
   expect((await dependencies.versions('space')).map(row => row.id)).toEqual(['sdk'])
+  const firstEntry = await dependencies.plan('space', [], {
+    ready: { dependencies: ['cache'] },
+    failed: { dependencies: ['unneeded', 'missing'] },
+  })
+  expect(firstEntry.versions.map(row => row.id)).toEqual(['cache', 'sdk'])
+  expect(firstEntry.bindings.cache?.mountedPath).toBe('/fixed/cache')
+  expect(firstEntry.bindings.unneeded).toBeUndefined()
+  expect(firstEntry.blockedPreinstalls).toEqual(['failed'])
   account.disabled = true
   expect(await dependencies.plan('space', ['office'])).toEqual({ versions: [], bindings: {} })
 })

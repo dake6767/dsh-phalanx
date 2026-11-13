@@ -222,7 +222,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       await admin.goto(origin + '/admin/skills?tab=catalog&locale=en')
       const card = admin.locator('.plugin-library-card').filter({ hasText: 'Architecture fixture' })
       await card.getByText('Unavailable on this architecture', { exact: true }).waitFor()
-      expect(await card.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
+      expect(await card.getByRole('button', { name: 'Install', exact: true }).count()).toBe(0)
       await receipt('architecture', { passed: true, architecture: 'arm64', installedModuleFixture: true, unavailableLabel: true, installationDisabled: true })
     } else if (phase === 'prepare') {
       await setStage('manual-feishu-baseline')

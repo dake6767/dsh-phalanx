@@ -54,10 +54,10 @@ async function resolvedArchive(name, path, integrity) {
 
 export const nativeReplacementImports = `
 import { constants } from 'node:fs';
-import { open, rename, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { open, rename, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 `
 
 /** Runs on the signed route with the same mutation queue as native browser operations. */

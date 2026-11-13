@@ -84,6 +84,30 @@ export function createPluginMarketRoute(deps: {
         sendCommunityJson(response, 200, await deps.market.useLocalCopy(await deps.entry.account(username), input.packageName, input.enabled, origin))
         return
       }
+      if (path === '/market/api/plugins/setup') {
+        if (request.method === 'GET') {
+          sendCommunityJson(response, 200, await deps.market.nativeSetup(await deps.entry.account(username)))
+          return
+        }
+        if (request.method !== 'POST') {
+          sendText(response, 405, 'Method Not Allowed')
+          return
+        }
+        assertCommunityOrigin(request, origin)
+        const input = (await readCommunityJson(request)) as { packageName?: unknown; action?: unknown }
+        if (
+          !input ||
+          typeof input.packageName !== 'string' ||
+          !input.packageName ||
+          input.packageName.length > 214 ||
+          (input.action !== 'retry-settings' && input.action !== 'retry-preinstall') ||
+          Object.keys(input).some(key => !['packageName', 'action'].includes(key))
+        )
+          throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
+        await deps.market.retryNativeSetup(await deps.entry.account(username), input.packageName, origin, input.action)
+        if (!response.destroyed) sendCommunityJson(response, 200, {})
+        return
+      }
       if (path !== '/market/api/plugins') {
         sendText(response, 404, 'Not Found')
         return
@@ -100,20 +124,18 @@ export function createPluginMarketRoute(deps: {
           !input ||
           typeof input !== 'object' ||
           typeof input.packageName !== 'string' ||
-          (input.action !== undefined && !['install', 'uninstall', 'update'].includes(input.action)) ||
+          (input.action !== undefined && !['install', 'uninstall', 'update', 'retry-receipt'].includes(input.action)) ||
           (input.requestId !== undefined && typeof input.requestId !== 'string') ||
-          (input.action === 'update' &&
-            (typeof input.requestId !== 'string' ||
-              !/^[a-zA-Z0-9_-]{1,128}$/u.test(input.requestId) ||
-              typeof input.target !== 'string' ||
-              !/^[a-f0-9]{64}$/u.test(input.target)))
+          ((input.action === 'update' || input.action === 'retry-receipt') &&
+            (typeof input.requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/u.test(input.requestId))) ||
+          (input.action === 'update' && (typeof input.target !== 'string' || !/^[a-f0-9]{64}$/u.test(input.target)))
         )
           throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
         const result = await (input.action === 'uninstall'
           ? deps.market.uninstall(actor, input.packageName, origin, controller.signal, input.requestId)
           : input.action === 'update'
             ? deps.market.update(actor, input.packageName, origin, controller.signal, input.requestId!, input.target!)
-            : deps.market.install(actor, input.packageName, origin, controller.signal, input.requestId))
+            : deps.market.install(actor, input.packageName, origin, controller.signal, input.requestId, input.action === 'retry-receipt'))
         if (!response.destroyed) sendCommunityJson(response, 'job' in result ? 202 : 200, result)
         return
       }

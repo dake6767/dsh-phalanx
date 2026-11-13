@@ -4,7 +4,7 @@ import { pluginOfflinePrecheck } from '../src/dsh/plugin-precheck.js'
 
 // Execute the disposable-container script with controlled operating-system exits.
 // DSH activation itself remains covered by the real Linux container tests.
-function startPrecheck() {
+function startPrecheck(rows = [{ moduleName: '@example/slow-plugin', fiberPhase: 'active' }], entries: readonly string[] = []) {
   const child = Object.assign(new EventEmitter(), {
     stdout: new EventEmitter(),
     stderr: new EventEmitter(),
@@ -16,7 +16,7 @@ function startPrecheck() {
   const fetch = vi
     .fn()
     .mockResolvedValueOnce({ status: 303, headers: { getSetCookie: () => ['session=fixture; Path=/'] } })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ result: { ok: true, value: [{ moduleName: '@example/slow-plugin', fiberPhase: 'active' }] } }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ result: { ok: true, value: rows } }) })
     .mockResolvedValueOnce({ ok: true, json: async () => ['fixture-service'] })
   const execute = new Function(
     'spawn',
@@ -31,7 +31,7 @@ function startPrecheck() {
   const result: { status: 'pending' | 'passed' | 'failed'; error?: Error } = { status: 'pending' }
   const completed = execute(
     () => child,
-    async () => JSON.stringify({ packageName: '@example/slow-plugin' }),
+    async (path: string) => JSON.stringify(path === '/artifact/precheck-entries.json' ? entries : { packageName: '@example/slow-plugin' }),
     async () => {},
     fetch,
     setTimeout,
@@ -50,6 +50,27 @@ function startPrecheck() {
 }
 
 afterEach(() => vi.useRealTimers())
+
+it('checks the compiled entry when the original bundle uses a shipped provider', async () => {
+  const provider = { moduleName: '/opt/dsh/skill-provider.js', fiberPhase: 'active', entryId: 'include:platform-layer:platform-own-provider' }
+  const active = startPrecheck([provider], ['platform-own-provider'])
+  const wrong = startPrecheck([provider], ['platform-other-provider'])
+  const inactive = startPrecheck(
+    [
+      { moduleName: '@example/slow-plugin', fiberPhase: 'active' },
+      { ...provider, fiberPhase: 'inactive' },
+    ],
+    ['platform-own-provider'],
+  )
+  for (const probe of [active, wrong, inactive]) {
+    await vi.waitFor(() => expect(probe.child.stdout.listenerCount('data')).toBe(1))
+    probe.child.stdout.emit('data', 'dsh web: http://127.0.0.1:4180/?token=fixture-token\n')
+    await probe.completed
+  }
+  expect(active.result.status).toBe('passed')
+  expect(wrong.result.error?.message).toBe('Plugin did not activate')
+  expect(inactive.result.error?.message).toBe('Plugin did not activate')
+})
 
 it('allows a slow offline boot to activate before the five-minute deadline', async () => {
   vi.useFakeTimers()

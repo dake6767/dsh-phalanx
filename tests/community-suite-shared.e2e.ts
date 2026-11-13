@@ -109,13 +109,15 @@ it('installs a shared dependency with the first suite, keeps it for the second a
     const dependencies = async () =>
       ((await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]).map(row => row.name).sort()
     const install = async (name: string, action: string) => {
-      await card(name).getByRole('button', { name: 'Install', exact: true }).click()
+      await card(name)
+        .getByRole('button', { name: `View catalog entry ${name}`, exact: true })
+        .click()
       const dialog = page.getByRole('dialog', { name })
       await dialog.getByText(`Shared tool · ${action}`, { exact: true }).waitFor()
       await dialog.getByRole('button', { name: 'Install entry', exact: true }).click()
-      await card(name).getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
+      await dialog.getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
+      await dialog.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
     }
-    await card('Suite alpha').getByText('Shared tool', { exact: true }).waitFor()
     await install('Suite alpha', 'Installed together with this tool')
     expect(await page.getByRole('button', { name: 'View catalog entry Shared tool', exact: true }).count()).toBe(0)
     await install('Suite beta', 'Already in the library; reused without preparing again')

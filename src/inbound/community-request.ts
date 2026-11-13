@@ -68,8 +68,8 @@ export function communityAccountActionInput(value: unknown): CommunityAccountAct
 export async function readCommunityForm(request: IncomingMessage): Promise<URLSearchParams> {
   return new URLSearchParams(await read(request, 'application/x-www-form-urlencoded'))
 }
-export async function readCommunityJson(request: IncomingMessage, limit = 16 * 1024): Promise<unknown> {
-  const text = await read(request, 'application/json', limit)
+export async function readCommunityJson(request: IncomingMessage, limit = 16 * 1024, signal?: AbortSignal): Promise<unknown> {
+  const text = await read(request, 'application/json', limit, signal)
   try {
     return JSON.parse(text) as unknown
   } catch {
@@ -77,12 +77,20 @@ export async function readCommunityJson(request: IncomingMessage, limit = 16 * 1
   }
 }
 
-function read(request: IncomingMessage, type: string, limit = 16 * 1024): Promise<string> {
+function read(request: IncomingMessage, type: string, limit = 16 * 1024, signal?: AbortSignal): Promise<string> {
   if (request.headers['content-type']?.split(';')[0]?.trim().toLowerCase() !== type) {
     throw new CommunityRequestError(415, 'Unsupported Media Type', 'media-type-unsupported')
   }
+  signal?.throwIfAborted()
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
+    const abort = () => {
+      oversized = true
+      chunks.length = 0
+      reject(signal?.reason)
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+    request.once('close', () => signal?.removeEventListener('abort', abort))
     let bytes = 0
     let oversized = false
     request.on('data', (chunk: Buffer) => {

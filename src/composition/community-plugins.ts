@@ -1,9 +1,14 @@
+import { MemberNativeServiceSettings } from '../use-cases/member-native-service-settings.js'
+import type { NativePluginInstallTransport, NativeServiceSettingsTransport } from '../ports/member-native-plugins.js'
+import { NativePluginServiceAccess } from '../use-cases/native-plugin-service-access.js'
+import { CatalogPluginArchives } from '../adapters/catalog-plugin-archives.js'
 import { HttpNpmPluginSource } from '../adapters/npm-plugin-source.js'
 import { GithubPluginArchives } from '../adapters/github-plugin-archives.js'
 import { HttpGithubPluginSource } from '../adapters/github-plugin-source.js'
 import { ContainerPluginSourcePacker } from '../adapters/plugin-source-packer.js'
 import { pluginIntakeToken } from '../adapters/plugin-intake-token.js'
 import { PluginIntake } from '../use-cases/plugin-intake.js'
+import { MemberNativePackageCache } from '../adapters/member-native-package-cache.js'
 import { NativeMemberPluginManager } from '../adapters/member-plugin-manager.js'
 import { PlatformDatabase } from '../adapters/platform-database.js'
 import { YamlPluginAccessSyntax } from '../adapters/plugin-access-syntax.js'
@@ -111,6 +116,7 @@ export function createCommunityPlugins(input: {
       expertReferences: transaction => new PostgresExpertReferences(transaction),
     }),
     expertStorage.references,
+    new CatalogPluginArchives(new HttpGithubPluginSource(downloads), uploads),
   )
   const npmSource = new HttpNpmPluginSource(downloads)
   const githubArchives = new GithubPluginArchives(
@@ -137,8 +143,21 @@ export function createCommunityPlugins(input: {
     { accounts, records: installations },
     { library: pluginStore, ready: names => runtimeDependencies.ready(names), runtimeRevision: declaredRuntimeRevision() },
   )
-  const preinstallPolicy = new GroupPluginPreinstalls(accounts, pluginStore, pluginGrants, installations, declaredRuntimeRevision())
+  const preinstallPolicy = new GroupPluginPreinstalls(
+    accounts,
+    pluginStore,
+    pluginGrants,
+    installations,
+    declaredRuntimeRevision(),
+    accessStore.installedServiceOwner.bind(accessStore),
+  )
   return {
+    runtimeDependencies,
+    nativeServiceRevision: () =>
+      JSON.stringify([
+        pluginStore.authorizationRevision(),
+        database.writeRevision(['dsh_phalanx.plugin_deliveries', 'dsh_phalanx.plugin_access_settings', 'dsh_phalanx.plugin_access_secrets']),
+      ]),
     pluginOperations,
     pluginStore,
     accessStore,
@@ -160,7 +179,9 @@ export function createCommunityPlugins(input: {
 
 /** Adds member delivery after the runtime owner and instance actions exist. */
 export function createCommunityPluginMembers(input: {
-  nativeInstallation?: import('../ports/member-native-plugins.js').NativePluginInstallTransport
+  origin: () => URL
+  gatewayOrigin: () => URL
+  nativeInstallation?: NativePluginInstallTransport & NativeServiceSettingsTransport
   pluginLibrary: ReturnType<typeof createCommunityPlugins>
   config: CommunityConfig
   options: CommunityApplicationOptions
@@ -176,6 +197,7 @@ export function createCommunityPluginMembers(input: {
     pluginStore,
     installations,
     selections,
+    accessStore,
     upstreamStore,
     pluginGrants,
     localCopies,
@@ -186,10 +208,37 @@ export function createCommunityPluginMembers(input: {
     pluginOperations,
   } = input.pluginLibrary
   const { downloads } = input
-  const native = new NativeMemberPluginManager(config.runtime, input.nativeInstallation)
+  const cache = config.runtime.container
+    ? new MemberNativePackageCache(config.runtime.container, pluginStore, input.pluginLibrary.runtimeDependencies)
+    : undefined
+  const native = new NativeMemberPluginManager(config.runtime, input.nativeInstallation, cache)
   const nativeManager = typeof options.pluginManager === 'function' ? options.pluginManager(native) : (options.pluginManager ?? native)
   const nativeDownloads = new NativePluginDownloads(accounts, pluginStore, new SignedPluginDownloadTokens(sessionKey), clock, declaredRuntimeRevision())
-  const nativeJobs = new MemberNativePluginJobs(accounts, runtime, new MemberNativePlugins(accounts, nativeDownloads, nativeManager, downloads), installations)
+  const nativeServices = new NativePluginServiceAccess({
+    accounts,
+    library: pluginStore,
+    grants: pluginGrants,
+    installations,
+    services: accessStore,
+    runtime,
+    manager: native,
+    origin: input.origin,
+    gatewayOrigin: input.gatewayOrigin,
+    signingKey: sessionKey,
+    revision: input.pluginLibrary.nativeServiceRevision,
+    runtimeRevision: declaredRuntimeRevision(),
+  })
+  const nativeSettings = input.nativeInstallation
+    ? new MemberNativeServiceSettings(installations, accessStore, nativeServices, input.nativeInstallation)
+    : undefined
+  const nativeJobs = new MemberNativePluginJobs(
+    accounts,
+    runtime,
+    new MemberNativePlugins(accounts, nativeDownloads, nativeManager, downloads),
+    installations,
+    nativeServices,
+    nativeSettings,
+  )
   const preinstallDelivery = new MemberPluginPreinstalls(preinstallPolicy, nativeJobs, runtime, installations)
   const managedAdministration = new ManagedPluginAdministration(
     accounts,
@@ -216,9 +265,22 @@ export function createCommunityPluginMembers(input: {
     localCopies,
     nativeJobs,
     pluginOperations,
+    nativeSettings,
+    preinstallDelivery,
   )
   const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
   const upstreamTransport = new NodePluginUpstreamTransport()
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
-  return { nativeDownloads, nativeJobs, preinstallDelivery, managedAdministration, market, upstreams, upstreamTransport, upstreamTest }
+  return {
+    nativeDownloads,
+    nativeJobs,
+    nativeServices,
+    nativeSettings,
+    preinstallDelivery,
+    managedAdministration,
+    market,
+    upstreams,
+    upstreamTransport,
+    upstreamTest,
+  }
 }

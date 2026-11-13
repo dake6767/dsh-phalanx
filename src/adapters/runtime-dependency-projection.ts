@@ -17,6 +17,8 @@ export class FileRuntimeDependencyProjection {
   ) {}
   async identity(spaceId: string, prepared?: readonly RuntimeDependencyVersion[]): Promise<unknown> {
     const versions = prepared ?? (await this.versions(spaceId))
+    if (versions.some(version => version.nativeCommandPaths))
+      return ['native-path-v1', versions.map(version => [version.id, version.python?.name, version.nativeCommandPaths])]
     return versions.some(version => version.python)
       ? ['python-venv-v1', versions.map(version => [version.id, version.python?.name])]
       : versions.map(version => version.id)
@@ -58,8 +60,10 @@ export class FileRuntimeDependencyProjection {
     try {
       await mkdir(stage, { mode: 0o700 })
       for (const version of versions.filter(version => !version.python))
-        for (const command of version.commands) {
-          const relative = version.commandPaths[command]
+        for (const [command, relative] of [
+          ...version.commands.map(command => [command, version.commandPaths[command]] as const),
+          ...Object.entries(version.nativeCommandPaths ?? {}),
+        ]) {
           if (!relative) throw new Error('Prepared dependency command path is missing')
           await symlink(`${version.mountedPath}/${relative}`, join(stage, command))
         }

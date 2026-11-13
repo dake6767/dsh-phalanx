@@ -9,7 +9,7 @@ import { handleCommunityFailure, sendCommunityJson } from './community-errors.js
 /** A member token requests observation; it never supplies bundle facts or installation authorization. */
 export function createNativePluginHistoryGateway(
   authorization: Pick<CommunityModelAuthorization, 'currentMember'>,
-  history: Pick<MemberNativePluginHistory, 'request'>,
+  history: Pick<MemberNativePluginHistory, 'request' | 'archiveReserved'>,
 ) {
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     if (request.method !== 'POST') {
@@ -27,17 +27,25 @@ export function createNativePluginHistoryGateway(
       if (!value || typeof value !== 'object' || Array.isArray(value))
         throw new BusinessRuleError('invalid', 'Invalid native plugin history request', 'native-plugin-history-invalid')
       const input = value as Record<string, unknown>
+      const archive = input.mode === 'archive'
+      const fields = archive ? ['generation', 'mode', 'integrity'] : ['generation', 'mode']
       if (
-        Object.keys(input).some(key => !['generation', 'mode'].includes(key)) ||
+        Object.keys(input).some(key => !fields.includes(key)) ||
         typeof input.generation !== 'string' ||
         !/^[a-zA-Z0-9_-]{1,120}$/u.test(input.generation) ||
-        (input.mode !== 'read' && input.mode !== 'refresh')
+        (archive
+          ? typeof input.integrity !== 'string' || !/^sha512-[A-Za-z0-9+/]{86}==$/u.test(input.integrity)
+          : input.mode !== 'read' && input.mode !== 'refresh')
       )
         throw new BusinessRuleError('invalid', 'Invalid native plugin history request', 'native-plugin-history-invalid')
       const member = await authorization.currentMember(request.headers['x-api-key'])
       if (member.username !== initial.username || member.spaceId !== initial.spaceId) throw new CommunityModelAccessError('forbidden')
-      const names = await history.request(member, input.generation, input.mode, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]))
-      sendCommunityJson(response, 200, { names })
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])
+      const result =
+        input.mode === 'archive'
+          ? { reserved: await history.archiveReserved(member, input.generation, input.integrity as string, signal) }
+          : { names: await history.request(member, input.generation, input.mode as 'read' | 'refresh', signal) }
+      sendCommunityJson(response, 200, result)
     } catch (error) {
       if (error instanceof CommunityModelAccessError)
         sendCommunityJson(response, error.kind === 'unauthenticated' ? 401 : 403, {

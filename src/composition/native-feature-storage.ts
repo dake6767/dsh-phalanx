@@ -1,3 +1,4 @@
+import { PostgresPluginInstallations } from '../adapters/postgres-plugin-installations.js'
 import { PostgresNativeFeatures } from '../adapters/postgres-native-features.js'
 import { PostgresSpaceActors } from '../adapters/postgres-space-actors.js'
 import { PostgresUnitOfWork } from '../adapters/postgres-unit-of-work.js'
@@ -19,6 +20,7 @@ export function createNativePluginHistoryStorage(database: PlatformDatabase): im
     work: new PostgresUnitOfWork(database, {
       actors: transaction => new PostgresSpaceActors(transaction),
       history: transaction => new PostgresNativePluginHistory(transaction),
+      deliveries: transaction => new PostgresPluginInstallations(transaction),
     }),
   }
 }

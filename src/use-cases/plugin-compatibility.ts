@@ -95,6 +95,6 @@ export class PluginCompatibility {
     const prepared = await this.preparer.prepare(candidate, async () => {}, this.controller.signal)
     this.controller.signal.throwIfAborted()
     assertPreparedPlugin(candidate, prepared, knownIntegrity ?? retained?.integrity)
-    return prepared
+    return retained?.catalogArchiveUrl ? { ...prepared, catalogArchiveUrl: retained.catalogArchiveUrl } : prepared
   }
 }

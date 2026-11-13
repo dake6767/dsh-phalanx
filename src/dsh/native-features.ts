@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { nativePackageManager, nativePackageManagerFile } from './native-package-cache.js'
 import { nativeTerminalAccessModule } from './native-terminal-access.js'
 import { BUILTIN_NATIVE_PRESET_IDS, nativeFeatureCatalog, type NativeFeatureDefinition } from '../domain/native-features.js'
 import { nativePluginPolicyOverlay, nativePluginPolicyModule, type NativePluginPolicyConfiguration } from './native-plugin-policy.js'
@@ -54,6 +55,7 @@ export function nativeFeatureProjection(
 } {
   const files: Record<string, string> = {}
   const entries: { readonly id: string; readonly name: string }[] = []
+  if (policy?.publicKey) files[nativePackageManagerFile] = nativePackageManager(policy.generation)
   if (policy) {
     files['plugin-policy.mjs'] = nativePluginPolicyModule(policy)
     entries.push({ id: 'phalanx-native-plugin-policy', name: join(directory, 'plugin-policy.mjs') })
@@ -72,7 +74,11 @@ export function nativeFeatureProjection(
   }
   return {
     files,
-    patch: [...(entries.length ? [{ insert: entries }, ...entries.map(({ id }) => ({ id, disabled: false }))] : []), ...patch],
+    patch: [
+      ...(entries.length ? [{ insert: entries }, ...entries.map(({ id }) => ({ id, disabled: false }))] : []),
+      ...(policy?.publicKey ? [{ id: 'plugin-manager', config: { pnpmCommand: join(directory, nativePackageManagerFile) } }] : []),
+      ...patch,
+    ],
   }
 }
 

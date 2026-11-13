@@ -1,3 +1,4 @@
+import { executionShortOption } from './execution-command-line.js'
 import { pythonPackagePins } from './python-library.js'
 import {
   normalizeSuiteCatalogDocument,
@@ -12,11 +13,18 @@ import {
 } from './suite-catalog-document.js'
 import { verifySuiteCatalogSignature, type TrustedSuiteCatalogKey } from './suite-catalog-signature.js'
 import { validateSuiteCatalogAdapters, type ValidatedSuiteCatalogAdapter } from './suite-catalog-adapters.js'
-import { suiteEntryViolations } from './suite-catalog-checks.js'
-import type { SuiteCatalogEntry, SuiteCatalogItem } from './suite-catalog.js'
+import { suiteEntryViolations, suiteResourceBindingViolations } from './suite-catalog-checks.js'
+import type { SuiteCatalogEntry, SuiteCatalogExecutionItem, SuiteCatalogItem } from './suite-catalog.js'
 import type { SuiteCatalogRuntimeDependencyItem as SuiteCatalogDocumentRuntimeItem } from './suite-catalog-document.js'
 import { suitePrepareCheckCommand, suitePrepareCommands } from './suite-prepare-commands.js'
-import { satisfiesSemverRange } from './semver.js'
+import { compareSemver, parseSemver, parseSemverRange, satisfiesSemverRange } from './semver.js'
+import { readCatalogPluginArchive } from './suite-plugin.js'
+import { readCatalogResourceBindings } from './suite-resource-bindings.js'
+import { resourceReadiness } from './suite-resource-readiness.js'
+import { readExecutionServiceSlots, readPluginServiceSlots } from './suite-service-slots.js'
+
+const itemExtensionFields = ['archive', 'requiredFiles', 'resourceBindings', 'serviceSlots', 'blockedShortOptions', 'shortOptionsWithValue'] as const
+const misplacedExtension = 'Catalog extension is declared at the wrong level.'
 
 /** Entries the reader refused; the gallery shows them unavailable with the reason. */
 export type SuiteCatalogEntryRejection = 'needs-platform-upgrade' | 'unknown-adapter' | 'invalid-adapter-params' | 'content-hash-mismatch' | 'invalid-entry'
@@ -75,6 +83,8 @@ export function checkUnsignedSuiteCatalog(raw: Record<string, unknown>, platform
 }
 
 function readCheckedSuiteCatalog(raw: Record<string, unknown>, platformVersion: string): SuiteCatalogRead {
+  if (['locked', ...itemExtensionFields].some(key => Object.hasOwn(raw, key)))
+    return { status: 'rejected', reason: 'invalid-document', detail: misplacedExtension }
   const normalized = normalizeSuiteCatalogDocument(raw)
   if (!normalized.okay)
     return {
@@ -106,7 +116,16 @@ function readCheckedSuiteCatalog(raw: Record<string, unknown>, platformVersion: 
       ...(read.problem?.detail ? { unavailableDetail: read.problem.detail } : {}),
     })
   })
-  return { status: 'ok', publishedAt: normalized.document.publishedAt, entries, rejected, skipped }
+  const available = entries.filter(row => !row.unavailableReason).map(row => row.entry)
+  const checked = entries.map(row => {
+    if (row.unavailableReason) return row
+    const [detail] = suiteResourceBindingViolations(row.entry, available)
+    if (!detail) return row
+    const unavailable = { unavailableReason: 'invalid-entry', unavailableDetail: detail } as const
+    rejected.push({ id: row.entry.id, version: row.entry.version, reason: unavailable.unavailableReason, detail })
+    return { ...row, ...unavailable, entry: { ...row.entry, ...unavailable } }
+  })
+  return { status: 'ok', publishedAt: normalized.document.publishedAt, entries: checked, rejected, skipped }
 }
 
 /**
@@ -147,6 +166,133 @@ function readGalleryEntry(
   const adapterCheck = validateSuiteCatalogAdapters(entry.adapters, runtimeItems, suiteAdapterValidationContext(entry))
   if (!adapterCheck.okay) return { entry: convertEntry(entry, []), problem: { reason: adapterCheck.code, detail: adapterCheck.detail } }
   const converted = convertEntry(entry, adapterCheck.adapters)
+  const raw = rawEntry as { readonly locked?: unknown; readonly items: readonly Record<string, unknown>[] }
+  if (itemExtensionFields.some(key => Object.hasOwn(raw, key)) || raw.items.some(item => Object.hasOwn(item, 'locked')))
+    return { entry: converted, problem: { reason: 'invalid-entry', detail: misplacedExtension } }
+  if (Object.hasOwn(raw, 'locked') && (raw.locked !== true || converted.category !== 'dependency' || !requiresCatalogExtensionPlatform(entry.engines.platform)))
+    return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Only dependencies can be locked on platform >=0.1.35.' } }
+  const rawItems = raw.items
+  const items = [...converted.items]
+  for (const [index, item] of items.entries()) {
+    const raw = rawItems[index]!
+    if (hasShortOptionDeclaration(raw) || (item.kind !== 'execution' && Array.isArray(raw.delegated) && raw.delegated.some(hasShortOptionDeclaration)))
+      return { entry: converted, problem: { reason: 'invalid-entry', detail: misplacedExtension } }
+    if (Object.hasOwn(raw, 'archive')) {
+      if (item.kind !== 'plugin') return { entry: converted, problem: { reason: 'invalid-entry', detail: 'An archive can only be declared on a plugin.' } }
+      const archive = readCatalogPluginArchive(raw.archive)
+      if (!archive || !requiresCatalogExtensionPlatform(entry.engines.platform))
+        return {
+          entry: converted,
+          problem: { reason: 'invalid-entry', detail: 'Plugin archives require a GitHub Release asset and engines.platform >=0.1.35.' },
+        }
+      items[index] = { ...item, archive }
+    }
+    if (Object.hasOwn(raw, 'requiredFiles')) {
+      const readiness = item.kind === 'runtime-dependency' && resourceReadiness(item, raw.requiredFiles)
+      if (item.kind !== 'runtime-dependency' || !readiness || !requiresCatalogExtensionPlatform(entry.engines.platform))
+        return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Required files need a checksummed resource and engines.platform >=0.1.35.' } }
+      items[index] = { ...item, ...readiness }
+    }
+    if (Object.hasOwn(raw, 'resourceBindings')) {
+      const plugin = items[index]!
+      const resourceBindings = plugin.kind === 'plugin' && readCatalogResourceBindings(plugin, raw.resourceBindings)
+      if (plugin.kind !== 'plugin' || !resourceBindings || !requiresCatalogExtensionPlatform(entry.engines.platform))
+        return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Resource bindings require pinned plugin dependencies and platform >=0.1.35.' } }
+      const environment = resourceBindings.flatMap(binding =>
+        'name' in binding ? [{ name: binding.name, value: '{dependency:' + binding.dependency + '}' + (binding.path === '.' ? '' : '/' + binding.path) }] : [],
+      )
+      items[index] = { ...plugin, resourceBindings, access: { ...plugin.access, environment: [...plugin.access.environment, ...environment] } }
+    }
+    if (item.kind === 'execution') {
+      const declarations = raw.delegated as readonly Record<string, unknown>[]
+      if (declarations.some(hasShortOptionDeclaration)) {
+        const delegated = withProtectedShortOptions(item, declarations)
+        if (!delegated || !requiresCatalogExtensionPlatform(entry.engines.platform))
+          return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Protected short options require valid flags and platform >=0.1.35.' } }
+        items[index] = { ...item, delegated }
+      }
+    }
+    if (Object.hasOwn(raw, 'serviceSlots')) {
+      const updated = itemWithServiceSlots(items[index]!, raw.serviceSlots)
+      if (!updated || !requiresCatalogExtensionPlatform(entry.engines.platform))
+        return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Service slots require valid fields and engines.platform >=0.1.35.' } }
+      items[index] = updated
+    }
+  }
+  if (converted.category === 'dependency' && raw.locked === true) {
+    const dependency = entry.items[0]
+    if (
+      items.length !== 1 ||
+      dependency?.kind !== 'runtime-dependency' ||
+      dependency.check !== undefined ||
+      dependency.downloads.some(download => download.source !== 'github-assets' && download.source !== 'browser')
+    )
+      return {
+        entry: converted,
+        problem: { reason: 'invalid-entry', detail: 'A locked dependency supplies one checksummed runtime artifact and uses platform readiness checks.' },
+      }
+    return checkEntryViolations({ ...converted, items, locked: true })
+  }
+  return checkEntryViolations({ ...converted, items })
+}
+
+function hasShortOptionDeclaration(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && ['blockedShortOptions', 'shortOptionsWithValue'].some(key => Object.hasOwn(value, key))
+}
+
+function withProtectedShortOptions(item: SuiteCatalogExecutionItem, declarations: readonly Record<string, unknown>[]) {
+  const delegated = []
+  for (const [index, command] of item.delegated.entries()) {
+    const raw = declarations[index]
+    if (!hasShortOptionDeclaration(raw)) {
+      delegated.push(command)
+      continue
+    }
+    const { blockedShortOptions, shortOptionsWithValue } = raw!
+    if (
+      !Array.isArray(blockedShortOptions) ||
+      !blockedShortOptions.length ||
+      !blockedShortOptions.every(executionShortOption) ||
+      blockedShortOptions.length + (command.blockedOptions?.length ?? 0) > 100
+    )
+      return
+    if (
+      shortOptionsWithValue !== undefined &&
+      (!Array.isArray(shortOptionsWithValue) ||
+        !shortOptionsWithValue.length ||
+        shortOptionsWithValue.length > 100 ||
+        !shortOptionsWithValue.every(executionShortOption) ||
+        shortOptionsWithValue.some(option => blockedShortOptions.includes(option)))
+    )
+      return
+    delegated.push({
+      ...command,
+      blockedOptions: [...new Set([...(command.blockedOptions ?? []), ...blockedShortOptions])],
+      ...(shortOptionsWithValue ? { shortOptionsWithValue: [...new Set(shortOptionsWithValue)] } : {}),
+    })
+  }
+  return delegated
+}
+
+function itemWithServiceSlots(item: SuiteCatalogItem, raw: unknown): SuiteCatalogItem | undefined {
+  if (item.kind === 'plugin') {
+    const serviceSlots = readPluginServiceSlots(raw)
+    return serviceSlots ? { ...item, serviceSlots } : undefined
+  }
+  if (item.kind === 'execution') {
+    const serviceSlots = readExecutionServiceSlots(item, raw)
+    return serviceSlots ? { ...item, serviceSlots } : undefined
+  }
+}
+
+function requiresCatalogExtensionPlatform(platform: string): boolean {
+  const floor = parseSemver('0.1.35')!
+  return parseSemverRange(platform)!.every(branch =>
+    branch.some(bound => (bound.operator === '>' || bound.operator === '>=' || bound.operator === '=') && compareSemver(bound.version, floor) >= 0),
+  )
+}
+
+function checkEntryViolations(converted: SuiteCatalogEntry): GalleryEntryRead {
   // The catalog rules run at runtime too, so a signed entry cannot bypass download-source prefixes, checksums or pins.
   const violations = suiteEntryViolations(converted)
   if (violations.length) return { entry: converted, problem: { reason: 'invalid-entry', detail: violations.join('; ') } }

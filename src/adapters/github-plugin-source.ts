@@ -102,6 +102,25 @@ export class HttpGithubPluginSource implements GithubPluginSourcePort {
       if (!complete) await rm(path, { force: true })
     }
   }
+  async releaseAsset(url: string, signal: AbortSignal): Promise<AsyncIterable<Uint8Array>> {
+    const response = await this.fetch(this.downloads.current().githubAssets + url, { accept: 'application/octet-stream' }, signal, 300_000)
+    if (!response.ok || !response.body) {
+      await response.body?.cancel()
+      throw new PluginPreparationError('plugin-github-unavailable')
+    }
+    const body = response.body as AsyncIterable<Uint8Array>
+    return {
+      async *[Symbol.asyncIterator]() {
+        try {
+          yield* body
+        } catch (cause) {
+          throw new PluginPreparationError(signal.aborted ? pluginSourceAbortCode(signal, 'plugin-github-unavailable') : 'plugin-github-unavailable', {
+            cause,
+          })
+        }
+      },
+    }
+  }
   /**
    * Proxies and GitHub redirect archives to codeload or a CDN. Each hop is followed manually and must stay on HTTPS,
    * unless the configured address itself is plain HTTP (a local mirror); credentials are never sent.

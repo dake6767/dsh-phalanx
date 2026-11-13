@@ -20,6 +20,15 @@
 @media (max-width: 600px) {
   .library-form-drawer .drawer__footer { padding-inline: 20px; }
 }
+.catalog-form-drawer .drawer__dialog { overflow: hidden; }
+.catalog-form-drawer .drawer__header, .catalog-form-drawer .drawer__footer { flex: none; }
+.catalog-form-drawer .drawer__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.catalog-form-drawer .catalog-entry-actions { flex-wrap: wrap; }
+.catalog-form-drawer .grant-rows > li { flex-wrap: wrap; }
+.catalog-form-drawer .grant-row-main { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .catalog-form-drawer .drawer__header, .catalog-form-drawer .drawer__body { padding-inline: 20px; }
+}
 .plugin-summary-description { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .plugin-identity { flex-wrap: wrap; }
 .plugin-identity > div { flex-basis: 240px; }

@@ -1,8 +1,9 @@
 import CommunitySuiteInstallDialog from './CommunitySuiteInstallDialog'
 import CommunitySuiteCredentials from './CommunitySuiteCredentials'
+import CommunityInstalledServiceSettings from './CommunityInstalledServiceSettings'
 import CommunitySuiteDetachDialog from './CommunitySuiteDetachDialog'
 import CommunitySuiteUninstallDialog from './CommunitySuiteUninstallDialog'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
 import { Chip } from '@heroui/react/chip'
@@ -10,7 +11,6 @@ import CommunityIcon from './CommunityIcon'
 import type { CommunitySuiteCatalogEntryView, CommunitySuiteCatalogView, CommunitySuiteInstallView } from '../../src/domain/admin-contract'
 import { communitySuites } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
-import CommunityDialog from './CommunityDialog'
 import CommunityMessage from './CommunityMessage'
 import CommunitySuiteUpdateDialog from './CommunitySuiteUpdateDialog'
 import { platformError, type PlatformMessageKey } from '../../src/domain/platform-copy'
@@ -33,16 +33,26 @@ const entryError = (entry: CommunitySuiteCatalogEntryView): PlatformMessageKey |
   return entry.available ? undefined : 'Unavailable on this architecture'
 }
 
-export default function CommunitySuitesPage({ category = 'suite' }: { category?: 'suite' | 'plugin' }) {
+export default function CommunitySuitesPage({ category = 'suite', onLibraryChanged }: { category?: 'suite' | 'plugin'; onLibraryChanged?: () => void }) {
   const { t, locale, errorText } = usePlatformLanguage()
   const [view, setView] = useState<CommunitySuiteCatalogView>()
-  const [installing, setInstalling] = useState<CommunitySuiteCatalogEntryView>()
   const [uninstalling, setUninstalling] = useState<CommunitySuiteCatalogEntryView>()
   const [updating, setUpdating] = useState<CommunitySuiteCatalogEntryView>()
-  const [details, setDetails] = useState<CommunitySuiteCatalogEntryView>()
+  const [selectedEntry, setDetails] = useState<CommunitySuiteCatalogEntryView>()
   const [detaching, setDetaching] = useState<{ id: string; entry: CommunitySuiteInstallView['entries'][number] }>()
+  const [drafts, setDrafts] = useState<Record<string, { dirty: boolean; busy: boolean }>>({})
+  const reportDraft = useCallback((key: string, dirty: boolean, busy: boolean) => {
+    setDrafts(current => {
+      if (!dirty && !busy && !Object.hasOwn(current, key)) return current
+      const next = { ...current }
+      if (dirty || busy) next[key] = { dirty, busy }
+      else delete next[key]
+      return next
+    })
+  }, [])
   const [error, setError] = useState<unknown>()
   const [revision, setRevision] = useState(0)
+  const lastInstalls = useRef<string | undefined>(undefined)
   const refresh = () => setRevision(value => value + 1)
   useEffect(() => {
     const controller = new AbortController()
@@ -51,6 +61,9 @@ export default function CommunitySuitesPage({ category = 'suite' }: { category?:
       try {
         const next = await communitySuites(controller.signal)
         if (controller.signal.aborted) return
+        const settled = JSON.stringify(next.installations.filter(row => row.status === 'installed').map(row => [row.id, row.version, row.entries]))
+        if (lastInstalls.current !== undefined && lastInstalls.current !== settled) onLibraryChanged?.()
+        lastInstalls.current = settled
         setView(next)
         setError(undefined)
         if (next.installations.some(row => row.status === 'installing' || row.status === 'uninstalling' || row.status === 'updating'))
@@ -66,15 +79,18 @@ export default function CommunitySuitesPage({ category = 'suite' }: { category?:
       controller.abort()
       if (timer) clearTimeout(timer)
     }
-  }, [revision])
+  }, [revision, onLibraryChanged])
   const entries = view?.entries ?? []
   const visible = entries.filter(entry => entry.category === category)
+  const details = entries.find(entry => entry.id === selectedEntry?.id) ?? selectedEntry
   const installationOf = (entry: CommunitySuiteCatalogEntryView): CommunitySuiteInstallView | undefined => view?.installations.find(row => row.id === entry.id)
+  const selectedInstallation = details ? installationOf(details) : undefined
+  const installedBusy = Object.values(drafts).some(draft => draft.busy)
+  const installedDraft = Object.values(drafts).some(draft => draft.dirty)
   const statusOf = (entry: CommunitySuiteCatalogEntryView): { label: string; tone: 'success' | 'warning' | 'danger' | 'default'; busy: boolean } => {
     const installation = installationOf(entry)
     if (!installation) return { label: t('Not installed'), tone: 'default', busy: false }
     if (installation.status === 'installed' && entry.updateAvailable) return { label: t('Update available'), tone: 'success', busy: false }
-    if (installation.status === 'installed' && installation.missingCredentials?.length) return { label: t('Missing credentials'), tone: 'warning', busy: false }
     if (installation.status === 'installed') return { label: t('Installed'), tone: 'success', busy: false }
     if (installation.status === 'failed') return { label: t('Installation failed. You can retry.'), tone: 'danger', busy: false }
     return {
@@ -83,6 +99,7 @@ export default function CommunitySuitesPage({ category = 'suite' }: { category?:
       busy: true,
     }
   }
+  const selectedStatus = details ? statusOf(details) : undefined
   const titleOf = (id: string): string => entries.find(row => row.id === id)?.title[locale] ?? id
   // Installation records stay usable when the catalog is unreachable or a whole document was rejected.
   const catalogIds = new Set(entries.map(entry => entry.id))
@@ -177,32 +194,6 @@ export default function CommunitySuitesPage({ category = 'suite' }: { category?:
                     </p>
                     <Card.Description>{entry.description[locale]}</Card.Description>
                   </Card.Header>
-                  {entry.dependencies?.length || entry.serviceAddresses?.length || entry.commands.length ? (
-                    <dl className="catalog-entry-facts">
-                      {entry.dependencies?.length ? (
-                        <div>
-                          <dt>{t('Shared dependencies')}</dt>
-                          <dd>
-                            {entry.dependencies.map(id => (
-                              <span key={id}>{titleOf(id)}</span>
-                            ))}
-                          </dd>
-                        </div>
-                      ) : null}
-                      {entry.commands.length ? (
-                        <div>
-                          <dt>{t('Commands')}</dt>
-                          <dd>{entry.commands.join(', ')}</dd>
-                        </div>
-                      ) : null}
-                      {entry.serviceAddresses?.length ? (
-                        <div>
-                          <dt>{t('Service addresses')}</dt>
-                          <dd>{entry.serviceAddresses.join(', ')}</dd>
-                        </div>
-                      ) : null}
-                    </dl>
-                  ) : null}
                   {entryError(entry) ? <p className="plugin-card-error">{t(entryError(entry)!)}</p> : null}
                   {entry.unavailableDetail ? <p className="plugin-card-error">{entry.unavailableDetail}</p> : null}
                   {manualOf(entry) !== undefined && installation === undefined ? (
@@ -218,15 +209,7 @@ export default function CommunitySuitesPage({ category = 'suite' }: { category?:
                       <span role="status">{status.label}</span>
                     </Chip>
                     <div className="catalog-entry-actions">
-                      {installation === undefined ? (
-                        <Button className="relative z-10" size="sm" variant="secondary" isDisabled={!entry.available} onPress={() => setInstalling(entry)}>
-                          {t(manualOf(entry) !== undefined ? 'Switch to the catalog version' : 'Install')}
-                        </Button>
-                      ) : installation.status === 'failed' ? (
-                        <Button className="relative z-10" size="sm" variant="secondary" onPress={() => setInstalling(entry)}>
-                          {t('Retry install')}
-                        </Button>
-                      ) : installation.status === 'installed' ? (
+                      {installation?.status === 'installed' ? (
                         <>
                           {entry.updateAvailable ? (
                             <Button className="relative z-10" size="sm" variant="primary" onPress={() => setUpdating(entry)}>
@@ -294,7 +277,10 @@ export default function CommunitySuitesPage({ category = 'suite' }: { category?:
                     </li>
                   ))}
                 </ul>
-                <div>
+                <div className="catalog-entry-actions">
+                  <Button size="sm" variant="secondary" onPress={() => setDetails(outsideEntry(row))}>
+                    {t('Catalog entry details')}
+                  </Button>
                   <Button
                     size="sm"
                     variant="secondary"
@@ -308,17 +294,6 @@ export default function CommunitySuitesPage({ category = 'suite' }: { category?:
             ))}
           </ul>
         </section>
-      ) : null}
-      {installing ? (
-        <CommunitySuiteInstallDialog
-          entry={installing}
-          titleOf={titleOf}
-          onClose={() => setInstalling(undefined)}
-          onSubmitted={() => {
-            setInstalling(undefined)
-            refresh()
-          }}
-        />
       ) : null}
       {detaching ? (
         <CommunitySuiteDetachDialog
@@ -356,151 +331,173 @@ export default function CommunitySuitesPage({ category = 'suite' }: { category?:
         />
       ) : null}
       {details ? (
-        <CommunityDialog
-          drawer
-          drawerClassName="plugin-drawer library-form-drawer"
-          title={details.title[locale]}
-          closeLabel={t('Close catalog entry details')}
+        <CommunitySuiteInstallDialog
+          key={details.id}
+          entry={details}
+          installation={selectedInstallation}
+          installedDraft={installedDraft}
+          installedBusy={installedBusy}
+          onAccepted={setView}
+          refreshError={error}
+          titleOf={titleOf}
           onClose={() => setDetails(undefined)}
+          onSubmitted={refresh}
         >
-          <p className="plugin-summary-description">{details.description[locale]}</p>
-          <div className="plugin-settings-panel">
-            <section className="plugin-detail-section">
-              <div className="plugin-section-heading">
-                <h2>{t('Installation record')}</h2>
-                <Chip size="sm" variant="soft" color={statusOf(details).tone}>
-                  <span role="status">{statusOf(details).label}</span>
-                </Chip>
-              </div>
-              {installationOf(details)?.failureCode === 'skill-catalog-limit-exceeded' ? (
-                <CommunityMessage role="alert" status="danger" title={platformError(locale, { code: 'skill-catalog-limit-exceeded', error: '' })} />
-              ) : null}
-              <dl className="catalog-entry-facts">
-                <div>
-                  <dt>{t('Source')}</dt>
-                  <dd>{details.source[locale]}</dd>
+          {setupPending => (
+            <div className="plugin-settings-panel">
+              <section className="plugin-detail-section">
+                <div className="plugin-section-heading">
+                  <h2>{t('Installation record')}</h2>
+                  <Chip size="sm" variant="soft" color={selectedStatus?.tone}>
+                    <span role="status">{selectedStatus?.label}</span>
+                  </Chip>
                 </div>
-                <div>
-                  <dt>{t('Version')}</dt>
-                  <dd>
-                    {installationOf(details)?.version ?? details.version}
-                    {details.updateAvailable ? ` → ${details.version}` : ''}
-                  </dd>
-                </div>
-                {details.plugin ? (
-                  <div>
-                    <dt>{t('Package')}</dt>
-                    <dd>{details.plugin.packageName}</dd>
-                  </div>
+                {installationOf(details)?.failureCode === 'skill-catalog-limit-exceeded' ? (
+                  <CommunityMessage role="alert" status="danger" title={platformError(locale, { code: 'skill-catalog-limit-exceeded', error: '' })} />
                 ) : null}
-                {details.packName ? (
-                  <div>
-                    <dt>{t('Skill pack')}</dt>
-                    <dd>{details.packName}</dd>
-                  </div>
-                ) : null}
-                {details.identity ? (
-                  <div>
-                    <dt>{t('Identity')}</dt>
-                    <dd>{details.identity[locale]}</dd>
-                  </div>
-                ) : null}
-                {details.dependencies?.length ? (
-                  <div>
-                    <dt>{t('Shared dependencies')}</dt>
-                    <dd>{details.dependencies.map(titleOf).join(', ')}</dd>
-                  </div>
-                ) : null}
-                {details.serviceAddresses?.length ? (
-                  <div>
-                    <dt>{t('Service addresses')}</dt>
-                    <dd>{details.serviceAddresses.join(', ')}</dd>
-                  </div>
-                ) : null}
-                {details.execution ? (
-                  <div>
-                    <dt>{t('Delegated execution')}</dt>
-                    <dd>
-                      {details.execution.commands
-                        .map(row => row.command + (row.blocked.length ? ` (${t('Blocked first arguments: {names}', { names: row.blocked.join(' ') })})` : ''))
-                        .join(', ')}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
-              {installationOf(details)?.manualDependencies?.length ? (
-                <ul className="grant-rows">
-                  {installationOf(details)!.manualDependencies!.map(row => (
-                    <li key={row.id}>
-                      <div className="grant-row-main">
-                        <strong>{titleOf(row.id)}</strong>
-                        <p>{t('Your manual dependency {name} is used; its version is not pinned', { name: row.name })}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </section>
-            {details.execution && installationOf(details)?.status === 'installed' ? (
-              <section className="plugin-detail-section">
-                <CommunitySuiteCredentials entry={details} installation={installationOf(details)!} onSaved={refresh} />
-              </section>
-            ) : null}
-            {installationOf(details)?.entries.length ? (
-              <section className="plugin-detail-section">
-                <h2>{t('Installed entries')}</h2>
-                <p className="section-note">{t('Catalog entries are managed together and remain read-only until detached.')}</p>
-                <ul className="grant-rows">
-                  {installationOf(details)!.entries.map(entry => (
-                    <li key={entry.kind + ':' + entry.name}>
-                      <div className="grant-row-main">
-                        <strong>{entry.name}</strong>
-                        <p>{t(kindLabels[entry.kind])}</p>
-                      </div>
-                      {installationOf(details)!.status === 'installed' ? (
-                        <Button
-                          size="sm"
-                          variant="tertiary"
-                          aria-label={t('Detach {name} from {tool}', { name: entry.name, tool: details.title[locale] })}
-                          onPress={() => setDetaching({ id: details.id, entry })}
-                        >
-                          {t('Detach')}
-                        </Button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : (
-              <section className="plugin-detail-section">
-                <p className="section-note">{t('Catalog entries are managed together and remain read-only until detached.')}</p>
-              </section>
-            )}
-            {installationOf(details)?.replaced?.length ? (
-              <section className="plugin-detail-section">
-                <h2>{t('Replaced manual entries')}</h2>
-                <ul className="grant-rows">
-                  {installationOf(details)!.replaced!.map(row => (
-                    <li key={row.kind + ':' + row.name}>
-                      <div className="grant-row-main">
-                        <strong>{row.name}</strong>
-                        <p>{t(kindLabels[row.kind])}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-            {installationOf(details)?.log ? (
-              <section className="plugin-detail-section">
+                {entryError(details) && !selectedInstallation ? <p className="plugin-card-error">{t(entryError(details)!)}</p> : null}
+                {details.unavailableDetail ? <p className="plugin-card-error">{details.unavailableDetail}</p> : null}
                 <details className="mcp-preparation-log">
-                  <summary>{t('Task log')}</summary>
-                  <pre className="plugin-preparation-log">{installationOf(details)!.log}</pre>
+                  <summary>{t('Technical details')}</summary>
+                  <dl className="catalog-entry-facts">
+                    <div>
+                      <dt>{t('Source')}</dt>
+                      <dd>{details.source[locale]}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('Catalog version')}</dt>
+                      <dd>
+                        {selectedInstallation?.version ?? details.version}
+                        {details.updateAvailable ? ` → ${details.version}` : ''}
+                      </dd>
+                    </div>
+                    {details.plugin ? (
+                      <div>
+                        <dt>{t('Package')}</dt>
+                        <dd>
+                          {details.plugin.packageName}@{details.plugin.version}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {details.packName ? (
+                      <div>
+                        <dt>{t('Skill pack')}</dt>
+                        <dd>{details.packName}</dd>
+                      </div>
+                    ) : null}
+                    {details.serviceAddresses?.length ? (
+                      <div>
+                        <dt>{t('Service addresses')}</dt>
+                        <dd>{details.serviceAddresses.join(', ')}</dd>
+                      </div>
+                    ) : null}
+                    {details.execution ? (
+                      <div>
+                        <dt>{t('Delegated execution')}</dt>
+                        <dd>
+                          {details.execution.commands
+                            .map(
+                              row => row.command + (row.blocked.length ? ` (${t('Blocked first arguments: {names}', { names: row.blocked.join(' ') })})` : ''),
+                            )
+                            .join(', ')}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
                 </details>
+                {selectedInstallation?.dependencies?.length ? (
+                  <ul className="grant-rows">
+                    {selectedInstallation.dependencies
+                      .filter(id => !selectedInstallation.manualDependencies?.some(row => row.id === id))
+                      .map(id => (
+                        <li key={id}>{titleOf(id)}</li>
+                      ))}
+                  </ul>
+                ) : null}
+                {installationOf(details)?.manualDependencies?.length ? (
+                  <ul className="grant-rows">
+                    {installationOf(details)!.manualDependencies!.map(row => (
+                      <li key={row.id}>
+                        <div className="grant-row-main">
+                          <strong>{titleOf(row.id)}</strong>
+                          <p>{t('Your manual dependency {name} is used; its version is not pinned', { name: row.name })}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </section>
-            ) : null}
-          </div>
-        </CommunityDialog>
+              {selectedInstallation?.status === 'installed' && selectedInstallation.execution?.variables?.length ? (
+                <section className="plugin-detail-section">
+                  <CommunitySuiteCredentials
+                    key={JSON.stringify([selectedInstallation.version, selectedInstallation.contentHash])}
+                    entry={details}
+                    installation={selectedInstallation}
+                    onSaved={refresh}
+                    onDraft={reportDraft}
+                  />
+                </section>
+              ) : null}
+              {!setupPending && selectedInstallation?.status === 'installed'
+                ? selectedInstallation.entries.map(({ kind, name }) =>
+                    kind === 'execution' || kind === 'plugin' ? (
+                      <CommunityInstalledServiceSettings key={kind + ':' + name} kind={kind} name={name} onDraft={reportDraft} />
+                    ) : null,
+                  )
+                : null}
+              {installationOf(details)?.entries.length ? (
+                <section className="plugin-detail-section">
+                  <h2>{t('Installed entries')}</h2>
+                  <p className="section-note">{t('Catalog entries are managed together and remain read-only until detached.')}</p>
+                  <ul className="grant-rows">
+                    {installationOf(details)!.entries.map(entry => (
+                      <li key={entry.kind + ':' + entry.name}>
+                        <div className="grant-row-main">
+                          <strong>{entry.name}</strong>
+                          <p>{t(kindLabels[entry.kind])}</p>
+                        </div>
+                        {installationOf(details)!.status === 'installed' ? (
+                          <Button
+                            size="sm"
+                            variant="tertiary"
+                            aria-label={t('Detach {name} from {tool}', { name: entry.name, tool: details.title[locale] })}
+                            isDisabled={installedDraft || installedBusy}
+                            onPress={() => setDetaching({ id: details.id, entry })}
+                          >
+                            {t('Detach')}
+                          </Button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+              {installationOf(details)?.replaced?.length ? (
+                <section className="plugin-detail-section">
+                  <h2>{t('Replaced manual entries')}</h2>
+                  <ul className="grant-rows">
+                    {installationOf(details)!.replaced!.map(row => (
+                      <li key={row.kind + ':' + row.name}>
+                        <div className="grant-row-main">
+                          <strong>{row.name}</strong>
+                          <p>{t(kindLabels[row.kind])}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+              {installationOf(details)?.log ? (
+                <section className="plugin-detail-section">
+                  <details className="mcp-preparation-log">
+                    <summary>{t('Task log')}</summary>
+                    <pre className="plugin-preparation-log">{installationOf(details)!.log}</pre>
+                  </details>
+                </section>
+              ) : null}
+            </div>
+          )}
+        </CommunitySuiteInstallDialog>
       ) : null}
     </div>
   )

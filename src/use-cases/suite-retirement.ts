@@ -1,3 +1,5 @@
+import { disableInstalledServiceBackends } from '../domain/installed-services.js'
+import { detachedExecutionConfiguration } from '../domain/execution-service-environment.js'
 import { isDeepStrictEqual } from 'node:util'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
@@ -96,6 +98,7 @@ export class SuiteRetirement {
         const record = await rows.installs.lock(installed.record.id, installed.revision),
           origin = suiteInstallOrigin(record.id)
         if (!['installed', 'failed'].includes(record.status)) throw changed()
+        if (record.locked) throw new BusinessRuleError('conflict', 'A locked resource cannot be detached.', 'suite-catalog-invalid')
         if (
           (await rows.installs.list()).some(
             row => row.record.id !== record.id && row.record.dependencies?.includes(record.id) && !['installed', 'failed'].includes(row.record.status),
@@ -134,17 +137,20 @@ export class SuiteRetirement {
           await rows.packs.store.save(manual, row.rowRevision)
         }
         for (const row of before.plugins.filter(row => includes('plugin', row.packageName))) {
-          const { suiteOrigin, suiteAppliedAccess, ...manual } = row
+          const { suiteOrigin, suiteAppliedAccess, suiteResourceEnvironment, suiteResourceBindings, ...manual } = row
           void suiteOrigin
           void suiteAppliedAccess
+          void suiteResourceEnvironment
+          void suiteResourceBindings
+          const services = await rows.pluginAccess.installedServices?.(row.packageName)
+          if (services)
+            await rows.pluginAccess.saveInstalledServices?.(row.packageName, origin, disableInstalledServiceBackends(services.configuration), services.revision)
           await rows.plugins.save(manual)
         }
         for (const row of before.execution.filter(row =>
           targets.some(target => target.kind === 'execution' && row.owner === suiteExecutionOwner(target.name)),
         )) {
-          const { suiteOrigin, ...manual } = row.configuration
-          void suiteOrigin
-          await rows.execution.save(row.owner, manual)
+          await rows.execution.save(row.owner, detachedExecutionConfiguration(row.configuration))
         }
         const scope = this.dependencies.transaction(rows.runtime, rows.runtimeReferences)
         for (const target of targets.filter(row => row.kind === 'runtime-dependency')) await scope.mutations.detachManaged(origin, target.name)

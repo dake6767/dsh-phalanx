@@ -1,11 +1,14 @@
 import { DSH_BUNDLE_LIST, DSH_BUNDLE_REMOVE } from '../dsh/plugin-manager-protocol.js'
 import type {
   NativePluginInstallTransport,
+  NativePluginCache,
   MemberNativePluginManagerPort,
   NativePluginApplication,
   NativePluginInstallPhase,
   NativePluginReplacement,
 } from '../ports/member-native-plugins.js'
+import type { PluginIdentity } from '../domain/plugin-library.js'
+import type { MemberNativePackageCache } from './member-native-package-cache.js'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -17,6 +20,7 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
   constructor(
     private readonly runtime?: Pick<CommunityRuntimeConfig, 'container'>,
     private readonly installation?: NativePluginInstallTransport,
+    private readonly cache?: Pick<MemberNativePackageCache, 'use'>,
   ) {}
   async list(instance: CommunityUserInstance, origin: URL, signal: AbortSignal) {
     const rows = (await this.rpc(instance, origin, DSH_BUNDLE_LIST, {}, signal, 10000)) as Array<{
@@ -57,28 +61,37 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
     origin: URL,
     archive: { readonly url: string; readonly integrity: string; readonly authorizationUrl: string },
     replacement: NativePluginReplacement,
-    options: { readonly registry: string; readonly requestId: string; readonly progress?: (phase: NativePluginInstallPhase) => void },
+    options: {
+      readonly registry: string
+      readonly requestId: string
+      readonly identity?: PluginIdentity
+      readonly progress?: (phase: NativePluginInstallPhase) => void
+    },
     signal: AbortSignal,
   ): Promise<NativePluginApplication> {
     const path = await this.receive(instance, archive, options.progress, signal)
     signal.throwIfAborted()
     options.progress?.('installing')
     // Once dispatched, a signed repeat observes the same native operation after a lost response.
-    const input = {
-      spec: path,
-      registry: options.registry,
-      requestId: options.requestId,
-      replacement: { ...replacement, authorizationUrl: archive.authorizationUrl },
-    }
-    let result: unknown
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        result = await this.installation!.install(instance, origin, input, AbortSignal.timeout(660000))
-        break
-      } catch {
-        if (attempt === 1) throw this.replacementFailure('restore-failed', 'native-connection-failed')
+    const install = async (cache?: NativePluginCache) => {
+      const input = {
+        spec: path,
+        registry: options.registry,
+        requestId: options.requestId,
+        replacement: { ...replacement, authorizationUrl: archive.authorizationUrl },
+        ...(cache ? { cache } : {}),
       }
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          return await this.installation!.install(instance, origin, input, AbortSignal.timeout(660000))
+        } catch {
+          if (attempt === 1) throw this.replacementFailure('restore-failed', 'native-connection-failed')
+        }
+      }
+      throw this.replacementFailure('restore-failed', 'native-connection-failed')
     }
+    const identity = { packageName: replacement.packageName, version: replacement.next.version }
+    const result = this.cache ? await this.cache.use(instance, identity, archive.integrity, signal, install) : await install()
     const outcome = result as { replacement?: string; reason?: string; recovery?: string; restartRequired?: boolean } | undefined
     if (outcome?.replacement) throw this.replacementFailure(outcome.replacement, outcome.reason, outcome.recovery, outcome.restartRequired)
     return this.application(result)
@@ -87,19 +100,31 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
     instance: CommunityUserInstance,
     origin: URL,
     archive: { readonly url: string; readonly integrity: string },
-    options: { readonly registry: string; readonly requestId: string; readonly progress?: (phase: NativePluginInstallPhase) => void },
+    options: {
+      readonly registry: string
+      readonly requestId: string
+      readonly identity?: PluginIdentity
+      readonly progress?: (phase: NativePluginInstallPhase) => void
+    },
     signal: AbortSignal,
   ): Promise<NativePluginApplication> {
     const path = await this.receive(instance, archive, options.progress, signal)
     options.progress?.('installing')
     let result: unknown
     try {
-      result = await this.installation!.install(
-        instance,
-        origin,
-        { spec: path, registry: options.registry, requestId: options.requestId },
-        AbortSignal.any([signal, AbortSignal.timeout(300000)]),
-      )
+      const install = async (cache?: NativePluginCache) => {
+        const input = { spec: path, registry: options.registry, requestId: options.requestId, ...(cache ? { cache } : {}) }
+        for (let attempt = 0; attempt < 2; attempt++) {
+          signal.throwIfAborted()
+          try {
+            return await this.installation!.install(instance, origin, input, AbortSignal.any([signal, AbortSignal.timeout(300000)]))
+          } catch (error) {
+            if (attempt === 1) throw error
+          }
+        }
+        throw this.failure('native-connection-failed')
+      }
+      result = this.cache ? await this.cache.use(instance, options.identity, archive.integrity, signal, install) : await install()
     } catch {
       signal.throwIfAborted()
       throw this.failure('native-connection-failed')

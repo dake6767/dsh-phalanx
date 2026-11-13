@@ -1,3 +1,5 @@
+import { detachedExecutionConfiguration, executionEnabledForDisplay, updateExecutionServiceDefinition } from '../domain/execution-service-environment.js'
+import { configureServiceBackend, installedServiceConflict, installedServiceView } from '../domain/installed-services.js'
 import type { CommunityExecutionInput, CommunityExecutionView } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
@@ -121,7 +123,8 @@ export class ExecutionAdministration {
     replacing: readonly SuiteExecutionSnapshot[] = [],
   ): Promise<void> {
     if (this.work) return this.atomic(scoped => scoped.commitSuiteExecution(origin, owner, template, credentials, replacing))
-    if (!this.owners.get(owner)) throw new BusinessRuleError('missing', 'Execution owner is unavailable', 'skill-unavailable')
+    const target = this.owners.get(owner)
+    if (!target) throw new BusinessRuleError('missing', 'Execution owner is unavailable', 'skill-unavailable')
     const currentRows = new Map((await this.store.list()).map(row => [row.owner, row.configuration]))
     const manual = (name: string) => {
       const row = currentRows.get(name)
@@ -142,6 +145,20 @@ export class ExecutionAdministration {
       const config = row.owner !== owner ? manual(row.owner) : undefined
       return config?.commands.some(next => commands.has(next.command)) ? [{ owner: row.owner, config }] : []
     })
+    if (
+      template.services &&
+      others.some(
+        ({ config }) =>
+          config.variables.some(row => row.value && !template.variables.includes(row.name)) ||
+          config.services?.settings.some(row => Object.values(row.values).some(Boolean)) ||
+          Object.values(config.services?.legacyValues ?? {}).some(Boolean),
+      )
+    )
+      throw new BusinessRuleError(
+        'conflict',
+        'Clear the previous skill owner’s service settings before confirming this replacement.',
+        'suite-replace-unconfirmed',
+      )
     for (const other of others) await this.store.save(other.owner, { ...other.config, enabled: false, suiteOrigin: origin })
     // Rollback removes the configuration, so a retried install starts from the wizard's values; replaced manual
     // configurations contribute the credentials they already saved.
@@ -151,13 +168,8 @@ export class ExecutionAdministration {
     // Variables only the manual configuration declared also stay until the install settles; the delegated command
     // already received them before the takeover.
     const extra = kept?.variables.filter(row => !template.variables.includes(row.name) && row.value !== '') ?? []
-    await this.saveSuite(
-      owner,
-      { commands: template.commands, variables, runtimeDependencies: template.runtimeDependencies, optionalVariables: template.optionalVariables ?? [] },
-      origin,
-      undefined,
-      extra,
-    )
+    const services = template.services ? updateExecutionServiceDefinition(template, target.version, kept) : undefined
+    await this.saveSuite(owner, { ...template, variables, ...(services ? { services } : {}) }, origin, undefined, extra)
   }
   /** Snapshot of a suite-owned configuration, so an update can put it back. */
   async suiteOwnedSnapshot(origin: string, owner: string): Promise<SuiteExecutionSnapshot | undefined> {
@@ -179,7 +191,10 @@ export class ExecutionAdministration {
     const variables = template.variables.map(name => ({ name, secret: true, value: current.variables.find(row => row.name === name)?.value ?? '' }))
     // Values of variables the new version dropped stay until the update settles, so a failure can restore them.
     const dropped = current.variables.filter(row => !template.variables.includes(row.name) && row.value !== '')
-    const enabled = current.enabled && suiteExecutionReady(variables, template.optionalVariables)
+    const target = this.owners.get(owner)
+    if (!target) throw new BusinessRuleError('missing', 'Execution owner is unavailable', 'skill-unavailable')
+    const services = updateExecutionServiceDefinition(template, target.version, current)
+    const enabled = Boolean(services) || (current.enabled && suiteExecutionReady(variables, template.optionalVariables))
     const configuration = await this.validate(
       owner,
       {
@@ -191,7 +206,12 @@ export class ExecutionAdministration {
       },
       current,
     )
-    await this.store.save(owner, { ...configuration, variables: [...configuration.variables, ...dropped], suiteOrigin: origin })
+    await this.store.save(owner, {
+      ...configuration,
+      variables: [...configuration.variables, ...dropped],
+      suiteOrigin: origin,
+      ...(services ? { services } : {}),
+    })
     return this.changed()
   }
   /** Puts a suite configuration back as an update found it; the values it held are still in the store. */
@@ -234,7 +254,13 @@ export class ExecutionAdministration {
     const variables = current.variables.map(row => ({ name: row.name, secret: row.secret, value: credentials[row.name] ?? row.value }))
     await this.saveSuite(
       owner,
-      { commands: current.commands, variables, runtimeDependencies: current.runtimeDependencies ?? [], optionalVariables: current.optionalVariables ?? [] },
+      {
+        ...(current.services ? { services: current.services } : {}),
+        commands: current.commands,
+        variables,
+        runtimeDependencies: current.runtimeDependencies ?? [],
+        optionalVariables: current.optionalVariables ?? [],
+      },
       origin,
       current,
     )
@@ -250,9 +276,7 @@ export class ExecutionAdministration {
   async detachSuiteExecution(origin: string, owner: string): Promise<void> {
     const current = await this.store.get(owner)
     if (!current || current.suiteOrigin !== origin) return
-    const { suiteOrigin, ...detached } = current
-    void suiteOrigin
-    await this.store.save(owner, detached)
+    await this.store.save(owner, detachedExecutionConfiguration(current))
     await this.changed()
   }
   /** What a takeover needs to put a manual configuration back; secret values stay in this store. */
@@ -303,7 +327,8 @@ export class ExecutionAdministration {
   async suiteExecutionStatus(owner: string) {
     const current = await this.store.get(owner)
     return {
-      enabled: current?.enabled ?? false,
+      enabled: executionEnabledForDisplay(current),
+      variables: current?.variables.map(row => row.name) ?? [],
       configuredVariables: current?.variables.filter(row => row.value !== '').map(row => row.name) ?? [],
       missingCredentials: current?.variables.filter(row => row.value === '' && !current.optionalVariables?.includes(row.name)).map(row => row.name) ?? [],
     }
@@ -329,6 +354,7 @@ export class ExecutionAdministration {
   private async saveSuite(
     owner: string,
     value: {
+      readonly services?: SuiteExecutionTemplate['services']
       readonly commands: SuiteExecutionTemplate['commands']
       readonly variables: readonly { name: string; secret: boolean; value: string }[]
       readonly runtimeDependencies: readonly string[]
@@ -341,7 +367,7 @@ export class ExecutionAdministration {
     const configuration = await this.validate(
       owner,
       {
-        enabled: suiteExecutionReady(value.variables, value.optionalVariables),
+        enabled: Boolean(value.services) || suiteExecutionReady(value.variables, value.optionalVariables),
         optionalVariables: value.optionalVariables ?? [],
         commands: value.commands.map(row => ({ ...row, blocked: [...row.blocked] })),
         variables: [...value.variables],
@@ -349,7 +375,16 @@ export class ExecutionAdministration {
       },
       previous,
     )
-    await this.store.save(owner, { ...configuration, variables: [...configuration.variables, ...retainedVariables], suiteOrigin: origin })
+    await this.store.save(
+      owner,
+      {
+        ...configuration,
+        variables: [...configuration.variables, ...retainedVariables],
+        suiteOrigin: origin,
+        ...(value.services ? { services: value.services } : {}),
+      },
+      previous?.rowRevision,
+    )
     await this.changed()
   }
   private async validate(owner: string, input: CommunityExecutionInput, previous?: ExecutionConfiguration) {
@@ -388,12 +423,14 @@ export class ExecutionAdministration {
         ).flat()
       : []
     const preparation = await this.preparation?.view(owner)
-    const { contributionReceipt, approvedContribution, rowRevision, ...display } = value as typeof value & { contributionReceipt?: unknown }
+    const { contributionReceipt, approvedContribution, rowRevision, services, ...display } = value as typeof value & { contributionReceipt?: unknown }
     void contributionReceipt
     void approvedContribution
     void rowRevision
     const result = {
       ...display,
+      enabled: executionEnabledForDisplay(value),
+      ...(services ? { hasInstalledServices: true as const } : {}),
       ...(!executionPreparationApproved(current, value) ? { awaitingPreparation: true } : {}),
       ...(unavailable.length ? { unavailableCommands: unavailable } : {}),
       ...(preparation
@@ -411,13 +448,32 @@ export class ExecutionAdministration {
     }
     return contributionReceipt ? redactContributionDeclaration(result) : result
   }
+  async services(actor: CommunityAccountActor, owner: string) {
+    await this.assertAdmin(actor, owner)
+    const current = await this.store.get(owner)
+    if (!current?.services) throw new BusinessRuleError('missing', 'This catalog service is not installed.', 'suite-not-installed')
+    return { ...installedServiceView(current.services), revision: current.rowRevision ?? 'none' }
+  }
+  async saveServices(actor: CommunityAccountActor, owner: string, revision: string, change: unknown) {
+    await this.assertAdmin(actor, owner)
+    const current = await this.store.get(owner)
+    if (!current?.services) throw new BusinessRuleError('missing', 'This catalog service is not installed.', 'suite-not-installed')
+    if ((current.rowRevision ?? 'none') !== revision) throw installedServiceConflict()
+    const services = configureServiceBackend(current.services, change)
+    if (!current.suiteOrigin && services.settings.some(row => row.enabled))
+      throw new BusinessRuleError('invalid', 'Detached catalog backends cannot be enabled.', 'execution-config-invalid')
+    const committed = await this.store.save(owner, { ...current, services }, revision)
+    await this.changed()
+    return { ...installedServiceView(services), revision: committed ?? revision }
+  }
   async save(actor: CommunityAccountActor, owner: string, input: CommunityExecutionInput): Promise<CommunityExecutionView> {
     await this.assertAdmin(actor, owner)
     await this.assertUnlocked(owner)
     if (input.prepare !== undefined)
       throw new BusinessRuleError('invalid', 'Select runtime dependencies instead of an execution preparation command.', 'execution-config-invalid')
-    const value = await this.validate(owner, input)
-    await this.store.save(owner, value)
+    const previous = await this.store.get(owner)
+    const value = await this.validate(owner, input, previous)
+    await this.store.save(owner, { ...value, ...(previous?.services ? { services: previous.services } : {}) })
     await this.changed()
     return this.view(actor, owner)
   }

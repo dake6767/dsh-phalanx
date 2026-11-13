@@ -19,3 +19,14 @@ print(values.get('DSH_PHALANX_USER_DATA_ROOT') or fallback)
 }
 
 export const installedShellArgument = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
+
+/** Resolve the fixture account's existing home from its creation-era storage key. */
+export async function installedMemberHome(remote: (command: string) => Promise<string>, storageKey: string): Promise<string> {
+  if (!/^(?:member|_spaces\/[a-f0-9]{32})$/u.test(storageKey)) throw Error('Invalid retained fixture storage key')
+  return (await installedUserDataRoot(remote)) + '/' + storageKey + '/home'
+}
+
+export async function seedInstalledMemberMarker(remote: (command: string) => Promise<string>, storageKey: string) {
+  const path = installedShellArgument((await installedMemberHome(remote, storageKey)) + '/upgrade-owned.txt')
+  await remote('sudo -u dsh-phalanx sh -c ' + installedShellArgument('printf MEMBER_DATA_PRESERVED > ' + path))
+}

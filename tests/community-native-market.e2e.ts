@@ -136,6 +136,8 @@ it('renders the platform market with native DSH controls, theme and locale while
       if (reload) await adminPage.reload()
       // Closing the admin console can return focus to a different tab.
       await adminPage.bringToFront()
+      // The blank session claims focus when its editor initializes, including after reload.
+      await adminPage.locator('[data-composer-input][contenteditable="true"]:focus').waitFor()
       const accountTrigger = adminPage.getByRole('button', { name: /^Platform account:/u })
       await accountTrigger.waitFor()
       expect(await adminPage.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
@@ -316,12 +318,11 @@ it('renders the platform market with native DSH controls, theme and locale while
       }
     }
     for (const tab of [
-      { label: 'Plugins', component: 'PluginsPanel', path: '/market/api/plugins' },
-      { label: 'Skills', component: 'SkillsPanel', path: '/market/api/skills' },
-      { label: 'MCP services', component: 'McpPanel', path: '/market/api/mcp' },
+      { label: 'Plugins', signature: /function PluginsPanel\([^\n)]*\)\s*\{/u, path: '/market/api/plugins' },
+      { label: 'Skills', signature: /function SkillsPanel\(\)\s*\{/u, path: '/market/api/skills' },
+      { label: 'MCP services', signature: /function McpPanel\(\)\s*\{/u, path: '/market/api/mcp' },
     ]) {
-      const signature = new RegExp('function ' + tab.component + '\\(\\)\\s*\\{', 'u')
-      expect(platformPluginClient).toMatch(signature)
+      expect(platformPluginClient).toMatch(tab.signature)
       for (const phase of ['initialization', 'render', 'request']) {
         const context = await browser.newContext({ locale: 'en' })
         const isolatedPage = await context.newPage()
@@ -341,7 +342,7 @@ it('renders the platform market with native DSH controls, theme and locale while
               await route.fulfill({ response })
               return
             }
-            const failed = platformPluginClient.replace(signature, declaration =>
+            const failed = platformPluginClient.replace(tab.signature, declaration =>
               phase === 'initialization'
                 ? "throw new Error('Fixture tab initialization');" + declaration
                 : declaration + "throw new Error('Fixture tab render');",

@@ -1,4 +1,6 @@
-import { expect, it } from 'vitest'
+import { expect, it, onTestFinished, vi } from 'vitest'
+import { NATIVE_PLUGIN_HISTORY_ENV } from '../src/dsh/native-plugin-install.js'
+import { MEMBER_PLUGIN_ARCHIVE_DIRECTORY } from '../src/dsh/native-plugin-replacement.js'
 import { nativePluginPolicyModule } from '../src/dsh/native-plugin-policy.js'
 
 it('refuses member installs and never-enabled optional bundles while preserving existing bundle operations and native validation', async () => {
@@ -47,14 +49,17 @@ it('refuses member installs and never-enabled optional bundles while preserving 
   expect(routes.has('/api/phalanx/native-plugins/install')).toBe(false)
 })
 
-it('accepts one signed platform installation while refusing cookie-only access and exact replay in the generated member policy', async () => {
+it('accepts one signed platform installation while reserving platform archives and refusing exact replay in the generated member policy', async () => {
   const { NativeInstallAuthority } = await import('../src/adapters/native-install-authority.js')
   const authority = new NativeInstallAuthority()
   const routes = new Map<string, (request: Request) => Promise<Response>>()
-  let installations = 0
+  let installations = 0,
+    failHistory = false
   const module = await import(
     'data:text/javascript;base64,' +
-      Buffer.from(nativePluginPolicyModule({ subject: 'member', generation: 'launch', allowInstall: false, publicKey: authority.publicKey })).toString('base64')
+      Buffer.from(
+        nativePluginPolicyModule({ subject: 'member', generation: 'launch', allowInstall: true, history: true, publicKey: authority.publicKey }),
+      ).toString('base64')
   )
   module.apply({
     connection: {
@@ -69,21 +74,59 @@ it('accepts one signed platform installation while refusing cookie-only access a
       },
     },
   })
-  const body = JSON.stringify({
-    type: 'client-request',
-    rpcId: 'fixture',
-    method: 'pluginManager/installBundle',
-    payload: { args: { spec: '/fixture/plugin.tgz' } },
+  const bodyFor = (spec: string) =>
+    JSON.stringify({
+      type: 'client-request',
+      rpcId: 'fixture',
+      method: 'pluginManager/installBundle',
+      payload: { args: { spec, options: { requestId: 'signed-fixture' } } },
+    })
+  const digest = Buffer.alloc(64, 7)
+  const archiveName = digest.toString('hex') + '.tgz'
+  const archive = MEMBER_PLUGIN_ARCHIVE_DIRECTORY + '/' + archiveName
+  vi.stubEnv(NATIVE_PLUGIN_HISTORY_ENV, 'http://native.example/history')
+  vi.stubEnv('DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN', 'member-fixture-token')
+  const history = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options) => {
+    const body = JSON.parse(String(options?.body))
+    expect(body.generation).toBe('launch')
+    if (body.mode === 'refresh' && failHistory) return new Response('', { status: 503 })
+    return body.mode === 'archive' ? Response.json({ reserved: body.integrity === 'sha512-' + digest.toString('base64') }) : Response.json({ names: [] })
   })
+  onTestFinished(() => {
+    history.mockRestore()
+    vi.unstubAllEnvs()
+  })
+  const body = bodyFor(archive)
+  const browserInstall = routes.get('/api/pluginManager/installBundle')!
+  for (const spec of [archive, 'file://' + archive, 'fixture@file:./.phalanx-market/' + archiveName]) {
+    const denied = await browserInstall(new Request('http://native.example/api/pluginManager/installBundle', { method: 'POST', body: bodyFor(spec) }))
+    expect(await denied.json()).toMatchObject({ result: { ok: false, error: { details: { reason: 'platform-archive' } } } })
+  }
+  const ordinary = await browserInstall(
+    new Request('http://native.example/api/pluginManager/installBundle', {
+      method: 'POST',
+      body: bodyFor(MEMBER_PLUGIN_ARCHIVE_DIRECTORY + '/' + 'ab'.repeat(64) + '.tgz'),
+    }),
+  )
+  expect(await ordinary.json()).toMatchObject({ result: { ok: true } })
+  const local = await browserInstall(
+    new Request('http://native.example/api/pluginManager/installBundle', { method: 'POST', body: bodyFor('/workspace/my-plugin.tgz') }),
+  )
+  expect(await local.json()).toMatchObject({ result: { ok: true } })
   const authorization = authority.authorize({ userId: 'member', resourceKey: 'launch' }, body)
   const path = '/api/phalanx/native-plugins/install'
   const call = async (headers: Record<string, string>) =>
     (await routes.get(path)!(new Request('http://native.example' + path, { method: 'POST', headers, body }))).json()
   expect(await call({ cookie: 'native=fixture' })).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
+  failHistory = true
   const headers = { 'x-phalanx-install-proof': authorization.proof, 'x-phalanx-install-signature': authorization.signature }
   expect(await call(headers)).toMatchObject({ result: { ok: true, value: { application: 'applied' } } })
   expect(await call(headers)).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied', details: { reason: 'platform-install-replay' } } } })
-  expect(installations).toBe(1)
+  const retry = authority.authorize({ userId: 'member', resourceKey: 'launch' }, body)
+  expect(await call({ 'x-phalanx-install-proof': retry.proof, 'x-phalanx-install-signature': retry.signature })).toMatchObject({
+    result: { ok: true, value: { application: 'applied' } },
+  })
+  expect(installations).toBe(3)
 })
 
 it.each(['activation-failed', 'target-archive-changed', 'partial-removal', 'moved-alias', 'renamed-alias', 'renamed-key-alias'] as const)(

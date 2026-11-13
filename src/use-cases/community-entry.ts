@@ -1,4 +1,6 @@
 import type { CommunityErrorCode, CommunityStartupView } from '../domain/admin-contract.js'
+import type { MemberNativeServiceSettings } from './member-native-service-settings.js'
+import type { MemberPluginPreinstalls } from './member-plugin-preinstalls.js'
 import type { CommunityInstanceActions } from './community-instance-actions.js'
 import { communitySpacePath } from '../domain/community-space.js'
 import { CommunityAuthenticationError, type CommunityAccountState } from '../domain/community-account.js'
@@ -25,6 +27,8 @@ export class CommunityEntry {
     private readonly storage?: Pick<CommunityUserSpaceStoragePort, 'assertAvailable'>,
     private readonly actions?: Pick<CommunityInstanceActions, 'restart'>,
     private readonly models?: { enter(spaceId: string, locale: import('../domain/platform-language.js').PlatformLocale): void },
+    private readonly preinstalls?: Pick<MemberPluginPreinstalls, 'firstEntryPending' | 'awaitFirstEntry'>,
+    private readonly nativeServices?: Pick<MemberNativeServiceSettings, 'ensureLaunch'>,
   ) {}
 
   async account(userId: string): Promise<CommunityAccountState> {
@@ -71,7 +75,8 @@ export class CommunityEntry {
   async status(userId: string) {
     await this.storage?.assertAvailable()
     await this.account(userId)
-    return this.runtime.status(userId)
+    const status = this.runtime.status(userId)
+    return status.state === 'ready' && this.preinstalls?.firstEntryPending(status.instance) ? ({ state: 'starting', stage: 'preparing' } as const) : status
   }
   async startup(userId: string): Promise<CommunityStartupView> {
     const account = await this.account(userId)
@@ -186,7 +191,10 @@ export class CommunityEntry {
   private async ensureEntry(account: CommunityAccountState, origin: URL): Promise<CommunityUserInstance> {
     await this.runtime.waitForMaintenance?.(account.username)
     await this.assertCurrent(account)
-    return await this.ensure(account.username, origin)
+    const instance = await this.ensure(account.username, origin)
+    await this.preinstalls?.awaitFirstEntry(instance, origin)
+    await this.nativeServices?.ensureLaunch(account, instance, origin)
+    return instance
   }
   private async admit(account: CommunityAccountState, origin: URL, cookie?: string): Promise<{ instance: CommunityUserInstance; cookies: string[] }> {
     for (let attempt = 0; attempt < 3; attempt++) {

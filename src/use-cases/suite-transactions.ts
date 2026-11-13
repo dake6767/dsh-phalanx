@@ -1,3 +1,5 @@
+import { installedCatalogIdentity, executionServiceDefinition, legacyCatalogExecutionVariables } from '../domain/execution-service-environment.js'
+import { acceptsInstalledCatalogDependency, catalogResourcePin } from '../domain/suite-resource-bindings.js'
 import { isDeepStrictEqual } from 'node:util'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
@@ -49,6 +51,8 @@ export class SuiteTransactions {
           origin = suiteInstallOrigin(record.id)
         if (entry.id !== record.id || (record.category && entry.category !== record.category) || compareSuiteVersions(entry.version, record.version) <= 0)
           throw new BusinessRuleError('conflict', 'Review the current catalog version.', 'suite-up-to-date')
+        if (record.locked || (entry.category === 'dependency' && entry.locked))
+          throw new BusinessRuleError('conflict', 'A locked resource requires a new catalog entry.', 'suite-catalog-invalid')
         const skip = (kind: SuiteInstalledEntry['kind'], name: string) => record.detached?.some(row => row.kind === kind && row.name === name)
         const pluginDetached = entry.category === 'plugin' && record.detached?.some(row => row.kind === 'plugin')
         if (pluginDetached && (plan.plugin || plan.runtime.length || plan.skills.length))
@@ -115,9 +119,12 @@ export class SuiteTransactions {
         const shared = await rows.installs.list()
         const catalogDependencyName = (id: string) => {
           const manual = record.manualDependencies?.find(row => row.id === id)
-          if (manual) return manual.name
-          const installed = shared.find(row => row.record.id === id && row.record.status === 'installed')
-          const name = installed?.record.entries.find(row => row.kind === 'runtime-dependency')?.name
+          const pin = catalogResourcePin(entry, id)
+          const installed = shared.find(row => row.record.id === id && row.record.status === 'installed')?.record
+          if (!acceptsInstalledCatalogDependency(entry, id, installed))
+            throw new BusinessRuleError('conflict', 'A shared dependency changed.', 'suite-dependency-missing')
+          if (manual && !pin) return manual.name
+          const name = installed?.entries.find(row => row.kind === 'runtime-dependency')?.name
           if (!name) throw new BusinessRuleError('conflict', 'A shared dependency changed.', 'suite-dependency-missing')
           return name
         }
@@ -138,6 +145,7 @@ export class SuiteTransactions {
             ...plan.plugin.item.catalogDependencies.map(catalogDependencyName),
           ]
           const plugin = await writeSuitePlugin(rows, origin, plan.plugin, dependencies, 'update', this.pluginSyntax, {
+            serviceIdentity: installedCatalogIdentity(entry),
             ...(this.compatibilityTarget ? { compatibilityTarget: this.compatibilityTarget } : {}),
           })
           const retained = entry.items.flatMap(item => (item.kind === 'runtime-dependency' ? [dependencyNames.get(item.name) ?? item.name] : []))
@@ -163,6 +171,7 @@ export class SuiteTransactions {
             {
               ...metadata,
               description: packItem.description,
+              catalogDisplayName: entry.title.en,
               instructions: packItem.note,
               skills: [
                 ...packItem.skills.filter(name => !skip('skill', name)),
@@ -177,9 +186,12 @@ export class SuiteTransactions {
         for (const item of executionItems) {
           const owner = suiteExecutionOwner(item.skill),
             template = {
+              ...executionServiceDefinition(entry, item),
               commands: item.delegated,
-              variables: item.variables.map(row => row.name),
-              optionalVariables: item.variables.filter(row => row.optional).map(row => row.name),
+              variables: legacyCatalogExecutionVariables(item).map(row => row.name),
+              optionalVariables: legacyCatalogExecutionVariables(item)
+                .filter(row => row.optional)
+                .map(row => row.name),
               runtimeDependencies: [dependencyNames.get(item.runtimeDependency) ?? item.runtimeDependency],
             }
           if (await execution.suiteOwnedSnapshot(origin, owner)) await execution.updateSuiteExecution(origin, owner, template)
@@ -188,7 +200,7 @@ export class SuiteTransactions {
         }
         await execution.finalizeSuiteExecutions(
           origin,
-          executionItems.map(item => ({ owner: suiteExecutionOwner(item.skill), variables: item.variables.map(row => row.name) })),
+          executionItems.map(item => ({ owner: suiteExecutionOwner(item.skill), variables: legacyCatalogExecutionVariables(item).map(row => row.name) })),
         )
         await rows.expertReferences.detach(removed.map(row => ({ kind: 'skill', name: row.name })))
         for (const row of removed) await rows.library.remove(row.name, row.rowRevision)
@@ -248,7 +260,13 @@ export class SuiteTransactions {
         const records = new Map<string, CatalogInstallRow['record']>()
         for (const unit of [...units].sort((a, b) => a.entry.id.localeCompare(b.entry.id))) {
           const record = await rows.installs.lock(unit.entry.id, unit.installed.revision)
-          if (record.status !== 'installing' || record.version !== unit.entry.version)
+          const locked = unit.entry.category === 'dependency' && unit.entry.locked === true
+          if (
+            record.status !== 'installing' ||
+            record.version !== unit.entry.version ||
+            Boolean(record.locked) !== locked ||
+            (locked && record.contentHash !== unit.entry.contentHash)
+          )
             throw new BusinessRuleError('conflict', 'The prepared catalog task changed.', 'suite-task-running')
           records.set(record.id, record)
         }
@@ -325,12 +343,14 @@ export class SuiteTransactions {
           const shared = await rows.installs.list()
           const dependencyName = (id: string) => {
             const manual = record.manualDependencies?.find(row => row.id === id)
-            if (manual) return manual.name
+            const pin = catalogResourcePin(entry, id)
             const prepared = aliases.get(id)?.values().next().value
+            const installed = shared.find(row => row.record.id === id && row.record.status === 'installed')?.record
+            if (!acceptsInstalledCatalogDependency(entry, id, prepared ? records.get(id) : installed))
+              throw new BusinessRuleError('conflict', 'A shared dependency changed.', 'suite-dependency-missing')
+            if (manual && !pin) return manual.name
             if (prepared) return prepared
-            const existing = shared
-              .find(row => row.record.id === id && row.record.status === 'installed')
-              ?.record.entries.find(row => row.kind === 'runtime-dependency')?.name
+            const existing = installed?.entries.find(row => row.kind === 'runtime-dependency')?.name
             if (!existing) throw new BusinessRuleError('conflict', 'A shared dependency changed.', 'suite-dependency-missing')
             return existing
           }
@@ -351,6 +371,7 @@ export class SuiteTransactions {
             ]
             const takeover = unit.replacement?.plugins?.find(row => row.row.packageName === unit.plugin!.item.packageName)
             await writeSuitePlugin(rows, origin, unit.plugin, dependencies, 'install', this.pluginSyntax, {
+              serviceIdentity: installedCatalogIdentity(entry),
               ...(this.compatibilityTarget ? { compatibilityTarget: this.compatibilityTarget } : {}),
               ...(takeover ? { takeover } : {}),
             })
@@ -373,6 +394,8 @@ export class SuiteTransactions {
               {
                 name: pack.name,
                 description: pack.description,
+                catalogDisplayName: entry.title.en,
+                ...(current?.displayOverrides ? { displayOverrides: current.displayOverrides } : {}),
                 skills: pack.skills,
                 instructions: pack.note,
                 published: entry.id === choices.id && choices.publish === true,
@@ -392,7 +415,7 @@ export class SuiteTransactions {
             executions = entry.items.filter((item): item is SuiteCatalogExecutionItem => item.kind === 'execution')
           for (const item of executions) {
             const credentials = Object.fromEntries(
-              item.variables
+              legacyCatalogExecutionVariables(item)
                 .filter(variable => choices.credentials?.[variable.name] !== undefined)
                 .map(variable => [variable.name, choices.credentials![variable.name]!]),
             )
@@ -400,9 +423,12 @@ export class SuiteTransactions {
               origin,
               suiteExecutionOwner(item.skill),
               {
+                ...executionServiceDefinition(entry, item),
                 commands: item.delegated,
-                variables: item.variables.map(row => row.name),
-                optionalVariables: item.variables.filter(row => row.optional).map(row => row.name),
+                variables: legacyCatalogExecutionVariables(item).map(row => row.name),
+                optionalVariables: legacyCatalogExecutionVariables(item)
+                  .filter(row => row.optional)
+                  .map(row => row.name),
                 runtimeDependencies: [names.get(item.runtimeDependency) ?? item.runtimeDependency],
               },
               credentials,
@@ -411,7 +437,7 @@ export class SuiteTransactions {
           }
           await execution.finalizeSuiteExecutions(
             origin,
-            executions.map(item => ({ owner: suiteExecutionOwner(item.skill), variables: item.variables.map(row => row.name) })),
+            executions.map(item => ({ owner: suiteExecutionOwner(item.skill), variables: legacyCatalogExecutionVariables(item).map(row => row.name) })),
           )
           const entries: SuiteInstalledEntry[] = entry.items.flatMap((item): SuiteInstalledEntry[] =>
             item.kind === 'runtime-dependency'

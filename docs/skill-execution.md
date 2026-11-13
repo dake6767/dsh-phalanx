@@ -14,6 +14,8 @@ Download defaults come from **System settings → Download sources**. Preparatio
 
 ## Review and configure
 
+For installed catalog skills with declared service backends, the platform keeps the installed definition and the administrator’s settings with the owning skill. Each backend stores its own settings. An empty key input keeps the existing key, and clearing a key requires confirmation. Saving settings leaves a disabled backend disabled. Enabling requires the backend’s required fields. Saving and enabling do not send a request to the provider.
+
 Import and review the skill, open its details, then choose **Platform execution**. The scan offers command and variable suggestions; it does not execute them, prove their safety or save them automatically. Confirm each field and enable execution explicitly.
 
 A command is an executable name on the prepared PATH, such as `tencent-news-cli`, or a script path relative to the skill, such as `scripts/mps_usage.py`. Use `./query.sh` for a root-level script. Multiple command rows may have separate blocked first arguments. Members invoke the normal command or original script path; platform forwarding preserves arguments, binary stdin, stdout, stderr and the command's exit status.

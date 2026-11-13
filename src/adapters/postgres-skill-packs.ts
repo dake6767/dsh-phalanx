@@ -14,6 +14,7 @@ export class PostgresSkillPackStore implements SkillPackStorePort {
       instructions: string
       published: boolean
       suite_origin: string | null
+      display: Pick<SkillPack, 'catalogDisplayName' | 'displayOverrides'> | null
       note: NonNullable<SkillPack['note']> | null
       revision: string
       skills: string[]
@@ -26,6 +27,7 @@ export class PostgresSkillPackStore implements SkillPackStorePort {
       instructions: row.instructions,
       published: row.published,
       skills: row.skills,
+      ...row.display,
       rowRevision: Number(row.revision),
       ...(row.suite_origin === null ? {} : { suiteOrigin: row.suite_origin }),
       ...(row.note === null ? {} : { note: row.note }),
@@ -36,8 +38,8 @@ export class PostgresSkillPackStore implements SkillPackStorePort {
       const values = this.values(pack)
       const saved = await sql.query(
         expectedRevision === undefined || expectedRevision === 'none'
-          ? `INSERT INTO dsh_phalanx.skill_packs(name,description,instructions,published,suite_origin,note) VALUES($1,$2,$3,$4,$5,$6) ${expectedRevision === 'none' ? 'ON CONFLICT(name) DO NOTHING' : 'ON CONFLICT(name) DO UPDATE SET description=EXCLUDED.description,instructions=EXCLUDED.instructions,published=EXCLUDED.published,suite_origin=EXCLUDED.suite_origin,note=EXCLUDED.note,revision=skill_packs.revision+1'} RETURNING revision`
-          : `UPDATE dsh_phalanx.skill_packs SET description=$2,instructions=$3,published=$4,suite_origin=$5,note=$6,revision=revision+1 WHERE name=$1 AND revision=$7 RETURNING revision`,
+          ? `INSERT INTO dsh_phalanx.skill_packs(name,description,instructions,published,suite_origin,note,display) VALUES($1,$2,$3,$4,$5,$6,$7) ${expectedRevision === 'none' ? 'ON CONFLICT(name) DO NOTHING' : 'ON CONFLICT(name) DO UPDATE SET description=EXCLUDED.description,instructions=EXCLUDED.instructions,published=EXCLUDED.published,suite_origin=EXCLUDED.suite_origin,note=EXCLUDED.note,display=EXCLUDED.display,revision=skill_packs.revision+1'} RETURNING revision`
+          : `UPDATE dsh_phalanx.skill_packs SET description=$2,instructions=$3,published=$4,suite_origin=$5,note=$6,display=$7,revision=revision+1 WHERE name=$1 AND revision=$8 RETURNING revision`,
         expectedRevision === undefined || expectedRevision === 'none' ? values : [...values, expectedRevision],
       )
       if (!saved.length) throw this.changed()
@@ -48,7 +50,7 @@ export class PostgresSkillPackStore implements SkillPackStorePort {
     if (previous === pack.name) return await this.save(pack)
     await repositoryTransaction(this.connection, async sql => {
       const saved = await sql.query(
-        `UPDATE dsh_phalanx.skill_packs SET name=$1,description=$2,instructions=$3,published=$4,suite_origin=$5,note=$6,revision=revision+1 WHERE name=$7 AND ($8::bigint IS NULL OR revision=$8) RETURNING revision`,
+        `UPDATE dsh_phalanx.skill_packs SET name=$1,description=$2,instructions=$3,published=$4,suite_origin=$5,note=$6,display=$7,revision=revision+1 WHERE name=$8 AND ($9::bigint IS NULL OR revision=$9) RETURNING revision`,
         [...this.values(pack), previous, pack.rowRevision ?? null],
       )
       if (!saved.length) throw this.changed()
@@ -65,7 +67,16 @@ export class PostgresSkillPackStore implements SkillPackStorePort {
     if (expectedRevision !== undefined && !removed.length) throw this.changed()
   }
   private values(pack: SkillPack) {
-    return [pack.name, pack.description, pack.instructions, pack.published, pack.suiteOrigin ?? null, pack.note ? JSON.stringify(pack.note) : null]
+    const { catalogDisplayName, displayOverrides } = pack
+    return [
+      pack.name,
+      pack.description,
+      pack.instructions,
+      pack.published,
+      pack.suiteOrigin ?? null,
+      pack.note ? JSON.stringify(pack.note) : null,
+      catalogDisplayName === undefined && displayOverrides === undefined ? null : JSON.stringify({ catalogDisplayName, displayOverrides }),
+    ]
   }
   private async members(sql: PlatformSql, pack: SkillPack): Promise<void> {
     await sql.query('DELETE FROM dsh_phalanx.skill_pack_members WHERE pack_name=$1 AND NOT(skill_name=ANY($2::text[]))', [pack.name, pack.skills])

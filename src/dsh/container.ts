@@ -11,6 +11,8 @@ import { managedModelsContainerPath } from './shared-models.js'
 import { platformPluginContainerPath, platformPluginDirectory, platformPluginPatch } from './community-platform-plugin.js'
 
 export const PASTA_HOST_LOOPBACK_OPTION = '--host-lo-to-ns-lo'
+export const MEMBER_CREDENTIAL_COMMAND = ['/usr/local/bin/node', '/usr/local/lib/dsh-phalanx/member-credentials.mjs'] as const
+export const MEMBER_CREDENTIAL_FAILURE_EXIT = 78
 
 const CONTAINER_HOME = DSH_CONTAINER_HOME
 const CONTAINER_WORKSPACE = '/dsh-phalanx/workspace'
@@ -28,6 +30,7 @@ const CONTAINER_ENVIRONMENT = {
 export function communityContainerPassthroughEnvironment(input: Readonly<Record<string, string>>): Record<string, string> {
   const environment = { ...input }
   for (const key of Object.keys(CONTAINER_ENVIRONMENT)) delete environment[key]
+  for (const key of ['DBUS_SESSION_BUS_ADDRESS', 'DBUS_SYSTEM_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'GNOME_KEYRING_CONTROL']) delete environment[key]
   return environment
 }
 
@@ -216,6 +219,7 @@ export function buildCommunityContainerLaunchCommand(input: {
       ...Object.keys(environment).flatMap(key => ['--env', key]),
       ...instanceResourceArguments(input.resourceLimits ?? UNLIMITED_INSTANCE_RESOURCES),
       container.image,
+      ...(input.mode === 'config-dump' ? [] : MEMBER_CREDENTIAL_COMMAND),
       config.command,
       ...(input.mode === 'config-dump'
         ? configurationDumpArgs(config.args, patches)

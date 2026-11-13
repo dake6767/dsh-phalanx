@@ -1,3 +1,4 @@
+import { executionServiceEnvironment } from '../domain/execution-service-environment.js'
 import { executionOptionBlocked } from '../domain/execution-command-line.js'
 import {
   EXECUTION_CREDENTIAL_NOTICE,
@@ -98,16 +99,24 @@ export class PlatformExecution {
     if (!owner || !(await this.owners.owns(request.username, request.owner))) throw new ExecutionFailure('unauthorized')
     const configuration = await this.configurations.get(owner.id)
     if (!configuration?.enabled) throw new ExecutionFailure('disabled')
-    if (!executionPreparationApproved(owner, configuration)) throw new ExecutionFailure('not-ready')
+    if (
+      !executionPreparationApproved(owner, configuration) ||
+      (configuration.suiteOrigin && configuration.services?.ownerVersion && configuration.services.ownerVersion !== owner.version)
+    )
+      throw new ExecutionFailure('not-ready')
     const command = configuration.commands.find(row => row.command === request.command)
     if (!command || (this.inspection && !(await this.inspection.available(owner.version, command.source ?? command.command))))
       throw new ExecutionFailure('command-missing')
-    if ((request.argv[0] !== undefined && command.blocked.includes(request.argv[0])) || executionOptionBlocked(request.argv, command.blockedOptions ?? [])) {
+    if (
+      (request.argv[0] !== undefined && command.blocked.includes(request.argv[0])) ||
+      executionOptionBlocked(request.argv, command.blockedOptions ?? [], command.shortOptionsWithValue)
+    ) {
       await emit({ stream: 'stdout', data: new TextEncoder().encode(EXECUTION_CREDENTIAL_NOTICE) })
       return { exitCode: 0, reason: 'blocked' }
     }
     signal.throwIfAborted()
-    const secrets = configuration.variables.filter(row => row.secret).map(row => row.value)
+    const variables = executionServiceEnvironment(configuration, request)
+    const secrets = variables.filter(row => row.secret).map(row => row.value)
     const output = { stdout: secretOutputRedactor(secrets), stderr: secretOutputRedactor(secrets) }
     const protectedEmit = async (event: ExecutionEvent) => {
       const data = output[event.stream].write(event.data)
@@ -120,12 +129,14 @@ export class PlatformExecution {
           command: command.source ?? request.command,
           version: artifact?.version ?? owner.version,
           ...(artifact?.dependencies ? { dependencies: artifact.dependencies } : {}),
-          environment: Object.fromEntries(configuration.variables.map(row => [row.name, row.value])),
+          environment: Object.fromEntries(variables.map(row => [row.name, row.value])),
         },
         protectedEmit,
         signal,
       )
-    const exitCode = await (this.preparation ? this.preparation.withPrepared(owner.id, run) : run())
+    const exitCode = await (this.preparation
+      ? this.preparation.withPrepared(owner.id, run, { version: owner.version, revision: configuration.rowRevision })
+      : run())
     for (const stream of ['stdout', 'stderr'] as const) {
       const data = output[stream].flush()
       if (data.length) await flushOutput(() => emit({ stream, data }), signal)

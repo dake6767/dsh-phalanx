@@ -1,3 +1,6 @@
+import type { InstalledServiceIdentity, InstalledServices } from './installed-services.js'
+import type { CatalogExecutionServiceSlot } from './suite-service-slots.js'
+
 /** Execution belongs to an opaque owner; the runner does not depend on a skill library. */
 export interface ExecutionOwner {
   readonly id: string
@@ -10,16 +13,20 @@ export interface DelegatedCommand {
   readonly source?: string
   readonly memberPath?: string
   readonly blockedOptions?: readonly string[]
+  readonly shortOptionsWithValue?: readonly string[]
   readonly blocked: readonly string[]
 }
 /** Locked shape a suite installs; variable values arrive separately. */
 export interface SuiteExecutionTemplate {
+  readonly serviceIdentity?: InstalledServiceIdentity
+  readonly services?: InstalledServices<CatalogExecutionServiceSlot>
   readonly optionalVariables?: readonly string[]
   readonly commands: readonly DelegatedCommand[]
   readonly variables: readonly string[]
   readonly runtimeDependencies: readonly string[]
 }
 export interface ExecutionConfiguration {
+  readonly services?: InstalledServices<CatalogExecutionServiceSlot>
   /** Internal optimistic owner revision; management responses omit it. */
   readonly rowRevision?: string
   readonly optionalVariables?: readonly string[]

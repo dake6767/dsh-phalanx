@@ -56,7 +56,7 @@ export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.str
  }
  return {name:'phalanx-platform-client',inject:['slots','locale'],apply(ctx){try {
   const namespace='phalanx-account';
-  ctx.effect(()=>ctx.locale.register(namespace,{en:{admin:'Go to admin console',account:'Platform account',fallback:'Account',settingsMenu:'Settings menu',settings:'Settings',feedback:'Feedback',switch:'Switch accounts',restart:'Restart instance',recovery:'More recovery options',logout:'Log out',market:'Platform App Center',unavailable:'Platform App Center is unavailable. Reload to try again.'},zh:{admin:'前往管理后台',account:'平台账户',fallback:'账户',settingsMenu:'设置菜单',settings:'设置',feedback:'意见反馈',switch:'切换账户',restart:'重启实例',recovery:'更多恢复选项',logout:'退出登录',market:'平台应用中心',unavailable:'平台应用中心暂不可用，请刷新重试。'}}));
+  ctx.effect(()=>ctx.locale.register(namespace,{en:{admin:'Go to admin console',account:'Platform account',fallback:'Account',settingsMenu:'Settings menu',settings:'Settings',feedback:'Feedback',switch:'Switch accounts',restart:'Restart instance',recovery:'More recovery options',logout:'Log out',market:'Platform App Center',setup:'Plugin setup',unavailable:'Platform App Center is unavailable. Reload to try again.'},zh:{admin:'前往管理后台',account:'平台账户',fallback:'账户',settingsMenu:'设置菜单',settings:'设置',feedback:'意见反馈',switch:'切换账户',restart:'重启实例',recovery:'更多恢复选项',logout:'退出登录',market:'平台应用中心',setup:'插件设置状态',unavailable:'平台应用中心暂不可用，请刷新重试。'}}));
   ctx.effect(()=>{const style=document.createElement('style');style.dataset.plugin=${JSON.stringify(platformClientName)};style.textContent=css+${JSON.stringify(nativeAccountSwitchCss + nativeMarketCss)};document.head.appendChild(style);return()=>style.remove()});
   const t=ctx.locale.bind(namespace);
   const subscribe=listener=>ctx.locale.subscribe(listener);const snapshot=()=>ctx.locale.getSnapshot().active;
@@ -66,14 +66,16 @@ export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.str
   function NativeAccount(props){React.useSyncExternalStore(subscribe,snapshot);return h(SafeAccount,{...props,locale:snapshot()==='zh'?'zh-CN':'en'})}
   slot('settings.launcher',()=>ctx.slots.register({name:'settings.launcher',priority:-10,locale:namespace},NativeAccount));
   function UnavailableMarket(){React.useSyncExternalStore(subscribe,snapshot);return h('p',{role:'alert'},t('unavailable'))}
-  let Market=UnavailableMarket;
+  let Market=UnavailableMarket, Setup=UnavailableMarket;
   isolated(()=>{
     ${nativeMarketComponent}
     Market=MarketPanel;
+    Setup=SetupPanel;
   });
   ${featureVisible('contributions') ? nativePluginContributions : ''}
   ${artifactDownloadClient}
   ${htmlPreviewClient}
+  function SafeSetup(){return h(ModuleBoundary,{fallback:h(UnavailableMarket)},h(Setup))}
   function SafeMarket(){return h(ModuleBoundary,{fallback:h(UnavailableMarket)},h(Market))}
   function MarketIcon({size=16,className}){
    return h('svg',{width:size,height:size,viewBox:'0 0 16 16',className,fill:'none',stroke:'currentColor',strokeWidth:1,'aria-hidden':true},
@@ -89,7 +91,16 @@ export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.str
       const response=await fetch('/account/platform-features',{credentials:'same-origin',cache:'no-store',signal:controller.signal});
       if(!response.ok)return;
       const settings=await response.json();
-      if(controller.signal.aborted || settings?.showAppCenter!==true)return;
+      if(controller.signal.aborted)return;
+      if(settings?.showAppCenter!==true){
+        const setup=await fetch('/market/api/plugins/setup',{credentials:'same-origin',cache:'no-store',signal:controller.signal});
+        if(!setup.ok)return;
+        const data=await setup.json();
+        if(controller.signal.aborted || !data.nativeServices?.length && !data.preinstallFailures?.length)return;
+        panel=slot('main',()=>ctx.slots.register({name:'main',key:'phalanx-plugin-setup',locale:namespace},SafeSetup));
+        entry=slot('sidebar.panellist',()=>ctx.slots.register({name:'sidebar.panellist',id:'phalanx-plugin-setup',order:10,label:()=>t('setup'),locale:namespace},MarketIcon));
+        return;
+      }
       panel=slot('main',()=>ctx.slots.register({name:'main',key:'phalanx-market',locale:namespace},SafeMarket));
       entry=slot('sidebar.panellist',()=>ctx.slots.register({name:'sidebar.panellist',id:'phalanx-market',order:10,label:()=>t('market'),locale:namespace},MarketIcon));
     }

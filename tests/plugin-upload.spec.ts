@@ -48,6 +48,11 @@ it('streams opaque bytes, limits size, and removes rejected or interrupted incom
   }
   try {
     await expect(upload.accept('package.zip', bytes(), new AbortController().signal)).rejects.toMatchObject({ code: 'plugin-upload-extension' })
+    await expect(upload.accept('untrusted.tgz', bytes(), new AbortController().signal, 'sha512-wrong')).rejects.toMatchObject({
+      code: 'plugin-integrity-invalid',
+    })
+    expect(inspections).toBe(0)
+    expect(await readdir(join(root, 'plugins/uploads/incoming'))).toEqual([])
     const accepted = await upload.accept('private.tgz', bytes(), new AbortController().signal)
     expect(accepted.packageName).toBe('@example/private')
     expect(await readFile(accepted.archive)).toEqual(Buffer.from([1, 2, 3]))

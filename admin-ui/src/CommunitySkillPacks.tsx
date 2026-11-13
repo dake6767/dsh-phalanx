@@ -77,7 +77,7 @@ export default function CommunitySkillPacks() {
             <Card key={pack.name} className="plugin-library-card">
               <Card.Header>
                 <div className="library-card-heading">
-                  <Card.Title>{pack.name}</Card.Title>
+                  <Card.Title>{pack.displayName ?? pack.name}</Card.Title>
                   <CommunityIcon name="chevron" size={14} />
                 </div>
                 <p className="plugin-summary-meta">{pack.empty ? t('Empty pack — hidden from members') : t('{count} skills', { count: pack.skills.length })}</p>

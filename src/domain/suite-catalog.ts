@@ -1,3 +1,5 @@
+import type { CatalogExecutionServiceSlot, CatalogPluginServiceSlot } from './suite-service-slots.js'
+import type { CatalogResourceBinding } from './suite-resource-bindings.js'
 import type { RuntimeDependencyDefinition } from './runtime-dependency.js'
 import { BusinessRuleError } from './business-error.js'
 import { runtimeDependencyInput } from './runtime-dependency.js'
@@ -15,6 +17,8 @@ export interface SuiteCatalogRuntimeDependencyItem {
   readonly prepareCommands: Readonly<Partial<Record<SuiteCatalogArchitecture, string>>>
   readonly pathDirectories: readonly string[]
   readonly checkCommand?: string
+  readonly resourceChecks?: Readonly<Partial<Record<SuiteCatalogArchitecture, string>>>
+  readonly resourceFiles?: readonly { readonly path: string; readonly executable?: true }[]
   readonly commands: readonly string[]
 }
 export interface SuiteCatalogSkillSource {
@@ -50,15 +54,24 @@ export interface SuiteCatalogExecutionItem {
     readonly source?: string
     readonly memberPath?: string
     readonly blockedOptions?: readonly string[]
+    readonly shortOptionsWithValue?: readonly string[]
     readonly blocked: readonly string[]
   }[]
   readonly variables: readonly { readonly name: string; readonly optional?: boolean; readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
+  readonly serviceSlots?: readonly CatalogExecutionServiceSlot[]
+}
+export interface SuiteCatalogPluginArchive {
+  /** Exact GitHub Release asset. The plugin item's integrity pins the archive bytes. */
+  readonly url: string
 }
 export interface SuiteCatalogPluginItem {
   readonly kind: 'plugin'
   readonly packageName: string
   readonly version: string
   readonly integrity: string
+  readonly archive?: SuiteCatalogPluginArchive
+  readonly serviceSlots?: readonly CatalogPluginServiceSlot[]
+  readonly resourceBindings?: readonly CatalogResourceBinding[]
   readonly runtimeDependencies: readonly string[]
   readonly catalogDependencies: readonly string[]
   readonly access: import('./admin-contract.js').CommunityPluginAccessInput
@@ -79,6 +92,7 @@ interface SuiteCatalogEntryCommon {
 }
 export interface SuiteCatalogDependencyEntry extends SuiteCatalogEntryCommon {
   readonly category: 'dependency'
+  readonly locked?: true
   readonly id: string
   readonly version: string
   readonly title: Readonly<Record<'en' | 'zh-CN', string>>
@@ -110,6 +124,7 @@ export interface SuiteReplacedEntry {
 export interface SuiteInstallRequest {
   readonly id: string
   readonly requestId: string
+  readonly preview?: { readonly version: string; readonly contentHash?: string }
   readonly groups?: readonly string[]
   readonly publish?: boolean
   /** Delegated execution variable values; held in memory for the task only, never in the install record. */
@@ -153,17 +168,31 @@ export function suiteUninstallInput(value: unknown): SuiteUninstallRequest {
   }
 }
 
+export function suitePreviewIdentity(value: unknown): NonNullable<SuiteInstallRequest['preview']> {
+  const preview = value as SuiteInstallRequest['preview']
+  if (
+    !preview ||
+    typeof preview !== 'object' ||
+    Array.isArray(preview) ||
+    Object.keys(preview).some(key => key !== 'version' && key !== 'contentHash') ||
+    typeof preview.version !== 'string' ||
+    (preview.contentHash !== undefined && (typeof preview.contentHash !== 'string' || !/^[a-f0-9]{64}$/u.test(preview.contentHash)))
+  )
+    throw invalidRequest()
+  return preview
+}
+
 export function suiteInstallInput(value: unknown): SuiteInstallRequest {
   if (
     !value ||
     typeof value !== 'object' ||
-    Object.keys(value).some(key => !['id', 'requestId', 'groups', 'publish', 'credentials', 'replace'].includes(key)) ||
+    Object.keys(value).some(key => !['id', 'requestId', 'preview', 'groups', 'publish', 'credentials', 'replace'].includes(key)) ||
     typeof (value as { id?: unknown }).id !== 'string' ||
     typeof (value as { requestId?: unknown }).requestId !== 'string' ||
     !/^[A-Za-z0-9_-]{16,128}$/u.test((value as { requestId: string }).requestId)
   )
     throw invalidRequest()
-  const request = value as { id: string; requestId: string; groups?: unknown; publish?: unknown; credentials?: unknown; replace?: unknown }
+  const request = value as { id: string; requestId: string; preview?: unknown; groups?: unknown; publish?: unknown; credentials?: unknown; replace?: unknown }
   if (
     request.replace !== undefined &&
     (!Array.isArray(request.replace) ||
@@ -186,10 +215,12 @@ export function suiteInstallInput(value: unknown): SuiteInstallRequest {
     (request.publish !== undefined && typeof request.publish !== 'boolean')
   )
     throw invalidRequest()
+  const preview = request.preview === undefined ? undefined : suitePreviewIdentity(request.preview)
   const credentials = request.credentials === undefined ? undefined : suiteCredentialsInput(request.credentials)
   return {
     id: request.id,
     requestId: request.requestId,
+    ...(preview ? { preview } : {}),
     ...(request.groups !== undefined ? { groups: request.groups as readonly string[] } : {}),
     ...(request.publish !== undefined ? { publish: request.publish } : {}),
     ...(credentials && Object.keys(credentials).length ? { credentials } : {}),
@@ -212,13 +243,14 @@ export function suiteRuntimeDependencyDefinition(
 ): RuntimeDependencyDefinition | undefined {
   const prepareCommand = item.prepareCommands[architecture]
   if (!prepareCommand) return undefined
+  const checkCommand = item.resourceChecks?.[architecture] ?? item.checkCommand
   if (item.type === 'python-library') return runtimeDependencyInput({ name: item.name, type: item.type, packages: item.packages ?? [] })
   return {
     name: item.name,
     ...(item.type === 'resource' ? { type: item.type } : {}),
     prepareCommand,
     pathDirectories: [...item.pathDirectories],
-    ...(item.checkCommand ? { checkCommand: item.checkCommand } : {}),
+    ...(checkCommand ? { checkCommand } : {}),
   }
 }
 

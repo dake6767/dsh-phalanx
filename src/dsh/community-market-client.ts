@@ -116,6 +116,18 @@ const keys = [
   'Removing plugin…',
   'Removing…',
   'Retry installation',
+  'Retry saving installation record',
+  'Platform service setup failed.',
+  'Platform service unavailable. Choose a service in the plugin settings.',
+  'Plugin settings changed. Review them before retrying.',
+  'This plugin version or configuration does not support platform services.',
+  'Plugin setup',
+  'Platform settings changed. Apply them to this plugin.',
+  'Apply service settings',
+  'Retry service setup',
+  'Platform settings saved. Reload the plugin panel.',
+  'Preinstalled plugin needs the next startup to finish setup.',
+  'Preinstalled plugin is not ready.',
   'Retry uninstall',
 ] satisfies PlatformMessageKey[]
 const copy = Object.fromEntries(
@@ -205,6 +217,10 @@ ${
     ? `isolated(()=>{${nativeExpertsTab}
 marketTabs.experts=ExpertsPanel;});`
     : ''
+}
+function SetupPanel(){
+ const Panel=marketTabs.plugins||UnavailableMarket;
+ return h('section',{className:'phalanx-market','aria-label':t('setup')},h(Panel,{setupOnly:true}));
 }
 function MarketPanel(){
  const locale=React.useSyncExternalStore(subscribe,snapshot)==='zh'?'zh-CN':'en';

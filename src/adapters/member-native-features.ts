@@ -1,3 +1,4 @@
+import { nativePackageManagerFile } from '../dsh/native-package-cache.js'
 import { nativeFeatureProjection, type NativeFeaturePatch } from '../dsh/native-features.js'
 import { parseDocument, isSeq, type Document } from 'yaml'
 import type { NativePluginPolicyConfiguration } from '../dsh/native-plugin-policy.js'
@@ -29,7 +30,7 @@ export async function prepareMemberNativeFeatures(
   for (const [name, contents] of Object.entries(projection.files)) {
     const target = join(directory, name)
     await mkdir(dirname(target), { recursive: true, mode: 0o700 })
-    await writeFile(target, contents, { mode: 0o600, flag: 'wx' })
+    await writeFile(target, contents, { mode: name === nativePackageManagerFile ? 0o700 : 0o600, flag: 'wx' })
   }
   const filename = options?.toolPolicyPatch ? 'overlay.yml' : 'overlay.json'
   let overlay = JSON.stringify(projection.patch)

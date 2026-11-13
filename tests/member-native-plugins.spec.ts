@@ -33,7 +33,11 @@ it('installs retained bytes with this call’s registry and removes the native c
     install: async (_instance, _origin, archive, options) => {
       expect(archive.integrity).toBe(plugin.integrity)
       expect(archive.url).toContain('http://plugins.dsh-phalanx.invalid/plugin-archive/')
-      expect(options).toEqual({ registry: 'https://registry.npmmirror.com', requestId: 'install-1' })
+      expect(options).toEqual({
+        registry: 'https://registry.npmmirror.com',
+        requestId: 'install-1',
+        identity: { packageName: plugin.packageName, version: plugin.version },
+      })
       installed = true
       return 'restart-required'
     },

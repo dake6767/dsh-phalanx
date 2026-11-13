@@ -9,6 +9,7 @@ export const pluginOfflinePrecheck = `
 import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 const input = JSON.parse(await readFile('/control/input.json', 'utf8'));
+const entryIds = new Set(JSON.parse(await readFile('/artifact/precheck-entries.json', 'utf8')));
 const command = ${JSON.stringify(webServiceArgs(containerWebCommand(), ['/artifact/managed.patch.json', '/control/service-observer.json'], 4180, '127.0.0.1:4180'))};
 const child = spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
 const closed = new Promise(resolve => child.once('close', resolve));
@@ -33,7 +34,9 @@ const completed = new Promise((resolve, reject) => {
         headers: { cookie, origin: url.origin, 'content-type': 'application/json' }, body: ${JSON.stringify(rpcRequestBody('phalanx-precheck', DSH_PLUGIN_LIST, {}))} });
       const result = await response.json();
       if (!response.ok || !result.result?.ok || !Array.isArray(result.result.value)) throw Error('Plugin inventory unavailable');
-      const rows = result.result.value.filter(row => row.moduleName === input.packageName || row.bundleName === input.packageName || row.moduleName?.includes('/node_modules/' + input.packageName + '/'));
+      const rows = result.result.value.filter(row => row.moduleName === input.packageName || row.bundleName === input.packageName
+        || row.moduleName?.includes('/node_modules/' + input.packageName + '/')
+        || (typeof row.entryId === 'string' && entryIds.has(row.entryId.split(':').at(-1))));
       if (!rows.length || rows.some(row => row.fiberPhase !== 'active')) throw Error('Plugin did not activate');
       const inventory = await fetch(new URL('/phalanx-precheck-services', url), { headers: { cookie, origin: url.origin } });
       const services = await inventory.json();

@@ -13,6 +13,7 @@ export interface CommunityUserInstance {
   readonly pluginAccessSnapshot?: readonly string[]
   readonly localPluginSnapshot?: readonly string[]
   readonly nativePluginSnapshot?: readonly string[]
+  readonly nativeArchiveSnapshot?: import('../domain/plugin-preinstall.js').NativePluginArchiveFacts
   readonly managedSnapshot?: readonly string[]
   readonly inspection?: 'checking' | 'complete'
   readonly managedFailures?: readonly string[]
@@ -42,7 +43,14 @@ export class CommunityRuntimeUnavailableError extends Error {
   readonly code: CommunityErrorCode
   constructor(
     readonly reason:
-      'draining' | 'shutdown' | 'start-cancelled' | 'authorization-unavailable' | 'profile-unavailable' | 'storage-unavailable' | 'startup-unavailable',
+      | 'draining'
+      | 'shutdown'
+      | 'start-cancelled'
+      | 'authorization-unavailable'
+      | 'profile-unavailable'
+      | 'storage-unavailable'
+      | 'startup-unavailable'
+      | 'credentials-unavailable',
     message: string,
     options?: ErrorOptions,
   ) {

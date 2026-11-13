@@ -4,7 +4,7 @@ import { NativePluginHistoryRuntimeAdapter } from '../adapters/native-plugin-his
 import type { PlatformDatabase } from '../adapters/platform-database.js'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { dshNativeFeatures, type DshNativeFeatureRegistration } from '../dsh/native-features.js'
-import type { CommunityRuntimePort } from '../ports/community-runtime.js'
+import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
 import { NativeFeatures } from '../use-cases/native-features.js'
 import { NativePluginHistory } from '../use-cases/native-plugin-history.js'
 import { createNativeFeatureStorage, createNativePluginHistoryStorage } from './native-feature-storage.js'
@@ -15,10 +15,11 @@ export function createNativeFeatureServices(
   additions: readonly DshNativeFeatureRegistration[] | undefined,
   runtime: () => CommunityRuntimePort,
   origin: () => URL,
+  pendingArchive: (instance: CommunityUserInstance, integrity: string) => boolean,
 ) {
   const registry = dshNativeFeatures(additions)
   const policy = new NativeFeatures(registry.catalog, createNativeFeatureStorage(database))
-  const history = new NativePluginHistory(createNativePluginHistoryStorage(database), new NativePluginHistoryRuntimeAdapter(runtime, origin))
+  const history = new NativePluginHistory(createNativePluginHistoryStorage(database), new NativePluginHistoryRuntimeAdapter(runtime, origin), pendingArchive)
   const authority = config.container ? new NativeInstallAuthority() : undefined
   return { policy, registry, history, ...(authority ? { publicKey: authority.publicKey, installation: new SignedNativeInstallTransport(authority) } : {}) }
 }

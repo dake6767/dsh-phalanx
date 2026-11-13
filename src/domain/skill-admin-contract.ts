@@ -47,6 +47,7 @@ export type CommunitySkillChangeAction =
 
 export interface CommunitySkillGroupView {
   readonly packs?: readonly {
+    readonly displayName?: string
     readonly name: string
     readonly description: string
     readonly granted: boolean
@@ -100,12 +101,14 @@ export interface CommunityExecutionInput {
     readonly source?: string
     readonly memberPath?: string
     readonly blockedOptions?: readonly string[]
+    readonly shortOptionsWithValue?: readonly string[]
     readonly blocked: readonly string[]
   }[]
   readonly variables: readonly { readonly name: string; readonly value?: string; readonly secret: boolean }[]
   readonly prepare?: string
 }
 export interface CommunityExecutionView extends Omit<CommunityExecutionInput, 'variables'> {
+  readonly hasInstalledServices?: true
   readonly awaitingPreparation?: boolean
   readonly suiteOrigin?: string
   readonly unavailableCommands?: readonly string[]
@@ -147,6 +150,7 @@ export interface CommunitySkillPackInput {
   readonly published: boolean
 }
 export interface CommunitySkillPackView extends CommunitySkillPackInput {
+  readonly displayName?: string
   readonly hasPlatformCredential?: boolean
   readonly unavailable?: 'empty' | 'conflict'
   readonly suiteOrigin?: string
@@ -154,7 +158,20 @@ export interface CommunitySkillPackView extends CommunitySkillPackInput {
   readonly conflict: boolean
   readonly revision: string
 }
+export interface CommunitySkillPackMember {
+  readonly name: string
+  readonly description: string
+  readonly conflict?: boolean
+}
+
+export interface CommunitySkillPackCandidates {
+  readonly rows: readonly CommunitySkillPackMember[]
+  readonly next?: string
+}
+
 export interface CommunitySkillPackDetail extends CommunitySkillPackView {
+  readonly members: readonly CommunitySkillPackMember[]
+  readonly displayOverrides?: readonly ('displayName' | 'description')[]
   readonly removal: {
     readonly experts: readonly { readonly id: string; readonly name: string }[]
     readonly expertsWithSkills: readonly { readonly id: string; readonly name: string }[]
@@ -166,6 +183,7 @@ export interface CommunitySkillPackDetail extends CommunitySkillPackView {
   }
 }
 export interface CommunityMarketPack {
+  readonly displayName?: string
   readonly name: string
   readonly description: string
   readonly skills: readonly string[]

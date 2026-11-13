@@ -16,12 +16,23 @@ it('starts an old member baseline from enabled or installed official optional bu
     launchUrl: 'http://native.example/launch',
     processId: 1,
   }
+  const nativeDigest = 'sha512-native'
   const history = new NativePluginHistory(
     {
       work: {
         run: async operation =>
           operation({
             actors: { lockMember: async () => {} },
+            deliveries: {
+              get: async spaceId =>
+                spaceId === 'space'
+                  ? [
+                      { packageName: 'ordinary', source: 'selected', version: '1.0.0', integrity: 'sha512-ordinary' },
+                      { packageName: 'adapted', source: 'selected', version: '1.0.0', integrity: nativeDigest, serviceOrigin: 'catalog' },
+                      { packageName: 'resources', source: 'preinstall', version: '1.0.0', integrity: 'sha512-resource', resourceOrigin: 'catalog' },
+                    ]
+                  : [],
+            },
             history: {
               read: async () => saved,
               remember: async (_space, names) => {
@@ -40,6 +51,11 @@ it('starts an old member baseline from enabled or installed official optional bu
   expect(await history.request(member, 'launch', 'refresh', new AbortController().signal)).toEqual(['enabled', 'installed', 'never'])
   bundles = bundles.map(row => ({ ...row, enabled: false, installed: false }))
   expect(await history.request(member, 'launch', 'read', new AbortController().signal)).toEqual(['enabled', 'installed', 'never'])
+  const signal = new AbortController().signal
+  await expect(history.archiveReserved(member, 'launch', nativeDigest, signal)).resolves.toBe(true)
+  await expect(history.archiveReserved(member, 'launch', 'sha512-resource', signal)).resolves.toBe(true)
+  await expect(history.archiveReserved(member, 'launch', 'sha512-ordinary', signal)).resolves.toBe(false)
+  await expect(history.archiveReserved(member, 'other-launch', nativeDigest, signal)).rejects.toMatchObject({ code: 'native-plugin-instance-stale' })
 })
 
 it('refuses stale launches and rechecks the active space before recording inspected facts', async () => {
@@ -63,6 +79,7 @@ it('refuses stale launches and rechecks the active space before recording inspec
                 if (revoked || member.spaceId !== 'space') throw new Error('inactive space')
               },
             },
+            deliveries: { get: async () => [] },
             history: {
               read: async () => [],
               remember: async (_space, names) => {
@@ -112,6 +129,7 @@ it('checks the launch again after waiting for account locks and never records an
                 if (moveDuringLock) generation = 'replacement'
               },
             },
+            deliveries: { get: async () => [] },
             history: {
               read: async () => [],
               remember: async (_space, names) => {

@@ -1,5 +1,6 @@
+import { installedServiceView } from '../domain/installed-services.js'
 import { ExecutionFailure, executionPreparationApproved } from '../domain/platform-execution.js'
-import type { ExecutionConfigurationStorePort, ExecutionMaterial, ExecutionOwnerInventoryPort } from '../ports/platform-execution.js'
+import type { ExecutionConfigurationStorePort, ExecutionMaterial, ExecutionMaterialIdentity, ExecutionOwnerInventoryPort } from '../ports/platform-execution.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
 
 /** Retains current skill sources and declared dependency versions for admitted calls. */
@@ -18,7 +19,16 @@ export class ExecutionDependencies {
   async hasPlatformCredential(owner: string): Promise<boolean> {
     if (!this.owners.identities().includes(owner)) return false
     const configuration = await this.configurations.get(owner)
-    return !!configuration?.enabled && configuration.variables.some(row => row.secret && row.value !== '')
+    if (!configuration?.enabled) return false
+    return (
+      configuration.variables.some(row => row.secret && row.value !== '') ||
+      Boolean(
+        configuration.services &&
+        installedServiceView(configuration.services).slots.some(slot =>
+          slot.backends.some(backend => backend.enabled && backend.fields.some(field => field.type === 'secret' && field.configured)),
+        ),
+      )
+    )
   }
   async recover(): Promise<void> {
     await this.changed()
@@ -47,18 +57,19 @@ export class ExecutionDependencies {
     const owners = this.owners.identities()
     for (const row of configurations) if (!owners.includes(row.owner)) await this.configurations.remove(row.owner, row.configuration.rowRevision)
   }
-  withPrepared<T>(owner: string, run: (material: ExecutionMaterial) => Promise<T>): Promise<T> {
+  withPrepared<T>(owner: string, run: (material: ExecutionMaterial) => Promise<T>, expected?: ExecutionMaterialIdentity): Promise<T> {
     if (this.stopped) return Promise.reject(new ExecutionFailure('internal'))
-    const task = this.usePrepared(owner, run)
+    const task = this.usePrepared(owner, run, expected)
     this.calls.add(task)
     return task.finally(() => {
       this.calls.delete(task)
     })
   }
-  private async usePrepared<T>(owner: string, run: (material: ExecutionMaterial) => Promise<T>): Promise<T> {
+  private async usePrepared<T>(owner: string, run: (material: ExecutionMaterial) => Promise<T>, expected?: ExecutionMaterialIdentity): Promise<T> {
     const configuration = await this.configurations.get(owner),
       source = this.owners.get(owner)
     if (!source || !configuration || !executionPreparationApproved(source, configuration)) throw new ExecutionFailure('not-ready')
+    if (expected && (expected.version !== source.version || expected.revision !== configuration.rowRevision)) throw new ExecutionFailure('not-ready')
     this.sources.set(source.version, (this.sources.get(source.version) ?? 0) + 1)
     try {
       return await this.dependencies.withPrepared(configuration.runtimeDependencies ?? [], versions => run({ version: source.version, dependencies: versions }))

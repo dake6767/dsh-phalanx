@@ -50,7 +50,7 @@ export default function CommunitySkillsPage() {
     executionGuard.current = guard
   }, [])
   const guarded = (action: () => void) => (executionGuard.current ? executionGuard.current(action) : action())
-  const refresh = () => setRevision(value => value + 1)
+  const refresh = useCallback(() => setRevision(value => value + 1), [])
   const matches = (row: { published: boolean }) => filter === 'all' || (filter === 'published' ? row.published : !row.published)
   const visible = skills?.filter(skill => skill.topLevel && matches(skill)) ?? []
   const visiblePacks = packs?.filter(matches) ?? []
@@ -275,7 +275,7 @@ export default function CommunitySkillsPage() {
           </section>
         </Tabs.Panel>
         <Tabs.Panel id="catalog">
-          <CommunitySuitesPage />
+          <CommunitySuitesPage onLibraryChanged={refresh} />
         </Tabs.Panel>
         {featureVisible('contributions') ? (
           <Tabs.Panel id="contributions">

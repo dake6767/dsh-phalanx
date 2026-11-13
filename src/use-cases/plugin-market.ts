@@ -1,5 +1,8 @@
+import type { CatalogPluginDistributionIdentity } from '../domain/plugin-group-contract.js'
+import { suiteInstallOrigin } from '../domain/suite-install.js'
 import type { CommunityMarketPageData, CommunityPluginContributionInfo } from '../domain/admin-contract.js'
 import { nativeUpdateChoice } from '../domain/member-plugin-update.js'
+import type { NativePluginArchiveFacts } from '../domain/plugin-preinstall.js'
 import type { InstalledMarketPlugin } from '../ports/plugin-market.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -18,6 +21,8 @@ import type { MemberPluginManagerPort } from '../ports/plugin-market.js'
 import type { PluginSelectionsPort } from '../ports/plugin-selections.js'
 import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import type { MemberManagedPlugins } from './member-managed-plugins.js'
+import type { MemberNativeServiceSettings } from './member-native-service-settings.js'
+import type { MemberPluginPreinstalls } from './member-plugin-preinstalls.js'
 import type { MemberNativePluginJobs } from './member-native-plugin-jobs.js'
 import type { PluginLocalCopies } from './plugin-local-copies.js'
 import { KeyedOperations } from './support/keyed-operations.js'
@@ -39,6 +44,8 @@ export class PluginMarket {
     private readonly localCopies?: Pick<PluginLocalCopies, 'view' | 'set'> & Partial<Pick<PluginLocalCopies, 'revision'>>,
     private readonly native?: MemberNativePluginJobs,
     private readonly libraryOperations = new KeyedOperations(),
+    private readonly serviceSettings?: Pick<MemberNativeServiceSettings, 'list' | 'apply'>,
+    private readonly preinstalls?: Pick<MemberPluginPreinstalls, 'listFailures' | 'retry'>,
   ) {}
   async selectedCount(packageName: string): Promise<number> {
     const selected = new Set(await this.selections.members(packageName))
@@ -48,7 +55,7 @@ export class PluginMarket {
     actor: CommunityAccountActor,
     packageName: string,
     published: boolean,
-    confirmation?: { readonly confirmed?: true; readonly selectedMembers?: number },
+    confirmation?: { readonly confirmed?: true; readonly selectedMembers?: number; readonly expected?: CatalogPluginDistributionIdentity },
   ): Promise<void> {
     return await this.libraryOperations.run(packageName, async () => {
       const account = await this.current(actor)
@@ -75,12 +82,19 @@ export class PluginMarket {
   private async commitPublication(
     packageName: string,
     published: boolean,
-    confirmation?: { readonly confirmed?: true; readonly selectedMembers?: number },
+    confirmation?: { readonly confirmed?: true; readonly selectedMembers?: number; readonly expected?: CatalogPluginDistributionIdentity },
     receipt?: ContributionReceipt,
   ): Promise<void> {
     const row = (await this.library.list()).find(row => row.packageName === packageName)
     if (!row || row.removing || (published && (row.incompatible || row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision)))
       throw this.unavailable()
+    const expected = confirmation?.expected
+    if (
+      expected &&
+      (expected.packageName !== packageName || expected.integrity !== row.current?.integrity || suiteInstallOrigin(expected.entryId) !== row.suiteOrigin)
+    )
+      throw new BusinessRuleError('conflict', 'Review the changed plugin impact.', 'plugin-impact-changed')
+    if (expected && published && row.published) return
     if (published && (await this.upstreams?.list(packageName))?.some(row => row.credential.length > 0) && confirmation?.confirmed !== true)
       throw new BusinessRuleError('conflict', 'Confirm platform credential sharing', 'plugin-publication-credential-confirmation')
     if (!published && (confirmation?.confirmed !== true || confirmation.selectedMembers !== (await this.selectedCount(packageName))))
@@ -100,7 +114,7 @@ export class PluginMarket {
     const plugins = await Promise.all(
       (await this.available(actor.username)).map(async plugin => {
         const actual = installed.find(row => row.packageName === plugin.packageName),
-          shared = await this.shared(plugin.packageName)
+          shared = await this.sharedChoice(plugin.packageName, selected.has(plugin.packageName))
         const status = granted.has(plugin.packageName)
           ? ('managed' as const)
           : shared && selected.has(plugin.packageName)
@@ -114,6 +128,7 @@ export class PluginMarket {
               : ('install' as const)
         const contribution = libraryContributionCredit((await this.library.list()).find(row => row.packageName === plugin.packageName)?.provenance)
         const candidate = await this.native?.get(actor, plugin.packageName, instance, actual)
+        const retryReceipt = status === 'installed' && actual && this.native?.canRetryReceipt(actor, instance, plugin, actual)
         const choice = status === 'installed' && actual ? await this.updateChoice(actor, actual, plugin) : undefined
         const update = choice && actual && (await this.verifyArchive(instance, actual, signal)) ? choice : undefined
         const job =
@@ -133,23 +148,54 @@ export class PluginMarket {
           ...(update ? { update } : {}),
           ...(contribution ? { contribution } : {}),
           ...(shared && status !== 'native' && status !== 'installed' ? { sharedCredential: true as const } : {}),
+          ...(retryReceipt ? { retryReceipt: true as const } : {}),
           ...(job ? { job } : {}),
         }
       }),
     )
     const unlistedUpdates = await this.native?.unlistedUpdates(actor, new Set(plugins.map(plugin => plugin.packageName)), instance, installed)
+    const { nativeServices, preinstallFailures } = await this.setupState(actor, instance)
     return {
+      ...(nativeServices ? { nativeServices } : {}),
+      ...(preinstallFailures ? { preinstallFailures } : {}),
       ...(unlistedUpdates?.length ? { unlistedUpdates } : {}),
       pending:
         (await this.pending(
           actor.username,
           instance,
           installed.map(row => row.packageName),
+          Object.fromEntries(
+            installed.flatMap(row =>
+              row.version && row.archiveIntegrity ? [[row.packageName, { version: row.version, integrity: row.archiveIntegrity }]] : [],
+            ),
+          ),
         )) || plugins.some(row => row.job?.status === 'succeeded' && row.job.application === 'restart-required'),
       plugins,
     }
   }
-  async install(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal, requestId?: string) {
+  async nativeSetup(actor: CommunityAccountActor) {
+    await this.current(actor)
+    const status = this.runtime.status?.(actor.username)
+    return status?.state === 'ready' ? await this.setupState(actor, status.instance) : {}
+  }
+  private async setupState(actor: CommunityAccountActor, instance: CommunityUserInstance) {
+    const [nativeServices, preinstallFailures] = await Promise.all([
+      this.serviceSettings?.list(actor, instance),
+      this.preinstalls?.listFailures(actor, instance),
+    ])
+    return {
+      ...(nativeServices?.length ? { nativeServices } : {}),
+      ...(preinstallFailures?.length ? { preinstallFailures } : {}),
+    }
+  }
+  async retryNativeSetup(actor: CommunityAccountActor, packageName: string, origin: URL, action: 'retry-settings' | 'retry-preinstall') {
+    await this.current(actor)
+    const status = this.runtime.status?.(actor.username)
+    if (status?.state !== 'ready') throw this.unavailable()
+    if (action === 'retry-preinstall') await this.preinstalls?.retry(actor, status.instance, packageName, origin)
+    else if (await this.native?.delivery(actor, packageName)) await this.serviceSettings?.apply(actor, status.instance, packageName, origin)
+  }
+  async install(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal, requestId?: string, retryReceipt = false) {
     return await this.operations.run(actor.spaceId, async () => {
       await this.current(actor)
       const previous = await this.native?.get(actor, packageName)
@@ -158,14 +204,28 @@ export class PluginMarket {
       const installed = await this.manager.list(instance, origin, signal)
       signal.throwIfAborted()
       const account = await this.current(actor)
-      if (
-        !(await this.available(actor.username)).some(row => row.packageName === packageName) ||
-        (await this.managed.granted(actor.username)).includes(packageName)
-      )
-        throw this.unavailable()
+      const plugin = (await this.available(actor.username)).find(row => row.packageName === packageName)
+      if (!plugin || (await this.managed.granted(actor.username)).includes(packageName)) throw this.unavailable()
+      const actual = installed.find(row => row.packageName === packageName)
+      if (retryReceipt) {
+        if (!actual || !this.native?.canRetryReceipt(actor, instance, plugin, actual)) throw this.unavailable()
+        const current = async () => {
+          const status = this.runtime.status?.(actor.username)
+          if (status && (status.state !== 'ready' || status.instance !== instance)) return false
+          const latest = (await this.available(actor.username)).find(row => row.packageName === packageName)
+          return (
+            latest?.version === plugin.version &&
+            latest.integrity === plugin.integrity &&
+            latest.artifact === plugin.artifact &&
+            latest.preparationId === plugin.preparationId &&
+            !(await this.managed.granted(actor.username)).includes(packageName)
+          )
+        }
+        return { job: await this.native.install(actor, packageName, origin, requestId ?? '', { instance, plugin, current }) }
+      }
       const selected = await this.selections.get(account.spaceId),
-        shared = await this.shared(packageName)
-      if (installed.some(row => row.packageName === packageName) && !(shared && selected.includes(packageName))) throw this.unavailable()
+        shared = await this.sharedChoice(packageName, selected.includes(packageName))
+      if (actual && !(shared && selected.includes(packageName))) throw this.unavailable()
       if (!shared) {
         if (!this.native) throw this.unavailable()
         return { job: await this.native.install(actor, packageName, origin, requestId ?? '') }
@@ -297,12 +357,13 @@ export class PluginMarket {
     username: string,
     instance: CommunityUserInstance,
     installed: readonly string[] = instance.nativePluginSnapshot ?? [],
+    archives: NativePluginArchiveFacts | undefined = instance.nativeArchiveSnapshot,
   ): Promise<boolean> {
     const expected = (await this.managed.effective(username, instance.nativePluginSnapshot))
       .map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`)
       .sort()
     return (
-      !samePluginAccessSnapshot((await this.pluginAccess?.snapshot(username, installed)) ?? [], instance.pluginAccessSnapshot) ||
+      !samePluginAccessSnapshot((await this.pluginAccess?.snapshot(username, installed, archives)) ?? [], instance.pluginAccessSnapshot) ||
       JSON.stringify(expected) !== JSON.stringify([...(instance.managedSnapshot ?? [])].sort())
     )
   }
@@ -340,6 +401,9 @@ export class PluginMarket {
       row.current.sourceCommit === plugin.sourceCommit
       ? nativeUpdateChoice(actual, plugin, row, delivery)
       : undefined
+  }
+  private async sharedChoice(packageName: string, existing: boolean) {
+    return (existing || !(await this.native?.adapted(packageName))) && (await this.shared(packageName))
   }
   private async shared(packageName: string) {
     return usesSharedPluginCredential((await this.upstreams?.list(packageName)) ?? [])

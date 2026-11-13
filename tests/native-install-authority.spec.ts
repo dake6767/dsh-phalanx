@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { NativeInstallAuthority } from '../src/adapters/native-install-authority.js'
-import { nativeInstallVerifierModule, NATIVE_PLATFORM_INSTALL_PATH } from '../src/dsh/native-plugin-install.js'
+import { nativeInstallVerifierModule, NATIVE_PLATFORM_INSTALL_PATH, NATIVE_PLATFORM_SETTINGS_PATH } from '../src/dsh/native-plugin-install.js'
 
 it('authorizes one exact platform install for the bound member and launch, then refuses the same proof', async () => {
   const now = 100000
@@ -76,4 +76,13 @@ it.each([undefined, {}, { proof: '.', signature: 'invalid' }, { proof: 'a'.repea
 
 it('requires a captured launch before creating platform authorization', () => {
   expect(() => new NativeInstallAuthority().authorize({ userId: 'member' }, 'body')).toThrow('captured member launch')
+})
+
+it('scopes signed settings requests to their own path and carrier', async () => {
+  const authority = new NativeInstallAuthority()
+  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule).toString('base64'))
+  const verifier = module.createVerifier(authority.publicKey, 'member', 'fixture-launch')
+  const authorization = authority.authorize({ userId: 'member', resourceKey: 'fixture-launch' }, 'settings', NATIVE_PLATFORM_SETTINGS_PATH)
+  expect(verifier.check(authorization, 'POST', NATIVE_PLATFORM_INSTALL_PATH, 'settings')).toMatchObject({ ok: false, reason: 'target' })
+  expect(verifier.check(authorization, 'POST', NATIVE_PLATFORM_SETTINGS_PATH, 'settings')).toEqual({ ok: true })
 })

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, rmdir, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { installedShellArgument, installedUserDataRoot } from './installed-storage-layout.js'
+import { installedMemberHome, installedShellArgument } from './installed-storage-layout.js'
 
 type SavedSession = { path: string; sha256: string }
 const digest = (bytes: string) => createHash('sha256').update(bytes).digest('hex')
@@ -114,11 +114,13 @@ export async function enterUpgradedMember({
   remote,
   candidate,
   browserSession,
+  memberStorageKey,
 }: {
   admin: Page
   member: Page
   origin: string
   memberEntry: string
+  memberStorageKey: string
   remote: (command: string) => Promise<string>
   candidate: string
   browserSession: SavedSession
@@ -140,7 +142,7 @@ export async function enterUpgradedMember({
   expect((await submitted).status()).toBe(303)
   await member.waitForURL(url => url.origin === origin && url.pathname === memberEntry, { timeout: 300000 })
   await member.locator('#root').waitFor({ state: 'attached', timeout: 600000 })
-  expect(await remote('sudo cat ' + installedShellArgument((await installedUserDataRoot(remote)) + '/member/home/upgrade-owned.txt'))).toBe(
+  expect(await remote('sudo cat ' + installedShellArgument((await installedMemberHome(remote, memberStorageKey)) + '/upgrade-owned.txt'))).toBe(
     'MEMBER_DATA_PRESERVED',
   )
   return { loginStatus: 303, memberEntry, rootAttached: true, memberFilePreserved: true, coldEntryAfterUpgrade: true, legacySession }

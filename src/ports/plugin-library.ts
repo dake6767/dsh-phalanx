@@ -16,10 +16,15 @@ export interface PluginPreparerPort {
 }
 
 export interface PluginUploadPort {
-  accept(filename: string, content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<UploadedPlugin>
+  accept(filename: string, content: AsyncIterable<Uint8Array>, signal: AbortSignal, expectedIntegrity?: string): Promise<UploadedPlugin>
   discard(archive: string): Promise<void>
   recover?(retainedArchives: readonly string[]): Promise<void>
 }
+export interface CatalogPluginArchivePort {
+  load(url: string, integrity: string, signal: AbortSignal): Promise<UploadedPlugin>
+  discard(archive: string): Promise<void>
+}
+
 export interface PluginArchiveInspectorPort {
   inspect(archive: string, signal: AbortSignal): Promise<{ readonly packageName: string; readonly version: string }>
 }

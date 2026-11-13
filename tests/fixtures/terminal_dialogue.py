@@ -4,12 +4,18 @@ import pty
 import select
 import signal
 import sys
+import termios
 import time
 
 
 def run_terminal(entry, args, dialogue):
     pid, master = pty.fork()
     if pid == 0:
+        # The fixture matches the child's output, not the terminal driver's input echo.
+        # Echo can interrupt a multibyte prompt while the parent answers it.
+        attributes = termios.tcgetattr(0)
+        attributes[3] &= ~(termios.ECHO | termios.ECHONL)
+        termios.tcsetattr(0, termios.TCSANOW, attributes)
         os.execv(sys.executable, [sys.executable, str(entry), *args])
     output = b''
     cursor = 0

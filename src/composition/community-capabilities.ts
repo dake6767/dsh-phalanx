@@ -118,6 +118,7 @@ export function createCommunityCapabilities(input: {
     recordsReady,
     async username => await mcp.memberDependencies(username),
     async (username, installed) => await memberPluginAccess().dependencyNames(username, installed),
+    async (username, archives) => await memberPluginAccess().nativeDependencyPlans(username, archives),
   )
   const dependencyProjection = new FileRuntimeDependencyProjection(
     join(skillRoot, 'members'),

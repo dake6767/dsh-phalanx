@@ -162,7 +162,15 @@ it('stops the installed deployment without detached tasks, preserves data and bo
         if (database)
           expect((await database.query('SELECT value FROM public.lifecycle_external_probe')).rows).toEqual([{ value: 'EXTERNAL_DATABASE_RETAINED' }])
         const started = await control.request('start')
-        expect(started.exitCode).toBe(0)
+        expect(
+          started.exitCode,
+          JSON.stringify({
+            mode,
+            state: started.result.state,
+            errors: started.result.errors,
+            steps: started.result.steps?.map(({ component, action, status }) => ({ component, action, status })),
+          }),
+        ).toBe(0)
         expect(started.result.state).toBe('running')
         expect(autostart(started.result)).toEqual(scene.autostart)
         await expect.poll(async () => control.request('member-counts'), { timeout: 120_000 }).toEqual({ resident: 1, ondemand: 0, disabled: 0 })

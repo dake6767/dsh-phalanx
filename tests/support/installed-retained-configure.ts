@@ -4,20 +4,24 @@ import { signInCommunity } from '../fixtures/community-native-browser.js'
 import { skillZip } from '../fixtures/skills/archive.js'
 import { retainedExecutionTrial, withAdministratorSkill } from './installed-upgrade-trial.js'
 import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
+import { setAppCenterVisibility } from './app-center-visibility.js'
 
 /** Retained configure assertions shared by formal and optional online transports. */
-export async function configureRetainedUpgrade(input: {
-  admin: Page
-  member: Page
-  origin: string
-  get: (path: string) => ReturnType<APIResponse['json']>
-  post: (path: string, data: object, timeout?: number) => Promise<APIResponse>
-  instances: ReturnType<typeof installedInstanceAcceptance>
-  executionTrialTimeout: number
-  trialEvidence: string | undefined
-  redact: (text: string) => string
-  upstream: string
-}) {
+export async function configureRetainedUpgrade(
+  spaceStorage: boolean,
+  input: {
+    admin: Page
+    member: Page
+    origin: string
+    get: (path: string) => ReturnType<APIResponse['json']>
+    post: (path: string, data: object, timeout?: number) => Promise<APIResponse>
+    instances: ReturnType<typeof installedInstanceAcceptance>
+    executionTrialTimeout: number
+    trialEvidence: string | undefined
+    redact: (text: string) => string
+    upstream: string
+  },
+) {
   const { admin, member, origin, get, post, instances, executionTrialTimeout, trialEvidence, redact, upstream } = input
 
   await instances.configureCatalog(upstream + '/catalog.json')
@@ -43,7 +47,9 @@ export async function configureRetainedUpgrade(input: {
   ).toBe(200)
   const account = await post('accounts', { username: 'member', password: 'password', email: '' })
   expect(account.status()).toBe(201)
-  const { groupId } = await account.json()
+  const { groupId, spaceId } = await account.json()
+  if (spaceStorage) expect(spaceId).toMatch(/^[a-f0-9]{32}$/u)
+  if (spaceStorage) await setAppCenterVisibility(admin.request, origin, groupId)
   for (const name of ['p-managed', 'p-selected']) {
     expect(
       (
@@ -136,5 +142,28 @@ export async function configureRetainedUpgrade(input: {
     data: { name: 'retained-pack-selected', action: 'install' },
   })
   expect(selected.status(), await selected.text()).toBe(200)
-  return { memberEntry, groupId: groupId as string }
+  return { memberEntry, groupId: groupId as string, memberStorageKey: spaceStorage ? '_spaces/' + spaceId : 'member' }
+}
+
+export async function signInRetainedUpgrade(admin: Page, member: Page, origin: string, memberEntry: string) {
+  expect(
+    (await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status(),
+  ).toBe(303)
+  await signInCommunity(member, origin, 'member', 'password')
+  expect(new URL(member.url()).pathname).toBe(memberEntry)
+}
+
+export async function assertBaselineInstanceResources(
+  instances: ReturnType<typeof installedInstanceAcceptance>,
+  deploymentInputs: Parameters<ReturnType<typeof installedInstanceAcceptance>['assertImported']>[0],
+  admin: Page,
+  origin: string,
+) {
+  if (deploymentInputs.persisted) await instances.assertImported(deploymentInputs)
+  else {
+    const absentResources = await admin.request.get(origin + '/admin/api/instance-resources')
+    expect(absentResources.status()).toBe(404)
+    expect(await absentResources.json()).toMatchObject({ code: 'not-found' })
+  }
+  instances.assertBaselineLimits(await instances.kernel(), deploymentInputs)
 }

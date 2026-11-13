@@ -86,15 +86,32 @@ export interface CommunityMarketPluginView {
   readonly status: 'install' | 'selected' | 'managed' | 'native' | 'installed' | 'unknown'
   readonly sharedCredential?: true
   readonly installedVersion?: string
+  readonly retryReceipt?: true
   readonly update?: CommunityPluginUpdateChoice
   readonly job?: CommunityNativePluginJob
+}
+export interface CommunityNativeServiceBindingView {
+  readonly slot: string
+  readonly status: 'applied' | 'inactive' | 'failed' | 'conflict' | 'unsupported' | 'pending'
+  readonly refresh?: true
+}
+export interface CommunityMarketNativeServiceView {
+  readonly packageName: string
+  readonly bindings: readonly CommunityNativeServiceBindingView[]
+}
+export interface CommunityMarketPreinstallFailure {
+  readonly packageName: string
+  readonly restartRequired: boolean
 }
 export interface CommunityMarketPageData {
   readonly plugins: readonly CommunityMarketPluginView[]
   readonly pending: boolean
+  readonly nativeServices?: readonly CommunityMarketNativeServiceView[]
+  readonly preinstallFailures?: readonly CommunityMarketPreinstallFailure[]
   readonly unlistedUpdates?: readonly { readonly packageName: string; readonly job: CommunityNativePluginJob }[]
 }
 export interface CommunityPluginPublishAction {
+  readonly expected?: import('./plugin-group-contract.js').CatalogPluginDistributionIdentity
   readonly confirmed?: true
   readonly selectedMembers?: number
   readonly action: 'publish'
@@ -103,7 +120,7 @@ export interface CommunityPluginPublishAction {
 }
 export interface CommunityMarketInstallAction {
   readonly packageName: string
-  readonly action?: 'install' | 'uninstall' | 'update'
+  readonly action?: 'install' | 'uninstall' | 'update' | 'retry-receipt'
   readonly target?: string
   readonly requestId?: string
 }

@@ -407,6 +407,80 @@ it('keeps a dependency shared with a skill until the last catalog reference is r
   await f.suites.uninstall(f.actor, 'skill-entry', { removeDependencies: ['shared'] })
   await expect.poll(async () => await f.dependencyRows.has('shared-cli')).toBe(false)
 })
+
+it('switches to an independently prepared locked dependency while preserving unrelated access settings', async () => {
+  const f = await setup()
+  const resource = (id: string, digest: string): SuiteCatalogEntry => ({
+    category: 'dependency',
+    id,
+    version: '1.0.0',
+    contentHash: digest.repeat(64),
+    locked: true,
+    title: text,
+    description: text,
+    source: text,
+    items: [
+      {
+        kind: 'runtime-dependency',
+        type: 'resource',
+        name: id,
+        prepareCommands: { amd64: 'prepare-' + id },
+        pathDirectories: [],
+        resourceFiles: [{ path: 'data/marker.json' }, { path: 'bin/fixture-export', executable: true }],
+        commands: [],
+      },
+    ],
+  })
+  const first = resource('assets-v1', 'a'),
+    second = resource('assets-v2', 'b')
+  const withResource = (version: string, dependency: SuiteCatalogEntry): SuiteCatalogEntry => {
+    const plugin = item(version)
+    return {
+      ...preset(version),
+      dependencies: [dependency.id],
+      items: [
+        {
+          ...plugin,
+          catalogDependencies: [dependency.id],
+          resourceBindings: [
+            { dependency: dependency.id, version: dependency.version, contentHash: dependency.contentHash!, name: 'EDITOR_ASSETS', path: 'data' },
+            {
+              kind: 'command-path',
+              dependency: dependency.id,
+              version: dependency.version,
+              contentHash: dependency.contentHash!,
+              path: 'bin',
+              commands: ['fixture-export'],
+            },
+          ],
+          access: {
+            ...plugin.access,
+            environment: [...plugin.access.environment, { name: 'EDITOR_ASSETS', value: '{dependency:' + dependency.id + '}/data' }],
+          },
+        },
+      ],
+    }
+  }
+  f.upgrade([withResource('1.0.0', first), first])
+  await f.suites.install(f.actor, request)
+  await f.settled('installed')
+  const old = (await f.accessStore.get('@fixture/editor'))!.environment.find(row => row.name === 'EDITOR_ASSETS')!
+  expect(old).toEqual({ name: 'EDITOR_ASSETS', value: '{dependency:assets-v1}/data' })
+  await expect(f.access.save(f.actor, '@fixture/editor', { environment: [], entriesYaml: '' })).rejects.toMatchObject({ code: 'plugin-access-invalid' })
+  await f.access.save(f.actor, '@fixture/editor', { environment: [old, { name: 'EDITOR_MODE', value: 'manual' }], entriesYaml: '' })
+  f.upgrade([withResource('2.0.0', second), first, second])
+  expect((await f.suites.updatePreview(f.actor, request.id)).reason).toBe('dependency-missing')
+  await f.suites.install(f.actor, { id: second.id, requestId: 'request-assets-v2-prepare' })
+  await expect.poll(async () => (await f.storage.installs.get(second.id))?.record.status).toBe('installed')
+  await f.suites.update(f.actor, request.id)
+  await expect.poll(async () => (await f.rows.get('@fixture/editor'))?.version).toBe('2.0.0')
+  expect((await f.accessStore.get('@fixture/editor'))?.environment).toEqual([
+    { name: 'EDITOR_MODE', value: 'manual' },
+    { name: 'EDITOR_ASSETS', value: '{dependency:assets-v2}/data' },
+  ])
+  expect((await f.rows.get('@fixture/editor'))?.runtimeDependencies).toEqual(['assets-v2'])
+  expect((await f.storage.installs.get(first.id))?.record.status).toBe('installed')
+})
 it('installs multiple embedded resources and resolves renamed dependencies during updates', async () => {
   const f = await setup()
   // An unrelated manual resource already owns the preferred library name.

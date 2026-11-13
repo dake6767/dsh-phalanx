@@ -3,7 +3,7 @@
     "protocol": 3,
     "source": {
       "min": "0.1.26",
-      "maxExclusive": "0.1.34"
+      "maxExclusive": "0.1.35"
     },
     "environmentEpoch": 1,
     "sourceDshRevisions": [
@@ -16,7 +16,7 @@
       {
         "name": "dsh_phalanx",
         "sourceMin": 15,
-        "sourceMax": 21
+        "sourceMax": 24
       }
     ],
     "minimumReader": "0.1.27",

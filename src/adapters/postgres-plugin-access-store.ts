@@ -1,16 +1,18 @@
+import { installedServiceConflict, mapInstalledServiceSecrets, resetInstalledServiceBackends } from '../domain/installed-services.js'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { ContributionReceipt } from '../domain/contribution-receipt.js'
 import type { PlatformSecretEnvelope } from '../domain/platform-secret.js'
 import type { PluginAccessCheckpoint, PluginAccessSettings } from '../domain/plugin-access.js'
-import type { PluginAccessStorePort } from '../ports/plugin-access.js'
+import type { PluginAccessStorePort, PluginInstalledServices } from '../ports/plugin-access.js'
 import type { PlatformSql } from './platform-database.js'
 import { protectedTable } from './platform-secret-codec.js'
 import { PlatformStoreLifecycle } from './platform-store-lifecycle.js'
 import { pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
 
 interface AccessRecord {
+  services?: PluginInstalledServices
   settings?: PluginAccessSettings
   receipt?: ContributionReceipt
   checkpoint?: PluginAccessCheckpoint
@@ -52,6 +54,14 @@ function mapSettings(settings: PluginAccessSettings, scope: string, visit: (posi
 function mapRecord(record: AccessRecord, visit: (position: Field, value: string) => string): AccessRecord {
   return {
     ...record,
+    ...(record.services
+      ? {
+          services: {
+            ...record.services,
+            configuration: mapInstalledServiceSecrets(record.services.configuration, (field, value) => visit({ scope: 'services', field }, value)),
+          },
+        }
+      : {}),
     ...(record.settings ? { settings: mapSettings(record.settings, 'current', visit) } : {}),
     ...(record.checkpoint?.before ? { checkpoint: { ...record.checkpoint, before: mapSettings(record.checkpoint.before, 'before', visit) } } : {}),
   }
@@ -68,7 +78,8 @@ export function resetPluginAccessSecrets(record: AccessRecord): AccessRecord {
         appliedRevision: settings && record.settings?.revision === next.checkpoint.appliedRevision ? settings.revision : next.checkpoint.appliedRevision,
       }
     : undefined
-  return { ...next, ...(settings ? { settings } : {}), ...(checkpoint ? { checkpoint } : {}) }
+  const services = next.services ? { configuration: resetInstalledServiceBackends(next.services.configuration), revision: randomUUID() } : undefined
+  return { ...next, ...(services ? { services } : {}), ...(settings ? { settings } : {}), ...(checkpoint ? { checkpoint } : {}) }
 }
 
 /** Per-package settings, contribution receipts and suite rollback state share one PostgreSQL commit. */
@@ -113,6 +124,40 @@ export class PostgresPluginAccessStore implements PluginAccessStorePort {
   private async record(packageName: string): Promise<AccessRecord> {
     this.ready()
     return pluginTransaction(this.connection, async sql => (await this.read(sql, packageName)).record)
+  }
+  async installedServices(packageName: string) {
+    return (await this.record(packageName)).services
+  }
+  /** Native delivery needs the installed definition identity even when a provider secret is unavailable. */
+  async installedServiceOwner(packageName: string): Promise<string | undefined> {
+    this.ready()
+    return await pluginTransaction(this.connection, async sql => {
+      const [row] = await sql.query<{ owner: string | null }>(
+        `SELECT configuration #>> '{services,configuration,ownerVersion}' AS owner
+         FROM dsh_phalanx.plugin_access_settings WHERE package_name=$1
+         AND jsonb_array_length(configuration #> '{services,configuration,slots}') > 0`,
+        [packageName],
+      )
+      return row?.owner ?? undefined
+    })
+  }
+  saveInstalledServices(
+    packageName: string,
+    origin: string | null,
+    configuration: PluginInstalledServices['configuration'] | undefined,
+    expectedRevision: string,
+  ): Promise<string | undefined> {
+    return this.modify(
+      packageName,
+      record => {
+        if ((record.services?.revision ?? 'none') !== expectedRevision) throw installedServiceConflict()
+        if (configuration) record.services = { configuration, revision: randomUUID() }
+        else delete record.services
+        return { record, result: record.services?.revision }
+      },
+      undefined,
+      origin,
+    )
   }
   async get(packageName: string) {
     return (await this.record(packageName)).settings
@@ -219,12 +264,21 @@ export class PostgresPluginAccessStore implements PluginAccessStorePort {
       return { record, result: true }
     })
   }
-  private async modify<T>(packageName: string, change: (record: AccessRecord) => { record: AccessRecord; result: T }, expectedRevision?: string): Promise<T> {
+  private async modify<T>(
+    packageName: string,
+    change: (record: AccessRecord) => { record: AccessRecord; result: T },
+    expectedRevision?: string,
+    expectedOrigin?: string | null,
+  ): Promise<T> {
     this.lifecycle.assertAccepting()
     this.ready()
     return this.lifecycle.write(() =>
       pluginTransaction(this.connection, async sql => {
-        await sql.query('SELECT package_name FROM dsh_phalanx.plugin_library WHERE package_name=$1 FOR UPDATE', [packageName])
+        const [plugin] = await sql.query<{ suite_origin: string | null }>(
+          'SELECT suite_origin FROM dsh_phalanx.plugin_library WHERE package_name=$1 FOR UPDATE',
+          [packageName],
+        )
+        if (expectedOrigin !== undefined && plugin?.suite_origin !== expectedOrigin) throw installedServiceConflict()
         // Lock first, then take a fresh snapshot of both metadata and protected values.
         await sql.query('SELECT package_name FROM dsh_phalanx.plugin_access_settings WHERE package_name=$1 FOR UPDATE', [packageName])
         const previous = await this.read(sql, packageName)

@@ -1,6 +1,8 @@
+import { legacyCatalogExecutionVariables } from '../domain/execution-service-environment.js'
 import { compareSuiteVersions } from '../domain/suite-install.js'
 import type { SuiteUnavailableReason } from './suite-availability.js'
 import type { CommunitySuiteInstallView, CommunitySuiteCatalogView } from '../domain/admin-contract.js'
+import type { CommunityCatalogServiceDefinition } from '../domain/suite-contract.js'
 import type { SuiteCatalogEntry, SuiteCatalogPluginItem, SuiteCatalogExecutionItem } from '../domain/suite-catalog.js'
 import { suiteExecutionOwner, type SuiteInstallState, type SuiteInstallRecord } from '../domain/suite-install.js'
 import type { ExecutionSuitePort } from './suite-entry-kinds.js'
@@ -21,7 +23,11 @@ export async function suiteInstallView(
       : []
   const missing = [...new Set(executions.flatMap(row => row.missingCredentials))]
   const execution = executions.length
-    ? { enabled: executions.every(row => row.enabled), configuredVariables: [...new Set(executions.flatMap(row => row.configuredVariables))] }
+    ? {
+        enabled: executions.every(row => row.enabled),
+        variables: [...new Set(executions.flatMap(row => row.variables ?? []))],
+        configuredVariables: [...new Set(executions.flatMap(row => row.configuredVariables))],
+      }
     : undefined
   // Keep actions pending until the configuration checkpoint allows them.
   return {
@@ -65,6 +71,21 @@ export async function suiteCatalogView(
         const suite = entry.category !== 'dependency' ? entry : undefined
         const packName = suite?.items.find(item => item.kind === 'skill-pack')?.name
         const plugin = suite?.items.find((item): item is SuiteCatalogPluginItem => item.kind === 'plugin')
+        const services: CommunityCatalogServiceDefinition[] = entry.items.flatMap(item =>
+          (item.kind === 'execution' || item.kind === 'plugin') && item.serviceSlots?.length
+            ? [
+                {
+                  kind: item.kind,
+                  name: item.kind === 'execution' ? item.skill : item.packageName,
+                  slots: item.serviceSlots.map(({ id, label, backends }) => ({
+                    id,
+                    label,
+                    backends: backends.map(({ id, label, fields }) => ({ id, label, fields })),
+                  })),
+                },
+              ]
+            : [],
+        )
         return {
           id: entry.id,
           category: entry.category,
@@ -77,6 +98,8 @@ export async function suiteCatalogView(
           ...reason,
           ...(entry.unavailableDetail ? { unavailableDetail: entry.unavailableDetail } : {}),
           ...(suite ? { identity: suite.identity, skills: suite.items.flatMap(item => (item.kind === 'skill' ? item.names : [])) } : {}),
+          ...(entry.contentHash ? { contentHash: entry.contentHash } : {}),
+          ...(services.length ? { services } : {}),
           ...(packName !== undefined ? { packName } : {}),
           ...(plugin ? { plugin: { packageName: plugin.packageName, version: plugin.version, integrity: plugin.integrity } } : {}),
           ...(suite?.dependencies.length ? { dependencies: suite.dependencies } : {}),
@@ -85,14 +108,19 @@ export async function suiteCatalogView(
             ? {
                 execution: {
                   commands: executionItems(entry).flatMap(item => item.delegated),
-                  variables: executionItems(entry).flatMap(item => item.variables),
+                  variables: executionItems(entry).flatMap(legacyCatalogExecutionVariables),
                 },
               }
             : {}),
           ...(record
             ? {
                 installedVersion: record.version,
-                ...(record.status === 'installed' && compareSuiteVersions(entry.version, record.version) > 0 ? { updateAvailable: true } : {}),
+                ...(record.status === 'installed' &&
+                !record.locked &&
+                !(entry.category === 'dependency' && entry.locked) &&
+                compareSuiteVersions(entry.version, record.version) > 0
+                  ? { updateAvailable: true }
+                  : {}),
               }
             : {}),
         }

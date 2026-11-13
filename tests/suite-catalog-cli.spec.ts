@@ -38,3 +38,41 @@ it('refuses adapter entries whose platform floor predates the adapter implementa
   expect(result.status).toBe(1)
   expect(result.stderr).toContain('>=0.1.19')
 })
+
+it('validates the declared plugin archive and its platform floor at publication', () => {
+  const entry = {
+    kind: 'plugin' as const,
+    id: 'fixture-archive',
+    version: '1.0.0',
+    engines: { platform: '>=0.1.35' },
+    adapters: [],
+    title: { en: 'Editor', 'zh-CN': '编辑器' },
+    description: { en: 'Editor', 'zh-CN': '编辑器' },
+    identity: { en: 'Editor', 'zh-CN': '编辑器' },
+    source: { en: 'Fixture', 'zh-CN': '夹具' },
+    dependencies: [],
+    items: [
+      {
+        kind: 'plugin' as const,
+        packageName: '@fixture/editor',
+        version: '1.0.0',
+        integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
+        runtimeDependencies: [],
+        catalogDependencies: [],
+        access: { environment: [], entriesYaml: '' },
+        archive: { url: 'https://github.com/fixture/editor/releases/download/v1.0.0/editor.tgz' },
+      },
+    ],
+  }
+  const valid = check([withSuiteCatalogContentHash(entry)], '0.1.35')
+  expect(valid.status, valid.stderr).toBe(0)
+  const unsafe = check([withSuiteCatalogContentHash({ ...entry, engines: { platform: '>=0.1.34' } })], '0.1.35')
+  expect(unsafe.status).toBe(1)
+  expect(unsafe.stderr).toContain('>=0.1.35')
+  const [plugin] = entry.items
+  const { archive, ...npmPlugin } = plugin!
+  const misplacedEntry = { ...entry, archive, items: [npmPlugin], engines: { platform: '>=0.1.34' } }
+  const misplaced = check([withSuiteCatalogContentHash(misplacedEntry)], '0.1.35')
+  expect(misplaced.status).toBe(1)
+  expect(misplaced.stderr).toContain('Catalog extension is declared at the wrong level')
+})

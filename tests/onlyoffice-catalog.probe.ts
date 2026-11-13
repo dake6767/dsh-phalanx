@@ -90,7 +90,7 @@ it('prepares the signed SDK resource and uses its read-only shared tree for two 
     const before = (await session.api('suites')).installations.find((row: { id: string }) => row.id === 'onlyoffice')
     const started = Date.now()
     if (before?.status !== 'installed') {
-      await card.getByRole('button', { name: 'Install', exact: true }).click()
+      await card.getByRole('button', { name: 'View catalog entry OnlyOffice', exact: true }).click()
       await admin.getByRole('dialog', { name: 'OnlyOffice', exact: true }).getByRole('button', { name: 'Install entry', exact: true }).click()
       const installed = await until(
         () => session.api('suites'),

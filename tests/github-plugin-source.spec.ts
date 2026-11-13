@@ -64,3 +64,18 @@ it('cancels a commit listing that exceeds its byte limit', async () => {
   }))
   await expect(source.resolve('owner/repo', signal())).rejects.toMatchObject({ code: 'plugin-github-unavailable' })
 })
+
+it('uses the configured asset prefix and reports a truncated release download as unavailable', async () => {
+  const asset = 'https://github.com/owner/repo/releases/download/v1.0.0/package.tgz'
+  const { source } = await proxy(url => {
+    if (url !== `/assets/${asset}`) return { status: 404 }
+    return { status: 200, headers: { 'content-length': '20', connection: 'close' }, body: 'short' }
+  })
+  const body = await source.releaseAsset(asset, signal())
+  const read = async () => {
+    const chunks: Uint8Array[] = []
+    for await (const chunk of body) chunks.push(chunk)
+    return chunks
+  }
+  await expect(read()).rejects.toMatchObject({ code: 'plugin-github-unavailable' })
+})

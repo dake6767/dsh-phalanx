@@ -7,13 +7,16 @@ import { Checkbox } from '@heroui/react/checkbox'
 import { TextField } from '@heroui/react/textfield'
 import { TextArea } from '@heroui/react/textarea'
 import { Label } from '@heroui/react/label'
-import type { CommunitySkillPackInput, CommunitySkillPackDetail, CommunitySkillView } from '../../src/domain/admin-contract'
-import { communitySkillPacks, communitySkillPackDetail, communitySkills, saveCommunitySkillPack, removeCommunitySkillPack } from './community-api'
+import type { CommunitySkillPackInput, CommunitySkillPackDetail } from '../../src/domain/admin-contract'
+import { communitySkillPacks, communitySkillPackDetail } from './community-api'
+import { saveCommunitySkillPack, saveCommunitySkillPackDisplay, removeCommunitySkillPack } from './community-skill-pack-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import { useDraftGuard } from './useDraftGuard'
 import CommunityDialog from './CommunityDialog'
 import CommunityField from './CommunityField'
 import CommunityMessage from './CommunityMessage'
+import CommunitySkillPackPicker from './CommunitySkillPackPicker'
+import type { CommunitySkillPackMember } from '../../src/domain/skill-admin-contract'
 
 const blank: CommunitySkillPackInput = { name: '', description: '', skills: [], instructions: '', published: false }
 const input = (row: CommunitySkillPackInput): CommunitySkillPackInput => ({
@@ -27,8 +30,13 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
   const { t, errorText } = usePlatformLanguage()
   const [draft, setDraft] = useState<CommunitySkillPackInput>(blank),
     [saved, setSaved] = useState<CommunitySkillPackInput>(blank)
-  const [skills, setSkills] = useState<readonly CommunitySkillView[]>(),
-    [revision, setRevision] = useState(''),
+  const [displayName, setDisplayName] = useState('')
+  const [members, setMembers] = useState<readonly CommunitySkillPackMember[]>([])
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
+  const [picking, setPicking] = useState(false)
+  const [reload, setReload] = useState(0)
+  const [revision, setRevision] = useState(''),
     [detail, setDetail] = useState<CommunitySkillPackDetail>()
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<unknown>(),
@@ -39,13 +47,16 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
   const readOnly = !!detail?.suiteOrigin
   useEffect(() => {
     const controller = new AbortController()
-    void Promise.all([communitySkills(controller.signal), name ? communitySkillPackDetail(name, controller.signal) : communitySkillPacks(controller.signal)])
-      .then(([rows, value]) => {
+    const request = name ? communitySkillPackDetail(name, controller.signal) : communitySkillPacks(controller.signal)
+    void request
+      .then(value => {
         if (controller.signal.aborted) return
-        setSkills(rows)
+        setError(undefined)
         setRevision(value.revision)
         if ('name' in value) {
+          setMembers(value.members)
           setDetail(value)
+          setDisplayName(value.displayName ?? value.name)
           setDraft(input(value))
           setSaved(input(value))
         }
@@ -54,15 +65,29 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
         if (!controller.signal.aborted) setError(failure)
       })
     return () => controller.abort()
-  }, [name])
-  const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
+  }, [name, reload])
+  const savedDisplayName = detail?.displayName ?? name
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved) || (readOnly && displayName !== savedDisplayName)
+  const discard = () => {
+    setDraft(saved)
+    setDisplayName(savedDisplayName)
+  }
   const save = async () => {
-    if (pending.current || !skills || readOnly) return false
+    if (pending.current || !revision) return false
     pending.current = true
     setBusy(true)
     setError(undefined)
     try {
-      await saveCommunitySkillPack(draft, revision, name || undefined)
+      if (readOnly) {
+        await saveCommunitySkillPackDisplay(
+          name,
+          {
+            ...(displayName !== savedDisplayName ? { displayName } : {}),
+            ...(draft.description !== saved.description ? { description: draft.description } : {}),
+          },
+          revision,
+        )
+      } else await saveCommunitySkillPack(draft, revision, name || undefined)
       onSaved()
       return true
     } catch (failure) {
@@ -73,7 +98,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
       setBusy(false)
     }
   }
-  const guard = useDraftGuard(dirty, save, () => setDraft(saved), busy)
+  const guard = useDraftGuard(dirty, save, discard, busy)
   const remove = async () => {
     if (!detail || pending.current) return
     pending.current = true
@@ -113,6 +138,8 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
       await publishCommunitySkillPack(confirmation.name, !confirmation.published, confirmation.revision)
       const next = await communitySkillPackDetail(confirmation.name)
       setDetail(next)
+      setMembers(next.members)
+      setDisplayName(next.displayName ?? next.name)
       setDraft(input(next))
       setSaved(input(next))
       setRevision(next.revision)
@@ -129,12 +156,19 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
     ;[names[index], names[index + direction]] = [names[index + direction]!, names[index]!]
     setDraft({ ...draft, skills: names })
   }
+  const byName = new Map(members.map(row => [row.name, row]))
+  const term = search.trim().toLowerCase()
+  const visible = draft.skills
+    .map((name, index) => ({ name, index, row: byName.get(name) }))
+    .filter(({ name, row }) => name.toLowerCase().includes(term) || row?.description.toLowerCase().includes(term))
+  const pageSize = 12
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(visible.length / pageSize) - 1))
   return (
     <>
       <CommunityDialog
         drawer
-        drawerClassName="plugin-drawer library-form-drawer"
-        title={name || t('Create skill pack')}
+        drawerClassName="plugin-drawer library-form-drawer catalog-form-drawer"
+        title={detail?.displayName ?? (name || t('Create skill pack'))}
         closeLabel={t('Close skill pack details')}
         busy={busy}
         onClose={() => guard.request(onClose)}
@@ -144,7 +178,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
               {t('Cancel')}
             </Button>
             <Button
-              isDisabled={busy || readOnly || !skills || !dirty || !draft.name || !draft.description}
+              isDisabled={busy || !revision || !dirty || !(readOnly ? displayName : draft.name).trim() || !draft.description.trim()}
               onPress={() => {
                 void save()
               }}
@@ -155,8 +189,14 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
         }
       >
         {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
-        {!skills ? (
-          <p role="status">{t('Loading…')}</p>
+        {!revision ? (
+          error ? (
+            <Button variant="secondary" onPress={() => setReload(value => value + 1)}>
+              {t('Reload skill packs')}
+            </Button>
+          ) : (
+            <p role="status">{t('Loading…')}</p>
+          )
         ) : (
           <div className="plugin-access-template">
             <CommunityPublicationSection
@@ -189,7 +229,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
                   {dirty ? (
                     <>
                       <p>{t('Save or discard changes before publishing.')}</p>
-                      <Button variant="tertiary" isDisabled={busy} onPress={() => setDraft(saved)}>
+                      <Button variant="tertiary" isDisabled={busy} onPress={discard}>
                         {t('Discard changes')}
                       </Button>
                     </>
@@ -200,78 +240,113 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
               )}
             </CommunityPublicationSection>
 
+            {readOnly ? (
+              <section className="plugin-detail-section">
+                <p>{t('Catalog source {name}', { name: detail!.suiteOrigin!.replace(/^suite:/u, '') })}</p>
+                <CommunityField label={t('Pack name')} value={name} readOnly />
+              </section>
+            ) : null}
             <CommunityField
-              label={t('Pack name')}
-              value={draft.name}
-              disabled={busy || readOnly}
-              onChange={value => setDraft({ ...draft, name: value })}
+              label={t(readOnly ? 'Pack display name' : 'Pack name')}
+              value={readOnly ? displayName : draft.name}
+              description={readOnly ? t(detail?.displayOverrides?.includes('displayName') ? 'Local override' : 'Uses catalog value') : undefined}
+              disabled={busy}
+              onChange={value => (readOnly ? setDisplayName(value) : setDraft({ ...draft, name: value }))}
               required
             />
             <CommunityField
               label={t('Pack description')}
               value={draft.description}
-              disabled={busy || readOnly}
+              description={readOnly ? t(detail?.displayOverrides?.includes('description') ? 'Local override' : 'Uses catalog value') : undefined}
+              disabled={busy}
               onChange={value => setDraft({ ...draft, description: value })}
               required
             />
-            <section className="group-grants" aria-label={t('Pack skills')}>
-              <div className="group-grants-intro">
-                <h3>{t('Pack skills')}</h3>
-                <p>{t('Select skills from the library. References follow the current skill version.')}</p>
+            <section className="plugin-detail-section" aria-label={t('Pack skills')}>
+              <div className="plugin-section-heading">
+                <h3>
+                  {t('Pack skills')} · {t('{count} skills', { count: draft.skills.length })}
+                </h3>
+                {readOnly ? null : (
+                  <Button size="sm" variant="secondary" isDisabled={busy || draft.skills.length >= 256} onPress={() => setPicking(true)}>
+                    {t('Add skills')}
+                  </Button>
+                )}
               </div>
-              <div className="group-grants-list">
-                {skills.map(skill => (
-                  <div className="group-grant-item" key={skill.name}>
-                    <Checkbox
-                      isSelected={draft.skills.includes(skill.name)}
-                      isDisabled={busy || readOnly || (!!skill.conflict && !draft.skills.includes(skill.name))}
-                      onChange={checked =>
-                        setDraft({ ...draft, skills: checked ? [...draft.skills, skill.name] : draft.skills.filter(name => name !== skill.name) })
-                      }
-                    >
-                      <Checkbox.Content>
-                        <Checkbox.Control>
-                          <Checkbox.Indicator />
-                        </Checkbox.Control>
-                        {skill.name}
-                      </Checkbox.Content>
-                    </Checkbox>
-                    <p className="text-sm text-muted">{skill.description}</p>
-                  </div>
+              {draft.skills.length ? (
+                <CommunityField
+                  label={t('Search pack skills')}
+                  value={search}
+                  onChange={value => {
+                    setSearch(value)
+                    setPage(0)
+                  }}
+                />
+              ) : (
+                <p>{t('This pack has no skills.')}</p>
+              )}
+              {draft.skills.length && !visible.length ? <p>{t('No skills match this filter.')}</p> : null}
+              <ol className="grant-rows">
+                {visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(({ name, row, index }) => (
+                  <li key={name}>
+                    <div className="grant-row-main">
+                      <strong>
+                        {index + 1}. {name}
+                      </strong>
+                      {row?.description ? <p>{row.description}</p> : null}
+                      {!row || row.conflict ? <p>{t('Skill is unavailable.')}</p> : null}
+                    </div>
+                    {readOnly ? null : (
+                      <div className="catalog-entry-actions">
+                        <Button
+                          size="sm"
+                          variant="tertiary"
+                          isDisabled={busy || !!term || index === 0}
+                          aria-label={t('Move {name} up', { name })}
+                          onPress={() => move(index, -1)}
+                        >
+                          ↑
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="tertiary"
+                          isDisabled={busy || !!term || index === draft.skills.length - 1}
+                          aria-label={t('Move {name} down', { name })}
+                          onPress={() => move(index, 1)}
+                        >
+                          ↓
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="tertiary"
+                          isDisabled={busy}
+                          onPress={() => setDraft({ ...draft, skills: draft.skills.filter(skill => skill !== name) })}
+                        >
+                          {t('Remove skill {name}', { name })}
+                        </Button>
+                      </div>
+                    )}
+                  </li>
                 ))}
-              </div>
+              </ol>
+              {visible.length > pageSize ? (
+                <div className="catalog-entry-actions">
+                  <Button size="sm" variant="secondary" isDisabled={currentPage === 0} onPress={() => setPage(currentPage - 1)}>
+                    {t('Previous page')}
+                  </Button>
+                  <Button size="sm" variant="secondary" isDisabled={(currentPage + 1) * pageSize >= visible.length} onPress={() => setPage(currentPage + 1)}>
+                    {t('Next page')}
+                  </Button>
+                </div>
+              ) : null}
             </section>
-            {draft.skills.length ? (
-              <section aria-label={t('Skill order')}>
-                <h3>{t('Skill order')}</h3>
-                {draft.skills.map((skill, index) => (
-                  <div key={skill} className="flex items-center gap-2 py-2">
-                    <span className="grow">
-                      {index + 1}. {skill}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="tertiary"
-                      isDisabled={busy || readOnly || index === 0}
-                      aria-label={t('Move {name} up', { name: skill })}
-                      onPress={() => move(index, -1)}
-                    >
-                      ↑
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="tertiary"
-                      isDisabled={busy || readOnly || index === draft.skills.length - 1}
-                      aria-label={t('Move {name} down', { name: skill })}
-                      onPress={() => move(index, 1)}
-                    >
-                      ↓
-                    </Button>
-                  </div>
-                ))}
-              </section>
-            ) : null}
-            <TextField value={draft.instructions} onChange={value => setDraft({ ...draft, instructions: value })} isDisabled={busy || readOnly} fullWidth>
+            <TextField
+              value={draft.instructions}
+              onChange={value => setDraft({ ...draft, instructions: value })}
+              isDisabled={busy}
+              isReadOnly={readOnly}
+              fullWidth
+            >
               <Label>{t('Orchestration instructions (optional)')}</Label>
               <TextArea rows={8} />
             </TextField>
@@ -284,6 +359,17 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
           </div>
         )}
       </CommunityDialog>
+      {picking ? (
+        <CommunitySkillPackPicker
+          current={draft.skills}
+          onClose={() => setPicking(false)}
+          onAdd={rows => {
+            setMembers(current => [...current.filter(row => !rows.some(added => added.name === row.name)), ...rows])
+            setDraft(current => ({ ...current, skills: [...current.skills, ...rows.map(row => row.name)] }))
+            setPicking(false)
+          }}
+        />
+      ) : null}
       {removing && detail ? (
         <CommunityDialog
           title={t('Remove skill pack')}

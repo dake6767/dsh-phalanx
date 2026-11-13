@@ -2,7 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { ContainerConfig } from '../domain/community-config.js'
 import { CommunityRuntimeUnavailableError } from '../ports/community-runtime.js'
-import { parsePublishedPort } from '../dsh/container.js'
+import { MEMBER_CREDENTIAL_FAILURE_EXIT, parsePublishedPort } from '../dsh/container.js'
 import { DSH_READY_PATTERN } from '../dsh/readiness.js'
 import { execFileText, sanitize } from './runtime-command.js'
 
@@ -48,6 +48,21 @@ export function waitForReady(child: ChildProcess, timeoutMs: number, signal: Abo
     signal.addEventListener('abort', onAbort, { once: true })
     if (signal.aborted) onAbort()
   })
+}
+
+export async function waitForMemberContainer(child: ChildProcess, timeoutMs: number, signal: AbortSignal, container: ContainerConfig, name: string) {
+  try {
+    return await waitForReady(child, timeoutMs, signal)
+  } catch (error) {
+    if (signal.aborted) throw error
+    const state = await execFileText(container.runtime, ['inspect', '--format', '{{.State.Running}} {{.State.ExitCode}}', name], {
+      timeout: 5_000,
+      signal,
+    }).catch(() => '')
+    if (state.trim() === `false ${MEMBER_CREDENTIAL_FAILURE_EXIT}`)
+      throw new CommunityRuntimeUnavailableError('credentials-unavailable', 'The private credential service could not be prepared')
+    throw error
+  }
 }
 
 export async function terminateChild(child: ChildProcess, exited: Promise<void>, timeoutMs: number): Promise<void> {

@@ -8,9 +8,10 @@ import {
   type LibraryPlugin,
   type PluginCandidate,
   npmPluginSource,
+  uploadPluginSource,
 } from '../domain/plugin-library.js'
 import type { PluginAccessStorePort } from '../ports/plugin-access.js'
-import type { PluginLibraryMembershipPort, PluginLibraryStorePort, PluginPreparerPort } from '../ports/plugin-library.js'
+import type { CatalogPluginArchivePort, PluginLibraryMembershipPort, PluginLibraryStorePort, PluginPreparerPort } from '../ports/plugin-library.js'
 import type { KeyedOperations } from './support/keyed-operations.js'
 
 /** Catalog owns staging and origin policy, using the library's package queue and lifecycle. */
@@ -30,6 +31,7 @@ export class PluginLibraryCatalog {
       assertIdle(name: string): void
       remove(name: string): Promise<void>
     },
+    private readonly archives?: CatalogPluginArchivePort,
   ) {}
   async assertSuiteAdmission(origin: string, packageName: string): Promise<void> {
     this.owner.assertIdle(packageName)
@@ -75,7 +77,7 @@ export class PluginLibraryCatalog {
   /** Prepares the locked package under a catalog origin; nothing is written until commitSuitePlugin. */
   async prepareSuitePlugin(
     origin: string,
-    item: { readonly packageName: string; readonly version: string; readonly integrity: string },
+    item: Pick<import('../domain/suite-catalog.js').SuiteCatalogPluginItem, 'packageName' | 'version' | 'integrity' | 'archive'>,
     log: (line: string) => Promise<void>,
     signal: AbortSignal,
   ): Promise<import('../domain/plugin-library.js').PreparedPlugin> {
@@ -87,7 +89,20 @@ export class PluginLibraryCatalog {
     const known = holder ? pluginIdentities(holder)[item.version] : undefined
     await log(`Preparing plugin ${item.packageName}@${item.version}…`)
     const candidate: PluginCandidate = { packageName: item.packageName, version: item.version }
-    const prepared = await this.preparer.prepare(candidate, async () => {}, signal)
+    let prepared: import('../domain/plugin-library.js').PreparedPlugin
+    if (item.archive) {
+      if (!this.archives) throw new PluginPreparationError('plugin-runtime-required')
+      const upload = await this.archives.load(item.archive.url, item.integrity, signal)
+      try {
+        if (upload.integrity !== item.integrity) throw new PluginPreparationError('plugin-integrity-invalid')
+        if (upload.packageName !== item.packageName || upload.version !== item.version) throw new PluginPreparationError('plugin-package-invalid')
+        prepared = await this.preparer.prepare({ ...candidate, upload }, async () => {}, signal)
+      } finally {
+        await this.archives.discard(upload.archive)
+      }
+    } else {
+      prepared = await this.preparer.prepare(candidate, async () => {}, signal)
+    }
     signal.throwIfAborted()
     await this.assertSuiteAdmission(origin, item.packageName)
     assertPreparedPlugin(candidate, prepared, known)
@@ -103,6 +118,7 @@ export class PluginLibraryCatalog {
       readonly packageName: string
       readonly version: string
       readonly integrity: string
+      readonly archive?: import('../domain/suite-catalog.js').SuiteCatalogPluginArchive
       readonly access: import('../domain/admin-contract.js').CommunityPluginAccessInput
     },
     prepared: import('../domain/plugin-library.js').PreparedPlugin,
@@ -133,12 +149,12 @@ export class PluginLibraryCatalog {
         ...metadata,
         packageName: item.packageName,
         version: item.version,
-        source: npmPluginSource,
+        source: item.archive ? uploadPluginSource : npmPluginSource,
         runtimeDependencies: [...runtimeDependencies],
         suiteOrigin: origin,
         suiteAppliedAccess: pluginAccessIdentity(item.access),
         ...(provenance ? { provenance } : {}),
-        current: prepared,
+        current: item.archive ? { ...prepared, catalogArchiveUrl: item.archive.url } : prepared,
         stage: 'available',
         published: current?.published === true || current?.restorePublication === true,
         identities: { ...pluginIdentities(current ?? takeover), [item.version]: item.integrity },

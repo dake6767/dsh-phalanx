@@ -6,6 +6,12 @@ import {
   reservedPluginEnvironment,
   type PluginEntryConfig,
 } from '../domain/plugin-access.js'
+import {
+  nativePluginDependencyPlan,
+  type NativePluginArchiveFacts,
+  type NativePluginDependencyPlan,
+  type NativePluginDependencyPlans,
+} from '../domain/plugin-preinstall.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 import type { RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
@@ -26,9 +32,20 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
       readonly runtimeRevision: string
     },
   ) {}
-  async snapshot(username: string, installed: readonly string[] = []): Promise<readonly string[]> {
+  async snapshot(username: string, installed: readonly string[] = [], archives: NativePluginArchiveFacts = {}): Promise<readonly string[]> {
     const managed = (await this.managed.accessible?.(username)) ?? (await this.managed.effective(username))
-    return [...(await this.revisions(managed)), ...(await this.nativeEnvironment(username, installed, managed)).snapshot].sort()
+    const resources = await this.nativeDependencyPlans(username, archives)
+    const ready = Object.fromEntries(
+      Object.entries(resources).filter(([, plan]) => {
+        try {
+          this.dependencies?.ready(plan.dependencies)
+          return true
+        } catch {
+          return false
+        }
+      }),
+    )
+    return [...(await this.revisions(managed)), ...(await this.nativeEnvironment(username, installed, managed, undefined, [], ready)).snapshot].sort()
   }
   async resolve(
     plugins: readonly PreparedPlugin[],
@@ -36,6 +53,8 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
     native?: {
       readonly username: string
       readonly installed: readonly string[]
+      readonly preinstall?: readonly string[]
+      readonly nativeResources?: NativePluginDependencyPlans
       readonly dependencyVersions?: Readonly<Record<string, RuntimeDependencyVersion>>
     },
   ) {
@@ -58,12 +77,13 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
       }) as Readonly<Record<string, PluginEntryConfig>>
     }
     const literals = native
-      ? await this.nativeEnvironment(native.username, native.installed, plugins, native.dependencyVersions)
-      : { environment: {}, snapshot: [] }
+      ? await this.nativeEnvironment(native.username, native.installed, plugins, native.dependencyVersions, native.preinstall, native.nativeResources)
+      : { environment: {}, snapshot: [], failures: [] }
     return {
       environment: { ...literals.environment, ...environment },
       entries,
       snapshot: [...(await this.revisions(plugins, native?.dependencyVersions)), ...literals.snapshot].sort(),
+      ...(literals.failures.length ? { nativeFailures: literals.failures } : {}),
     }
   }
   private async nativeEnvironment(
@@ -71,31 +91,57 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
     installed: readonly string[],
     managed: readonly PreparedPlugin[],
     versions?: Readonly<Record<string, RuntimeDependencyVersion>>,
+    preinstall: readonly string[] = [],
+    nativeResources: NativePluginDependencyPlans = {},
   ) {
     const account = await this.native?.accounts.get(username),
       environment: Record<string, string> = {},
-      snapshot: string[] = []
-    if (!account || account.disabled) return { environment, snapshot }
+      snapshot: string[] = [],
+      failures: string[] = []
+    if (!account || account.disabled) return { environment, snapshot, failures }
     const controlled = new Set([...managed.map(row => row.packageName), ...((await this.managed.localSelection?.(username)) ?? [])]),
       present = new Set(installed)
-    for (const row of await this.native!.records.get(account.spaceId)) {
-      if (!present.has(row.packageName) || controlled.has(row.packageName) || !(await this.nativeEligible(row.packageName))) continue
-      const values = (
-        await Promise.all(
-          (await this.store.get(row.packageName))?.environment
-            .filter(value => !reservedPluginEnvironment(value.name) && !value.value.includes('{access-token}') && !/\{upstream:[^{}]*\}/u.test(value.value))
-            .map(async value => [value.name, await this.replaceDependencies(row.packageName, value.value, versions)] as const) ?? [],
+    const deliveries = (await this.native!.records.get(account.spaceId)).flatMap(row => (present.has(row.packageName) ? [row.packageName] : []))
+    for (const packageName of new Set([...deliveries, ...preinstall])) {
+      if (controlled.has(packageName)) continue
+      const frozen = Object.hasOwn(nativeResources, packageName) ? nativeResources[packageName] : undefined
+      const library = await this.libraryRow(packageName)
+      if (this.dependencies && !this.eligible(library)) {
+        if (frozen) failures.push(packageName)
+        continue
+      }
+      if (library?.suiteResourceBindings?.length && !frozen) continue
+      if (frozen && (!library || nativePluginDependencyPlan(library).identity !== frozen.identity)) {
+        failures.push(packageName)
+        continue
+      }
+      const settings = await this.store.get(packageName)
+      const values =
+        settings?.environment.filter(
+          value => !reservedPluginEnvironment(value.name) && !value.value.includes('{access-token}') && !/\{upstream:[^{}]*\}/u.test(value.value),
+        ) ?? []
+      try {
+        const names = frozen?.dependencies ?? (await this.declarations(packageName))
+        const dependencies = this.resolvedBindings(names, versions)
+        const resolved = values.map(({ name, value }) => [name, this.boundValue(value, names, dependencies)] as const).sort(([a], [b]) => a.localeCompare(b))
+        const current = frozen ? await this.libraryRow(packageName) : undefined
+        if (frozen && (!current || !this.eligible(current) || nativePluginDependencyPlan(current).identity !== frozen.identity)) {
+          failures.push(packageName)
+          continue
+        }
+        const access = Object.entries(dependencies).map(([name, version]) => 'native:dependency:' + packageName + ':' + JSON.stringify([name, version.id]))
+        snapshot.push(...access)
+        if (!resolved.length) continue
+        Object.assign(environment, Object.fromEntries(resolved))
+        snapshot.push(
+          'native:' + packageName + ':' + pluginAccessIdentity({ environment: resolved.map(([name, value]) => ({ name, value })), entriesYaml: '' }),
         )
-      ).sort(([a], [b]) => a.localeCompare(b))
-      const dependencies = await this.dependencySnapshot(row.packageName, versions)
-      if (dependencies.length) snapshot.push(...dependencies.map(value => 'native:' + value))
-      if (!values.length) continue
-      Object.assign(environment, Object.fromEntries(values))
-      snapshot.push(
-        'native:' + row.packageName + ':' + pluginAccessIdentity({ environment: values.map(([name, value]) => ({ name, value })), entriesYaml: '' }),
-      )
+      } catch (error) {
+        if (!frozen) throw error
+        failures.push(packageName)
+      }
     }
-    return { environment, snapshot: snapshot.sort() }
+    return { environment, snapshot: snapshot.sort(), failures }
   }
   async dependencyNames(username: string, installed: readonly string[]): Promise<readonly string[]> {
     const managed = (await this.managed.accessible?.(username)) ?? (await this.managed.effective(username))
@@ -104,19 +150,64 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
     const local = new Set((await this.managed.localSelection?.(username)) ?? [])
     const names = new Set(managed.map(row => row.packageName))
     for (const row of account ? await this.native!.records.get(account.spaceId) : [])
-      if (installed.includes(row.packageName) && !local.has(row.packageName) && (await this.nativeEligible(row.packageName))) names.add(row.packageName)
+      if (
+        installed.includes(row.packageName) &&
+        !local.has(row.packageName) &&
+        (await this.nativeEligible(row.packageName)) &&
+        !(await this.libraryRow(row.packageName))?.suiteResourceBindings?.length
+      )
+        names.add(row.packageName)
     return [...new Set((await Promise.all([...names].map(async name => await this.declarations(name)))).flat())].sort()
   }
+  async nativeDependencyPlans(username: string, archives: NativePluginArchiveFacts): Promise<NativePluginDependencyPlans> {
+    if (!this.native || !this.dependencies || !Object.keys(archives).length) return {}
+    const account = await this.native.accounts.get(username)
+    if (!account || account.disabled) return {}
+    const [library, delivered, local, managed] = await Promise.all([
+      this.dependencies.library.list(),
+      this.native.records.get(account.spaceId),
+      this.managed.localSelection?.(username),
+      this.managed.effective(username),
+    ])
+    const excluded = new Set([...(local ?? []), ...managed.map(row => row.packageName)])
+    return Object.fromEntries(
+      delivered.flatMap(record => {
+        if (excluded.has(record.packageName)) return []
+        const actual = archives[record.packageName]
+        if (!actual || actual.integrity !== record.integrity || actual.version !== record.version) return []
+        const row = library.find(row => row.packageName === record.packageName)
+        if (
+          !row?.suiteOrigin ||
+          row.suiteOrigin !== record.resourceOrigin ||
+          !row.suiteResourceBindings?.length ||
+          row.removing ||
+          row.incompatible ||
+          row.stage !== 'available' ||
+          row.current?.version !== actual.version ||
+          row.current.integrity !== actual.integrity ||
+          row.current.runtimeRevision !== this.dependencies!.runtimeRevision
+        )
+          return []
+        return [[record.packageName, nativePluginDependencyPlan(row)]]
+      }),
+    )
+  }
+  private async libraryRow(packageName: string) {
+    return (await this.dependencies?.library.list())?.find(row => row.packageName === packageName)
+  }
+  private eligible(row: Awaited<ReturnType<MemberPluginAccess['libraryRow']>>) {
+    return !!row && !row.removing && !row.incompatible && row.stage === 'available' && row.current?.runtimeRevision === this.dependencies?.runtimeRevision
+  }
   private async nativeEligible(packageName: string): Promise<boolean> {
-    if (!this.dependencies) return true
-    const row = (await this.dependencies.library.list()).find(row => row.packageName === packageName)
-    return !!row && !row.removing && !row.incompatible && row.stage === 'available' && row.current?.runtimeRevision === this.dependencies.runtimeRevision
+    return !this.dependencies || this.eligible(await this.libraryRow(packageName))
   }
   private async declarations(packageName: string) {
-    return (await this.dependencies?.library.list())?.find(row => row.packageName === packageName)?.runtimeDependencies ?? []
+    return (await this.libraryRow(packageName))?.runtimeDependencies ?? []
   }
   private async bindings(packageName: string, versions?: Readonly<Record<string, RuntimeDependencyVersion>>) {
-    const names = await this.declarations(packageName)
+    return this.resolvedBindings(await this.declarations(packageName), versions)
+  }
+  private resolvedBindings(names: NativePluginDependencyPlan['dependencies'], versions?: Readonly<Record<string, RuntimeDependencyVersion>>) {
     const ready = versions ? names.map(name => versions[name]) : (this.dependencies?.ready(names) ?? [])
     return Object.fromEntries(
       names.map((name, index) => {
@@ -126,11 +217,14 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
       }),
     )
   }
-  private async replaceDependencies(packageName: string, value: string, versions?: Readonly<Record<string, RuntimeDependencyVersion>>) {
-    assertPluginDependencyTemplate(value, new Set(await this.declarations(packageName)))
-    if (!value.includes('{dependency:')) return value
-    const bindings = await this.bindings(packageName, versions)
+  private boundValue(value: string, names: readonly string[], bindings: Readonly<Record<string, RuntimeDependencyVersion>>) {
+    assertPluginDependencyTemplate(value, new Set(names))
     return value.replace(/\{dependency:([^{}]*)\}/gu, (_, name: string) => bindings[name]!.mountedPath)
+  }
+  private async replaceDependencies(packageName: string, value: string, versions?: Readonly<Record<string, RuntimeDependencyVersion>>) {
+    const names = await this.declarations(packageName)
+    if (!value.includes('{dependency:')) return this.boundValue(value, names, {})
+    return this.boundValue(value, names, this.resolvedBindings(names, versions))
   }
   private async dependencySnapshot(packageName: string, versions?: Readonly<Record<string, RuntimeDependencyVersion>>) {
     return Object.entries(await this.bindings(packageName, versions)).map(

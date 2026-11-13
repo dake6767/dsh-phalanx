@@ -32,7 +32,7 @@ export class FilePluginUpload implements PluginUploadPort {
     }
     this.cleanupFailed = false
   }
-  async accept(filename: string, content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<UploadedPlugin> {
+  async accept(filename: string, content: AsyncIterable<Uint8Array>, signal: AbortSignal, expectedIntegrity?: string): Promise<UploadedPlugin> {
     if (this.cleanupFailed) throw new PluginPreparationError('plugin-cleanup-failed')
     if (!/^[^/\\]{1,240}\.tgz$/u.test(filename) || [...filename].some(character => character.charCodeAt(0) < 32))
       throw new BusinessRuleError('invalid', 'Choose an npm pack .tgz archive.', 'plugin-upload-extension')
@@ -71,12 +71,14 @@ export class FilePluginUpload implements PluginUploadPort {
         signal.removeEventListener('abort', cancel)
         await file.close()
       }
+      const integrity = `sha512-${hash.digest('base64')}`
+      if (expectedIntegrity !== undefined && integrity !== expectedIntegrity) throw new PluginPreparationError('plugin-integrity-invalid')
       const identity = await this.inspector.inspect(temporary, signal)
       signal.throwIfAborted()
       assertPluginIdentity(identity)
       const archive = join(this.archives, id)
       await rename(temporary, archive)
-      return { ...identity, archive, integrity: `sha512-${hash.digest('base64')}` }
+      return { ...identity, archive, integrity }
     } catch (error) {
       preserve = error instanceof PluginPreparationError && error.code === 'plugin-cleanup-failed'
       if (preserve) this.cleanupFailed = true

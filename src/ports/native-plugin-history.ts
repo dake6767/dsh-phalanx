@@ -1,5 +1,6 @@
 import type { CommunityUserInstance } from './community-runtime.js'
 import type { NativeFeatureMember } from './native-features.js'
+import type { PluginInstallationsPort } from './plugin-installations.js'
 import type { PlatformUnitOfWorkPort } from './platform-unit-of-work.js'
 import type { SpaceMembers } from './space-actors.js'
 
@@ -15,7 +16,11 @@ export interface NativePluginHistoryRows {
   remember(spaceId: string, names: readonly string[]): Promise<readonly string[]>
 }
 export interface NativePluginHistoryPersistence {
-  readonly work: PlatformUnitOfWorkPort<{ readonly actors: SpaceMembers; readonly history: NativePluginHistoryRows }>
+  readonly work: PlatformUnitOfWorkPort<{
+    readonly actors: SpaceMembers
+    readonly history: NativePluginHistoryRows
+    readonly deliveries: Pick<PluginInstallationsPort, 'get'>
+  }>
 }
 export interface NativePluginHistoryRuntime {
   current(username: string): CommunityUserInstance | undefined
@@ -24,4 +29,5 @@ export interface NativePluginHistoryRuntime {
 export interface MemberNativePluginHistory {
   initialize(member: NativeFeatureMember, instance: CommunityUserInstance, signal: AbortSignal): Promise<readonly string[]>
   request(member: NativeFeatureMember, generation: string, mode: 'read' | 'refresh', signal: AbortSignal): Promise<readonly string[]>
+  archiveReserved(member: NativeFeatureMember, generation: string, integrity: string, signal: AbortSignal): Promise<boolean>
 }

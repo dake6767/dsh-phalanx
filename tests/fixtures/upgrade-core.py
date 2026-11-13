@@ -498,7 +498,7 @@ class SharedUpgrade(unittest.TestCase):
         self.assertEqual(core.recover(job['id'])['phase'],'restored')
         self.assertEqual(port.db,'member write after restoration'); self.assertEqual(port.events.count('carriers-restored'),1)
 
-    def test_public_recovery_accepts_a_committed_protocol_journal_without_executor_fields(self):
+    def test_public_recovery_accepts_a_large_committed_protocol_journal_without_executor_fields(self):
         from installer_upgrade_host import UpgradeHost
         from installer_progress import Progress
         UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
@@ -512,12 +512,19 @@ class SharedUpgrade(unittest.TestCase):
             host.progress=Progress(machine.root,persist=False);port=UpgradeHost(host)
             job=port.begin({'version':'v0.1.4-rc.2','manifest':manifest,'manifestSha256':'f'*64})
             job.update(phase='committed',committed=True,prepared={'target':str(machine.running_target),'command':['node','/fixture-official-cli.js']})
+            retained=['cache/plugins/'+str(index)+'/node_modules/'+('dependency-'+'x'*150) for index in range(14_098)]
+            job['backup']={'schema':2,'retainedDirectories':retained}
             port.save(job)
+            host.atomic('/etc/dsh-phalanx/maintenance','{}\n',0o644)
+            journal=port.path(job)/'operation.json'
+            self.assertGreater(journal.stat().st_size, 2_000_000)
             gate=type('GatePort',(),{'close':lambda self,ports:None,'open':lambda self:None})
             with patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(installer.main(['--upgrade','recover','--operation',job['id'],'--output','json'],host),0)
+                result=installer.main(['--upgrade','recover','--operation',job['id'],'--output','json'],host)
+                self.assertEqual(result,0,output.getvalue())
             self.assertEqual(json.loads(output.getvalue())['operation']['phase'],'succeeded')
             self.assertFalse((machine.root/'etc/dsh-phalanx/maintenance').exists())
+            self.assertEqual(json.loads(journal.read_text())['backup']['retainedDirectories'],retained)
 
     def test_public_install_rejects_self_consistent_but_incomplete_executor_before_activation(self):
         import tarfile,hashlib

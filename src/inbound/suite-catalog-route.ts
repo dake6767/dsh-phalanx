@@ -39,7 +39,7 @@ export async function suiteCatalogRoute(
     return true
   }
   assertCommunityOrigin(request, origin)
-  const value = (await readCommunityJson(request, 256 * 1024)) as { action?: string; input?: unknown; id?: unknown; credentials?: unknown }
+  const value = (await readCommunityJson(request, 256 * 1024)) as { action?: string; input?: unknown; id?: unknown; credentials?: unknown; expected?: unknown }
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new CommunityRequestError(400, 'Invalid suite catalog request', 'suite-catalog-invalid')
   if (value.action === 'install') await suites.install(actor, value.input)
@@ -50,7 +50,7 @@ export async function suiteCatalogRoute(
     sendCommunityJson(response, 200, await suites.catalog(actor))
     return true
   } else if (value.action === 'credentials' && typeof value.id === 'string') {
-    await suites.saveCredentials(actor, value.id, value.credentials)
+    await suites.saveCredentials(actor, value.id, value.credentials, value.expected)
     sendCommunityJson(response, 200, await suites.catalog(actor))
     return true
   } else throw new CommunityRequestError(400, 'Invalid suite catalog request', 'suite-catalog-invalid')

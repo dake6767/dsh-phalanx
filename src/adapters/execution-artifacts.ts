@@ -20,7 +20,13 @@ export class FileExecutionArtifacts {
     await mkdir(directory, { mode: 0o700 })
     return { directory }
   }
-  async publish(stage: { directory: string }, version: string, identity: string, log: string): Promise<PreparedExecution> {
+  async publish(
+    stage: { directory: string },
+    version: string,
+    identity: string,
+    log: string,
+    { copyableFiles = false }: { readonly copyableFiles?: boolean } = {},
+  ): Promise<PreparedExecution> {
     const digest = createHash('sha256')
     await this.walk(stage.directory, async (path, info) => {
       digest.update(
@@ -28,7 +34,9 @@ export class FileExecutionArtifacts {
       )
       if (info.isFile()) {
         digest.update(await readFile(path))
-        await chmod(path, info.mode & 0o111 ? 0o555 : 0o444)
+        // A file copied out of a read-only mount inherits its source mode.
+        const permissions = info.mode & 0o111 ? 0o555 : 0o444
+        await chmod(path, permissions | (copyableFiles ? 0o200 : 0))
       } else if (info.isSymbolicLink()) digest.update(await readlink(path))
       else if (info.isDirectory()) await chmod(path, 0o555)
       else throw new Error('Unexpected prepared artifact entry')

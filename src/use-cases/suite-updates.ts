@@ -1,3 +1,4 @@
+import { acceptsInstalledCatalogDependency, catalogResourcePin } from '../domain/suite-resource-bindings.js'
 import { pluginAccessIdentity } from '../domain/plugin-access.js'
 import type { SuiteCatalogPluginItem } from '../domain/suite-catalog.js'
 import type { PluginSuiteUpdatePort } from './suite-entry-kinds.js'
@@ -72,6 +73,7 @@ export class SuiteUpdates {
             old &&
             (old.blocked.join(' ') !== row.blocked.join(' ') ||
               (old.blockedOptions ?? []).join(' ') !== (row.blockedOptions ?? []).join(' ') ||
+              (old.shortOptionsWithValue ?? []).join(' ') !== (row.shortOptionsWithValue ?? []).join(' ') ||
               old.source !== row.source ||
               old.memberPath !== row.memberPath)
           )
@@ -98,13 +100,15 @@ export class SuiteUpdates {
     const reason =
       compareSuiteVersions(entry.version, record.version) <= 0
         ? 'up-to-date'
-        : entry.items.some(item => item.kind === 'runtime-dependency' && !suiteRuntimeDependencyDefinition(item, this.architecture))
-          ? 'unavailable-architecture'
-          : conflicts.length
-            ? 'skill-conflicts'
-            : missing.length
-              ? 'dependency-missing'
-              : undefined
+        : record.locked || (entry.category === 'dependency' && entry.locked)
+          ? 'invalid-entry'
+          : entry.items.some(item => item.kind === 'runtime-dependency' && !suiteRuntimeDependencyDefinition(item, this.architecture))
+            ? 'unavailable-architecture'
+            : conflicts.length
+              ? 'skill-conflicts'
+              : missing.length
+                ? 'dependency-missing'
+                : undefined
     const plugin = await this.pluginPreview(context),
       dependencyChanges = entry.category === 'plugin' ? await this.pluginDependencyPreview(context) : undefined
     return {
@@ -232,8 +236,10 @@ export function suiteUpdateContext(
     installs,
     catalogDependencyName: id => {
       const manual = record.manualDependencies?.find(row => row.id === id)
-      if (manual) return manual.name
+      const pin = catalogResourcePin(entry, id)
       const shared = installs.find(row => row.id === id && row.status === 'installed')
+      if (!acceptsInstalledCatalogDependency(entry, id, shared)) return undefined
+      if (manual && !pin) return manual.name
       return shared?.entries.find(row => row.kind === 'runtime-dependency')?.name
     },
   }

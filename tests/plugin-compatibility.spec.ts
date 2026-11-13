@@ -15,14 +15,15 @@ it('rechecks retained bytes once per platform/runtime upgrade, isolates failures
     bundlePatch: '[]',
     dependencies: {},
   }
+  const catalogArchiveUrl = 'https://github.com/fixture/plugin/releases/download/v1.0.0/plugin.tgz'
   const rows = new Map(
     ['compatible', 'incompatible'].map(packageName => [
       packageName,
       {
-        source: { kind: 'npm' as const },
+        source: { kind: packageName === 'compatible' ? 'upload' : 'npm' },
         packageName,
         version: '1.0.0',
-        current: { ...prepared, packageName },
+        current: { ...prepared, packageName, ...(packageName === 'compatible' ? { catalogArchiveUrl } : {}) },
         stage: 'available',
         published: true,
       } as LibraryPlugin,
@@ -49,10 +50,10 @@ it('rechecks retained bytes once per platform/runtime upgrade, isolates failures
   const compatibility = new PluginCompatibility(store, preparer, 'release/new')
   await compatibility.recover()
   expect(rows.get('compatible')).toMatchObject({
-    source: { kind: 'npm' as const },
+    source: { kind: 'upload' },
     stage: 'available',
     published: true,
-    current: { runtimeRevision: 'new' },
+    current: { runtimeRevision: 'new', catalogArchiveUrl },
     checkedFor: 'release/new',
   })
   expect(rows.get('incompatible')).toMatchObject({

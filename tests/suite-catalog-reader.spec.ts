@@ -1,3 +1,4 @@
+import { suiteCatalogViolations } from '../src/domain/suite-catalog-checks.js'
 import { expect, it } from 'vitest'
 import { readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
 import { suiteRuntimeDependencyDefinition, type SuiteCatalogRuntimeDependencyItem } from '../src/domain/suite-catalog.js'
@@ -332,5 +333,471 @@ it('reads signed plugin entries with locked npm identity, embedded resources and
     skipped: [],
     rejected: [],
     entries: [{ entry: { category: 'plugin', items: [{ kind: 'plugin', packageName: '@fixture/editor', version: '1.2.3' }] } }],
+  })
+})
+
+it('keeps old entries available when a signed catalog adds a version-gated plugin archive', () => {
+  const archive = { url: 'https://github.com/fixture/editor/releases/download/v1.2.3/editor.tgz' }
+  const item = {
+    kind: 'plugin' as const,
+    packageName: '@fixture/editor',
+    version: '1.2.3',
+    integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
+    runtimeDependencies: [],
+    catalogDependencies: [],
+    access: { environment: [], entriesYaml: '' },
+  }
+  const definition = {
+    ...minimal(),
+    kind: 'plugin' as const,
+    id: 'fixture-npm',
+    dependencies: [],
+    identity: { en: 'Editor', 'zh-CN': '编辑器' },
+    items: [item],
+  }
+  const npm = withSuiteCatalogContentHash(definition)
+  const archived = withSuiteCatalogContentHash({
+    ...definition,
+    id: 'fixture-archive',
+    engines: { platform: '>=0.1.35' },
+    items: [{ ...item, archive }],
+  })
+  const bytes = signCatalog([npm, archived], key).bytes
+  expect(readSuiteCatalog(bytes, { ...options, platformVersion: '0.1.34' })).toMatchObject({
+    status: 'ok',
+    rejected: [{ id: 'fixture-archive', reason: 'needs-platform-upgrade' }],
+    entries: [{ entry: { id: 'fixture-npm' } }, { entry: { id: 'fixture-archive' } }],
+  })
+  expect(readSuiteCatalog(bytes, { ...options, platformVersion: '0.1.35' })).toMatchObject({
+    status: 'ok',
+    rejected: [],
+    entries: [{ entry: { id: 'fixture-npm' } }, { entry: { items: [{ archive }] } }],
+  })
+})
+
+it.each([
+  [{ url: 'https://github.com/fixture/editor/releases/download/v1.2.3/editor.tgz' }, '>=0.1.35 || 0.1.34'],
+  [{ url: 'https://github.com/fixture/editor/archive/main.tar.gz' }, '>=0.1.35'],
+  [{ url: 'https://example.com/fixture/editor/releases/download/v1.2.3/editor.tgz' }, '>=0.1.35'],
+  [{ url: 'https://github.com/fixture/editor/releases/download/v1.2.3/editor.tgz', script: 'echo unexpected' }, '>=0.1.35'],
+])('refuses an unsafe archive declaration without hiding unrelated signed entries (%j, %s)', (archive, platform) => {
+  const plugin = {
+    ...minimal(),
+    kind: 'plugin',
+    id: 'fixture-archive',
+    engines: { platform },
+    dependencies: [],
+    items: [
+      {
+        kind: 'plugin',
+        packageName: '@fixture/editor',
+        version: '1.2.3',
+        integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
+        runtimeDependencies: [],
+        catalogDependencies: [],
+        access: { environment: [], entriesYaml: '' },
+        archive,
+      },
+    ],
+  }
+  const bytes = signRawCatalog(
+    {
+      format: 1,
+      publishedAt: '2026-11-11T00:00:00Z',
+      entries: [withSuiteCatalogContentHash(minimal()), { ...plugin, contentHash: suiteCatalogContentHash(plugin) }],
+    },
+    key,
+  )
+  expect(readSuiteCatalog(bytes, { ...options, platformVersion: '0.1.35' })).toMatchObject({
+    status: 'ok',
+    rejected: [{ id: 'fixture-archive', reason: 'invalid-entry' }],
+    entries: [{ entry: { id: 'fixture-tool' } }, { entry: { id: 'fixture-archive' } }],
+  })
+})
+
+it('verifies resource readiness markers for the selected architecture without executing catalog code', () => {
+  const makeEntry = (requiredFiles: unknown, platform = '>=0.1.35') => {
+    const entry = {
+      ...minimal({ engines: { platform } }),
+      items: [
+        {
+          kind: 'runtime-dependency',
+          type: 'resource',
+          name: 'fixture-resource',
+          paths: [],
+          commands: [],
+          downloads: [
+            {
+              source: 'github-assets',
+              url: { arm64: 'https://github.com/fixture/sdk/releases/download/v1.0.0/sdk.tar.gz' },
+              sha256: { arm64: 'a'.repeat(64) },
+              target: 'sdk.tar.gz',
+              extract: { format: 'tar' },
+            },
+          ],
+          requiredFiles,
+        },
+      ],
+    }
+    return { ...entry, contentHash: suiteCatalogContentHash(entry) }
+  }
+  const digest = 'b'.repeat(64)
+  const marker = { path: '.ready.json', sha256: { arm64: digest } }
+  const read = (files: unknown, version = '0.1.35', platform = '>=0.1.35') =>
+    readSuiteCatalog(signRawCatalog({ format: 1, publishedAt: '2026-11-11T00:00:00Z', entries: [makeEntry(files, platform)] }, key), {
+      ...options,
+      platformVersion: version,
+    })
+  expect(read([marker], '0.1.34')).toMatchObject({ status: 'ok', rejected: [{ reason: 'needs-platform-upgrade' }] })
+  const valid = read([marker])
+  expect(valid).toMatchObject({ status: 'ok', rejected: [] })
+  if (valid.status !== 'ok') throw new Error('Expected a readable catalog')
+  const item = valid.entries[0]!.entry.items[0] as SuiteCatalogRuntimeDependencyItem
+  expect(suiteRuntimeDependencyDefinition(item, 'arm64')?.checkCommand).toContain(digest)
+  expect(suiteRuntimeDependencyDefinition(item, 'arm64')?.checkCommand).toContain('./.ready.json')
+  expect(suiteRuntimeDependencyDefinition(item, 'amd64')).toBeUndefined()
+  for (const files of [
+    [{ ...marker, path: '../.ready.json' }],
+    [{ ...marker, path: '.ready.json\n' }],
+    [{ ...marker, sha256: { amd64: digest } }],
+    [{ ...marker, script: 'id' }],
+    [marker, marker],
+  ])
+    expect(read(files)).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+  expect(read([marker], '0.1.35', '>=0.1.34')).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+})
+
+it('reads typed backend fields scoped to declared execution commands and variables', () => {
+  const label = { en: 'Fixture', 'zh-CN': '夹具' }
+  const slots = [
+    {
+      id: 'image',
+      label,
+      commands: ['fixture-image'],
+      backends: [
+        {
+          id: 'openai',
+          label,
+          selector: { kind: 'environment', name: 'IMAGE_BACKEND', value: 'openai' },
+          fields: [
+            { name: 'OPENAI_KEY', type: 'secret', required: true },
+            { name: 'OPENAI_URL', type: 'url', required: false },
+          ],
+        },
+      ],
+    },
+  ]
+  const read = (
+    serviceSlots: unknown,
+    platform = '>=0.1.35',
+    variables = ['IMAGE_BACKEND', 'OPENAI_KEY', 'OPENAI_URL'],
+    protection?: { at: 'command' | 'item'; options: unknown; values?: unknown },
+  ) => {
+    const base = minimal()
+    const entry = {
+      ...base,
+      kind: 'suite',
+      identity: label,
+      dependencies: [],
+      engines: { platform },
+      items: [
+        ...('items' in base ? base.items : []),
+        { kind: 'skill', source: { type: 'git', url: 'https://github.com/fixture/skill', commit: 'a'.repeat(40), path: 'skills' }, names: ['fixture-skill'] },
+        {
+          kind: 'execution',
+          skill: 'fixture-skill',
+          runtimeDependency: 'fixture-tool',
+          delegated: [
+            {
+              command: 'fixture-image',
+              blocked: [],
+              ...(protection?.at === 'command'
+                ? { blockedShortOptions: protection.options, ...(protection.values !== undefined ? { shortOptionsWithValue: protection.values } : {}) }
+                : {}),
+            },
+          ],
+          ...(protection?.at === 'item' ? { blockedShortOptions: protection.options } : {}),
+          variables: variables.map(name => ({ name, optional: true, purpose: label })),
+          serviceSlots,
+        },
+      ],
+    }
+    return readSuiteCatalog(
+      signRawCatalog(
+        {
+          format: 1,
+          publishedAt: '2026-11-11T00:00:00Z',
+          entries: [{ ...entry, contentHash: suiteCatalogContentHash(entry) }],
+        },
+        key,
+      ),
+      { ...options, platformVersion: '0.1.35' },
+    )
+  }
+  expect(read(slots)).toMatchObject({
+    status: 'ok',
+    rejected: [],
+    entries: [{ entry: { items: expect.arrayContaining([expect.objectContaining({ kind: 'execution', serviceSlots: slots })]) } }],
+  })
+  expect(read(slots, '>=0.1.35', ['IMAGE_BACKEND', 'OPENAI_KEY', 'OPENAI_URL', 'NODE_OPTIONS'])).toMatchObject({
+    status: 'ok',
+    rejected: [{ reason: 'invalid-entry' }],
+  })
+  expect(read(slots, '>=0.1.34')).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+
+  expect(read(slots, '>=0.1.35', undefined, { at: 'command', options: ['-b'], values: ['-o'] })).toMatchObject({
+    status: 'ok',
+    rejected: [],
+    entries: [
+      {
+        entry: {
+          items: expect.arrayContaining([
+            expect.objectContaining({ delegated: [{ command: 'fixture-image', blocked: [], blockedOptions: ['-b'], shortOptionsWithValue: ['-o'] }] }),
+          ]),
+        },
+      },
+    ],
+  })
+  for (const [floor, protection] of [
+    ['>=0.1.34', { at: 'command', options: ['-b'] }],
+    ['>=0.1.35', { at: 'item', options: ['-b'] }],
+    ['>=0.1.35', { at: 'command', options: ['--backend'] }],
+    ['>=0.1.35', { at: 'command', options: ['-b'], values: ['-b'] }],
+  ] as const) {
+    expect(read(slots, floor, undefined, protection)).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+  }
+  const [slot] = slots
+  const backend = slot!.backends[0]!
+  const firstProvider = { ...backend, selector: { kind: 'option', name: '--provider', value: 'first' } }
+  const secondProvider = { ...backend, id: 'second', selector: { kind: 'option', name: '--provider', value: 'second' } }
+  expect(read([{ ...slot, backends: [firstProvider, secondProvider] }])).toMatchObject({ status: 'ok', rejected: [] })
+  for (const invalid of [
+    [{ ...slot, backends: [firstProvider, { ...secondProvider, selector: firstProvider.selector }] }],
+    [{ ...slot, backends: [backend, { ...backend, id: 'second', selector: undefined }] }],
+    [{ ...slot, backends: [{ ...backend, fields: [{ name: 'OPENAI_URL', type: 'url', required: false }] }] }],
+    [{ ...slot, commands: ['unknown'] }],
+    [{ ...slot, backends: [{ ...backend, selector: { kind: 'environment', name: 'UNDECLARED', value: 'openai' } }] }],
+    [{ ...slot, backends: [{ ...backend, fields: [{ name: 'OPENAI_KEY', type: 'shell', required: true }] }] }],
+    [{ ...slot, backends: [{ ...backend, fields: [{ name: 'UNDECLARED', type: 'secret', required: true }] }] }],
+    [{ ...slot, backends: [{ ...backend, script: 'id' }] }],
+    [slot, { ...slot, id: 'other' }],
+  ])
+    expect(read(invalid)).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+})
+
+it('validates native plugin service bindings for the signed package version', () => {
+  const label = { en: 'Fixture', 'zh-CN': '夹具' }
+  const binding = {
+    kind: 'revisioned-rpc',
+    service: 'fixtureSettings',
+    active: ['settings', 'ai'],
+    selection: ['settings', 'ai', 'selected'],
+    profiles: ['settings', 'ai', 'profiles'],
+    idKey: 'id',
+    snapshotKey: 'snapshot',
+    fields: { endpoint: 'baseUrl', key: 'apiKey', model: 'model', mode: 'engine', enabled: 'enabled' },
+  }
+  const backend = {
+    id: 'standard',
+    label,
+    protocol: 'openai-image',
+    mode: 'api',
+    profile: { alias: 'Platform' },
+    upstream: { endpoint: 'URL', key: 'KEY', model: 'MODEL' },
+    fields: [
+      { name: 'URL', type: 'url', required: true },
+      { name: 'KEY', type: 'secret', required: true },
+      { name: 'MODEL', type: 'text', required: true },
+    ],
+  }
+  const slot = { id: 'image', label, binding, backends: [backend] }
+  const read = (serviceSlots: unknown, platformVersion = '0.1.35') => {
+    const entry = {
+      ...minimal({ engines: { platform: '>=0.1.35' } }),
+      kind: 'plugin',
+      dependencies: [],
+      items: [
+        {
+          kind: 'plugin',
+          packageName: 'fixture-editor',
+          version: '1.2.3',
+          integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
+          runtimeDependencies: [],
+          catalogDependencies: [],
+          access: { environment: [], entriesYaml: '' },
+          serviceSlots,
+        },
+      ],
+    }
+    return readSuiteCatalog(
+      signRawCatalog(
+        {
+          format: 1,
+          publishedAt: '2026-11-11T00:00:00Z',
+          entries: [{ ...entry, contentHash: suiteCatalogContentHash(entry) }],
+        },
+        key,
+      ),
+      { ...options, platformVersion },
+    )
+  }
+  expect(read([slot])).toMatchObject({
+    status: 'ok',
+    rejected: [],
+    entries: [{ entry: { items: [{ version: '1.2.3', serviceSlots: [slot] }] } }],
+  })
+  expect(read([slot], '0.1.34')).toMatchObject({ status: 'ok', rejected: [{ reason: 'needs-platform-upgrade' }] })
+  for (const invalid of [
+    [{ ...slot, binding: { ...binding, selection: ['settings', '..', 'selected'] } }],
+    [{ ...slot, binding: { ...binding, profiles: ['settings', '__proto__'] } }],
+    [{ ...slot, binding: { ...binding, service: 'untrusted/request' } }],
+    [{ ...slot, binding: { ...binding, save: 'request' } }],
+    [{ ...slot, binding: { ...binding, fields: { ...binding.fields, endpoint: 'apiKey' } } }],
+    [{ ...slot, backends: [{ ...backend, protocol: 'custom-script' }] }],
+    [{ ...slot, backends: [{ ...backend, upstream: { ...backend.upstream, key: 'URL' } }] }],
+    [{ ...slot, backends: [{ ...backend, profile: { apiKey: 'disallowed' } }] }],
+    [{ ...slot, backends: [{ ...backend, profile: { alias: { script: 'id' } } }] }],
+    [slot, { ...slot, id: 'another' }],
+  ])
+    expect(read(invalid)).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+})
+
+it('checks and renders bindings to exact locked resources at publication', () => {
+  const base = minimal({ engines: { platform: '>=0.1.35' } })
+  const dependency = {
+    ...base,
+    kind: 'dependency',
+    id: 'shared-assets',
+    locked: true,
+    items: [
+      {
+        kind: 'runtime-dependency',
+        type: 'resource',
+        name: 'shared-assets',
+        paths: [],
+        commands: [],
+        downloads: [
+          {
+            source: 'github-assets',
+            url: { arm64: 'https://github.com/fixture/assets/releases/download/v1.0.0/assets.tgz' },
+            sha256: { arm64: 'a'.repeat(64) },
+            target: 'assets.tgz',
+            extract: { format: 'tar' },
+          },
+        ],
+        requiredFiles: [
+          { path: 'assets/marker.json', sha256: { arm64: 'a'.repeat(64) } },
+          { path: 'native/cache/metadata/marker.json', sha256: { arm64: 'b'.repeat(64) } },
+          { path: 'native/cache/store/marker.json', sha256: { arm64: 'c'.repeat(64) } },
+        ],
+      },
+    ],
+  }
+  const resource = { ...dependency, contentHash: suiteCatalogContentHash(dependency) }
+  const pin = { dependency: dependency.id, version: resource.version, contentHash: resource.contentHash, name: 'ASSET_ROOT', path: 'assets' }
+  const read = (bindings: readonly object[], shared: object = resource, embedded: readonly string[] = []) => {
+    const plugin = {
+      ...base,
+      kind: 'plugin',
+      id: 'fixture-plugin',
+      dependencies: [dependency.id],
+      items: [
+        {
+          kind: 'plugin',
+          packageName: 'fixture-editor',
+          version: '1.2.3',
+          integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
+          runtimeDependencies: embedded,
+          catalogDependencies: [dependency.id],
+          access: { environment: [], entriesYaml: '' },
+          resourceBindings: bindings,
+        },
+      ],
+    }
+    return readSuiteCatalog(
+      signRawCatalog(
+        {
+          format: 1,
+          publishedAt: '2026-11-11T00:00:00Z',
+          entries: [shared, { ...plugin, contentHash: suiteCatalogContentHash(plugin) }],
+        },
+        key,
+      ),
+      { ...options, platformVersion: '0.1.35' },
+    )
+  }
+  const cache = {
+    kind: 'native-package-cache',
+    dependency: pin.dependency,
+    version: pin.version,
+    contentHash: pin.contentHash,
+    path: 'native/cache',
+    packages: [{ packageName: 'fixture-export', version: '2.1.0' }],
+  }
+  const valid = read([pin, cache])
+  expect(valid).toMatchObject({
+    status: 'ok',
+    rejected: [],
+    entries: [
+      { entry: { locked: true } },
+      { entry: { items: [{ resourceBindings: [pin, cache], access: { environment: [{ name: 'ASSET_ROOT', value: '{dependency:shared-assets}/assets' }] } }] } },
+    ],
+  })
+  if (valid.status !== 'ok') throw new Error('Expected a readable catalog')
+  expect(suiteCatalogViolations(valid.entries.map(row => row.entry))).toEqual([])
+  const mismatch = read([{ ...pin, contentHash: 'b'.repeat(64) }])
+  if (mismatch.status !== 'ok') throw new Error('Expected a readable catalog')
+  expect(mismatch.rejected).toMatchObject([{ id: 'fixture-plugin', reason: 'invalid-entry' }])
+  expect(suiteCatalogViolations(mismatch.entries.map(row => row.entry))).toContain(
+    'fixture-plugin: resource binding requires exact locked dependency shared-assets',
+  )
+  for (const raw of [
+    { ...dependency, locked: undefined, items: dependency.items.map(item => ({ ...item, locked: true })) },
+    { ...dependency, items: dependency.items.map(item => ({ ...item, requiredFiles: undefined, check: { command: 'sh', args: ['./payload.sh'] } })) },
+    { ...dependency, items: dependency.items.map(item => ({ ...item, check: { command: 'sh', args: ['./payload.sh'] } })) },
+  ]) {
+    const invalid = { ...raw, contentHash: suiteCatalogContentHash(raw) }
+    expect(read([{ ...pin, contentHash: invalid.contentHash }], invalid)).toMatchObject({
+      status: 'ok',
+      rejected: expect.arrayContaining([{ id: 'shared-assets', version: dependency.version, reason: 'invalid-entry', detail: expect.any(String) }]),
+    })
+  }
+  for (const bad of [
+    { ...pin, name: 'NODE_OPTIONS' },
+    { ...pin, path: '../assets' },
+    { ...pin, path: '/tmp/assets' },
+    { ...pin, path: 'assets/missing' },
+    { ...cache, path: 'wrong-cache' },
+    { ...cache, packages: [{ packageName: 'fixture-export', version: '^2.1.0' }] },
+    { ...cache, packages: [{ packageName: 'fixture-editor', version: '1.0.0' }] },
+    { ...cache, kind: 'execute' },
+    { ...pin, kind: 'command-path', name: undefined },
+  ])
+    expect(read([bad])).toMatchObject({ status: 'ok', rejected: [{ id: 'fixture-plugin', reason: 'invalid-entry' }] })
+  expect(read([pin], resource, [pin.dependency])).toMatchObject({ status: 'ok', rejected: [{ id: 'fixture-plugin', reason: 'invalid-entry' }] })
+  expect(read([cache, cache])).toMatchObject({ status: 'ok', rejected: [{ id: 'fixture-plugin', reason: 'invalid-entry' }] })
+  const executable = {
+    ...dependency,
+    items: dependency.items.map(item => ({
+      ...item,
+      requiredFiles: [{ path: 'bin/fixture-export', sha256: { arm64: 'c'.repeat(64) }, executable: true }],
+    })),
+  }
+  const verifiedExecutable = { ...executable, contentHash: suiteCatalogContentHash(executable) }
+  const commandPath = { ...pin, kind: 'command-path', name: undefined, path: 'bin', commands: ['fixture-export'], contentHash: verifiedExecutable.contentHash }
+  const commands = read([commandPath], verifiedExecutable)
+  expect(commands).toMatchObject({ status: 'ok', rejected: [] })
+  if (commands.status !== 'ok') throw new Error('Expected a readable catalog')
+  const command = (commands.entries[0]!.entry.items[0] as SuiteCatalogRuntimeDependencyItem).resourceChecks?.arm64
+  expect(command).toContain("test -x './bin/fixture-export'")
+  expect(command).toContain('/usr/bin/realpath')
+  expect(command).toContain('/usr/bin/sha256sum')
+  expect(read([{ ...commandPath, commands: ['fixture-export', 'missing'] }], verifiedExecutable)).toMatchObject({
+    status: 'ok',
+    rejected: [{ id: 'fixture-plugin', reason: 'invalid-entry' }],
+  })
+  expect(read([{ ...commandPath, path: 'bin/fixture-export' }], verifiedExecutable)).toMatchObject({
+    status: 'ok',
+    rejected: [{ id: 'fixture-plugin', reason: 'invalid-entry' }],
   })
 })

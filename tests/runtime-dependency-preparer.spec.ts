@@ -4,7 +4,7 @@ import { runtimeDependencyInput } from '../src/domain/runtime-dependency.js'
 import { execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { access, mkdtemp, realpath, readFile, rm, stat } from 'node:fs/promises'
+import { access, copyFile, mkdtemp, realpath, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
@@ -15,13 +15,20 @@ const roots: string[] = []
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
-async function fixture() {
+async function fixture(isolated = false) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'runtime-dependency-'))
   roots.push(root)
   const development = new DevelopmentExecutionProcess()
   const process = Object.assign(development, {
-    runPreparation: development.run.bind(development),
-    isolated: false,
+    runPreparation: (
+      request: Parameters<DevelopmentExecutionProcess['run']>[0],
+      emit: Parameters<DevelopmentExecutionProcess['run']>[1],
+      signal: AbortSignal,
+    ) => {
+      const mount = request.mounts[0]!
+      return development.run({ ...request, cwd: mount.host, environment: { ...request.environment, RD_OUT: mount.host } }, emit, signal)
+    },
+    isolated,
     canDiscardArtifacts: true,
     recover: async () => {},
     imageIdentity: async () => 'development',
@@ -333,4 +340,27 @@ test('prepares immutable resource files without PATH commands while preserving w
     expect.objectContaining({ code: 'runtime-dependency-invalid' }),
   )
   await preparer.collect([])
+})
+
+test('keeps data copied from an isolated read-only resource writable in a member project', async () => {
+  const preparer = await fixture(true)
+  const definition = runtimeDependencyInput({
+    name: 'shared-artwork',
+    type: 'resource',
+    prepareCommand: 'mkdir artwork; printf source > artwork/font.dat',
+  })
+  const version = await preparer.prepare(definition, async () => {}, new AbortController().signal)
+  const work = await mkdtemp(join(tmpdir(), 'member-project-'))
+  roots.push(work)
+  try {
+    const source = join(version.directory, 'artwork/font.dat')
+    const copy = join(work, 'font.dat')
+    expect((await stat(source)).mode & 0o222).toBe(0o200)
+    await copyFile(source, copy)
+    await writeFile(copy, 'processed')
+    expect(await readFile(source, 'utf8')).toBe('source')
+    expect(await readFile(copy, 'utf8')).toBe('processed')
+  } finally {
+    await preparer.collect([])
+  }
 })

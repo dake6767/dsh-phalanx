@@ -30,6 +30,7 @@ export interface RuntimeDependencyVersion {
   readonly isolated: boolean
   readonly checks: readonly RuntimeDependencyCheck[]
   readonly log: string
+  readonly nativeCommandPaths?: Readonly<Record<string, string>>
   readonly python?: { readonly name: string; readonly interpreter: string; readonly sitePackages: string; readonly abi: string }
 }
 export type RuntimeDependencyDefinition =

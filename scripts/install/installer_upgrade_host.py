@@ -42,7 +42,8 @@ def read_upgrade_operation(host,operation=None):
     path=host.path(UPGRADE_ROOT)/operation_id(operation)/'operation.json'
     if path.is_symlink():raise InstallError('Upgrade journal cannot be a symbolic link')
     if not path.exists():return None
-    value=json.loads(read_owned(path,os.geteuid()))
+    # This root-written journal includes backup inventories that grow with the deployment.
+    value=json.loads(read_owned(path,os.geteuid(),max_bytes=None))
     if not isinstance(value,dict) or value.get('id')!=operation or not isinstance(value.get('phase'),str):raise InstallError('Invalid protected upgrade operation')
     return value
 

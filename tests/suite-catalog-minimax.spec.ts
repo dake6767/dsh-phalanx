@@ -13,10 +13,10 @@ import {
 import { PlatformExecution } from '../src/use-cases/platform-execution.js'
 import type { ExecutionEvent } from '../src/domain/platform-execution.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
-import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
+import { catalogEquivalencePlatformVersion, onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
 
 const key = createCatalogSigningKey()
-const read = readSuiteCatalog(signCatalog(onlineCatalogEntries, key).bytes, { trustedKeys: [key], platformVersion: '0.1.19' })
+const read = readSuiteCatalog(signCatalog(onlineCatalogEntries, key).bytes, { trustedKeys: [key], platformVersion: catalogEquivalencePlatformVersion })
 if (read.status !== 'ok') throw new Error('fixture catalog was rejected')
 const minimax = read.entries.find(row => row.entry.id === 'minimax')!.entry as SuiteCatalogSuiteEntry
 const tool = minimax.items.find((item): item is SuiteCatalogRuntimeDependencyItem => item.kind === 'runtime-dependency')!

@@ -1,4 +1,4 @@
-import { executionCommandPath, executionLongOption } from './execution-command-line.js'
+import { executionCommandPath, executionProtectedOption, executionShortOption } from './execution-command-line.js'
 import { BusinessRuleError } from './business-error.js'
 import type { CommunityExecutionInput } from './admin-contract.js'
 import type { ExecutionConfiguration } from './platform-execution.js'
@@ -30,7 +30,11 @@ export function executionConfiguration(input: CommunityExecutionInput, previous?
       (row.source !== undefined && (!executionCommandPath(row.source) || !row.source.includes('/'))) ||
       (row.memberPath !== undefined && (!row.source || !executionCommandPath(row.memberPath) || !row.memberPath.includes('/'))) ||
       (row.blockedOptions !== undefined &&
-        (!Array.isArray(row.blockedOptions) || row.blockedOptions.length > 100 || row.blockedOptions.some(value => !executionLongOption(value)))) ||
+        (!Array.isArray(row.blockedOptions) || row.blockedOptions.length > 100 || row.blockedOptions.some(value => !executionProtectedOption(value)))) ||
+      (row.shortOptionsWithValue !== undefined &&
+        (!Array.isArray(row.shortOptionsWithValue) ||
+          row.shortOptionsWithValue.length > 100 ||
+          row.shortOptionsWithValue.some(value => !executionShortOption(value)))) ||
       !Array.isArray(row.blocked) ||
       row.blocked.length > 100 ||
       row.blocked.some((value: unknown) => typeof value !== 'string' || value.length > 256 || value.includes('\0'))
@@ -41,6 +45,7 @@ export function executionConfiguration(input: CommunityExecutionInput, previous?
       ...(row.source ? { source: row.source } : {}),
       ...(row.memberPath ? { memberPath: row.memberPath } : {}),
       ...(row.blockedOptions?.length ? { blockedOptions: [...new Set(row.blockedOptions)] } : {}),
+      ...(row.shortOptionsWithValue?.length ? { shortOptionsWithValue: [...new Set(row.shortOptionsWithValue)] } : {}),
       blocked: [...new Set(row.blocked)],
     }
   })

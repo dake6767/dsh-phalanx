@@ -21,6 +21,7 @@ export const pluginAccessObject = (value: unknown): value is Record<string, unkn
 export function reservedPluginEnvironment(name: string): boolean {
   return (
     /^(DSH_PHALANX_|LC_|DSH_TELEMETRY_)/iu.test(name) ||
+    /^(DBUS_SESSION_BUS_ADDRESS|DBUS_SYSTEM_BUS_ADDRESS|XDG_RUNTIME_DIR|GNOME_KEYRING_CONTROL)$/iu.test(name) ||
     /^(HOME|PATH|PYTHONPATH|SHELL|TMPDIR|LANG|DSH_HOME|DSH_AGENTS_HOME|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/iu.test(name)
   )
 }

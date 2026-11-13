@@ -111,6 +111,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3-venv \
 COPY install-browser-libraries.sh /tmp/dsh-phalanx-install-browser-libraries.sh
 RUN sh /tmp/dsh-phalanx-install-browser-libraries.sh && rm /tmp/dsh-phalanx-install-browser-libraries.sh
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      'dbus-daemon=1.14.10-1~deb12u1' \
+      'gnome-keyring=42.1-1+b2' \
+      'libglib2.0-bin=2.74.6-2+deb12u9' \
+      'libsecret-tools=0.20.5-3' \
+  && rm -rf /var/lib/apt/lists/*
+COPY member-credentials.mjs /usr/local/lib/dsh-phalanx/member-credentials.mjs
+
 LABEL dsh.revision="$DSH_REV"
 LABEL dsh.base.image="$NODE_IMAGE"
 

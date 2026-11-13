@@ -95,13 +95,55 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
       const card = page
         .locator('.plugin-library-card')
         .filter({ has: page.getByRole('button', { name: zh ? `查看广场条目 ${title}` : `View catalog entry ${title}`, exact: true }) })
-      await card.getByRole('button', { name: zh ? '安装' : 'Install', exact: true }).click()
+      expect(await card.getByRole('button', { name: zh ? '安装' : 'Install', exact: true }).count()).toBe(0)
+      const open = card.getByRole('button', { name: zh ? `查看广场条目 ${title}` : `View catalog entry ${title}`, exact: true })
+      await open.click()
       let dialog = page.getByRole('dialog', { name: title, exact: true })
+      const publish = dialog.getByRole('checkbox', { name: zh ? '发布到平台应用中心' : 'Publish to the platform app center', exact: true })
+      expect(await publish.isChecked()).toBe(false)
+      if (!zh) {
+        await publish.press('Space')
+        expect(await publish.isChecked()).toBe(true)
+      }
+      if (zh) {
+        const preinstall = dialog.getByRole('checkbox', { name: /^为 .+ 预装$/u }).first()
+        await preinstall.press('Space')
+        expect(await preinstall.isChecked()).toBe(true)
+      } else {
+        const stale = await page.request.post(origin + '/admin/api/suites', {
+          headers: { origin },
+          data: { action: 'install', input: { id: 'fixture-editor', requestId: 'fixture-preview-stale-01', preview: { version: '0.9.0' } } },
+        })
+        expect(stale.status()).toBe(409)
+        expect(await stale.json()).toMatchObject({ code: 'suite-preview-changed' })
+      }
       await dialog.getByRole('button', { name: zh ? '安装条目' : 'Install entry', exact: true }).click()
-      await card
+      await dialog
         .getByText(zh ? '已安装' : 'Installed', { exact: true })
         .first()
         .waitFor()
+      await expect
+        .poll(async () => {
+          const rows = (await (await page.request.get(origin + '/admin/api/plugins')).json()) as { packageName: string; published: boolean }[]
+          return rows.find(row => row.packageName === '@fixture/editor')?.published
+        })
+        .toBe(!zh)
+      if (zh) {
+        const groups = (await (await page.request.get(origin + '/admin/api/groups')).json()) as { id: string; kind: string }[]
+        const group = groups.find(row => row.kind !== 'admin')!
+        await expect
+          .poll(async () => {
+            const configured = await (await page.request.get(origin + '/admin/api/groups/' + group.id + '/plugins')).json()
+            return configured.plugins.find((row: { packageName: string }) => row.packageName === '@fixture/editor')
+          })
+          .toMatchObject({ preinstalled: true, granted: false })
+        const stale = await page.request.post(origin + '/admin/api/groups/' + group.id + '/plugins', {
+          headers: { origin },
+          data: { action: 'catalog-preinstall', plugin: { packageName: '@fixture/editor', integrity: 'stale-integrity', entryId: 'fixture-editor' } },
+        })
+        expect(stale.status()).toBe(409)
+      }
+      await dialog.getByRole('button', { name: zh ? '关闭广场条目详情' : 'Close catalog entry details', exact: true }).click()
       await card.getByRole('button', { name: zh ? '卸载' : 'Uninstall', exact: true }).click()
       await dialog.getByText(zh ? '将移除：' : 'This will remove:', { exact: true }).waitFor()
       await dialog.getByRole('button', { name: zh ? '确认卸载' : 'Confirm uninstall', exact: true }).click()
@@ -140,14 +182,13 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
         (await page.request.post(origin + '/admin/api/plugins/previews/confirm', { headers: { origin }, data: { token: addResult!.token } })).status(),
       ).toBe(200)
       await expect.poll(async () => ((await (await page.request.get(origin + '/admin/api/plugins')).json()) as { stage: string }[])[0]?.stage).toBe('available')
-      await card.getByRole('button', { name: zh ? '安装' : 'Install', exact: true }).click()
+      await open.click()
       await dialog.getByText(zh ? '替代这些手动条目' : 'Replace these manual entries', { exact: true }).click()
       await dialog.getByRole('button', { name: zh ? '安装条目' : 'Install entry', exact: true }).click()
-      await card
+      await dialog
         .getByText(zh ? '已安装' : 'Installed', { exact: true })
         .first()
         .waitFor()
-      await card.getByRole('button', { name: zh ? `查看广场条目 ${title}` : `View catalog entry ${title}`, exact: true }).click()
       dialog = page.getByRole('dialog', { name: title, exact: true })
       await dialog.getByRole('button', { name: zh ? `让 @fixture/editor 脱离『${title}』` : `Detach @fixture/editor from “${title}”`, exact: true }).click()
       const detach = page.getByRole('dialog').last()

@@ -97,6 +97,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       options.nativeFeatures,
       () => runtime,
       () => lifecycle.origin(),
+      (instance, integrity) => nativeJobs.archiveReserved(instance, integrity),
     )
     const spaceStorage = createSpaceStorage(database, config.runtime, config.idleReclaimSeconds ?? 1800, () => !maintenance.closed())
     const mcpStore = createMcpStorage(database)
@@ -250,7 +251,6 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       residentInstances,
     )
     const actions = new CommunityInstanceActions(accounts, runtime, connections)
-    const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions, memberModelsProjection)
     const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => {
       await entry.reconcile()
       await instanceResources.reconcileMembers()
@@ -260,19 +260,22 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       await contributions.recover()
     })
     const modelAdministration = new SharedModelAdministration(accounts, modelStore)
-    const { nativeDownloads, nativeJobs, preinstallDelivery, managedAdministration, market, upstreams, upstreamTransport, upstreamTest } =
-      createCommunityPluginMembers({
-        pluginLibrary,
-        config,
-        options,
-        accounts,
-        runtime,
-        actions,
-        sessionKey,
-        clock,
-        downloads,
-        ...(native.installation ? { nativeInstallation: native.installation } : {}),
-      })
+    const pluginMembers = createCommunityPluginMembers({
+      pluginLibrary,
+      config,
+      options,
+      accounts,
+      runtime,
+      actions,
+      sessionKey,
+      origin: () => lifecycle.origin(),
+      gatewayOrigin: () => lifecycle.gatewayOrigin(),
+      clock,
+      downloads,
+      ...(native.installation ? { nativeInstallation: native.installation } : {}),
+    })
+    const { nativeJobs, nativeSettings, preinstallDelivery, managedAdministration, market, upstreams, upstreamTest } = pluginMembers
+    const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions, memberModelsProjection, preinstallDelivery, nativeSettings)
     const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, spaceStorage.resets, clock, preinstallDelivery)
     const contributionStorage = createContributionStorage(database)
     const contributions = new MemberContributions(
@@ -298,6 +301,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       kind => (kind === 'skill' ? executionPreparation.changed() : Promise.resolve()),
     )
     const { mcpImports, memberMcpProbe, mcpProbe, proxyAgent, proxy, preview, origin, databaseOnboarding, listeners } = createCommunityEntryHandlers({
+      ...pluginMembers,
       accounts,
       modelAccess,
       pluginStore,
@@ -308,8 +312,6 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       nativeFeatures: native.policy,
       nativePluginHistory: native.history,
       experts,
-      upstreamTransport,
-      nativeDownloads,
       dataRoot,
       usage,
       config,
@@ -332,18 +334,14 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       executionAdministration,
       accessAdministration,
       modelAdministration,
-      managedAdministration,
       onboarding,
       environment,
       administration,
       instanceResources,
-      market,
       runtimeDependencies,
       suites,
       downloads,
       executionOperations,
-      upstreams,
-      upstreamTest,
       plugins,
       pluginIntake,
       pluginUpdates,
@@ -443,6 +441,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
           const stopped = await Promise.allSettled([
             preinstallDelivery.stop(),
             nativeJobs.stop(),
+            nativeSettings?.stop(),
             runtimeDependencies.stop(),
             mcpImports.stop(),
             mcpPreparation.stop(),

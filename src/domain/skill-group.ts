@@ -1,3 +1,4 @@
+import { skillPackDisplay } from './skill-pack.js'
 import type { CommunitySkillGroupView } from './admin-contract.js'
 import type { CommunityAccountRecord } from './community-account.js'
 import type { CommunityGroupRecord } from './community-group.js'
@@ -39,7 +40,7 @@ export function skillGroupView({
       packs?.map(pack => ({
         name: pack.name,
         skills: pack.skills,
-        description: pack.description,
+        ...skillPackDisplay(pack),
         granted: !!packGrants?.includes(pack.name),
         empty: !pack.skills.length,
       })) ?? [],

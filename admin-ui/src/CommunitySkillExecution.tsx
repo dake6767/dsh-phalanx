@@ -1,5 +1,5 @@
 import CommunityExecutionTrial from './CommunityExecutionTrial'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Switch } from '@heroui/react/switch'
 import { Label } from '@heroui/react/label'
@@ -10,6 +10,7 @@ import { usePlatformLanguage } from './CommunityLanguage'
 import { useDraftGuard } from './useDraftGuard'
 import CommunityDependencyPicker from './CommunityDependencyPicker'
 import CommunityMessage from './CommunityMessage'
+import CommunityInstalledServiceSettings from './CommunityInstalledServiceSettings'
 
 export default function CommunitySkillExecution({
   name,
@@ -26,6 +27,12 @@ export default function CommunitySkillExecution({
   const [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(false),
     [error, setError] = useState<unknown>()
+  const [serviceDraft, setServiceDraft] = useState(false)
+  const [serviceBusy, setServiceBusy] = useState(false)
+  const onServiceDraft = useCallback((_key: string, dirty: boolean, busy: boolean) => {
+    setServiceDraft(dirty)
+    setServiceBusy(busy)
+  }, [])
   const [reload, setReload] = useState(0)
   const reset = (value: CommunityExecutionView) => {
     setSaved(value)
@@ -99,12 +106,12 @@ export default function CommunitySkillExecution({
     }
   }
   const guard = useDraftGuard(
-    dirty,
-    save,
+    dirty || serviceDraft,
+    saved?.suiteOrigin ? undefined : save,
     () => {
       if (saved) reset(saved)
     },
-    busy,
+    busy || serviceBusy,
   )
   useEffect(() => {
     onCloseGuard(guard.request)
@@ -126,7 +133,7 @@ export default function CommunitySkillExecution({
         </>
       ) : (
         <>
-          {saved.suiteOrigin ? <CommunityMessage status="accent" title={t('Managed by the catalog. Enter team credentials in the tool details.')} /> : null}
+          {saved.suiteOrigin ? <CommunityInstalledServiceSettings key={name} kind="execution" name={name} onDraft={onServiceDraft} /> : null}
           <Switch isSelected={enabled} onChange={setEnabled} isDisabled={busy || !!saved.suiteOrigin}>
             <Switch.Content>
               <Switch.Control>

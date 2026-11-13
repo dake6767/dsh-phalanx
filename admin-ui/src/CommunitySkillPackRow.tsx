@@ -28,7 +28,7 @@ export default function CommunitySkillPackRow({
     <Card className="plugin-library-card">
       <Card.Header>
         <div className="library-card-heading">
-          <Card.Title>{pack.name}</Card.Title>
+          <Card.Title>{pack.displayName ?? pack.name}</Card.Title>
           <CommunityIcon name="chevron" size={14} />
         </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

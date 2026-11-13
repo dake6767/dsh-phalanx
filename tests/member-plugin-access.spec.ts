@@ -146,6 +146,9 @@ it('projects only literal startup environment for successful native deliveries s
   const gateway = { url: 'https://platform.example', token: 'member-token' },
     native = { username: 'member', installed: ['plugin'] }
   expect(await access.resolve([], gateway, native)).toEqual({ environment: {}, entries: {}, snapshot: [] })
+  const planned = await access.resolve([], gateway, { ...native, installed: [], preinstall: ['plugin'] })
+  expect(planned.environment).toEqual({ WELCOME: 'hello' })
+  expect(planned.entries).toEqual({})
   delivered = true
   const result = await access.resolve([], gateway, native)
   expect(result.environment).toEqual({ WELCOME: 'hello' })
@@ -342,3 +345,72 @@ it.each(['controlled', 'selected', 'preinstall', 'expert'] as const)(
     expect(await access.dependencyNames('member', ['office'])).toEqual([])
   },
 )
+
+it('projects a locked catalog resource only for an exact member delivery and retained native archive', async () => {
+  const account = { username: 'member', spaceId: 'space', sessionEpoch: 0, disabled: false, admin: false, groupId: 'g', email: '', createdAt: 0, updatedAt: 0 }
+  const plugin = {
+    packageName: 'adapted',
+    version: '1.0.0',
+    integrity: 'fixed-integrity',
+    artifact: '',
+    runtimeRevision: 'rev',
+    title: '',
+    description: '',
+    bundlePatch: '',
+    dependencies: {},
+  }
+  const resource = {
+    kind: 'command-path' as const,
+    dependency: 'locked-bin',
+    runtimeDependency: 'locked-bin',
+    path: 'bin',
+    version: '1.0.0',
+    contentHash: 'a'.repeat(64),
+    commands: ['ffmpeg'],
+  }
+  let delivery: import('../src/ports/plugin-installations.js').PluginInstallation = {
+    packageName: 'adapted',
+    source: 'selected',
+    version: '1.0.0',
+    integrity: plugin.integrity,
+  }
+  let row = {
+    ...plugin,
+    source: { kind: 'upload' as const },
+    current: plugin,
+    stage: 'available' as const,
+    published: true,
+    suiteOrigin: 'catalog',
+    runtimeDependencies: ['locked-bin'],
+    suiteResourceBindings: [resource],
+  }
+  const access = new MemberPluginAccess(
+    { effective: async () => [], localSelection: async () => [] },
+    { get: () => undefined, list: () => ({}), save: async () => {}, remove: async () => {} },
+    { accounts: { get: async () => account }, records: { get: async () => [delivery] } },
+    { library: { list: async () => [row] }, ready: () => [], runtimeRevision: 'rev' },
+  )
+  expect(await access.dependencyNames('member', ['adapted'])).toEqual([])
+  const facts = { adapted: { version: plugin.version, integrity: plugin.integrity } }
+  expect(await access.nativeDependencyPlans('member', facts)).toEqual({})
+  delivery = { ...delivery, resourceOrigin: 'catalog' }
+  const nativeResources = await access.nativeDependencyPlans('member', facts)
+  expect(nativeResources).toMatchObject({ adapted: { dependencies: ['locked-bin'], resources: [resource] } })
+  expect(await access.nativeDependencyPlans('member', {})).toEqual({})
+  expect(await access.nativeDependencyPlans('member', { adapted: { ...facts.adapted, integrity: 'self-installed' } })).toEqual({})
+  row = { ...row, runtimeDependencies: ['changed'], suiteResourceBindings: [{ ...resource, runtimeDependency: 'changed' }] }
+  expect(
+    await access.resolve(
+      [],
+      { url: 'http://localhost', token: 'fixture' },
+      {
+        username: 'member',
+        installed: ['adapted'],
+        nativeResources,
+        dependencyVersions: {},
+      },
+    ),
+  ).toEqual({ environment: {}, entries: {}, snapshot: [], nativeFailures: ['adapted'] })
+  delivery = { ...delivery, version: '0.9.0' }
+  expect(await access.nativeDependencyPlans('member', facts)).toEqual({})
+})

@@ -1,3 +1,4 @@
+import { installServiceDefinition } from '../src/domain/installed-services.js'
 import { expect, it } from 'vitest'
 import { ExecutionAdministration } from '../src/use-cases/execution-administration.js'
 import type { ExecutionConfiguration } from '../src/domain/platform-execution.js'
@@ -363,4 +364,190 @@ it('does not enable a skipped optional template with a replaced manual credentia
   )
   await service.finalizeSuiteExecutions('suite:images', [{ owner: 'skill:images', variables: ['BACKEND_KEY'] }])
   expect(rows.get('skill:images')).toMatchObject({ enabled: false, variables: [{ name: 'BACKEND_KEY', value: '' }] })
+})
+
+it('keeps existing credentials when a suite adopts backend declarations and never activates them implicitly', async () => {
+  const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
+  const owner = 'skill:design',
+    origin = 'suite:design'
+  let row: ExecutionConfiguration | undefined
+  const service = new ExecutionAdministration(
+    { get: async () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
+    { get: id => ({ id, version: 'v1' }), owns: async () => true },
+    {
+      get: async () => row,
+      save: async (_, value) => {
+        row = value
+      },
+      list: async () => (row ? [{ owner, configuration: row }] : []),
+      remove: async () => {
+        row = undefined
+      },
+    },
+    async () => {},
+  )
+  const template = {
+    commands: [{ command: 'draw', blocked: [] }],
+    variables: ['FIRST_KEY', 'SHARED_KEY', 'MODEL', 'RETIRED_KEY', 'LATER_KEY'],
+    runtimeDependencies: [],
+  }
+  await service.commitSuiteExecution(origin, owner, template, {
+    FIRST_KEY: 'fixture-old-first',
+    SHARED_KEY: 'fixture-old-shared',
+    MODEL: 'fixture-old-model',
+    RETIRED_KEY: 'fixture-retired',
+    LATER_KEY: 'fixture-later',
+  })
+  const label = { en: 'Image', 'zh-CN': '生图' }
+  const services = installServiceDefinition({ id: 'design', version: '2.0.0' }, [
+    {
+      id: 'image',
+      label,
+      commands: ['draw'],
+      backends: ['first', 'second'].map(id => ({
+        id,
+        label,
+        selector: { kind: 'option' as const, name: '--backend', value: id },
+        fields: [
+          ...(id === 'first' ? [{ name: 'FIRST_KEY', type: 'secret' as const, required: true }] : []),
+          { name: 'SHARED_KEY', type: 'secret' as const, required: true },
+          { name: 'MODEL', type: 'text' as const, required: false },
+        ],
+      })),
+    },
+  ])!
+  await service.updateSuiteExecution(origin, owner, { ...template, services, variables: ['LATER_KEY'], optionalVariables: ['LATER_KEY'] })
+  await service.finalizeSuiteExecutions(origin, [{ owner, variables: ['LATER_KEY'] }])
+  const retained = await service.services(actor, owner)
+  expect(retained.retainedLegacyFields).toEqual(['SHARED_KEY', 'MODEL', 'RETIRED_KEY'])
+  expect(retained.slots[0]?.backends[0]).toMatchObject({
+    enabled: false,
+    fields: [
+      { name: 'FIRST_KEY', configured: true },
+      { name: 'SHARED_KEY', configured: false },
+      { name: 'MODEL', configured: false },
+    ],
+  })
+  expect(JSON.stringify(retained)).not.toContain('fixture-old-')
+  expect(await service.suiteExecutionStatus(owner)).toMatchObject({ enabled: false })
+  const adopted = await service.saveServices(actor, owner, retained.revision, {
+    slot: 'image',
+    backend: 'second',
+    action: 'adopt-legacy',
+    field: 'SHARED_KEY',
+    confirmed: true,
+  })
+  expect(adopted.slots[0]?.backends[1]).toMatchObject({ enabled: false, complete: true })
+  expect(adopted.retainedLegacyFields).toContain('SHARED_KEY')
+  const first = await service.saveServices(actor, owner, adopted.revision, {
+    slot: 'image',
+    backend: 'first',
+    action: 'adopt-legacy',
+    field: 'SHARED_KEY',
+    confirmed: true,
+  })
+  expect(first.retainedLegacyFields).not.toContain('SHARED_KEY')
+  expect(first.slots[0]?.backends[0]).toMatchObject({ enabled: false, complete: true })
+  const active = await service.saveServices(actor, owner, first.revision, { slot: 'image', backend: 'second', action: 'enable' })
+  expect(active.slots[0]?.backends[1]).toMatchObject({ enabled: true })
+  const [initial] = services.slots
+  const expanded = installServiceDefinition({ id: 'design', version: '3.0.0' }, [
+    {
+      ...initial!,
+      backends: [
+        ...initial!.backends,
+        {
+          id: 'later',
+          label,
+          selector: { kind: 'option' as const, name: '--backend', value: 'later' },
+          fields: [{ name: 'LATER_KEY', type: 'secret' as const, required: true }],
+        },
+      ],
+    },
+  ])!
+  await service.updateSuiteExecution(origin, owner, {
+    ...template,
+    commands: [{ command: 'draw', source: 'scripts/new.sh', blocked: [] }],
+    services: expanded,
+    variables: [],
+  })
+  await service.finalizeSuiteExecutions(origin, [{ owner, variables: [] }])
+  const after = await service.services(actor, owner)
+  expect(after.slots[0]?.backends[1]).toMatchObject({ enabled: false, complete: true })
+  expect(after.slots[0]?.backends[2]).toMatchObject({ enabled: false, complete: true })
+  const removed = await service.saveServices(actor, owner, after.revision, { action: 'discard-legacy', field: 'RETIRED_KEY', confirmed: true })
+  expect(removed.retainedLegacyFields).toEqual(['MODEL'])
+
+  await service.detachSuiteExecution(origin, owner)
+  await service.save(actor, owner, { enabled: false, commands: [], variables: [] })
+  expect((await service.services(actor, owner)).retainedLegacyFields).toEqual(['MODEL'])
+  expect(await service.view(actor, owner)).toMatchObject({ enabled: false })
+  await expect(service.saveServices(actor, owner, retained.revision, { slot: 'image', backend: 'second', action: 'enable' })).rejects.toMatchObject({
+    code: 'execution-config-invalid',
+  })
+  row = undefined
+  await service.save(actor, owner, { enabled: true, commands: template.commands, variables: [{ name: 'FIRST_KEY', value: 'fixture-manual', secret: true }] })
+  const takeover = (await service.suiteExecutionSnapshot(owner))!
+  await service.commitSuiteExecution(origin, owner, { ...template, services, variables: [] }, {}, [takeover])
+  await service.finalizeSuiteExecutions(origin, [{ owner, variables: [] }])
+  const installed = await service.services(actor, owner)
+  expect(installed.slots[0]?.backends[0]).toMatchObject({
+    enabled: false,
+    fields: [{ name: 'FIRST_KEY', configured: true }, expect.anything(), expect.anything()],
+  })
+  expect(JSON.stringify(installed)).not.toContain('fixture-manual')
+  expect((row as ExecutionConfiguration | undefined)?.services?.ownerVersion).toBe('v1')
+  await service.detachSuiteExecution(origin, owner)
+  const detached = (await service.suiteExecutionSnapshot(owner))!
+  const otherOrigin = 'suite:other'
+  const legacy = { ...template, variables: ['OLD_KEY'] }
+  await service.commitSuiteExecution(otherOrigin, owner, legacy, { OLD_KEY: 'fixture-owner-other' }, [detached])
+  await expect(service.services(actor, owner)).rejects.toMatchObject({ code: 'suite-not-installed' })
+  const otherDefinition = installServiceDefinition({ id: 'other', version: '2.0.0' }, services.slots)!
+  await service.updateSuiteExecution(otherOrigin, owner, { ...legacy, services: otherDefinition })
+  const identity = { id: 'other', version: '3.0.0', contentHash: 'new-definition-digest' }
+  await service.updateSuiteExecution(otherOrigin, owner, { ...legacy, variables: [], serviceIdentity: identity })
+  await service.finalizeSuiteExecutions(otherOrigin, [{ owner, variables: [] }])
+  expect(await service.services(actor, owner)).toMatchObject({ identity, slots: [], retainedLegacyFields: ['OLD_KEY'] })
+})
+
+it('refuses to discard or transfer protected values when a different skill owner delegates the same command', async () => {
+  const owner = 'skill:other'
+  const previous: ExecutionConfiguration = {
+    enabled: true,
+    commands: [{ command: 'draw', blocked: [] }],
+    variables: [{ name: 'TEAM_KEY', value: 'fictional-old-key', secret: true }],
+  }
+  const rows = new Map([[owner, previous]])
+  const service = new ExecutionAdministration(
+    { get: async () => undefined },
+    { get: id => ({ id, version: 'v1' }), owns: async () => true },
+    {
+      get: async id => rows.get(id),
+      list: async () => [...rows].map(([id, configuration]) => ({ owner: id, configuration })),
+      save: async (id, configuration) => {
+        rows.set(id, configuration)
+      },
+      remove: async id => {
+        rows.delete(id)
+      },
+    },
+    async () => {},
+  )
+  const label = { en: 'Images', 'zh-CN': '生图' }
+  const services = installServiceDefinition({ id: 'design', version: '1.0.0' }, [
+    {
+      id: 'image',
+      label,
+      commands: ['draw'],
+      backends: [{ id: 'api', label, fields: [{ name: 'TEAM_KEY', type: 'secret' as const, required: true }] }],
+    },
+  ])!
+  const confirmation = (await service.suiteExecutionSnapshot(owner))!
+  await expect(
+    service.commitSuiteExecution('suite:design', 'skill:design', { commands: previous.commands, variables: [], runtimeDependencies: [], services }, {}, [
+      confirmation,
+    ]),
+  ).rejects.toMatchObject({ code: 'suite-replace-unconfirmed' })
+  expect([...rows]).toEqual([[owner, previous]])
 })

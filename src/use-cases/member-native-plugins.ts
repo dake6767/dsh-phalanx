@@ -39,6 +39,15 @@ export class MemberNativePlugins {
   ) {
     return await this.deliver(actor, plugin.packageName, instance, origin, signal, requestId, progress, { plugin, current })
   }
+  async hasDelivery(plugin: PreparedPlugin, instance: CommunityUserInstance, origin: URL, signal: AbortSignal): Promise<boolean> {
+    const row = (await this.manager.list(instance, origin, signal)).find(row => row.packageName === plugin.packageName)
+    return (
+      row?.version === plugin.version &&
+      row.archiveIntegrity === plugin.integrity &&
+      row.retainedArchive === true &&
+      (await this.manager.verifyArchive?.(instance, plugin.packageName, plugin.integrity, signal)) === true
+    )
+  }
   private async deliver(
     actor: CommunityAccountActor,
     packageName: string,
@@ -75,11 +84,17 @@ export class MemberNativePlugins {
       instance,
       origin,
       { url: archive.url, integrity: archive.plugin.integrity },
-      { registry: (await this.sources.current()).npm, requestId, ...(progress ? { progress } : {}) },
+      {
+        registry: (await this.sources.current()).npm,
+        requestId,
+        identity: { packageName, version: archive.plugin.version },
+        ...(progress ? { progress } : {}),
+      },
       signal,
     )
-    await assertCurrent()
-    return { application, version: archive.plugin.version, integrity: archive.plugin.integrity }
+    // The preinstall job retains the signed result before rechecking admission and writing history.
+    if (!preinstall) await assertCurrent()
+    return { application, version: archive.plugin.version, integrity: archive.plugin.integrity, prepared: archive.plugin }
   }
   async update(
     actor: CommunityAccountActor,

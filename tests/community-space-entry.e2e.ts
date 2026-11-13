@@ -130,7 +130,9 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     const frames: string[] = []
     const identityRequests: { url: string; method: string }[] = []
     const featureUrl = `${origin}/account/platform-features`
+    const setupUrl = `${origin}/market/api/plugins/setup`
     let features: Response | undefined
+    let setup: Response | undefined
     let nativeRequests = false
     page.on('request', request => {
       const url = new URL(request.url())
@@ -140,6 +142,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
         return
       }
       if (request.url() === featureUrl && request.method() === 'GET') return
+      if (request.url() === setupUrl && request.method() === 'GET') return
       nativeRequests ||= url.pathname.startsWith('/app/')
       if (nativeRequests) resources.push(request.url())
     })
@@ -150,6 +153,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     })
     page.on('response', response => {
       if (response.url() === featureUrl && response.request().method() === 'GET') features = response
+      if (response.url() === setupUrl && response.request().method() === 'GET') setup = response
     })
     await signInCommunity(page, origin, username, 'password')
     const cookie = await cookieHeader(context, origin)
@@ -171,6 +175,8 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     expect(identityRequests.every(request => request.url === `${origin}/account/identity` && request.method === 'GET')).toBe(true)
     await expect.poll(() => features?.status(), { timeout: 30_000 }).toBe(200)
     expect(await features!.json()).toEqual({ showAppCenter: false })
+    await expect.poll(() => setup?.status(), { timeout: 30_000 }).toBe(200)
+    expect(await setup!.json()).toEqual({})
     const identity = await context.request.get(`${origin}/account/identity`)
     expect(identity.status()).toBe(200)
     expect(await identity.json()).toEqual({ username, admin: username === adminUsername })

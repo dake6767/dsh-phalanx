@@ -614,6 +614,9 @@ const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
 
 /** Catalog CI feeds its actual publication into the existing equivalence assertions. Tests alone accept this path. */
 const publicationFile = process.env.DSH_PHALANX_CATALOG_TEST_FILE
+export const catalogEquivalencePlatformVersion = publicationFile
+  ? (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version
+  : '0.1.19'
 export const onlineCatalogEntries: readonly SuiteCatalogDocumentEntry[] = publicationFile
   ? (JSON.parse(readFileSync(publicationFile, 'utf8')) as { entries: SuiteCatalogDocumentEntry[] }).entries
   : unsealed.map(withSuiteCatalogContentHash)

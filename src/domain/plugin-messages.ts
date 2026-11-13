@@ -1,4 +1,7 @@
+import { en as nativeServiceEn, zhCN as nativeServiceZh } from './native-service-messages.js'
+
 export const en = {
+  ...nativeServiceEn,
   'Installed version': 'Installed version',
   'Installation status unavailable': 'Installation status unavailable',
   'Content update available': 'Content update available',
@@ -53,6 +56,7 @@ export const en = {
   'Removing plugin…': 'Removing plugin…',
   'Removing…': 'Removing…',
   'Retry installation': 'Retry installation',
+  'Retry saving installation record': 'Retry saving installation record',
   'Retry uninstall': 'Retry uninstall',
   'Checking capabilities…': 'Checking capabilities…',
   'Basic settings': 'Basic settings',
@@ -261,6 +265,7 @@ export const en = {
     'Editing replaces the saved entry configuration. Leave unchanged to retain it.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  ...nativeServiceZh,
   'Installed version': '已装版本',
   'Installation status unavailable': '无法确认安装状态',
   'Content update available': '有内容更新',
@@ -312,6 +317,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Removing plugin…': '正在卸载插件…',
   'Removing…': '正在卸载…',
   'Retry installation': '重试安装',
+  'Retry saving installation record': '重试保存安装记录',
   'Retry uninstall': '重试卸载',
   'Checking capabilities…': '检查中…',
   'Basic settings': '基础设置',

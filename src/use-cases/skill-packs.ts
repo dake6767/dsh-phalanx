@@ -1,10 +1,12 @@
+import { createHash } from 'node:crypto'
 import { visibleSkillPacks } from '../domain/skill-market-presentation.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
+import type { CommunitySkillPackCandidates } from '../domain/skill-admin-contract.js'
 import type { CommunitySkillPackInput, CommunitySkillPackView, CommunitySkillPackDetail, CommunityMarketPack } from '../domain/admin-contract.js'
 import type { ExpertReferencesPort } from '../ports/experts.js'
 import type { ExpertReferenceTarget } from '../domain/expert-reference.js'
-import type { SkillPack } from '../domain/skill-pack.js'
+import { skillPackDisplay, type SkillPack, type SkillPackDisplay } from '../domain/skill-pack.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { SkillLibraryStorePort } from '../ports/skill-library.js'
 import type { SkillPackState, SkillNotePort } from '../ports/skill-packs.js'
@@ -31,15 +33,31 @@ export class SkillPacks {
     await this.admin(actor)
     return Promise.all((await this.packs.store.list()).map(pack => this.view(actor, pack)))
   }
+  async candidates(actor: CommunityAccountActor, search: string, after: string): Promise<CommunitySkillPackCandidates> {
+    await this.admin(actor)
+    if (search.length > 256 || after.length > 256) throw new BusinessRuleError('invalid', 'Invalid skill pack search.', 'skill-pack-invalid')
+    const term = search.trim().toLowerCase()
+    const limit = 24
+    const matches = this.library.packCandidates
+      ? await this.library.packCandidates(term, after, limit + 1)
+      : (await this.library.list())
+          .filter(row => row.name > after && (row.name.toLowerCase().includes(term) || row.description.toLowerCase().includes(term)))
+          .sort((first, second) => (first.name < second.name ? -1 : first.name === second.name ? 0 : 1))
+          .slice(0, limit + 1)
+    const rows = matches.slice(0, limit).map(({ name, description, conflict }) => ({ name, description, ...(conflict ? { conflict } : {}) }))
+    return { rows, ...(matches.length > limit ? { next: rows[limit - 1]!.name } : {}) }
+  }
   async revision(actor: CommunityAccountActor): Promise<string> {
     await this.admin(actor)
-    return JSON.stringify([
-      await this.packs.store.list(),
-      await this.library.list(),
+    const packs = await this.packs.store.list(),
+      library = await this.library.list()
+    const snapshot = JSON.stringify([
+      packs,
+      library,
       (
         await this.expertReferences?.impact([
-          ...(await this.packs.store.list()).map(row => ({ kind: 'pack' as const, name: row.name })),
-          ...(await this.library.list()).map(row => ({ kind: 'skill' as const, name: row.name })),
+          ...packs.map(row => ({ kind: 'pack' as const, name: row.name })),
+          ...library.map(row => ({ kind: 'skill' as const, name: row.name })),
         ])
       )?.revision,
       await Promise.all((await this.accounts.listGroups()).map(async group => [group, await this.direct.get(group.id), await this.packs.grants.get(group.id)])),
@@ -52,6 +70,7 @@ export class SkillPacks {
         ]),
       ),
     ])
+    return createHash('sha256').update(snapshot).digest('hex')
   }
   async detail(actor: CommunityAccountActor, name: string): Promise<CommunitySkillPackDetail> {
     await this.admin(actor)
@@ -86,8 +105,16 @@ export class SkillPacks {
     const experts = (await this.expertReferences?.impact([{ kind: 'pack', name }]))?.experts ?? [],
       expertsWithSkills =
         (await this.expertReferences?.impact([{ kind: 'pack', name }, ...deleting.map(name => ({ kind: 'skill' as const, name }))]))?.experts ?? []
+    const byName = new Map((await this.library.list()).map(row => [row.name, row]))
+    const members = pack.skills.flatMap(name => {
+      const member = byName.get(name)
+      return member ? [{ name, description: member.description, ...(member.conflict ? { conflict: true } : {}) }] : []
+    })
+    const displayOverrides = (['displayName', 'description'] as const).filter(field => pack.displayOverrides?.[field] !== undefined)
     return {
       ...(await this.view(actor, pack, revision)),
+      members,
+      ...(displayOverrides.length ? { displayOverrides } : {}),
       removal: { deleting, retained, groups, selectedMembers, selectedMembersWithSkills, experts, expertsWithSkills },
     }
   }
@@ -116,12 +143,13 @@ export class SkillPacks {
           throw new BusinessRuleError('conflict', 'The orchestration skill name is already in use.', 'skill-pack-name-conflict')
         const note = input.instructions.trim() ? await this.notes.createNote(input.name, input.description, input.instructions) : undefined
         await this.admin(actor)
+        const previous = packs.find(row => row.name === previousName)
+        const displayName = previous ? skillPackDisplay(previous).displayName : undefined
         const pack: SkillPack = {
           ...input,
-          published: packs.find(row => row.name === previousName)?.published ?? false,
-          ...(packs.find(row => row.name === previousName)?.rowRevision !== undefined
-            ? { rowRevision: packs.find(row => row.name === previousName)!.rowRevision }
-            : {}),
+          published: previous?.published ?? false,
+          ...(displayName === undefined ? {} : { displayOverrides: { displayName } }),
+          ...(previous?.rowRevision === undefined ? {} : { rowRevision: previous.rowRevision }),
           ...(note ? { note: { name: note.name, description: note.description, hash: note.hash, importedAt: this.clock.now(), published: false } } : {}),
         }
         await this.queue.transaction(async repositories => {
@@ -133,6 +161,31 @@ export class SkillPacks {
         })
       })
       .then(async () => await this.view(actor, await this.required(input.name)))
+  }
+  saveDisplay(actor: CommunityAccountActor, name: string, changes: SkillPackDisplay, revision: string): Promise<CommunitySkillPackView> {
+    return this.queue.mutate(async () => {
+      await this.admin(actor)
+      const pack = await this.required(name)
+      await this.fresh(actor, name, revision)
+      const values = Object.entries(changes)
+      if (
+        !pack.suiteOrigin ||
+        !values.length ||
+        values.some(
+          ([field, value]) =>
+            (field !== 'displayName' && field !== 'description') ||
+            typeof value !== 'string' ||
+            !value.trim() ||
+            value.length > (field === 'displayName' ? 160 : 4096) ||
+            (field === 'displayName' ? /\p{Cc}/u.test(value) : value.includes('\0')),
+        )
+      )
+        throw new BusinessRuleError('invalid', 'Enter a valid display name or description.', 'skill-pack-invalid')
+      await this.queue.transaction(repositories =>
+        repositories.packs.store.save({ ...pack, displayOverrides: { ...pack.displayOverrides, ...changes } }, pack.rowRevision),
+      )
+      return await this.view(actor, await this.required(name))
+    })
   }
   publish(actor: CommunityAccountActor, name: string, published: boolean, revision: string): Promise<void> {
     return this.queue.mutate(async () => {
@@ -164,7 +217,10 @@ export class SkillPacks {
     })
   }
   /** Suite installs commit packs through the same queue, retention and distribution boundary. */
-  commitSuitePack(origin: string, input: { name: string; description: string; skills: readonly string[]; instructions: string }): Promise<void> {
+  commitSuitePack(
+    origin: string,
+    input: { name: string; catalogDisplayName?: string; description: string; skills: readonly string[]; instructions: string },
+  ): Promise<void> {
     return this.queue.mutate(async () => {
       if ((await this.packInputInvalid(input)) || (await this.packs.store.list()).some(pack => pack.name === input.name && pack.suiteOrigin !== origin))
         throw new BusinessRuleError('invalid', 'Review the skill pack name and selected skills.', 'skill-pack-invalid')
@@ -177,6 +233,7 @@ export class SkillPacks {
       await this.packs.store.save({
         name: input.name,
         description: input.description,
+        ...(input.catalogDisplayName === undefined ? {} : { catalogDisplayName: input.catalogDisplayName }),
         skills: [...input.skills],
         instructions: input.instructions,
         published: false,
@@ -193,7 +250,7 @@ export class SkillPacks {
    * Skills detached from the suite stay members so an update does not withdraw them. */
   updateSuitePack(
     origin: string,
-    input: { name: string; description: string; skills: readonly string[]; instructions: string },
+    input: { name: string; catalogDisplayName?: string; description: string; skills: readonly string[]; instructions: string },
     detached: readonly string[],
   ): Promise<void> {
     return this.queue.mutate(async () => {
@@ -211,6 +268,7 @@ export class SkillPacks {
       await this.packs.store.save({
         ...rest,
         description: input.description,
+        ...(input.catalogDisplayName === undefined ? {} : { catalogDisplayName: input.catalogDisplayName }),
         skills,
         instructions: input.instructions,
         ...(note
@@ -340,7 +398,7 @@ export class SkillPacks {
       ...(unavailable ? { unavailable } : {}),
       hasPlatformCredential: (await Promise.all(pack.skills.map(name => this.execution?.hasPlatformCredential('skill:' + name) ?? false))).some(Boolean),
       name: pack.name,
-      description: pack.description,
+      ...skillPackDisplay(pack),
       skills: pack.skills,
       instructions: pack.instructions,
       published: pack.published,

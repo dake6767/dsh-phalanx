@@ -243,3 +243,6 @@ export interface CommunityMemberInstanceRequest {
 export interface CommunityMemberInstanceResult {
   readonly completed: true
 }
+
+export type CommunityInstalledServices = ReturnType<typeof import('./installed-services.js').installedServiceView> & { readonly revision: string }
+export type CommunityInstalledServiceChange = import('./installed-services.js').InstalledServiceChange

@@ -67,7 +67,7 @@ it('reports a catalog skill limit failure through its installation record and vi
     ).toBe(303)
     await page.goto(origin + '/admin/skills?tab=catalog')
     const card = page.locator('.plugin-library-card').filter({ hasText: 'Large templates' })
-    await card.getByRole('button', { name: 'Install', exact: true }).click()
+    await card.getByRole('button', { name: 'View catalog entry Large templates', exact: true }).click()
     await page.getByRole('dialog', { name: 'Large templates' }).getByRole('button', { name: 'Install entry', exact: true }).click()
     await expect
       .poll(async () => (await (await page.request.get(origin + '/admin/api/suites')).json()).installations[0], { timeout: 30000 })

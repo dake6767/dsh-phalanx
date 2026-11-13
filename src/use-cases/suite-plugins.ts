@@ -2,7 +2,7 @@ import { BusinessRuleError } from '../domain/business-error.js'
 import type { SuiteCatalogPluginItem } from '../domain/suite-catalog.js'
 import type { PluginAccessAdministration } from './plugin-access-administration.js'
 import type { PluginLibrary } from './plugin-library.js'
-import type { PreparedSuitePlugin } from './suite-plugin-facts.js'
+import { assertCatalogPluginBindings, type PreparedSuitePlugin } from './suite-plugin-facts.js'
 
 /** Coordinates the plugin and access owners inside the durable catalog transaction. */
 export class SuitePlugins {
@@ -43,6 +43,7 @@ export class SuitePlugins {
       throw new BusinessRuleError('conflict', 'The plugin changed after confirmation.', 'suite-replace-unconfirmed')
     const accessRevision = (await this.access.suiteSettings(item.packageName))?.revision ?? 'none'
     const prepared = await this.library.prepareSuitePlugin(origin, item, log, signal)
+    assertCatalogPluginBindings(item, prepared)
     await this.access.validateSuiteTemplate(prepared, item.access, [...item.runtimeDependencies, ...item.catalogDependencies])
     return { item: structuredClone(item), prepared, accessRevision }
   }

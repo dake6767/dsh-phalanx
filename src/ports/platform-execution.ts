@@ -15,8 +15,12 @@ export interface ExecutionMaterial {
   readonly version: string
   readonly dependencies?: readonly RuntimeDependencyVersion[]
 }
+export interface ExecutionMaterialIdentity {
+  readonly version: string
+  readonly revision: string | undefined
+}
 export interface ExecutionMaterialPort {
-  withPrepared<T>(owner: string, run: (material: ExecutionMaterial) => Promise<T>): Promise<T>
+  withPrepared<T>(owner: string, run: (material: ExecutionMaterial) => Promise<T>, expected?: ExecutionMaterialIdentity): Promise<T>
 }
 export interface ExecutionRunnerPort {
   run(
@@ -33,5 +37,5 @@ export interface ExecutionConfigurationStorePort extends ExecutionConfigurationP
   revision?(owner: string): Promise<string>
   remove(owner: string, expectedRevision?: string): Promise<void>
   list(): Promise<readonly { readonly owner: string; readonly configuration: ExecutionConfiguration }[]>
-  save(owner: string, configuration: ExecutionConfiguration, expectedRevision?: string): Promise<void>
+  save(owner: string, configuration: ExecutionConfiguration, expectedRevision?: string): Promise<string | void>
 }

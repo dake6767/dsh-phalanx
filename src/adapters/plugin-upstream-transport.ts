@@ -10,6 +10,7 @@ export class NodePluginUpstreamTransport implements PluginUpstreamTransportPort 
   constructor(
     private readonly timeout: 'bounded' | 'idle' = 'bounded',
     private readonly timeoutMs = PLUGIN_TIMEOUT_MS,
+    private readonly bodyLimit = PLUGIN_BODY_LIMIT,
   ) {}
   async send(input: Parameters<PluginUpstreamTransportPort['send']>[0]): Promise<Response> {
     const base = new URL(input.upstream.baseUrl)
@@ -29,11 +30,14 @@ export class NodePluginUpstreamTransport implements PluginUpstreamTransportPort 
       if (value !== undefined && !blocked.has(name.toLowerCase()) && !name.toLowerCase().startsWith('proxy-'))
         headers[name] = typeof value === 'string' ? value : [...value]
     for (const header of input.upstream.headers)
-      headers[header.name.toLowerCase()] = input.headerMode === 'literal' ? header.value : header.value.replaceAll('{credential}', input.upstream.credential)
+      headers[header.name.toLowerCase()] =
+        input.headerMode === 'literal' ? header.value : header.value.replaceAll('{credential}', () => input.upstream.credential)
     // Node otherwise omits framing for unknown-length GET/DELETE/OPTIONS bodies.
     if (headers['content-length'] === undefined) headers['transfer-encoding'] = 'chunked'
     const declared = Number(headers['content-length'])
-    if (Number.isFinite(declared) && declared > PLUGIN_BODY_LIMIT) throw new PluginUpstreamTransportError(413, 'Plugin request body exceeds 64 MiB')
+    const bodyLimit = this.bodyLimit
+    const oversized = () => new PluginUpstreamTransportError(413, `Plugin request body exceeds ${bodyLimit / (1024 * 1024)} MiB`)
+    if (Number.isFinite(declared) && declared > bodyLimit) throw oversized()
     return await new Promise<Response>((resolve, reject) => {
       const outgoing = (base.protocol === 'https:' ? httpsRequest : httpRequest)({
         protocol: base.protocol,
@@ -73,7 +77,7 @@ export class NodePluginUpstreamTransport implements PluginUpstreamTransportPort 
       const limit = new Transform({
         transform(chunk: Buffer, _encoding, callback) {
           bytes += chunk.length
-          callback(bytes > PLUGIN_BODY_LIMIT ? new PluginUpstreamTransportError(413, 'Plugin request body exceeds 64 MiB') : null, chunk)
+          callback(bytes > bodyLimit ? oversized() : null, chunk)
         },
       })
       void pipeline(Readable.fromWeb(input.body as import('node:stream/web').ReadableStream<Uint8Array>), limit, outgoing).catch(error => {

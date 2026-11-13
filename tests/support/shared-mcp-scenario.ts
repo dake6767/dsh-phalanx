@@ -228,8 +228,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       if (marker.startsWith('CALL_')) expect(outcome.result).toBe(success)
       return outcome
     }
-    // In-process scenarios only: record outbound transport errors and upstream 5xx during the
-    // first prompt so a gateway 502 names its hop and cause.
+    // In-process scenarios only: record outbound transport errors and upstream 5xx during each
+    // member's first prompt so a gateway 502 names its member, hop and cause.
     type OutboundRequest = {
       method?: string
       path?: string
@@ -256,24 +256,29 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
     const failures = channel('http.client.request.error')
     const recordFailure = (message: unknown) => {
       const event = message as { request?: OutboundRequest; error?: NodeJS.ErrnoException }
-      console.info('[mcp-first-prompt-transport]', { ...outbound(event.request), code: event.error?.code })
+      console.info('[mcp-first-prompt-transport]', { member: probing, ...outbound(event.request), code: event.error?.code })
     }
     const responses = channel('http.client.response.finish')
     const recordResponse = (message: unknown) => {
       const event = message as { request?: OutboundRequest; response?: { statusCode?: number } }
       if ((event.response?.statusCode ?? 0) >= 500) {
-        console.info('[mcp-first-prompt-transport]', { ...outbound(event.request), upstreamStatus: event.response?.statusCode })
+        console.info('[mcp-first-prompt-transport]', { member: probing, ...outbound(event.request), upstreamStatus: event.response?.statusCode })
       }
     }
+    let probing: string | undefined
     created.subscribe(recordCreated)
     failures.subscribe(recordFailure)
     responses.subscribe(recordResponse)
-    const alice = await prompt(members[0]!, 'CALL_ALICE').finally(() => {
+    const [alice, bob] = await (async () => {
+      probing = members[0]!.name
+      const first = await prompt(members[0]!, 'CALL_ALICE')
+      probing = members[1]!.name
+      return [first, await prompt(members[1]!, 'CALL_BOB')] as const
+    })().finally(() => {
       created.unsubscribe(recordCreated)
       failures.unsubscribe(recordFailure)
       responses.unsubscribe(recordResponse)
     })
-    const bob = await prompt(members[1]!, 'CALL_BOB')
     for (const row of [alice, bob]) {
       expect(row.tools).toContain('mcp__p-search__search')
       expect(row.tools).not.toContain('mcp__p-search__write')

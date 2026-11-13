@@ -19,11 +19,11 @@ INITIALIZATION_RECOVERY_PROGRAM = "// Generated recovery program. All writes use
 # END GENERATED INITIALIZATION RECOVERY PROGRAM
 
 
-def read_owned(path,uid,mode=0o600):
+def read_owned(path,uid,mode=0o600,*,max_bytes=262144):
     descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
     try:
         info=os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid!=uid or stat.S_IMODE(info.st_mode)!=mode or info.st_size>262144:
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=uid or stat.S_IMODE(info.st_mode)!=mode or (max_bytes is not None and info.st_size>max_bytes):
             raise InstallError('Invalid protected maintenance carrier')
         with os.fdopen(os.dup(descriptor),'r') as stream:return stream.read()
     finally:os.close(descriptor)

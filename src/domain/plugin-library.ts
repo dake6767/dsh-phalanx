@@ -76,6 +76,8 @@ export interface PreparedPlugin extends PluginIdentity {
   readonly preparationId?: string
   /** GitHub sources: the commit whose packed content has this integrity. */
   readonly sourceCommit?: string
+  /** Signed catalog Release asset that supplied this exact prepared archive. */
+  readonly catalogArchiveUrl?: string
   readonly integrity: string
   readonly artifact: string
   readonly runtimeRevision: string
@@ -102,6 +104,8 @@ export interface LibraryPlugin extends PluginCandidate {
   readonly suiteOrigin?: string
   /** Hash of the catalog access template this platform applied last; updates compare it to detect manual edits. */
   readonly suiteAppliedAccess?: string
+  readonly suiteResourceBindings?: readonly import('./plugin-preinstall.js').InstalledNativeResourceBinding[]
+  readonly suiteResourceEnvironment?: readonly { readonly name: string; readonly value: string }[]
   readonly pendingAdministrator?: { readonly actor: import('./community-account.js').CommunityAccountActor; readonly submittedAt: number }
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly contributionPublicationReceipt?: import('./contribution-receipt.js').ContributionReceipt

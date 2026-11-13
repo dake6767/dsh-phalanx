@@ -1,3 +1,5 @@
+import { resetInstalledServiceBackends } from '../domain/installed-services.js'
+import type { ExecutionConfiguration } from '../domain/platform-execution.js'
 import { randomUUID } from 'node:crypto'
 import type { PluginUpstream } from '../domain/plugin-upstream.js'
 import { resetMcpStateSecrets } from './mcp-record-codec.js'
@@ -67,8 +69,17 @@ export async function resetPlatformDatabaseSecrets(
         row.name,
         JSON.stringify(secrets.encrypt({ table: 'execution_variables', recordId: JSON.stringify([row.owner, row.name]), field: 'value' }, '')),
       ])
-    const executions = await database.query<{ owner: string }>('SELECT owner FROM dsh_phalanx.execution_configurations')
-    for (const row of executions) await database.query('UPDATE dsh_phalanx.execution_configurations SET revision=$2 WHERE owner=$1', [row.owner, randomUUID()])
+    const executions = await database.query<{ owner: string; configuration: ExecutionConfiguration }>(
+      'SELECT owner,configuration FROM dsh_phalanx.execution_configurations',
+    )
+    for (const { owner, configuration } of executions) {
+      const next = configuration.services ? { ...configuration, services: resetInstalledServiceBackends(configuration.services) } : configuration
+      await database.query('UPDATE dsh_phalanx.execution_configurations SET revision=$2,configuration=$3 WHERE owner=$1', [
+        owner,
+        randomUUID(),
+        JSON.stringify(next),
+      ])
+    }
     const connection = { sql: database, cipher: secrets }
     const mcpRows = new PostgresMcpStore(connection),
       mcpMetadata = new PostgresMcpMetadata(connection)

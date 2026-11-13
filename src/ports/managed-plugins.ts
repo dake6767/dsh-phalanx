@@ -1,3 +1,4 @@
+import type { CatalogPluginDistributionIdentity } from '../domain/plugin-group-contract.js'
 import type { ContributionReceipt } from '../domain/contribution-receipt.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 
@@ -28,6 +29,7 @@ export interface PluginGrantsPort {
 
 /** Both group lists are committed together; a package belongs to at most one list. */
 export interface PluginGroupConfigurationPort extends PluginGrantsPort {
+  preinstallCatalog?(groupId: string, plugin: CatalogPluginDistributionIdentity, runtimeRevision: string): Promise<void>
   preinstalls(groupId: string): Promise<readonly string[]>
   configure(groupId: string, controlled: readonly string[], preinstalled: readonly string[]): Promise<void>
 }

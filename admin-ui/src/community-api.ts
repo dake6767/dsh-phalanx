@@ -272,25 +272,13 @@ export function communitySkillPacks(signal?: AbortSignal): Promise<import('../..
 export function communitySkillPackDetail(name: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySkillPackDetail> {
   return request('/admin/api/skill-packs/detail?name=' + encodeURIComponent(name), { signal })
 }
-export function saveCommunitySkillPack(
-  pack: import('../../src/domain/admin-contract').CommunitySkillPackInput,
-  revision: string,
-  previousName?: string,
-): Promise<import('../../src/domain/admin-contract').CommunitySkillPackView> {
-  return request<import('../../src/domain/admin-contract').CommunitySkillPackView>('/admin/api/skill-packs', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'save', pack, revision, ...(previousName ? { previousName } : {}) }),
-  }).finally(skillSynchronizationChanged)
+export function communitySkillPackCandidates(
+  search: string,
+  after: string,
+  signal?: AbortSignal,
+): Promise<import('../../src/domain/skill-admin-contract').CommunitySkillPackCandidates> {
+  return request('/admin/api/skill-packs/candidates?' + new URLSearchParams({ q: search, after }), { signal })
 }
-export function removeCommunitySkillPack(name: string, deleteSkills: boolean, revision: string): Promise<unknown> {
-  return request('/admin/api/skill-packs', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'remove', name, deleteSkills, revision }),
-  }).finally(skillSynchronizationChanged)
-}
-
 export function previewSkillImport(file: File): Promise<import('../../src/domain/admin-contract').CommunitySkillImportPreview> {
   return request('/admin/api/skills/import?filename=' + encodeURIComponent(file.name), {
     method: 'POST',
@@ -485,11 +473,12 @@ export function detachCommunitySuiteEntry(
 export function saveCommunitySuiteCredentials(
   id: string,
   credentials: Readonly<Record<string, string>>,
+  expected: NonNullable<import('../../src/domain/suite-catalog').SuiteInstallRequest['preview']>,
 ): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> {
   return request('/admin/api/suites', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'credentials', id, credentials }),
+    body: JSON.stringify({ action: 'credentials', id, credentials, expected }),
   })
 }
 

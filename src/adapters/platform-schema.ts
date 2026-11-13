@@ -175,6 +175,13 @@ export const PLATFORM_MIGRATIONS: readonly { readonly version: number; readonly 
     name: 'group app center visibility',
     sql: 'ALTER TABLE dsh_phalanx.native_feature_group_settings ADD COLUMN show_app_center boolean NOT NULL DEFAULT false;',
   },
+  { version: 22, name: 'skill pack display metadata', sql: 'ALTER TABLE dsh_phalanx.skill_packs ADD COLUMN display jsonb;' },
+  { version: 23, name: 'native plugin service delivery origin', sql: 'ALTER TABLE dsh_phalanx.plugin_deliveries ADD COLUMN service_origin text;' },
+  {
+    version: 24,
+    name: 'member native service settings history',
+    sql: 'ALTER TABLE dsh_phalanx.plugin_deliveries ADD COLUMN service_settings jsonb, ADD COLUMN resource_origin text;',
+  },
 ]
 
 /** The newest version this code can prepare, always the last migration. */

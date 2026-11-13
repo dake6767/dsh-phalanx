@@ -83,7 +83,7 @@ it('installs the signed presentation entry and creates editable member decks wit
       await signInCommunity(page, session.origin, 'admin', 'office-facts-fixture-password', true)
       await page.goto(session.origin + '/admin/skills?tab=catalog')
       const card = page.locator('.plugin-library-card').filter({ has: page.getByRole('button', { name: 'View catalog entry PPT Master', exact: true }) })
-      await card.getByRole('button', { name: 'Install', exact: true }).click()
+      await card.getByRole('button', { name: 'View catalog entry PPT Master', exact: true }).click()
       await page.getByRole('dialog', { name: 'PPT Master', exact: true }).getByRole('button', { name: 'Install entry', exact: true }).click()
       await card.getByText('Installed', { exact: true }).first().waitFor({ timeout: 900_000 })
     } finally {

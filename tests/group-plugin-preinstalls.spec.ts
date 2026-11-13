@@ -45,19 +45,19 @@ function setup() {
 it('captures checked bytes and rejects a changed artifact, group or account identity before background delivery', async () => {
   const f = setup(),
     plan = (await f.policy.plan('alice', []))!
-  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe(true)
+  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe('ready')
   f.plugin.integrity = 'sha512-new'
   expect(plan.plugins[0]?.integrity).toBe('sha512-fixture')
-  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe(false)
+  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe('cancelled')
   f.plugin.integrity = 'sha512-fixture'
   f.alice.groupId = 'other'
-  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe(false)
+  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe('cancelled')
   f.alice.groupId = 'members'
   f.alice.sessionEpoch++
-  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe(false)
+  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe('cancelled')
   f.alice.sessionEpoch = 0
   f.alice.spaceId = 'replacement'
-  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe(false)
+  expect(await f.policy.current(plan, plan.plugins[0]!)).toBe('cancelled')
 })
 
 it('counts eligible members once across failed packages, excludes retired spaces, and preserves selected delivery protection', async () => {

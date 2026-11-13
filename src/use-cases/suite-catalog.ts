@@ -1,3 +1,4 @@
+import { legacyCatalogExecutionVariables } from '../domain/execution-service-environment.js'
 import { SuiteCatalogQueries } from './suite-catalog-queries.js'
 import { SuiteChanges } from './suite-changes.js'
 import { SuiteTransactions } from './suite-transactions.js'
@@ -17,6 +18,7 @@ import {
   suiteCatalogRefusal,
   suiteInstallInput,
   suiteCredentialsInput,
+  suitePreviewIdentity,
   suiteUninstallInput,
   invalidRequest,
   type SuiteCatalogArchitecture,
@@ -38,7 +40,6 @@ import type { SkillLibrary } from './skill-library.js'
 import type { SuitePlugins } from './suite-plugins.js'
 import {
   suitePreparationFailure,
-  credentialsFor,
   type SkillSuitePort,
   type SkillSuiteUpdatePort,
   type SkillPackSuitePort,
@@ -156,11 +157,13 @@ export class SuiteCatalog {
           previous.status === 'installed' ? 'This catalog entry is already installed.' : 'A task is already running for this entry.',
           previous.status === 'installed' ? 'suite-already-installed' : 'suite-task-running',
         )
+      if (value.preview && (value.preview.version !== entry.version || value.preview.contentHash !== entry.contentHash))
+        throw new BusinessRuleError('conflict', 'The catalog install preview changed. Review the entry again.', 'suite-preview-changed')
       if (entry.unavailableReason) throw suiteCatalogRefusal(entry.unavailableReason)
       const shared = await this.queries.availability.plan(entry)
       if (!(await this.queries.availability.available(entry, shared)))
         throw new BusinessRuleError('invalid', 'This suite entry has no preparation for the current architecture.', 'suite-arch-unavailable')
-      const variables = new Set(this.queries.executionItems(entry).flatMap(item => item.variables.map(row => row.name)))
+      const variables = new Set(this.queries.executionItems(entry).flatMap(item => legacyCatalogExecutionVariables(item).map(row => row.name)))
       if (Object.keys(value.credentials ?? {}).some(name => !variables.has(name))) throw invalidRequest()
       for (const item of entry.items) if (item.kind === 'plugin') await this.plugins?.assertSuiteAdmission(suiteInstallOrigin(entry.id), item.packageName)
       const plan = await this.queries.replacements(entry)
@@ -201,6 +204,7 @@ export class SuiteCatalog {
         status: 'installing',
         category: entry.category,
         ...(entry.contentHash ? { contentHash: entry.contentHash } : {}),
+        ...(entry.category === 'dependency' && entry.locked ? { locked: true as const } : {}),
         ...(pluginPackage !== undefined ? { pluginPackage } : {}),
         entries: [],
         requestId: value.requestId,
@@ -216,6 +220,7 @@ export class SuiteCatalog {
         version: dependency.version,
         category: dependency.category,
         ...(dependency.contentHash ? { contentHash: dependency.contentHash } : {}),
+        ...(dependency.category === 'dependency' && dependency.locked ? { locked: true as const } : {}),
         status: 'installing',
         entries: [],
         updatedAt: this.clock.now(),
@@ -232,20 +237,26 @@ export class SuiteCatalog {
       return this.queries.view(record)
     })
   }
-  async saveCredentials(actor: CommunityAccountActor, id: string, input: unknown): Promise<void> {
-    const accepted = structuredClone({ actor, input })
+  async saveCredentials(actor: CommunityAccountActor, id: string, input: unknown, expected?: unknown): Promise<void> {
+    const accepted = structuredClone({ actor, input, expected })
     this.assertOpen()
     return this.operations.run('catalog', async () => {
       this.assertOpen()
       await this.assertAdmin(accepted.actor)
-      const record = (await this.queries.installed(id)).record,
-        entry = this.queries.require(id),
-        credentials = suiteCredentialsInput(accepted.input)
-      const items = this.queries.executionItems(entry).filter(item => record.entries.some(row => row.kind === 'execution' && row.name === item.skill))
-      if (!items.length || !this.execution || Object.keys(credentials).some(name => !items.some(item => item.variables.some(row => row.name === name))))
-        throw invalidRequest()
-      for (const item of items)
-        await this.execution.saveSuiteCredentials(suiteInstallOrigin(id), suiteExecutionOwner(item.skill), credentialsFor(item, credentials))
+      const record = (await this.queries.installed(id)).record
+      const identity = accepted.expected === undefined ? undefined : suitePreviewIdentity(accepted.expected)
+      if (identity && (record.version !== identity.version || record.contentHash !== identity.contentHash))
+        throw new BusinessRuleError('conflict', 'The catalog install preview changed. Review the entry again.', 'suite-preview-changed')
+      const credentials = suiteCredentialsInput(accepted.input),
+        execution = this.execution
+      if (!execution) throw invalidRequest()
+      const owners = record.entries.flatMap(item => (item.kind === 'execution' ? [suiteExecutionOwner(item.name)] : []))
+      const definitions = await Promise.all(owners.map(async owner => ({ owner, names: (await execution.suiteExecutionStatus(owner)).variables ?? [] })))
+      if (!definitions.length || Object.keys(credentials).some(name => !definitions.some(row => row.names.includes(name)))) throw invalidRequest()
+      for (const { owner, names } of definitions) {
+        const values = Object.fromEntries(Object.entries(credentials).filter(([name]) => names.includes(name)))
+        if (Object.keys(values).length) await execution.saveSuiteCredentials(suiteInstallOrigin(id), owner, values)
+      }
     })
   }
   async update(actor: CommunityAccountActor, id: string): Promise<CommunitySuiteInstallView> {
@@ -258,6 +269,8 @@ export class SuiteCatalog {
         entry = this.queries.require(id)
       if (entry.unavailableReason) throw suiteCatalogRefusal(entry.unavailableReason)
       const preview = await this.queries.updatePreview(id)
+      if (preview.reason === 'invalid-entry')
+        throw new BusinessRuleError('conflict', 'A locked resource requires a new catalog entry.', 'suite-catalog-invalid')
       if (preview.reason)
         throw new BusinessRuleError(
           'conflict',

@@ -1,3 +1,4 @@
+import { mapInstalledServiceSecrets } from '../domain/installed-services.js'
 import { executionCommandLock } from './advisory-locks.js'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -27,6 +28,7 @@ interface VariableRow extends Record<string, unknown> {
   value: PlatformSecretEnvelope
 }
 const variableSecrets = protectedTable('execution_variables')
+const serviceVariable = (position: string) => 'service/' + position
 
 /** Stateless owner rows and variable diffs; only accepted-write lifetime is held in process. */
 export class PostgresExecutionConfigurations implements ExecutionConfigurationStorePort {
@@ -55,16 +57,26 @@ export class PostgresExecutionConfigurations implements ExecutionConfigurationSt
     this.lifecycle.assertOpen()
     return await repositoryTransaction(this.connection, sql => this.read(sql))
   }
-  async save(owner: string, configuration: ExecutionConfiguration, expectedRevision = configuration.rowRevision ?? 'none'): Promise<void> {
+  async save(owner: string, configuration: ExecutionConfiguration, expectedRevision = configuration.rowRevision ?? 'none'): Promise<string> {
     this.lifecycle.assertAccepting()
     const { rowRevision, runtimeDependencies, ...next } = structuredClone(configuration)
     void rowRevision
+    const { services, ...settings } = next
+    const protectedValues = new Map(next.variables.filter(row => row.secret).map(row => [row.name, row.value]))
     const metadata: Metadata = {
-      ...next,
+      ...settings,
+      ...(services
+        ? {
+            services: mapInstalledServiceSecrets(services, (position, value) => {
+              protectedValues.set(serviceVariable(position), value)
+              return ''
+            }),
+          }
+        : {}),
       variables: next.variables.map(variable => (variable.secret ? { name: variable.name, secret: true } : variable)),
       ...(runtimeDependencies ? { runtimeDependencies: [] } : {}),
     }
-    await this.lifecycle.write(() =>
+    return await this.lifecycle.write(() =>
       repositoryTransaction(this.connection, async sql => {
         const sources = owner.startsWith('skill:') ? await sql.query('SELECT name FROM dsh_phalanx.skills WHERE name=$1 FOR KEY SHARE', [owner.slice(6)]) : []
         if (!sources.length) throw new BusinessRuleError('missing', 'Execution owner is unavailable', 'skill-unavailable')
@@ -79,8 +91,15 @@ export class PostgresExecutionConfigurations implements ExecutionConfigurationSt
         const { rowRevision: previousRevision, ...previous } = current ?? {}
         void previousRevision
         const value = { ...next, ...(runtimeDependencies ? { runtimeDependencies } : {}) }
-        if (current && isDeepStrictEqual(previous, value)) return
-        await this.assertCommandsAvailable(sql, owner, configuration)
+        if (current && isDeepStrictEqual(previous, value)) return expectedRevision
+        if (
+          !current?.enabled ||
+          !isDeepStrictEqual(
+            current.commands.map(row => row.command),
+            configuration.commands.map(row => row.command),
+          )
+        )
+          await this.assertCommandsAvailable(sql, owner, configuration)
         const revision = randomUUID()
         if (current)
           await sql.query('UPDATE dsh_phalanx.execution_configurations SET configuration=$2,revision=$3 WHERE owner=$1', [
@@ -95,18 +114,24 @@ export class PostgresExecutionConfigurations implements ExecutionConfigurationSt
           )
           if (!saved.length) throw this.changed()
         }
-        const names = next.variables.filter(variable => variable.secret).map(variable => variable.name)
+        const names = [...protectedValues.keys()]
         await sql.query('DELETE FROM dsh_phalanx.execution_variables WHERE owner=$1 AND NOT(name=ANY($2::text[]))', [owner, names])
-        for (const variable of next.variables.filter(variable => variable.secret)) {
-          const old = current?.variables.find(row => row.name === variable.name && row.secret)
-          if (old && old.value === variable.value) continue
+        const previousValues = new Map(current?.variables.filter(row => row.secret).map(row => [row.name, row.value]))
+        if (current?.services)
+          mapInstalledServiceSecrets(current.services, (position, value) => {
+            previousValues.set(serviceVariable(position), value)
+            return value
+          })
+        for (const [name, value] of protectedValues) {
+          if (previousValues.get(name) === value) continue
           await sql.query(
             `INSERT INTO dsh_phalanx.execution_variables(owner,name,value) VALUES($1,$2,$3)
           ON CONFLICT(owner,name) DO UPDATE SET value=EXCLUDED.value`,
-            [owner, variable.name, JSON.stringify(variableSecrets.encrypt(this.cipher(), JSON.stringify([owner, variable.name]), 'value', variable.value))],
+            [owner, name, JSON.stringify(variableSecrets.encrypt(this.cipher(), JSON.stringify([owner, name]), 'value', value))],
           )
         }
         await new PostgresRuntimeReferences({ sql, cipher: this.cipher() }).replace({ kind: 'execution', name: owner }, runtimeDependencies ?? [])
+        return revision
       }),
     )
   }
@@ -136,7 +161,7 @@ export class PostgresExecutionConfigurations implements ExecutionConfigurationSt
     for (const row of rows) {
       const names = row.dependencies,
         secrets = new Map(row.protected_values.map(variable => [variable.name, variable.value]))
-      const { contributionReceipt, awaitingPreparation, approvedContribution, suiteOrigin } = row.configuration
+      const { contributionReceipt, awaitingPreparation, approvedContribution, suiteOrigin, services } = row.configuration
       if (
         (contributionReceipt !== undefined &&
           (!contributionReceipt || typeof contributionReceipt.id !== 'string' || typeof contributionReceipt.revision !== 'string')) ||
@@ -160,6 +185,14 @@ export class PostgresExecutionConfigurations implements ExecutionConfigurationSt
             variables: decoded,
             ...(Object.hasOwn(row.configuration, 'runtimeDependencies') || names.length ? { runtimeDependencies: names } : {}),
           }),
+          ...(services
+            ? {
+                services: mapInstalledServiceSecrets(services, position => {
+                  const name = serviceVariable(position)
+                  return variableSecrets.decrypt(this.cipher(), JSON.stringify([row.owner, name]), 'value', secrets.get(name)!)
+                }),
+              }
+            : {}),
           rowRevision: row.revision,
           ...(contributionReceipt ? { contributionReceipt } : {}),
           ...(awaitingPreparation === undefined ? {} : { awaitingPreparation }),

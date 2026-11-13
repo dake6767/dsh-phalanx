@@ -160,3 +160,67 @@ it('saves plugin access through PostgreSQL and reopens without a JSON backend', 
     await removeCommunityFixture(root)
   }
 })
+
+it('persists isolated catalog backend settings using protected plugin fields and rejects stale revisions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'installed-plugin-services-'))
+  const database = await openTestDatabase(root)
+  try {
+    const store = await openAccess(database)
+    await database.query("UPDATE dsh_phalanx.plugin_library SET suite_origin='suite:example' WHERE package_name='plugin'")
+    const label = { en: 'Fixture', 'zh-CN': '夹具' }
+    const configuration = {
+      identity: { id: 'example', version: '1.0.0' },
+      slots: [
+        {
+          id: 'chat',
+          label,
+          binding: {
+            kind: 'revisioned-rpc',
+            service: 'settings',
+            active: ['active'],
+            selection: ['choice'],
+            profiles: ['profiles'],
+            idKey: 'id',
+            snapshotKey: 'data',
+            fields: { endpoint: 'endpoint', key: 'key', model: 'model', mode: 'mode' },
+          },
+          backends: [
+            {
+              id: 'openai',
+              label,
+              protocol: 'openai-chat',
+              mode: 'chat',
+              upstream: { endpoint: 'url', key: 'key', model: 'model' },
+              fields: [
+                { name: 'url', type: 'url', required: true },
+                { name: 'key', type: 'secret', required: true },
+                { name: 'model', type: 'text', required: true },
+              ],
+            },
+          ],
+        },
+      ],
+      settings: [
+        { slot: 'chat', backend: 'openai', enabled: true, values: { url: 'https://example.test/v1', key: 'fictional-plugin-secret', model: 'model' } },
+      ],
+    } as const
+    const revision = await store.saveInstalledServices('plugin', 'suite:example', configuration, 'none')
+    expect(typeof revision).toBe('string')
+    expect((await store.installedServices('plugin'))?.revision).toBe(revision)
+    await expect(store.saveInstalledServices('plugin', 'suite:example', configuration, 'none')).rejects.toMatchObject({
+      code: 'platform-configuration-conflict',
+    })
+    await expect(
+      store.saveInstalledServices('plugin', 'suite:foreign', configuration, (await store.installedServices('plugin'))!.revision),
+    ).rejects.toMatchObject({ code: 'platform-configuration-conflict' })
+    const reopened = await openAccess(database)
+    expect((await reopened.installedServices('plugin'))?.configuration).toEqual(configuration)
+    const metadata = JSON.stringify(await database.query("SELECT configuration FROM dsh_phalanx.plugin_access_settings WHERE package_name='plugin'"))
+    const encrypted = JSON.stringify(await database.query("SELECT value FROM dsh_phalanx.plugin_access_secrets WHERE package_name='plugin'"))
+    expect(metadata).toContain('https://example.test/v1')
+    expect(metadata + encrypted).not.toContain('fictional-plugin-secret')
+  } finally {
+    await database.close()
+    await removeCommunityFixture(root)
+  }
+})

@@ -14,6 +14,12 @@ export async function skillPackRoute(
   origin: URL,
 ): Promise<boolean> {
   const market = url.pathname === '/market/api/skill-packs'
+  if (url.pathname === '/admin/api/skill-packs/candidates') {
+    if (request.method === 'GET')
+      sendCommunityJson(response, 200, await packs.candidates(actor, url.searchParams.get('q') ?? '', url.searchParams.get('after') ?? ''))
+    else sendCommunityJson(response, 405, { code: 'method-not-allowed', error: 'Method Not Allowed' })
+    return true
+  }
   if (!market && !['/admin/api/skill-packs', '/admin/api/skill-packs/detail'].includes(url.pathname)) return false
   if (request.method === 'GET') {
     sendCommunityJson(
@@ -42,6 +48,19 @@ export async function skillPackRoute(
     return true
   }
   if (typeof body.revision !== 'string') throw invalid()
+  if (body.action === 'save-display' && Object.keys(body).length === 4 && typeof body.name === 'string') {
+    const display = body.display
+    if (
+      !display ||
+      typeof display !== 'object' ||
+      Array.isArray(display) ||
+      !Object.keys(display).length ||
+      Object.entries(display).some(([field, value]) => (field !== 'displayName' && field !== 'description') || typeof value !== 'string')
+    )
+      throw invalid()
+    sendCommunityJson(response, 200, await packs.saveDisplay(actor, body.name, display, body.revision))
+    return true
+  }
   if (body.action === 'publish' && Object.keys(body).length === 4 && typeof body.name === 'string' && typeof body.published === 'boolean') {
     await packs.publish(actor, body.name, body.published, body.revision)
     sendCommunityJson(response, 200, { applied: true })

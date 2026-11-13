@@ -97,6 +97,7 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     const execution = async () =>
       (await (await page.request.get(origin + '/admin/api/skills/execution?name=team-cli')).json()) as {
         enabled: boolean
+        commands: { command: string; blockedOptions?: string[]; shortOptionsWithValue?: string[] }[]
         suiteOrigin?: string
         variables: { name: string; configured: boolean }[]
       }
@@ -108,7 +109,7 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     await wizard.getByText('Uses the team key through platform delegated execution.', { exact: true }).waitFor()
     await wizard.getByText('Delegated execution · team-cli · TEAM_KEY').waitFor()
     await wizard.getByRole('button', { name: 'Install entry', exact: true }).click()
-    await card.getByText('Missing credentials', { exact: true }).waitFor({ timeout: 60000 })
+    await wizard.getByText('Missing credentials', { exact: true }).first().waitFor({ timeout: 60000 })
     expect(await execution()).toMatchObject({ enabled: false, suiteOrigin: 'suite:team-suite', variables: [{ name: 'TEAM_KEY', configured: false }] })
     expect(
       (
@@ -118,7 +119,6 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
         })
       ).status(),
     ).toBe(403)
-    await card.getByRole('button', { name: 'View catalog entry Team suite', exact: true }).click()
     const details = page.getByRole('dialog', { name: 'Team suite' })
     await details.getByText('Delegated execution is off until these credentials are saved: TEAM_KEY').waitFor()
     await details.getByLabel('TEAM_KEY').fill(secret)
@@ -127,6 +127,17 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     expect(await execution()).toMatchObject({ enabled: true, variables: [{ name: 'TEAM_KEY', configured: true }] })
     await details.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
     await card.getByText('Installed', { exact: true }).first().waitFor()
+    catalogFixture.fail(true)
+    await page.reload()
+    const outside = page.getByRole('button', { name: 'Catalog entry details', exact: true })
+    await outside.click()
+    const offline = page.getByRole('dialog', { name: 'team-suite', exact: true })
+    await offline.getByLabel('TEAM_KEY', { exact: true }).fill(secret)
+    await offline.getByRole('button', { name: 'Save credentials', exact: true }).click()
+    await offline.getByText('Credentials saved.', { exact: true }).waitFor()
+    await offline.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
+    catalogFixture.fail(false)
+    await page.reload()
     const catalog = await (await page.request.get(origin + '/admin/api/suites')).text()
     expect(catalog).not.toContain(secret)
     expect(JSON.stringify(await execution())).not.toContain(secret)
@@ -161,7 +172,8 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     await openWizard(page, card)
     await wizard.getByLabel('TEAM_KEY').fill(secret)
     await wizard.getByRole('button', { name: 'Install entry', exact: true }).click()
-    await card.getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
+    await wizard.getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
+    await wizard.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
     expect(await execution()).toMatchObject({ enabled: true, variables: [{ name: 'TEAM_KEY', configured: true }] })
     expect(await filesContaining(root, secret)).toEqual([])
     await uninstall(page, card)
@@ -194,8 +206,7 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     await page.reload()
     await openWizard(page, card)
     await wizard.getByRole('button', { name: 'Install entry', exact: true }).click()
-    await card.getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
-    await card.getByRole('button', { name: 'View catalog entry Team suite', exact: true }).click()
+    await wizard.getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
     await details.getByText('Delegated execution is off. Configure a backend when needed.', { exact: true }).waitFor()
     expect(await details.getByText('Credentials are saved. Delegated execution is on.', { exact: true }).count()).toBe(0)
     await details.getByLabel('TEAM_KEY').fill(secret)
@@ -219,15 +230,197 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     await page.reload()
     const zhCard = page.locator('.plugin-library-card').filter({ hasText: '团队套件' })
     await zhCard.getByText('未安装', { exact: true }).waitFor()
-    await zhCard.getByRole('button', { name: '安装', exact: true }).click()
+    await zhCard.getByRole('button', { name: '查看广场条目 团队套件', exact: true }).click()
     const zhWizard = page.getByRole('dialog', { name: '团队套件' })
     await zhWizard.getByText('团队凭据（可选）', { exact: true }).waitFor()
     await zhWizard.getByText('可以跳过这一步。凭据全部保存之前，代执行保持关闭。', { exact: true }).waitFor()
     await zhWizard.getByText('代执行 · team-cli · TEAM_KEY').waitFor()
     await zhWizard.getByRole('button', { name: '安装条目', exact: true }).click()
-    await zhCard.getByText('缺少凭据', { exact: true }).waitFor({ timeout: 60000 })
-    await zhCard.getByRole('button', { name: '查看广场条目 团队套件', exact: true }).click()
+    await zhWizard.getByText('缺少凭据', { exact: true }).waitFor({ timeout: 60000 })
     await page.getByRole('dialog', { name: '团队套件' }).getByText('保存以下凭据之前，代执行保持关闭：TEAM_KEY').waitFor()
+    await zhWizard.getByRole('button', { name: '关闭广场条目详情', exact: true }).click()
+    await page.context().addCookies([{ name: 'dsh-phalanx.lang', value: 'en', url: origin }])
+    await page.reload()
+    await uninstall(page, card)
+
+    await page.setViewportSize({ width: 560, height: 720 })
+    const backendLabel = { en: 'Chat backend', 'zh-CN': '对话后端' }
+    catalogFixture.publish(
+      original.entries.map(entry =>
+        entry.kind === 'suite'
+          ? {
+              ...entry,
+              version: '3.0.0',
+              engines: { platform: '>=0.1.35' },
+              items: entry.items.map(item =>
+                item.kind === 'execution'
+                  ? {
+                      ...item,
+                      delegated: item.delegated.map(command => ({ ...command, blockedShortOptions: ['-b'], shortOptionsWithValue: ['-o'] })),
+                      variables: [
+                        ...item.variables,
+                        ...['TEAM_URL', 'TEAM_PROVIDER', 'SECOND_KEY', 'SECOND_URL', 'SECOND_ALIAS'].map(name => ({ name, purpose: backendLabel })),
+                      ],
+                      serviceSlots: [
+                        {
+                          id: 'chat',
+                          label: backendLabel,
+                          commands: ['team-cli'],
+                          backends: [
+                            {
+                              id: 'compatible',
+                              label: { en: 'Compatible API', 'zh-CN': '兼容接口' },
+                              selector: { kind: 'environment', name: 'TEAM_PROVIDER', value: 'compatible' },
+                              fields: [
+                                { name: 'TEAM_URL', type: 'url', required: true },
+                                { name: 'TEAM_KEY', type: 'secret', required: true },
+                              ],
+                            },
+                            {
+                              id: 'second',
+                              label: { en: 'Second API', 'zh-CN': '第二接口' },
+                              selector: { kind: 'environment', name: 'TEAM_PROVIDER', value: 'second' },
+                              fields: [
+                                { name: 'SECOND_KEY', type: 'secret', required: false, requiredGroup: 'provider-key' },
+                                { name: 'SECOND_URL', type: 'url', required: false },
+                                { name: 'SECOND_ALIAS', type: 'secret', required: false, requiredGroup: 'provider-key' },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    }
+                  : item,
+              ),
+            }
+          : entry,
+      ),
+    )
+    await page.reload()
+    await openWizard(page, card)
+    await wizard.getByText('Compatible API', { exact: true }).click()
+    const installButton = wizard.getByRole('button', { name: 'Install entry', exact: true })
+    expect(
+      await installButton.evaluate(button => {
+        const { top, bottom, left, right } = button.getBoundingClientRect()
+        return top >= 0 && bottom <= window.innerHeight && left >= 0 && right <= window.innerWidth
+      }),
+    ).toBe(true)
+    await wizard.getByLabel('TEAM_URL', { exact: true }).fill('https://service.example.test/v1')
+    await wizard.getByLabel('TEAM_KEY', { exact: true }).fill(secret)
+    await wizard.getByText('Second API', { exact: true }).click()
+    await wizard.getByLabel('SECOND_ALIAS', { exact: true }).fill('fixture-second-key')
+    await wizard.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
+    const guard = page.getByRole('dialog', { name: 'Unsaved changes', exact: true })
+    await guard.getByRole('button', { name: 'Continue editing', exact: true }).click()
+    expect(await wizard.getByLabel('TEAM_KEY', { exact: true }).inputValue()).toBe(secret)
+    let failed = false
+    await page.route('**/admin/api/skills/execution/services?name=team-cli', async route => {
+      if (route.request().method() === 'POST' && !failed) {
+        failed = true
+        await route.fulfill({ status: 503, json: { error: 'Fixture backend save failure' } })
+      } else await route.continue()
+    })
+    await wizard.getByRole('button', { name: 'Install entry', exact: true }).click()
+    await wizard.getByText('Installation succeeded. Some setup actions still need attention.', { exact: true }).waitFor()
+    const stored = async () => await (await page.request.get(origin + '/admin/api/skills/execution/services?name=team-cli')).json()
+    const firstBackend = async () => (await stored()).slots[0].backends[0]
+    expect((await stored()).slots[0].backends[1]).toMatchObject({ complete: false })
+    await wizard.getByRole('button', { name: 'Retry setup', exact: true }).click()
+    await wizard.getByText('Installation succeeded. Some setup actions still need attention.', { exact: true }).waitFor({ state: 'hidden' })
+    await expect.poll(firstBackend).toMatchObject({
+      complete: true,
+      enabled: false,
+      fields: [
+        { name: 'TEAM_URL', value: 'https://service.example.test/v1' },
+        { name: 'TEAM_KEY', configured: true },
+      ],
+    })
+    await expect.poll(async () => (await stored()).slots[0].backends[1]).toMatchObject({ complete: true })
+    expect(JSON.stringify(await stored())).not.toContain(secret)
+    await wizard.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
+    await page.getByRole('tab', { name: 'Skills', exact: true }).click()
+    await page.getByRole('button', { name: 'View skills in team-suite', exact: true }).click()
+    await page.getByRole('button', { name: 'View skill team-cli', exact: true }).click()
+    await page.getByRole('tab', { name: 'Platform execution', exact: true }).click()
+    const settings = page.getByRole('region', { name: 'Service backends', exact: true })
+    await settings.locator('summary').filter({ hasText: 'Compatible API' }).click()
+    expect(await settings.getByLabel('TEAM_URL', { exact: true }).inputValue()).toBe('https://service.example.test/v1')
+    expect(await settings.getByLabel('TEAM_KEY', { exact: true }).inputValue()).toBe('')
+    await settings.getByRole('button', { name: 'Enable', exact: true }).click()
+    await expect.poll(firstBackend).toMatchObject({ enabled: true })
+    await settings.getByRole('button', { name: 'Clear TEAM_KEY', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Clear saved credential', exact: true }).getByRole('button', { name: 'Clear saved credential', exact: true }).click()
+    await expect.poll(firstBackend).toMatchObject({
+      enabled: false,
+      fields: [
+        { name: 'TEAM_URL', value: 'https://service.example.test/v1' },
+        { name: 'TEAM_KEY', configured: false },
+      ],
+    })
+    await page.getByText('Service configuration saved.', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Close skill details', exact: true }).click()
+    await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
+    const servicePath = '/admin/api/skills/execution/services?name=team-cli'
+    const routePattern = '**' + servicePath
+    const warning = wizard.getByText('Installation succeeded. Some setup actions still need attention.', { exact: true })
+    const manual = wizard.getByText('Review and enter these values in the installed service settings.', { exact: true })
+    for (const scenario of ['lost-response', 'concurrent-write']) {
+      await page.unroute(routePattern)
+      await uninstall(page, card)
+      await openWizard(page, card)
+      await wizard.getByText('Compatible API', { exact: true }).click()
+      await wizard.getByLabel('TEAM_URL', { exact: true }).fill('https://service.example.test/v1')
+      await wizard.getByLabel('TEAM_KEY', { exact: true }).fill(secret)
+      await wizard.getByText('Second API', { exact: true }).click()
+      await wizard.getByLabel('SECOND_URL', { exact: true }).fill('https://stale.example.test')
+      let setupPosts = 0
+      await page.route(routePattern, async route => {
+        if (route.request().method() !== 'POST') return route.continue()
+        setupPosts++
+        if (setupPosts !== 1) return route.continue()
+        const committed = await route.fetch()
+        expect(committed.ok()).toBe(true)
+        if (scenario === 'lost-response') {
+          await route.fulfill({ status: 503, json: { error: 'Fixture lost response after commit' } })
+          return
+        }
+        const result = await committed.json()
+        const concurrent = await page.request.post(origin + servicePath, {
+          headers: { origin },
+          data: {
+            revision: result.revision,
+            change: { action: 'save', slot: 'chat', backend: 'second', values: { SECOND_URL: 'https://current.example.test' } },
+          },
+        })
+        expect(concurrent.ok()).toBe(true)
+        await route.fulfill({ response: committed })
+      })
+      await installButton.click()
+      await warning.waitFor()
+      if (scenario === 'lost-response') await wizard.getByRole('button', { name: 'Retry setup', exact: true }).click()
+      await manual.waitFor()
+      expect(setupPosts).toBe(1)
+      expect((await firstBackend()).complete).toBe(true)
+      expect((await stored()).slots[0].backends[1].fields[1].value).toBe(scenario === 'concurrent-write' ? 'https://current.example.test' : '')
+      await wizard.getByRole('button', { name: 'Discard pending setup', exact: true }).click()
+      await wizard.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
+    }
+    const detached = await page.request.post(origin + '/admin/api/suites', {
+      headers: { origin },
+      data: { action: 'detach', id: 'team-suite', input: { kind: 'skill', name: 'team-cli' } },
+    })
+    expect(detached.ok(), await detached.text()).toBe(true)
+    await page.reload()
+    await page.getByRole('tab', { name: 'Skills', exact: true }).click()
+    await page.getByRole('button', { name: 'View skills in team-suite', exact: true }).click()
+    await page.getByRole('button', { name: 'View skill team-cli', exact: true }).click()
+    await page.getByRole('tab', { name: 'Platform execution', exact: true }).click()
+    await page.getByRole('textbox', { name: 'Blocked first arguments', exact: true }).fill('fixture-argument')
+    await page.getByRole('button', { name: 'Save execution settings', exact: true }).click()
+    await expect
+      .poll(async () => (await execution()).commands)
+      .toMatchObject([{ command: 'team-cli', blocked: ['fixture-argument'], blockedOptions: ['-b'], shortOptionsWithValue: ['-o'] }])
     expect(errors).toEqual([])
   } finally {
     await browser.close()
@@ -243,7 +436,7 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
 
 async function openWizard(page: Page, card: ReturnType<Page['locator']>) {
   await card.getByText('Not installed', { exact: true }).waitFor()
-  await card.getByRole('button', { name: 'Install', exact: true }).click()
+  await card.getByRole('button', { name: 'View catalog entry Team suite', exact: true }).click()
   await page.getByRole('dialog', { name: 'Team suite' }).getByText('This entry will install:', { exact: true }).waitFor()
 }
 async function uninstall(page: Page, card: ReturnType<Page['locator']>, expert?: string) {

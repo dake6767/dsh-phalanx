@@ -261,7 +261,7 @@ it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative cata
     await openCatalog(running.page, running.origin)
     for (const name of ['WeCom']) {
       await card(running.page, name).getByText('Not installed', { exact: true }).waitFor()
-      expect(await card(running.page, name).getByRole('button', { name: 'Install', exact: true }).count()).toBe(1)
+      expect(await card(running.page, name).getByRole('button', { name: 'Install', exact: true }).count()).toBe(0)
     }
     const install = async (id: string) => {
       const response = await running.page.request.post(running.origin + '/admin/api/suites', {
@@ -362,7 +362,7 @@ it('installs OfficeCLI and MiniMax through generated adapters and enforces their
     await openCatalog(running.page, running.origin)
     for (const name of ['OfficeCLI', 'MiniMax']) {
       await card(running.page, name).getByText('Not installed', { exact: true }).waitFor()
-      expect(await card(running.page, name).getByRole('button', { name: 'Install', exact: true }).count()).toBe(1)
+      expect(await card(running.page, name).getByRole('button', { name: 'Install', exact: true }).count()).toBe(0)
     }
     const install = async (id: string) => {
       expect(
@@ -466,14 +466,17 @@ it('installs Feishu and HyperFrames through the generated adapters and enforces 
   const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
-    // The gallery shows each suite's declared service address; the fixture points Feishu at the local endpoint.
-    const feishuCard = card(running.page, 'Feishu')
-    await feishuCard.getByText('Not installed', { exact: true }).waitFor()
-    await feishuCard.getByText(exchange.origin).waitFor()
-    const hyperframesCard = card(running.page, 'HyperFrames')
-    await hyperframesCard.getByText('Not installed', { exact: true }).waitFor()
-    // HyperFrames renders locally; it declares no service address to show.
-    expect(await hyperframesCard.getByText('Service addresses').count()).toBe(0)
+    // Technical details show Feishu's declared address. HyperFrames runs locally and has no address.
+    for (const title of ['Feishu', 'HyperFrames']) {
+      const entry = card(running.page, title)
+      await entry.getByText('Not installed', { exact: true }).waitFor()
+      await entry.getByRole('button', { name: `View catalog entry ${title}`, exact: true }).click()
+      const details = running.page.getByRole('dialog', { name: title, exact: true })
+      await details.getByText('Technical details', { exact: true }).click()
+      if (title === 'Feishu') await details.getByText(exchange.origin, { exact: true }).waitFor()
+      else expect(await details.getByText('Service addresses', { exact: true }).count()).toBe(0)
+      await details.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
+    }
 
     const install = async (id: string) => {
       expect(
@@ -625,7 +628,7 @@ it('marks a signed entry that fails the platform download checks as unavailable'
     const blocked = card(running.page, 'Unsafe source')
     await blocked.getByText('The catalog entry failed the platform download checks.', { exact: true }).waitFor()
     await blocked.getByText('outside the five download-source classes').waitFor()
-    expect(await blocked.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
+    expect(await blocked.getByRole('button', { name: 'Install', exact: true }).count()).toBe(0)
     const view = (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as {
       entries: { id: string; available: boolean; unavailableReason?: string }[]
     }
@@ -714,11 +717,14 @@ it('marks an entry that needs a newer platform as unavailable and keeps the othe
   const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
-    await card(running.page, 'WeCom').filter({ hasNotText: 'Needs a newer platform version' }).getByRole('button', { name: 'Install', exact: true }).waitFor()
+    await card(running.page, 'WeCom')
+      .filter({ hasNotText: 'Needs a newer platform version' })
+      .getByRole('button', { name: 'View catalog entry WeCom', exact: true })
+      .waitFor()
     // The newer entry shares the title but differs by id; both cards are visible and only the incompatible one is refused.
     const blocked = running.page.locator('.plugin-library-card').filter({ hasText: 'Needs a newer platform version' })
     await blocked.waitFor()
-    expect(await blocked.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
+    expect(await blocked.getByRole('button', { name: 'Install', exact: true }).count()).toBe(0)
   } finally {
     vi.unstubAllEnvs()
     await fixture.close()

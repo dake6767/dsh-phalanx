@@ -13,6 +13,7 @@ export class NativePluginHistory implements MemberNativePluginHistory {
   constructor(
     private readonly persistence: NativePluginHistoryPersistence,
     private readonly runtime: NativePluginHistoryRuntime,
+    private readonly pendingArchive?: (instance: CommunityUserInstance, integrity: string) => boolean,
   ) {}
   async initialize(member: NativeFeatureMember, instance: CommunityUserInstance, signal: AbortSignal): Promise<readonly string[]> {
     this.assertTarget(member, instance)
@@ -29,6 +30,21 @@ export class NativePluginHistory implements MemberNativePluginHistory {
     return this.record(member, bundles, () => {
       signal.throwIfAborted()
       this.assertTarget(member, this.runtime.current(member.username), generation)
+    })
+  }
+  async archiveReserved(member: NativeFeatureMember, generation: string, integrity: string, signal: AbortSignal): Promise<boolean> {
+    signal.throwIfAborted()
+    this.assertTarget(member, this.runtime.current(member.username), generation)
+    return await this.persistence.work.run(async repositories => {
+      await repositories.actors.lockMember(member)
+      const deliveries = await repositories.deliveries.get(member.spaceId)
+      signal.throwIfAborted()
+      const instance = this.runtime.current(member.username)
+      this.assertTarget(member, instance, generation)
+      return (
+        this.pendingArchive?.(instance!, integrity) === true ||
+        deliveries.some(row => row.integrity === integrity && (row.serviceOrigin !== undefined || row.resourceOrigin !== undefined))
+      )
     })
   }
   private record(member: NativeFeatureMember, bundles?: readonly NativeOptionalBundle[], assertCurrent: () => void = () => {}): Promise<readonly string[]> {

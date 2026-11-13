@@ -1,3 +1,4 @@
+import type { CatalogExecutionServiceSlot } from './suite-service-slots.js'
 import { executionCommandPath, executionLongOption } from './execution-command-line.js'
 import { readCatalogPluginItem } from './suite-plugin.js'
 import { pythonPackagePins } from './python-library.js'
@@ -63,6 +64,8 @@ export interface SuiteCatalogRuntimeDependencyItem {
   readonly commands: readonly string[]
   /** Executable readiness check; arguments stay data, never a shell script. */
   readonly check?: { readonly command: string; readonly args?: readonly string[] }
+  /** Resource files verified by digest after preparation, for each supported architecture. */
+  readonly requiredFiles?: readonly { readonly path: string; readonly sha256: SuiteCatalogArchValue; readonly executable?: true }[]
   readonly downloads: readonly SuiteCatalogDownload[]
   /** Symlink entry under the first PATH directory; relative to the artifact root, per architecture. */
   readonly entry?: string | SuiteCatalogArchValue
@@ -95,6 +98,7 @@ export interface SuiteCatalogExecutionItem {
     readonly blocked: readonly string[]
   }[]
   readonly variables: readonly { readonly name: string; readonly optional?: boolean; readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
+  readonly serviceSlots?: readonly CatalogExecutionServiceSlot[]
 }
 export type SuiteCatalogItem =
   | import('./suite-catalog.js').SuiteCatalogPluginItem
@@ -119,6 +123,7 @@ export interface SuiteCatalogDocumentEntryBase {
 }
 export interface SuiteCatalogDocumentDependencyEntry extends SuiteCatalogDocumentEntryBase {
   readonly kind: 'dependency'
+  readonly locked?: true
   readonly items: readonly SuiteCatalogItem[]
 }
 export interface SuiteCatalogDocumentSuiteEntry extends SuiteCatalogDocumentEntryBase {

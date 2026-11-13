@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 
 export const NATIVE_PLATFORM_INSTALL_PATH = '/api/phalanx/native-plugins/install'
+export const NATIVE_PLATFORM_SETTINGS_METHOD = 'phalanx/native-service-settings'
+export const NATIVE_PLATFORM_SETTINGS_PATH = '/api/phalanx/native-plugins/settings'
+export type NativePlatformActionPath = typeof NATIVE_PLATFORM_INSTALL_PATH | typeof NATIVE_PLATFORM_SETTINGS_PATH
 export const NATIVE_INSTALL_PROOF_HEADER = 'x-phalanx-install-proof'
 export const NATIVE_INSTALL_SIGNATURE_HEADER = 'x-phalanx-install-signature'
 export const NATIVE_INSTALL_LIFETIME_MS = 30000
@@ -12,7 +15,14 @@ export interface NativeInstallAuthorization {
 }
 
 /** The signed bytes bind the complete native RPC body to one member launch and one action. */
-export function nativeInstallProof(subject: string, generation: string, body: string, expires: number, nonce: string): string {
+export function nativeInstallProof(
+  subject: string,
+  generation: string,
+  body: string,
+  expires: number,
+  nonce: string,
+  path: NativePlatformActionPath = NATIVE_PLATFORM_INSTALL_PATH,
+): string {
   return Buffer.from(
     JSON.stringify({
       v: 1,
@@ -21,7 +31,7 @@ export function nativeInstallProof(subject: string, generation: string, body: st
       nonce,
       expires,
       method: 'POST',
-      path: NATIVE_PLATFORM_INSTALL_PATH,
+      path,
       digest: createHash('sha256').update(body).digest('hex'),
     }),
   ).toString('base64url')
@@ -51,7 +61,7 @@ export function createVerifier(publicKey,subject,generation,now=Date.now) {
         || typeof claims.nonce!=='string' || !/^[A-Za-z0-9_-]{1,120}$/.test(claims.nonce))
         return {ok:false,reason:'proof'};
       if (claims.subject!==subject || claims.generation!==generation || method!=='POST' || claims.method!==method
-        || path!==${JSON.stringify(NATIVE_PLATFORM_INSTALL_PATH)} || claims.path!==path
+        || !${JSON.stringify([NATIVE_PLATFORM_INSTALL_PATH, NATIVE_PLATFORM_SETTINGS_PATH])}.includes(path) || claims.path!==path
         || claims.digest!==createHash('sha256').update(body).digest('hex'))
         return {ok:false,reason:'target'};
       const current=now();

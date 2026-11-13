@@ -1,3 +1,4 @@
+import { createNativePluginServiceGateway, NATIVE_SERVICE_BODY_LIMIT, NATIVE_SERVICE_TIMEOUT_MS } from '../inbound/native-plugin-service-gateway.js'
 import { CommunityMemberInstances } from '../use-cases/community-member-instances.js'
 import { FileInitialModelDefaults } from '../adapters/initial-model-defaults.js'
 import { InitialModelSetup } from '../use-cases/initial-model-setup.js'
@@ -114,6 +115,7 @@ export function createCommunityEntryHandlers(input: {
   experts: ReturnType<typeof createExpertLibrary>['experts']
   upstreamTransport: NodePluginUpstreamTransport
   nativeDownloads: NativePluginDownloads
+  nativeServices: import('../use-cases/native-plugin-service-access.js').NativePluginServiceAccess
   dataRoot: string
   usage: UsagePolicy
   config: CommunityConfig
@@ -404,6 +406,12 @@ export function createCommunityEntryHandlers(input: {
         network,
         pluginDownloads,
         pluginUpstreams,
+        nativeServices: createNativePluginServiceGateway({
+          access: input.nativeServices,
+          transport: new NodePluginUpstreamTransport('bounded', NATIVE_SERVICE_TIMEOUT_MS, NATIVE_SERVICE_BODY_LIMIT),
+          connections,
+          usage,
+        }),
         mcp: mcpGateway,
         execution: executionGateway,
       }),

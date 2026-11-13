@@ -80,6 +80,26 @@ it('previews dependency, skill, pack and delegated execution differences', async
   })
 })
 
+it('keeps a locked dependency at its installed version and refuses in-place replacement', async () => {
+  const base = suitePreset()
+  const dependency = {
+    ...base,
+    category: 'dependency' as const,
+    locked: true as const,
+    contentHash: 'a'.repeat(64),
+    items: base.items.filter(item => item.kind === 'runtime-dependency'),
+  }
+  const f = fixture(dependency)
+  await f.suites.install(actor, { id: dependency.id, requestId: 'request-locked-dependency' })
+  await f.settled('installed')
+  expect((await f.suites.updatePreview(actor, dependency.id)).reason).toBe('up-to-date')
+  f.upgrade([{ ...dependency, version: '2', contentHash: 'b'.repeat(64) }])
+  expect((await f.suites.catalog(actor)).entries[0]?.updateAvailable).toBeUndefined()
+  expect((await f.suites.updatePreview(actor, dependency.id)).reason).toBe('invalid-entry')
+  await expect(f.suites.update(actor, dependency.id)).rejects.toMatchObject({ code: 'suite-catalog-invalid' })
+  expect(f.record()).toMatchObject({ version: '1', contentHash: 'a'.repeat(64), locked: true })
+})
+
 it('switches every step once prepared, keeping grants, publication, selections and saved credentials; new variables keep execution off', async () => {
   const f = await installed()
   const previous = f.dependencyRows.get('suite-cli')!.current!

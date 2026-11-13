@@ -1,3 +1,5 @@
+import { isCatalogPluginDistributionIdentity } from '../domain/plugin-group-contract.js'
+import { installedServicesRoute } from './installed-services-route.js'
 import { memberInstanceRoute } from './member-instance-route.js'
 import type { CommunityMemberInstances } from '../use-cases/community-member-instances.js'
 import type { InitialModelSetup } from '../use-cases/initial-model-setup.js'
@@ -202,6 +204,10 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
         return
       }
+      if (url.pathname === '/admin/api/plugins/services' && deps.access) {
+        await installedServicesRoute(request, response, caller, url.searchParams.get('packageName') ?? '', deps.access, deps.origin())
+        return
+      }
       if (url.pathname === '/admin/api/plugins/access' && deps.access) {
         const packageName = url.searchParams.get('packageName') ?? ''
         if (request.method === 'GET') {
@@ -252,7 +258,14 @@ export function createCommunityAdminRoute(deps: {
         }
         assertCommunityOrigin(request, deps.origin())
         const input = (await readCommunityJson(request)) as CommunityPluginPublishAction
-        if (!input || typeof input !== 'object' || input.action !== 'publish' || typeof input.packageName !== 'string' || typeof input.published !== 'boolean')
+        if (
+          !input ||
+          typeof input !== 'object' ||
+          input.action !== 'publish' ||
+          typeof input.packageName !== 'string' ||
+          typeof input.published !== 'boolean' ||
+          (input.expected !== undefined && !isCatalogPluginDistributionIdentity(input.expected))
+        )
           throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
         await deps.market.publish(caller, input.packageName, input.published, input)
         sendCommunityJson(response, 200, { published: input.published } satisfies CommunityPluginPublishResult)
@@ -361,6 +374,10 @@ export function createCommunityAdminRoute(deps: {
             typeof input.revision === 'string'
           ) {
             sendCommunityJson(response, 200, await deps.managed.save(caller, id, input.packages, input.preinstalls, input.revision))
+            return
+          }
+          if (input.action === 'catalog-preinstall' && isCatalogPluginDistributionIdentity(input.plugin)) {
+            sendCommunityJson(response, 200, await deps.managed.preinstallCatalog(caller, id, input.plugin))
             return
           }
           if (input.action === 'restart' && input.confirmed === true) {

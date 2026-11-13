@@ -1,3 +1,4 @@
+import { legacyCatalogExecutionVariables } from '../domain/execution-service-environment.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import {
   suiteRuntimeDependencyDefinition,
@@ -82,7 +83,12 @@ export class ExecutionSuiteKind implements SuiteItemOperations<SuiteCatalogExecu
     return this.execution !== undefined
   }
   plan(item: SuiteCatalogExecutionItem): SuiteItemPlan {
-    return { name: item.delegated.map(row => row.command).join(', '), detail: item.variables.map(row => row.name).join(', ') }
+    return {
+      name: item.delegated.map(row => row.command).join(', '),
+      detail: legacyCatalogExecutionVariables(item)
+        .map(row => row.name)
+        .join(', '),
+    }
   }
   references(): readonly { kind: string; name: string }[] {
     return []
@@ -133,9 +139,12 @@ export interface SkillPackSuiteUpdatePort {
 export interface ExecutionSuitePort {
   saveSuiteCredentials(origin: string, owner: string, credentials: Readonly<Record<string, string>>): Promise<void>
   suiteExecutionSnapshot(owner: string): Promise<SuiteExecutionSnapshot | undefined>
-  suiteExecutionStatus(
-    owner: string,
-  ): Promise<{ readonly enabled: boolean; readonly configuredVariables: readonly string[]; readonly missingCredentials: readonly string[] }>
+  suiteExecutionStatus(owner: string): Promise<{
+    readonly enabled: boolean
+    readonly variables?: readonly string[]
+    readonly configuredVariables: readonly string[]
+    readonly missingCredentials: readonly string[]
+  }>
   delegatedCommandConflicts(owner: string, commands: readonly string[], replacing?: readonly string[]): Promise<readonly string[]>
 }
 export interface ExecutionSuiteUpdatePort {
@@ -160,12 +169,6 @@ export interface PluginSuitePort {
   discardSuitePlugin(origin: string): Promise<void>
 }
 export type PluginSuiteUpdatePort = Pick<PluginSuitePort, 'suitePluginRow' | 'suitePluginAccess'>
-
-/** Keeps only the values this execution item declares. */
-export function credentialsFor(item: SuiteCatalogExecutionItem, credentials: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
-  const names = new Set(item.variables.map(row => row.name))
-  return Object.fromEntries(Object.entries(credentials).filter(([name]) => names.has(name)))
-}
 
 /** Resolves declarative dependency names to the library names selected by this task. */
 export function resolvedPluginItem(item: SuiteCatalogPluginItem, names: readonly string[]): SuiteCatalogPluginItem {

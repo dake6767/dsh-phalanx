@@ -81,6 +81,12 @@ it('requires current contribution approval before leasing dependencies and remov
     await service.withPrepared('skill:reports', async material => {
       expect(material).toEqual({ version: 'source', dependencies: [] })
     })
+    await expect(service.withPrepared('skill:reports', async () => {}, { version: 'older-source', revision: undefined })).rejects.toMatchObject({
+      code: 'not-ready',
+    })
+    await expect(service.withPrepared('skill:reports', async () => {}, { version: 'source', revision: 'older-row' })).rejects.toMatchObject({
+      code: 'not-ready',
+    })
     expect(calls).toBe(1)
     exists = false
     await service.changed()

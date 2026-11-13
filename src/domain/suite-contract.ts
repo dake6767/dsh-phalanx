@@ -1,6 +1,7 @@
 /** Administrator API shapes for the suite catalog. */
 import type { SuiteEntryKind } from './suite-install.js'
 import type { SuiteCatalogEntryUnavailable } from './suite-catalog.js'
+import type { CatalogServiceBackend } from './suite-service-slots.js'
 
 /** Where the last gallery load stood; the page shows unreachable and rejected reasons. */
 export interface CommunitySuiteCatalogSourceView {
@@ -21,6 +22,16 @@ export interface CommunitySuiteInstallPlanEntry {
   readonly commands?: readonly string[]
   readonly detail?: string
 }
+export interface CommunityCatalogServiceDefinition {
+  readonly kind: 'execution' | 'plugin'
+  readonly name: string
+  readonly slots: readonly {
+    readonly id: string
+    readonly label: Readonly<Record<'en' | 'zh-CN', string>>
+    readonly backends: readonly CatalogServiceBackend[]
+  }[]
+}
+
 export interface CommunitySuiteCatalogEntryView {
   readonly id: string
   readonly category: 'suite' | 'plugin' | 'dependency'
@@ -43,10 +54,13 @@ export interface CommunitySuiteCatalogEntryView {
       readonly source?: string
       readonly memberPath?: string
       readonly blockedOptions?: readonly string[]
+      readonly shortOptionsWithValue?: readonly string[]
       readonly blocked: readonly string[]
     }[]
     readonly variables: readonly { readonly name: string; readonly optional?: boolean; readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
   }
+  readonly contentHash?: string
+  readonly services?: readonly CommunityCatalogServiceDefinition[]
   readonly version: string
   readonly commands: readonly string[]
   readonly available: boolean
@@ -59,7 +73,7 @@ export interface CommunitySuiteCatalogEntryView {
 }
 export interface CommunitySuiteInstallView {
   readonly contentHash?: string
-  readonly execution?: { readonly enabled: boolean; readonly configuredVariables: readonly string[] }
+  readonly execution?: { readonly enabled: boolean; readonly variables?: readonly string[]; readonly configuredVariables: readonly string[] }
   readonly category?: 'suite' | 'plugin' | 'dependency'
   readonly id: string
   readonly version: string
@@ -84,6 +98,7 @@ export interface CommunitySuiteCatalogView {
 export interface CommunitySuiteInstallPreview {
   readonly id: string
   readonly version: string
+  readonly contentHash?: string
   readonly available: boolean
   readonly reason?:
     | 'unavailable-architecture'
@@ -189,6 +204,7 @@ export interface CommunitySuiteUpdatePreview {
 export interface CommunitySuiteInstallInput {
   readonly id: string
   readonly requestId: string
+  readonly preview?: import('./suite-catalog.js').SuiteInstallRequest['preview']
   readonly groups?: readonly string[]
   readonly publish?: boolean
   readonly credentials?: Readonly<Record<string, string>>

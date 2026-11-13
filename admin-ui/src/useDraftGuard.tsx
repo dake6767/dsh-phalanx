@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import CommunityDialog from './CommunityDialog'
 /** Guard shared by in-app actions and ordinary links; browser unloading uses its native prompt. */
-export function useDraftGuard(dirty: boolean, save: () => Promise<boolean>, discard: () => void, busy = false) {
+export function useDraftGuard(dirty: boolean, save: (() => Promise<boolean>) | undefined, discard: () => void, busy = false) {
   const { t } = usePlatformLanguage()
   const [pending, setPending] = useState<() => void>()
   const latest = useRef({ dirty, save, discard, busy })
@@ -61,21 +61,23 @@ export function useDraftGuard(dirty: boolean, save: () => Promise<boolean>, disc
             >
               {t('Discard changes')}
             </Button>
-            <Button
-              isDisabled={busy}
-              onPress={() => {
-                void latest.current.save().then(saved => {
-                  if (saved) proceed(pending)
-                  else setPending(undefined)
-                })
-              }}
-            >
-              {t('Save changes')}
-            </Button>
+            {save ? (
+              <Button
+                isDisabled={busy}
+                onPress={() => {
+                  void latest.current.save?.().then(saved => {
+                    if (saved) proceed(pending)
+                    else setPending(undefined)
+                  })
+                }}
+              >
+                {t('Save changes')}
+              </Button>
+            ) : null}
           </>
         }
       >
-        <p>{t('Save your changes before continuing, discard them, or keep editing.')}</p>
+        <p>{t(save ? 'Save your changes before continuing, discard them, or keep editing.' : 'Discard your changes or keep editing.')}</p>
       </CommunityDialog>
     ) : null,
   }

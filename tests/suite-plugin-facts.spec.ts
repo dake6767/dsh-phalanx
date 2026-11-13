@@ -3,6 +3,7 @@ import { expect, it } from 'vitest'
 import { YamlPluginAccessSyntax } from '../src/adapters/plugin-access-syntax.js'
 import { createSuiteStorage } from '../src/composition/suite-storage.js'
 import { SuiteTransactions } from '../src/use-cases/suite-transactions.js'
+import { assertCatalogPluginBindings } from '../src/use-cases/suite-plugin-facts.js'
 import type { SuiteCatalogPluginItem } from '../src/domain/suite-catalog.js'
 import { postgresSuiteService, suiteVersion } from './fixtures/postgres-suite-service.js'
 
@@ -32,6 +33,24 @@ const plugin = (version: 1 | 2) => {
     accessRevision: 'none',
   }
 }
+
+it('requires native package cache pins to cover the original dependency names and ranges', () => {
+  const { item, prepared } = plugin(1)
+  const pins = [
+    { packageName: 'fixture-export', version: '2.1.0' },
+    { packageName: 'fixture-renderer', version: '1.3.0' },
+  ]
+  const cache = { kind: 'native-package-cache' as const, dependency: 'cache', version: '1.0.0', contentHash: 'a'.repeat(64), path: 'cache' }
+  const check = (packages: typeof pins) =>
+    assertCatalogPluginBindings(
+      { ...item, resourceBindings: [{ ...cache, packages }] },
+      { ...prepared, dependencies: { 'fixture-export': '^2.0.0', 'fixture-renderer': '~1.3.0' } },
+    )
+  expect(() => check(pins)).not.toThrow()
+  expect(() => check(pins.slice(0, 1))).toThrow('package cache pins')
+  expect(() => check([...pins, { packageName: 'undeclared', version: '1.0.0' }])).toThrow('package cache pins')
+  expect(() => check([{ ...pins[0]!, version: '3.0.0' }, pins[1]!])).toThrow('package cache pins')
+})
 
 it('commits prepared plugin bytes, protected template settings and catalog receipt together without a recovery checkpoint', async () => {
   const f = await postgresSuiteService(),
@@ -80,8 +99,12 @@ it('commits prepared plugin bytes, protected template settings and catalog recei
     expect(await storage.work.run(async rows => ({ plugin: await rows.plugins.list(), access: await rows.pluginAccess.get(plan.item.packageName) }))).toEqual(
       before,
     )
-    const next = plugin(2),
-      previous = (await storage.installs.get(entry.id))!
+    const update = plugin(2)
+    const next = {
+      ...update,
+      item: { ...update.item, archive: { url: 'https://github.com/fixture/editor/releases/download/v2.0.0/editor.tgz' } },
+    }
+    const previous = (await storage.installs.get(entry.id))!
     await f.database.query(
       "CREATE TRIGGER reject_plugin AFTER UPDATE ON dsh_phalanx.catalog_installs FOR EACH ROW WHEN (NEW.state='installed') EXECUTE FUNCTION dsh_phalanx.reject_plugin()",
     )
@@ -94,7 +117,11 @@ it('commits prepared plugin bytes, protected template settings and catalog recei
     expect(await storage.installs.get(entry.id)).toEqual(previous)
     await f.database.query('DROP TRIGGER reject_plugin ON dsh_phalanx.catalog_installs')
     await unit.update(f.actor, { installed: previous, entry: { ...entry, version: '2', items: [next.item] }, runtime: [], skills: [], plugin: next })
-    expect((await storage.work.run(rows => rows.plugins.list()))[0]?.version).toBe('2.0.0')
+    expect((await storage.work.run(rows => rows.plugins.list()))[0]).toMatchObject({
+      version: '2.0.0',
+      source: { kind: 'upload' },
+      current: { ...next.prepared, catalogArchiveUrl: next.item.archive.url },
+    })
     expect((await storage.work.run(async rows => rows.pluginAccess.get(plan.item.packageName)))?.environment).toEqual(next.item.access.environment)
   } finally {
     await f.close()
@@ -267,6 +294,65 @@ it('records a confirmed manual plugin takeover while retaining publication and c
     await unit.install(f.actor, makePlan(latest, { row: current, revision: pluginCatalogRevision(current, latest.revision) }), options, request)
     expect((await storage.work.run(rows => rows.plugins.list()))[0]).toMatchObject({ version: '2.0.0', published: true, provenance })
     expect((await storage.installs.get(entry.id))?.record.replaced).toEqual([{ kind: 'plugin', name: old.item.packageName }])
+  } finally {
+    await f.close()
+  }
+})
+
+it('rechecks the locked shared artifact before committing a prepared plugin', async () => {
+  const f = await postgresSuiteService()
+  const storage = createSuiteStorage(f.database)
+  const transactions = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, new YamlPluginAccessSyntax())
+  try {
+    const dependency = 'shared-assets'
+    const original = plugin(1)
+    const item = {
+      ...original.item,
+      catalogDependencies: [dependency],
+      resourceBindings: [{ dependency, version: '1.0.0', contentHash: 'a'.repeat(64), name: 'ASSET_ROOT', path: '.' }],
+    }
+    const entry = { ...suiteVersion(1), category: 'plugin' as const, id: 'fixture-plugin', dependencies: [dependency], items: [item] }
+    const options = { id: entry.id, requestId: 'request-pinned-resource' }
+    await storage.installs.save({
+      id: dependency,
+      category: 'dependency',
+      version: '1.0.0',
+      contentHash: 'b'.repeat(64),
+      locked: true,
+      status: 'installed',
+      entries: [{ kind: 'runtime-dependency', name: 'shared-assets' }],
+      updatedAt: 1,
+      log: '',
+    })
+    await storage.installs.save({
+      id: entry.id,
+      version: entry.version,
+      category: 'plugin',
+      status: 'installing',
+      entries: [],
+      dependencies: [dependency],
+      requestId: options.requestId,
+      updatedAt: 1,
+      log: '',
+    })
+    await storage.requests.save(options.requestId, { id: entry.id, version: entry.version, status: 'pending' })
+    const installed = (await storage.installs.get(entry.id))!
+    const request = (await storage.requests.get(options.requestId))!
+    await expect(
+      transactions.install(f.actor, [{ installed, entry, runtime: [], skills: [], plugin: { ...original, item } }], options, request),
+    ).rejects.toMatchObject({ code: 'suite-dependency-missing' })
+    const unpinned = { ...item, resourceBindings: [] }
+    await expect(
+      transactions.install(
+        f.actor,
+        [{ installed, entry: { ...entry, items: [unpinned] }, runtime: [], skills: [], plugin: { ...original, item: unpinned } }],
+        options,
+        request,
+      ),
+    ).rejects.toMatchObject({ code: 'suite-dependency-missing' })
+    expect(await storage.installs.get(entry.id)).toEqual(installed)
+    expect(await storage.requests.get(options.requestId)).toEqual(request)
+    expect(await storage.work.run(rows => rows.plugins.list())).toEqual([])
   } finally {
     await f.close()
   }

@@ -6,7 +6,7 @@ import { NativePluginDownloads } from '../src/use-cases/native-plugin-downloads.
 import type { PluginInstallation } from '../src/ports/plugin-installations.js'
 import type { CommunityUserInstance } from '../src/ports/community-runtime.js'
 
-const preinstallFixture = () => {
+const preinstallFixture = ({ failReceipt = false }: { failReceipt?: boolean } = {}) => {
   const account = {
       username: 'alice',
       spaceId: 'space-a',
@@ -39,7 +39,9 @@ const preinstallFixture = () => {
   )
   let finish!: () => void,
     entered!: () => void,
-    present = false
+    present = false,
+    installs = 0,
+    receiptFailures = failReceipt ? 1 : 0
   const started = new Promise<void>(resolve => {
       entered = resolve
     }),
@@ -50,10 +52,13 @@ const preinstallFixture = () => {
     accounts,
     downloads,
     {
-      list: async () => (present ? [{ packageName: 'sample' }] : []),
+      list: async () => (present ? [{ packageName: 'sample', version: plugin.version, retainedArchive: true, archiveIntegrity: plugin.integrity }] : []),
+      verifyArchive: async () => present,
       install: async () => {
+        installs++
         entered()
         await completed
+        present = true
         return 'restart-required'
       },
       remove: async () => 'applied',
@@ -73,9 +78,14 @@ const preinstallFixture = () => {
     {
       get: async () => history,
       save: async (_space, row) => {
+        if (receiptFailures > 0) {
+          receiptFailures--
+          throw Error('Fixture receipt write failed')
+        }
         history.push(row)
       },
     },
+    failReceipt ? { describeDelivery: async () => ({ version: plugin.version, integrity: plugin.integrity, resourceOrigin: 'suite:fixture' }) } : undefined,
   )
   return {
     plugin,
@@ -83,6 +93,7 @@ const preinstallFixture = () => {
     jobs,
     instance,
     history,
+    installs: () => installs,
     started,
     finish: () => {
       finish()
@@ -104,6 +115,23 @@ it('delivers preinstalls on the captured ready carrier and records restart-requi
   f.finish()
   expect(await task).toBe('succeeded')
   expect(f.history).toEqual([{ packageName: 'sample', source: 'preinstall', version: '1.0.0', integrity: 'sha512-fixture' }])
+  await f.jobs.stop()
+})
+
+it('recovers a failed preinstall receipt write on the same carrier without reinstalling', async () => {
+  const f = preinstallFixture({ failReceipt: true })
+  const deliver = () => f.jobs.preinstall(f.actor, f.plugin, f.instance, f.origin, async () => true)
+  const first = deliver()
+  await f.started
+  f.finish()
+  expect(await first).toBe('failed')
+  expect(f.history).toEqual([])
+  expect(f.jobs.archiveReserved(f.instance, f.plugin.integrity)).toBe(true)
+  expect(f.jobs.archiveReserved({ ...f.instance }, f.plugin.integrity)).toBe(false)
+  expect(await deliver()).toBe('succeeded')
+  expect(f.installs()).toBe(1)
+  expect(f.jobs.archiveReserved(f.instance, f.plugin.integrity)).toBe(false)
+  expect(f.history).toEqual([{ packageName: 'sample', source: 'preinstall', version: '1.0.0', integrity: 'sha512-fixture', resourceOrigin: 'suite:fixture' }])
   await f.jobs.stop()
 })
 

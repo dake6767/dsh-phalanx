@@ -1,3 +1,6 @@
+import { BusinessRuleError } from '../domain/business-error.js'
+import type { CatalogPluginDistributionIdentity } from '../domain/plugin-group-contract.js'
+import { suiteInstallOrigin } from '../domain/suite-install.js'
 import type { ContributionReceipt } from '../domain/contribution-receipt.js'
 import { assertPluginGroupConfiguration } from '../domain/plugin-group-configuration.js'
 import type { PluginGroupConfigurationPort } from '../ports/managed-plugins.js'
@@ -47,6 +50,26 @@ export class PostgresPluginGrants implements PluginGroupConfigurationPort {
         [groupId, mode],
       )
     ).map(row => row.package_name)
+  }
+  async preinstallCatalog(groupId: string, plugin: CatalogPluginDistributionIdentity, runtimeRevision: string): Promise<void> {
+    await pluginTransaction(this.connection, async sql => {
+      const group = await sql.query('SELECT id FROM dsh_phalanx.groups WHERE id=$1 FOR UPDATE', [groupId])
+      const installed = await sql.query(
+        `SELECT package_name FROM dsh_phalanx.plugin_library
+         WHERE package_name=$1 AND suite_origin=$2 AND stage='available'
+           AND current->>'integrity'=$3 AND current->>'runtimeRevision'=$4
+           AND COALESCE(configuration->>'incompatible','false') <> 'true' FOR UPDATE`,
+        [plugin.packageName, suiteInstallOrigin(plugin.entryId), plugin.integrity, runtimeRevision],
+      )
+      if (!group.length || !installed.length) throw new BusinessRuleError('conflict', 'Review the changed plugin impact.', 'plugin-impact-changed')
+      const [grant] = await sql.query<{ mode: string }>('SELECT mode FROM dsh_phalanx.plugin_grants WHERE group_id=$1 AND package_name=$2', [
+        groupId,
+        plugin.packageName,
+      ])
+      if (grant?.mode === 'controlled')
+        throw new BusinessRuleError('conflict', 'This group already has a controlled grant for this plugin.', 'plugin-impact-changed')
+      if (!grant) await sql.query("INSERT INTO dsh_phalanx.plugin_grants(group_id,package_name,mode) VALUES($1,$2,'preinstall')", [groupId, plugin.packageName])
+    })
   }
   async configure(groupId: string, controlled: readonly string[], preinstalled: readonly string[]): Promise<void> {
     assertPluginGroupConfiguration(controlled, preinstalled)

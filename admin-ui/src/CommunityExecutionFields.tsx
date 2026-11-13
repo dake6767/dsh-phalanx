@@ -8,7 +8,15 @@ import type { CommunityExecutionInput, CommunityExecutionView } from '../../src/
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityField from './CommunityField'
 
-type CommandDraft = { key: string; command: string; source?: string; memberPath?: string; blockedOptions?: readonly string[]; blocked: string }
+type CommandDraft = {
+  key: string
+  command: string
+  source?: string
+  memberPath?: string
+  blockedOptions?: readonly string[]
+  shortOptionsWithValue?: readonly string[]
+  blocked: string
+}
 type VariableDraft = { key: string; name: string; secret: boolean; configured: boolean; last4?: string; value?: string }
 type ExecutionDraft = { commandRows: CommandDraft[]; variableRows: VariableDraft[] }
 let nextRowKey = 0
@@ -24,6 +32,7 @@ export function executionDraft(view: CommunityExecutionView): ExecutionDraft {
           ...(row.source ? { source: row.source } : {}),
           ...(row.memberPath ? { memberPath: row.memberPath } : {}),
           ...(row.blockedOptions ? { blockedOptions: row.blockedOptions } : {}),
+          ...(row.shortOptionsWithValue ? { shortOptionsWithValue: row.shortOptionsWithValue } : {}),
           blocked: row.blocked.join('\n'),
         }))
       : [commandRow()],
@@ -34,11 +43,12 @@ export function executionInput(draft: ExecutionDraft): Pick<CommunityExecutionIn
   return {
     commands: draft.commandRows
       .filter(row => row.command || row.blocked)
-      .map(({ command, source, memberPath, blockedOptions, blocked }) => ({
+      .map(({ command, source, memberPath, blockedOptions, shortOptionsWithValue, blocked }) => ({
         command,
         ...(source ? { source } : {}),
         ...(memberPath ? { memberPath } : {}),
         ...(blockedOptions ? { blockedOptions } : {}),
+        ...(shortOptionsWithValue ? { shortOptionsWithValue } : {}),
         blocked: blocked.split('\n').filter(Boolean),
       })),
     variables: draft.variableRows

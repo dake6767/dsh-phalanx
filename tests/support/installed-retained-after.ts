@@ -13,7 +13,7 @@ import { runCommunityTerminal, signInCommunity } from '../fixtures/community-nat
 import { refreshAppCenter, setAppCenterVisibility } from './app-center-visibility.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
 import { retainedPluginSnapshot, retainedCatalogSnapshot, retainedContributionSnapshot, retainedOfficialCatalog } from './installed-retained-contributions.js'
-import { installedShellArgument, installedUserDataRoot } from './installed-storage-layout.js'
+import { installedMemberHome, installedShellArgument } from './installed-storage-layout.js'
 import { assertPausedUpgradeState, type PausedUpgradeState } from './installed-retained-paused.js'
 import { retainedExecutionTrial, withAdministratorSkill } from './installed-upgrade-trial.js'
 import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
@@ -28,6 +28,18 @@ function retainedDependencyState(rows: readonly CommunityRuntimeDependencyView[]
     const { id, ...artifact } = current
     void id
     return { ...definition, current: artifact }
+  })
+}
+
+/** Compare retained pack facts and check the current concurrency token at its own boundary. */
+export function assertRetainedSkillPacks(before: CommunitySkillPackLibrary, after: CommunitySkillPackLibrary) {
+  const { revision, packs } = after
+  expect(revision).toMatch(/^[a-f0-9]{64}$/u)
+  expect(packs.map(pack => pack.revision)).toEqual(before.packs.map(() => revision))
+  expect(after).toEqual({
+    ...before,
+    revision,
+    packs: before.packs.map(pack => ({ ...pack, revision, hasPlatformCredential: false })),
   })
 }
 
@@ -47,6 +59,8 @@ export async function assertRetainedUpgradeAfter(input: {
   versions: { dsh: { revision: string } }
   release: Awaited<ReturnType<typeof installedReleaseFixture>>
   memberEntry: string
+  memberStorageKey: string
+  appCenterOptIn: boolean
   deploymentInputs: Parameters<ReturnType<typeof installedInstanceAcceptance>['assertImported']>[0]
   beforeDependencies: readonly CommunityRuntimeDependencyView[]
   beforeSkills: readonly CommunitySkillView[]
@@ -87,6 +101,8 @@ export async function assertRetainedUpgradeAfter(input: {
     versions,
     release,
     memberEntry,
+    memberStorageKey,
+    appCenterOptIn,
     deploymentInputs,
     beforeDependencies,
     beforeSkills,
@@ -124,7 +140,7 @@ export async function assertRetainedUpgradeAfter(input: {
   ).toBe(303)
   await signInCommunity(member, origin, 'member', 'password')
   expect(new URL(member.url()).pathname).toBe(memberEntry)
-  await refreshAppCenter(member, false)
+  await refreshAppCenter(member, appCenterOptIn)
   const importedKernel = await instances.assertImported(deploymentInputs)
   await expect
     .poll(async () => retainedDependencyState(await get('runtime-dependencies')), { timeout: 300000 })
@@ -134,7 +150,7 @@ export async function assertRetainedUpgradeAfter(input: {
   expect(groups.some(group => group.id === groupId)).toBe(true)
   for (const group of groups) {
     const native: CommunityNativeFeatureGroup = await get(`groups/${group.id}/native-features`)
-    expect(native.showAppCenter, group.id).toBe(false)
+    expect(native.showAppCenter, group.id).toBe(appCenterOptIn && group.id === groupId)
     expect(native.features.map(({ id }) => id).sort()).toEqual([
       'plugin-install',
       'preset-cordis',
@@ -155,10 +171,7 @@ export async function assertRetainedUpgradeAfter(input: {
   // is false; every previously returned field must still match exactly.
   expect(await get('skills')).toEqual(beforeSkills.map(skill => ({ ...skill, hasPlatformCredential: false })))
   expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
-  expect(await get('skill-packs')).toEqual({
-    ...beforePacks,
-    packs: beforePacks.packs.map(pack => ({ ...pack, hasPlatformCredential: false })),
-  })
+  assertRetainedSkillPacks(beforePacks, await get('skill-packs'))
   expect(await (await member.request.get(origin + '/market/api/skill-packs')).json()).toEqual(beforePackSelections)
   const { plugins, access, grants, selections, ...beforeCatalog } = beforeContributions
   const retainedCatalogState = await retainedCatalogSnapshot(retainedApi, remote, retainedCatalog.contentHash)
@@ -186,7 +199,7 @@ export async function assertRetainedUpgradeAfter(input: {
   expect(await get('mcp')).toEqual(beforeLibrary)
   expect(await get(`groups/${groupId}/mcp`)).toEqual(beforeGrants)
   expect(await (await member.request.get(origin + '/market/api/mcp')).json()).toEqual(beforeSelection)
-  expect(await remote('sudo cat ' + installedShellArgument((await installedUserDataRoot(remote)) + '/member/home/upgrade-owned.txt'))).toBe(
+  expect(await remote('sudo cat ' + installedShellArgument((await installedMemberHome(remote, memberStorageKey)) + '/upgrade-owned.txt'))).toBe(
     'MEMBER_DATA_PRESERVED',
   )
   const assertHistory = async () => {
@@ -254,9 +267,11 @@ export async function assertRetainedUpgradeAfter(input: {
   await assertPaused('after-restart')
   await trial()
   const retainedSession = await call('AFTER_RECORDS_RESTART')
-  await refreshAppCenter(member, false)
-  await setAppCenterVisibility(admin.request, origin, groupId)
-  await refreshAppCenter(member, true)
+  await refreshAppCenter(member, appCenterOptIn)
+  if (!appCenterOptIn) {
+    await setAppCenterVisibility(admin.request, origin, groupId)
+    await refreshAppCenter(member, true)
+  }
   for (const label of ['Usage records', 'Self-reported usage', 'Usage record retention']) expect(await member.getByText(label, { exact: true }).count()).toBe(0)
 
   expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
@@ -264,7 +279,7 @@ export async function assertRetainedUpgradeAfter(input: {
   expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
   return {
     retainedSession,
-    appCenterHiddenForExistingGroups: true,
+    appCenterGroupVisibilityPreserved: true,
     importedKernel,
     usageExecutionRecordsPreserved: beforeUsage.execution.items.length,
     usageMcpRecordsPreserved: beforeUsage.mcp.items.length,

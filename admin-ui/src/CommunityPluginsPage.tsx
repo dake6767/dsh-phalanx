@@ -12,7 +12,7 @@ import { CommunityPublicationStatus } from './CommunityPublicationSection'
 import CommunityPluginUpstreams from './CommunityPluginUpstreams'
 import CommunityPluginChanges from './CommunityPluginChanges'
 import CommunityPluginUploadDialog from './CommunityPluginUploadDialog'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
 import { Chip } from '@heroui/react/chip'
@@ -53,7 +53,7 @@ export default function CommunityPluginsPage() {
   const [error, setError] = useState<unknown>()
   const [retrying, setRetrying] = useState<string>()
   const pending = useRef(false)
-  const refresh = () => setRevision(value => value + 1)
+  const refresh = useCallback(() => setRevision(value => value + 1), [])
   useEffect(() => {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -290,7 +290,7 @@ export default function CommunityPluginsPage() {
           </Tabs.Panel>
         ) : null}
         <Tabs.Panel id="catalog">
-          <CommunitySuitesPage category="plugin" />
+          <CommunitySuitesPage category="plugin" onLibraryChanged={refresh} />
         </Tabs.Panel>
       </Tabs>
       {uploading ? (

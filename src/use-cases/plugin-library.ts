@@ -24,6 +24,7 @@ import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { PlatformUnitOfWorkPort } from '../ports/platform-unit-of-work.js'
 import type { PluginAccessStorePort } from '../ports/plugin-access.js'
 import type {
+  CatalogPluginArchivePort,
   PluginLibraryMembershipPort,
   PluginLibraryStorePort,
   PluginPreparerPort,
@@ -66,6 +67,7 @@ export class PluginLibrary {
     private readonly operations = new KeyedOperations(),
     removal?: PlatformUnitOfWorkPort<PluginRemovalRepositories>,
     expertReferences?: ExpertReferencesPort,
+    catalogArchives?: CatalogPluginArchivePort,
   ) {
     this.retirement = new PluginLibraryRemoval(store, membership, settings, removal, expertReferences)
     this.administration = new PluginLibraryAdministration(accounts, store, compatibilityTarget, settings, runtimeDependencies, operations, {
@@ -75,13 +77,22 @@ export class PluginLibrary {
       confirm: (actor, name, revision) => this.confirm(actor, name, revision),
       required: name => this.required(name),
     })
-    this.catalog = new PluginLibraryCatalog(store, preparer, membership, settings, compatibilityTarget, operations, {
-      stopped: () => this.stopped,
-      preparing: name => this.tasks.has(name),
-      claims: () => this.suiteClaims?.() ?? [],
-      assertIdle: name => this.assertIdle(name),
-      remove: name => this.finishRemoval(name),
-    })
+    this.catalog = new PluginLibraryCatalog(
+      store,
+      preparer,
+      membership,
+      settings,
+      compatibilityTarget,
+      operations,
+      {
+        stopped: () => this.stopped,
+        preparing: name => this.tasks.has(name),
+        claims: () => this.suiteClaims?.() ?? [],
+        assertIdle: name => this.assertIdle(name),
+        remove: name => this.finishRemoval(name),
+      },
+      catalogArchives,
+    )
   }
   /** The suite catalog registers the package names its persisted install intents hold. */
   observeSuiteClaims(claims: () => readonly { packageName: string; origin: string }[]): void {

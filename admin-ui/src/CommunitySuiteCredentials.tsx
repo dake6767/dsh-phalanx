@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CommunitySuiteCatalogEntryView, CommunitySuiteInstallView } from '../../src/domain/admin-contract'
 import { saveCommunitySuiteCredentials } from './community-api'
 import CommunityField from './CommunityField'
@@ -11,26 +11,35 @@ export default function CommunitySuiteCredentials({
   entry,
   installation,
   onSaved,
+  onDraft,
 }: {
   entry: CommunitySuiteCatalogEntryView
   installation: CommunitySuiteInstallView
   onSaved: () => void
+  onDraft: (key: string, dirty: boolean, busy: boolean) => void
 }) {
   const missing = installation.missingCredentials ?? []
   const configured = installation.execution?.configuredVariables ?? []
+  const names = installation.execution?.variables ?? []
   const { t, locale, errorText } = usePlatformLanguage()
   const [values, setValues] = useState<Readonly<Record<string, string>>>({})
   const [error, setError] = useState<unknown>()
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const filled = filledCredentials(values)
+  const dirty = Object.keys(filled).length > 0
+  useEffect(() => {
+    const key = JSON.stringify(['legacy', entry.id])
+    onDraft(key, dirty, busy)
+    return () => onDraft(key, false, false)
+  }, [entry.id, dirty, busy, onDraft])
   const submit = async () => {
     if (busy) return
     setBusy(true)
     setError(undefined)
     setSaved(false)
     try {
-      await saveCommunitySuiteCredentials(entry.id, filled)
+      await saveCommunitySuiteCredentials(entry.id, filled, { version: installation.version, contentHash: installation.contentHash })
       setValues({})
       setSaved(true)
       onSaved()
@@ -53,16 +62,19 @@ export default function CommunitySuiteCredentials({
         <CommunityMessage role="status" status="warning" title={t('Delegated execution is off. Configure a backend when needed.')} />
       )}
       {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
-      {entry.execution!.variables.map(variable => (
+      {names.map(name => (
         <CommunityField
-          key={variable.name}
-          label={variable.name}
+          key={name}
+          label={name}
           type="password"
           autoComplete="new-password"
-          value={values[variable.name] ?? ''}
-          onChange={value => setValues(current => ({ ...current, [variable.name]: value }))}
+          value={values[name] ?? ''}
+          onChange={value => setValues(current => ({ ...current, [name]: value }))}
           disabled={busy}
-          description={(configured.includes(variable.name) ? t('A credential is saved. Leave blank to keep it.') + ' ' : '') + variable.purpose[locale]}
+          description={
+            (configured.includes(name) ? t('A credential is saved. Leave blank to keep it.') + ' ' : '') +
+            (entry.version === installation.version ? (entry.execution?.variables.find(variable => variable.name === name)?.purpose[locale] ?? '') : '')
+          }
         />
       ))}
       {saved ? <CommunityMessage role="status" status="success" title={t('Credentials saved.')} /> : null}

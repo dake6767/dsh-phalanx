@@ -47,11 +47,21 @@ export const executionCommandPath = (value: unknown): value is string =>
 /** Long options protected by the administrator, including parser-supported abbreviations. */
 export const executionLongOption = (value: unknown): value is string =>
   typeof value === 'string' && value.length <= 128 && /^--[a-zA-Z0-9][a-zA-Z0-9-]*$/u.test(value)
-export function executionOptionBlocked(argv: readonly string[], blocked: readonly string[]): boolean {
+export const executionShortOption = (value: unknown): value is string => typeof value === 'string' && /^-[a-zA-Z]$/u.test(value)
+export const executionProtectedOption = (value: unknown): value is string => executionLongOption(value) || executionShortOption(value)
+export function executionOptionBlocked(argv: readonly string[], blocked: readonly string[], shortOptionsWithValue: readonly string[] = []): boolean {
   for (const argument of argv) {
     if (argument === '--') break
     const option = argument.split('=', 1)[0]!
     if (option.startsWith('--') && blocked.some(value => value.startsWith(option))) return true
+    if (/^-[^-]/u.test(option)) {
+      for (const character of option.slice(1)) {
+        const short = '-' + character
+        if (blocked.includes(short)) return true
+        // A value-taking option consumes the rest of the cluster as its own value.
+        if (shortOptionsWithValue.includes(short)) break
+      }
+    }
   }
   return false
 }

@@ -21,14 +21,27 @@ it('keeps the rootless CLI home separate from the community container home', () 
     workspace: '/fixture/alice/workspace',
     publicAuthority: 'example.test',
     gatewayUrl: 'http://127.0.0.1:3081/_dsh-phalanx/model',
-    environment: { HOME: '/fixture/alice/home', DSH_HOME: '/fixture/alice/home/.dsh', DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: 'opaque-fixture' },
+    environment: {
+      HOME: '/fixture/alice/home',
+      DSH_HOME: '/fixture/alice/home/.dsh',
+      XDG_RUNTIME_DIR: '/host/runtime',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/host/bus',
+      DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: 'opaque-fixture',
+    },
   })
   expect(plan.passthroughEnvironment.HOME).toBeUndefined()
+  expect(plan.passthroughEnvironment.XDG_RUNTIME_DIR).toBeUndefined()
+  expect(plan.passthroughEnvironment.DBUS_SESSION_BUS_ADDRESS).toBeUndefined()
   expect(plan.args).toContain('--http-proxy=false')
   expect(plan.args).toContain('dsh-phalanx.space=' + 'a'.repeat(32))
   expect(plan.args).toContain('HOME=/dsh-phalanx/home')
   expect(plan.passthroughEnvironment.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN).toBe('opaque-fixture')
   expect(plan.args).not.toContain('DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN=opaque-fixture')
+  expect(plan.args.slice(plan.args.indexOf('fixture') + 1, plan.args.indexOf('fixture') + 4)).toEqual([
+    '/usr/local/bin/node',
+    '/usr/local/lib/dsh-phalanx/member-credentials.mjs',
+    'node',
+  ])
 })
 
 it('rejects a privileged container identity and restores process-scoped identity probes', () => {

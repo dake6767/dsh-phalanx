@@ -1,5 +1,6 @@
 import { readPastaLoopbackMapping } from './container-network.js'
 import { memberRuntimeEnvironment } from './member-runtime-environment.js'
+import { ContainerMemberCredentials } from './member-credentials.js'
 import { NATIVE_PLUGIN_HISTORY_ENV, NATIVE_PLUGIN_HISTORY_PATH } from '../dsh/native-plugin-install.js'
 import type { MemberNativePluginHistory } from '../ports/native-plugin-history.js'
 import { repairNativePresetDefault } from '../dsh/native-presets.js'
@@ -36,7 +37,6 @@ import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
 import type { PluginPreinstallPlanningPort } from '../ports/plugin-preinstalls.js'
 import { OwnedCommunityContainers } from './community-containers.js'
 import { prepareCommunityPlatformPlugin } from './community-platform-plugin.js'
-import { prepareCommunityProfile } from './community-profile.js'
 import { expertPresetFailures } from './expert-status.js'
 import { HostPreparationCache } from './host-preparation-cache.js'
 import { InstanceInspection, inspectCapabilities } from './instance-inspection.js'
@@ -47,10 +47,11 @@ import { prepareManagedPlugins } from './managed-plugins.js'
 import { memberMcpPreparation } from './mcp-projection.js'
 import { prepareMemberExperts } from './member-experts.js'
 import { prepareMemberDependencyMounts, prepareMemberSkills } from './member-skills.js'
-import { memberProfileBundles, preparePluginCoordination } from './plugin-coordination.js'
+import { prepareMemberProfileInventory } from './member-profile-archive-facts.js'
+import { preparePluginCoordination } from './plugin-coordination.js'
 import { futurePluginYieldEntries, readonlyPreinstallPlugins } from './preinstall-plugin-coordination.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
-import { resolvePublishedPort, rewriteToHostPort, terminateChild, waitForReady } from './runtime-process.js'
+import { resolvePublishedPort, rewriteToHostPort, terminateChild, waitForMemberContainer, waitForReady } from './runtime-process.js'
 import { StartupTiming } from './startup-timing.js'
 
 type InspectionResult = Required<Pick<CommunityUserInstance, 'managedFailures' | 'expertFailures'>>
@@ -59,6 +60,7 @@ interface ProcessHandle {
   readonly exited: Promise<void>
   readonly inspect: (signal: AbortSignal) => Promise<InspectionResult>
   readonly fallback: InspectionResult
+  credentialsClosed?: true
 }
 
 /** Owns host I/O and only containers labelled for this exact protected data root. */
@@ -117,23 +119,19 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const selection = this.nativeFeatures ? await this.nativeFeatures.policy.resolve({ username: userId, spaceId }) : { disabledIds: [] }
     const resourceKey = randomUUID()
     const nativePatch = (this.nativeFeatures?.registry ?? dshNativeFeatures()).patch(selection.disabledIds)
-    const profileTask = (async () => {
-      try {
-        await prepareCommunityProfile(home, this.config.defaultModel.provider, this.config.defaultModel.model)
-        return this.managedPlugins || this.dependencies ? await memberProfileBundles(home) : []
-      } catch (error) {
-        throw new CommunityRuntimeUnavailableError(
-          'profile-unavailable',
-          'Private DSH profile could not be prepared; repair its configuration before retrying',
-          { cause: error },
-        )
-      }
-    })()
+    const profileTask = prepareMemberProfileInventory(
+      home,
+      this.config.defaultModel.provider,
+      this.config.defaultModel.model,
+      Boolean(this.managedPlugins || this.dependencies),
+      Boolean(this.config.container && this.dependencies),
+    )
     const platformTask = prepareCommunityPlatformPlugin(this.config.dataRoot, this.config.container !== undefined, this.prepared, this.canDiscardArtifacts)
     const memberTask = (async () => {
       await this.mcp?.prepare(userId)
-      const installed = await profileTask
-      const plan = await this.dependencies?.plan(spaceId, installed)
+      const { installed, archives } = await profileTask
+      const preinstalls = await this.preinstalls?.plan(userId, installed)
+      const plan = await this.dependencies?.plan(spaceId, installed, preinstalls?.dependencies, archives)
       if (plan)
         await this.dependencies!.prepare(spaceId, plan, async () => {
           await this.skills?.prepare(userId, plan.versions)
@@ -142,6 +140,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       return {
         skills: this.skills ? await prepareMemberSkills(this.config, spaceId, this.prepared) : undefined,
         plan,
+        preinstalls,
+        archives,
         volumes: !this.skills && plan ? await prepareMemberDependencyMounts(this.config, spaceId, true) : [],
       }
     })()
@@ -154,12 +154,13 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       }
     if (profileResult.status !== 'fulfilled' || platformResult.status !== 'fulfilled' || memberResult.status !== 'fulfilled')
       throw new Error('Host preparation did not settle')
-    const installed = profileResult.value,
+    const installed = profileResult.value.installed,
       platformPatch = platformResult.value,
       memberSkills = memberResult.value.skills,
       dependencyPlan = memberResult.value.plan,
       dependencyVolumes = memberResult.value.volumes
-    const preinstallPlan = await this.preinstalls?.plan(userId, installed)
+    const preinstallPlan = memberResult.value.preinstalls
+    const blockedPreinstalls = new Set(dependencyPlan?.blockedPreinstalls ?? [])
     const memberMcp = this.mcp ? memberMcpPreparation(this.config, spaceId) : undefined
     const plugins = (await this.managedPlugins?.effective(userId, installed)) ?? []
     const accessiblePlugins = (await this.managedPlugins?.accessible?.(userId)) ?? plugins
@@ -167,8 +168,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const pluginAccess = await this.pluginAccess?.resolve(accessiblePlugins, access, {
       username: userId,
       installed,
+      preinstall: (preinstallPlan?.firstEntry ?? []).filter(name => !blockedPreinstalls.has(name)),
+      nativeResources: dependencyPlan?.nativeResources ?? {},
       ...(dependencyPlan ? { dependencyVersions: dependencyPlan.bindings } : {}),
     })
+    for (const name of pluginAccess?.nativeFailures ?? []) blockedPreinstalls.add(name)
     const managedPlugins = await prepareManagedPlugins(
       this.config.dataRoot,
       spaceId,
@@ -206,7 +210,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       const future = await futurePluginYieldEntries(
         this.config.dataRoot,
         readonlyPreinstallPlugins({
-          plugins: preinstallPlan?.plugins ?? [],
+          plugins: preinstallPlan?.plugins.filter(plugin => !blockedPreinstalls.has(plugin.packageName)) ?? [],
           global: plugins,
           ...(managedPlugins ? { managed: managedPlugins } : {}),
           experts: expertPlans,
@@ -214,7 +218,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         }),
         runtimeHome,
       )
-      preinstallFailures = future.failures
+      preinstallFailures = [...blockedPreinstalls, ...future.failures]
       if (this.managedPlugins)
         await preparePluginCoordination(
           home,
@@ -327,7 +331,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         launched.once('error', reject)
       })
       void exited.catch(() => undefined)
-      let url = privateLaunchUrl(await waitForReady(child, this.startupTimeoutMs, signal), publicUrl, listenerPort)
+      const ready =
+        container && name
+          ? await waitForMemberContainer(child, this.startupTimeoutMs, signal, container, name)
+          : await waitForReady(child, this.startupTimeoutMs, signal)
+      let url = privateLaunchUrl(ready, publicUrl, listenerPort)
       timing.advance('connecting')
       let pid = child.pid
       if (container !== undefined && name !== undefined) {
@@ -367,6 +375,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         expertFailures,
         expertSnapshot: memberExperts?.snapshot ?? [],
         nativePluginSnapshot: installed,
+        ...(memberResult.value.archives ? { nativeArchiveSnapshot: memberResult.value.archives } : {}),
         localPluginSnapshot,
         pluginAccessSnapshot: pluginAccess?.snapshot ?? [],
         managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(),
@@ -415,10 +424,22 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const handle = this.processes.get(instance)
     if (handle) void this.inspection.start(instance, handle.inspect, handle.fallback)
   }
+  credentials(instance: CommunityUserInstance) {
+    const container = this.config.container,
+      name = instance.containerName
+    if (!container || !name) throw new CommunityRuntimeUnavailableError('credentials-unavailable', 'The private credential service is unavailable')
+    return new ContainerMemberCredentials(container.runtime, async () => {
+      const handle = this.processes.get(instance)
+      if (!handle || handle.credentialsClosed) throw new Error('Member instance is no longer registered')
+      await this.containers.assertCarrier(instance, 5_000)
+      if (handle.credentialsClosed) throw new Error('Member instance is stopping')
+      return name
+    })
+  }
   async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits) {
     const container = this.config.container
     if (!container || !instance.containerName || !this.processes.has(instance)) throw new Error('Current member container is unavailable')
-    await this.assertResourceCarrier(instance)
+    await this.containers.assertCarrier(instance)
     try {
       await execFileText(container.runtime, ['update', ...instanceResourceArguments(limits), instance.containerName], {
         env: containerClientEnvironment(),
@@ -427,34 +448,14 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     } catch {
       /* A still-readable carrier can fall back to a confirmed restart. */
     }
-    await this.assertResourceCarrier(instance)
+    await this.containers.assertCarrier(instance)
     const observed = await this.cgroups.read(instance.processId)
     Object.assign(instance, { resourceLimits: observed })
     return observed
   }
-  private async assertResourceCarrier(instance: CommunityUserInstance): Promise<void> {
-    const value = await execFileText(
-      this.config.container!.runtime,
-      ['inspect', '--format', '{{.State.Running}} {{.State.Pid}} {{index .Config.Labels "dsh-phalanx.community-root"}}', instance.containerName!],
-      { env: containerClientEnvironment() },
-    )
-    if (value.trim() !== `true ${instance.processId} ${this.ownership}`) throw new Error('Member container identity changed')
-  }
   async running(instances: readonly CommunityUserInstance[]): Promise<readonly CommunityUserInstance[]> {
-    const container = this.config.container
-    if (container === undefined) return instances.filter(instance => this.processAlive(instance))
-    const output = await execFileText(container.runtime, [
-      'ps',
-      '--filter',
-      'status=running',
-      '--filter',
-      'label=dsh-phalanx.community=1',
-      '--filter',
-      `label=dsh-phalanx.community-root=${this.ownership}`,
-      '--format',
-      '{{.Names}}',
-    ])
-    const names = new Set(output.split('\n').map(name => name.trim()))
+    if (this.config.container === undefined) return instances.filter(instance => this.processAlive(instance))
+    const names = await this.containers.runningNames()
     return instances.filter(instance => instance.containerName !== undefined && names.has(instance.containerName))
   }
   async alive(instance: CommunityUserInstance): Promise<boolean> {
@@ -479,11 +480,15 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     return handle !== undefined && handle.child.exitCode === null && handle.child.signalCode === null
   }
   async stop(instance: CommunityUserInstance): Promise<void> {
+    const handle = this.processes.get(instance)
+    if (handle) handle.credentialsClosed = true
     await this.inspection.stop(instance)
     if (instance.containerName !== undefined) await this.containers.remove(instance.containerName)
     await this.releaseProcess(instance, false)
   }
   async detach(instance: CommunityUserInstance): Promise<void> {
+    const handle = this.processes.get(instance)
+    if (handle) handle.credentialsClosed = true
     await this.inspection.stop(instance)
     await this.releaseProcess(instance, instance.containerName !== undefined)
   }

@@ -1,4 +1,4 @@
-import { installedUserDataRoot } from './installed-storage-layout.js'
+import { installedMemberHome, installedUserDataRoot } from './installed-storage-layout.js'
 import { createHash } from 'node:crypto'
 import { join, relative } from 'node:path'
 import { dshWebProfilePath, DSH_PATCH_CONFIG } from '../../src/dsh/profile-layout.js'
@@ -161,7 +161,7 @@ os.replace(temporary,p)`)
       limits(importedKernel, expected.defaults)
       return importedKernel
     },
-    async verifyCombination(entry: string, sessionId: string) {
+    async verifyCombination(entry: string, sessionId: string, memberStorageKey: string) {
       const bookmark = origin + entry + '?view=workspace#saved'
       // Scope the two-second timer to reclamation so it does not reclaim the next cold entry.
       const reclaim = async () => {
@@ -247,7 +247,7 @@ os.replace(temporary,p)`)
       await member.getByRole('menuitem', { name: 'More recovery options', exact: true }).click()
       await member.waitForURL(origin + '/recovery')
       await python(
-        `from pathlib import Path\np=Path(${JSON.stringify(join(dshWebProfilePath((await installedUserDataRoot(remote)) + '/member/home'), DSH_PATCH_CONFIG))})\nassert p.is_file() and not p.is_symlink()\np.write_text('broken-combination-profile: true\\n')`,
+        `from pathlib import Path\np=Path(${JSON.stringify(join(dshWebProfilePath(await installedMemberHome(remote, memberStorageKey)), DSH_PATCH_CONFIG))})\nassert p.is_file() and not p.is_symlink()\np.write_text('broken-combination-profile: true\\n')`,
       )
       const reset = member.locator('#reset-environment')
       await reset.getByRole('checkbox').check()

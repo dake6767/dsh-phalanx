@@ -22,6 +22,7 @@ export interface SuiteInstallRecord {
   readonly pluginPackage?: string
   /** Signed catalog content identity this install accepted; absent for 0.1.18 records. */
   readonly contentHash?: string
+  readonly locked?: true
   readonly status: SuiteInstallStatus
   readonly entries: readonly SuiteInstalledEntry[]
   readonly requestId?: string
@@ -56,6 +57,7 @@ export interface SuiteExecutionSnapshot {
     readonly source?: string
     readonly memberPath?: string
     readonly blockedOptions?: readonly string[]
+    readonly shortOptionsWithValue?: readonly string[]
     readonly blocked: readonly string[]
   }[]
   readonly runtimeDependencies: readonly string[]

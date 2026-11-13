@@ -1,4 +1,5 @@
 import type { SkillImportCandidates, SkillImportPolicy } from '../domain/skill-import.js'
+import type { CommunitySkillPackMember } from '../domain/skill-admin-contract.js'
 import type { LibrarySkill, SkillContents, UploadedSkill } from '../domain/skill-library.js'
 
 /** Published facts for synchronous member expansion and execution admission. */
@@ -8,6 +9,7 @@ export interface SkillLibraryView {
 }
 export interface SkillLibraryStorePort {
   list(): Promise<readonly LibrarySkill[]>
+  packCandidates?(search: string, after: string, limit: number): Promise<readonly CommunitySkillPackMember[]>
   save(skill: LibrarySkill, expectedRevision?: number | 'none'): Promise<void>
   remove(name: string, expectedRevision?: number): Promise<void>
 }

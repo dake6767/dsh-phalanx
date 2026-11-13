@@ -104,6 +104,24 @@ it('offers an update after a platform upgrade, previews the differences and swit
         { timeout: 60000 },
       )
       .toBe('installed')
+    const firstPack = await (await page.request.get(origin + '/admin/api/skill-packs/detail?name=chat')).json()
+    const invalidDisplay = await page.request.post(origin + '/admin/api/skill-packs', {
+      headers: { origin },
+      data: { action: 'save-display', name: 'chat', revision: firstPack.revision, display: { skills: [] } },
+    })
+    expect(invalidDisplay.status()).toBe(400)
+    await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click()
+    await page.getByRole('tab', { name: 'Skill packs', exact: true }).click()
+    await page.getByRole('button', { name: 'View skill pack chat', exact: true }).click({ position: { x: 12, y: 12 } })
+    const packEditor = page.getByRole('dialog', { name: 'Chat suite' })
+    expect(await packEditor.getByLabel('Pack name', { exact: true }).getAttribute('readonly')).not.toBeNull()
+    expect(await packEditor.getByLabel('Orchestration instructions (optional)', { exact: true }).getAttribute('readonly')).not.toBeNull()
+    expect(await packEditor.getByRole('button', { name: /^(Add skills|Move |Remove skill chat-)/u }).count()).toBe(0)
+    await packEditor.getByLabel('Pack display name', { exact: true }).fill('Local chat')
+    await packEditor.getByLabel('Pack description', { exact: true }).fill('Local chat description')
+    await packEditor.getByRole('button', { name: 'Save skill pack' }).click()
+    await packEditor.waitFor({ state: 'hidden' })
+    await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/skill-packs/detail?name=chat')).json()).displayName).toBe('Local chat')
     const before = ((await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json()) as CommunityRuntimeDependencyView[]).find(
       row => row.name === 'chat-tools',
     )!
@@ -133,7 +151,9 @@ it('offers an update after a platform upgrade, previews the differences and swit
     await dialog.getByText('Skill pack chat: adds chat-read; removes —', { exact: true }).waitFor()
     await dialog.getByText('New credentials: CHAT_REGION. Delegated execution stays off until they are saved.', { exact: true }).waitFor()
     await dialog.getByRole('button', { name: 'Confirm update', exact: true }).click()
-    await card.getByText('Missing credentials', { exact: true }).waitFor({ timeout: 60000 })
+    await dialog.waitFor({ state: 'hidden' })
+    await card.getByRole('button', { name: 'View catalog entry Chat suite', exact: true }).click()
+    await dialog.getByText('Missing credentials', { exact: true }).waitFor({ timeout: 60000 })
     const after = ((await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json()) as CommunityRuntimeDependencyView[]).find(
       row => row.name === 'chat-tools',
     )!
@@ -143,10 +163,17 @@ it('offers an update after a platform upgrade, previews the differences and swit
     const packs = (await (await page.request.get(origin + '/admin/api/skill-packs')).json()) as {
       packs: { name: string; skills: string[]; published: boolean }[]
     }
-    expect(packs.packs.find(row => row.name === 'chat')).toMatchObject({ skills: ['chat-send', 'chat-read'], published: true })
+    expect(packs.packs.find(row => row.name === 'chat')).toMatchObject({
+      displayName: 'Local chat',
+      description: 'Local chat description',
+      skills: ['chat-send', 'chat-read'],
+      published: true,
+    })
+    await dialog.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
     await page.getByRole('button', { name: /Platform language/ }).click()
     await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
-    await card.getByText('缺少凭据', { exact: true }).waitFor()
+    await card.getByRole('button', { name: '查看广场条目 Chat suite', exact: true }).click()
+    await dialog.getByText('缺少凭据', { exact: true }).waitFor()
     expect(errors).toEqual([])
   } finally {
     await browser.close()

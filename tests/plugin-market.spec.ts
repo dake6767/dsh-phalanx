@@ -165,7 +165,9 @@ it('uses actual native inventory for market actions without treating delivery hi
   const instance = { userId: 'member', processId: 1, origin: 'http://localhost', launchUrl: 'http://localhost' },
     runtime = { ensure: async () => instance }
   let installed: import('../src/ports/plugin-market.js').InstalledMarketPlugin[] = [],
-    credential = ''
+    credential = '',
+    installCount = 0,
+    failSave = false
   let finish!: () => void, entered!: () => void
   const started = new Promise<void>(resolve => {
       entered = resolve
@@ -177,6 +179,7 @@ it('uses actual native inventory for market actions without treating delivery hi
     list: async () => installed,
     verifyArchive: async () => true,
     install: async () => {
+      installCount++
       entered()
       await completed
       installed = [{ packageName: 'native', version: '1.0.0', retainedArchive: true, archiveIntegrity: plugin.integrity, enabled: false }]
@@ -197,10 +200,29 @@ it('uses actual native inventory for market actions without treating delivery hi
       return history
     },
     save: async (_space: string, row: import('../src/ports/plugin-installations.js').PluginInstallation) => {
+      if (failSave) throw Error('Receipt store unavailable')
       history = [row]
     },
   }
-  const jobs = new MemberNativePluginJobs(accounts, runtime, native, records)
+  let adapted = false
+  let setups = 0
+  const jobs = new MemberNativePluginJobs(
+    accounts,
+    runtime,
+    native,
+    records,
+    {
+      describeDelivery: async () =>
+        adapted ? { version: plugin.version, integrity: plugin.integrity, resourceOrigin: 'catalog', serviceOrigin: 'catalog' } : undefined,
+    },
+    {
+      apply: async () => {
+        setups++
+        return []
+      },
+      cancelSpace: async () => {},
+    },
+  )
   let selected: readonly string[] = []
   const selections = {
     get: async () => selected,
@@ -292,6 +314,42 @@ it('uses actual native inventory for market actions without treating delivery hi
   await expect(market.uninstall(account, 'native', origin, signal, 'remove-2')).rejects.toThrow()
   expect(installed).toEqual([{ packageName: 'native', version: '2.0.0' }])
   expect(history).toHaveLength(1)
+  installed = []
+  adapted = true
+  selected = ['native']
+  expect((await listMarket()).plugins[0]).toMatchObject({ status: 'selected', sharedCredential: true })
+  await market.uninstall(account, 'native', origin, signal)
+  expect(selected).toEqual([])
+  expect((await listMarket()).plugins[0]).toMatchObject({ status: 'install' })
+  expect((await listMarket()).plugins[0]?.sharedCredential).toBeUndefined()
+  failSave = true
+  expect(await market.install(account, 'native', origin, signal, 'install-adapted')).toMatchObject({ job: { action: 'install' } })
+  await jobs.drain()
+  expect((await listMarket()).plugins[0]).toMatchObject({ status: 'installed', job: { status: 'failed' }, retryReceipt: true })
+  expect(history[0]?.resourceOrigin).toBeUndefined()
+  expect(setups).toBe(0)
+  failSave = false
+  expect(await market.install(account, 'native', origin, signal, 'install-adapted')).toMatchObject({ job: { status: 'failed' } })
+  publication = false
+  await expect(market.install(account, 'native', origin, signal, 'retry-unpublished', true)).rejects.toThrow()
+  publication = true
+  const retainedArchive = installed
+  installed = []
+  await expect(market.install(account, 'native', origin, signal, 'retry-after-native-removal', true)).rejects.toThrow()
+  expect(installCount).toBe(2)
+  installed = retainedArchive
+  installed = [{ ...installed[0]!, archiveIntegrity: 'sha512-replaced' }]
+  expect((await listMarket()).plugins[0]?.retryReceipt).toBeUndefined()
+  await expect(market.install(account, 'native', origin, signal, 'retry-replaced', true)).rejects.toThrow()
+  installed = retainedArchive
+  expect(await market.install(account, 'native', origin, signal, 'retry-adapted', true)).toMatchObject({ job: { action: 'install' } })
+  await jobs.drain()
+  expect((await listMarket()).plugins[0]).toMatchObject({ status: 'installed', job: { status: 'succeeded' } })
+  expect((await listMarket()).plugins[0]?.retryReceipt).toBeUndefined()
+  expect(installCount).toBe(2)
+  expect(setups).toBe(1)
+  expect(selected).toEqual([])
+  expect(history[0]).toMatchObject({ resourceOrigin: 'catalog', serviceOrigin: 'catalog' })
   await jobs.stop()
 })
 
