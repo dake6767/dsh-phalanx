@@ -23,11 +23,11 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
     kind: 'plugin',
     id: 'fixture-editor',
     version: '1.0.0',
-    engines: { platform: '>=0.1.24' },
+    engines: { platform: '>=0.1.35' },
     adapters: [],
     title: localized,
     description: localized,
-    source: localized,
+    source: { en: 'Test registry', 'zh-CN': '测试包仓库' },
     identity: localized,
     dependencies: [],
     items: [
@@ -39,6 +39,37 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
         runtimeDependencies: [],
         catalogDependencies: [],
         access: { environment: [{ name: 'EDITOR_MODE', value: 'shared' }], entriesYaml: '' },
+        serviceSlots: [
+          {
+            id: 'chat',
+            label: { en: 'Conversation', 'zh-CN': '对话' },
+            binding: {
+              kind: 'revisioned-rpc',
+              service: 'fixtureSettings',
+              active: ['settings', 'chat'],
+              selection: ['settings', 'chat', 'selected'],
+              profiles: ['settings', 'chat', 'profiles'],
+              idKey: 'id',
+              snapshotKey: 'snapshot',
+              fields: { endpoint: 'baseUrl', key: 'apiKey', model: 'model', mode: 'engine' },
+            },
+            backends: [
+              {
+                id: 'openai',
+                label: { en: 'OpenAI compatible', 'zh-CN': 'OpenAI 兼容' },
+                protocol: 'openai-chat',
+                mode: 'api',
+                upstream: { endpoint: 'URL', key: 'KEY', model: 'MODEL' },
+                fields: [
+                  { name: 'URL', type: 'url', required: true },
+                  { name: 'KEY', type: 'secret', required: true },
+                  { name: 'MODEL', type: 'text', required: true },
+                ],
+              },
+            ],
+          },
+        ],
+        serviceFieldLabels: [{ slot: 'chat', backend: 'openai', field: 'MODEL', label: { en: 'Model name', 'zh-CN': '模型名称' } }],
       },
     ],
   })
@@ -65,6 +96,7 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
           runtimeRevision: declaredRuntimeRevision(),
           title: 'Fixture editor',
           description: '',
+          services: ['fixtureSettings'],
           bundlePatch: '- insert:\n  - id: main\n    name: editor\n',
           dependencies: {},
         }),
@@ -97,8 +129,32 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
         .filter({ has: page.getByRole('button', { name: zh ? `查看广场条目 ${title}` : `View catalog entry ${title}`, exact: true }) })
       expect(await card.getByRole('button', { name: zh ? '安装' : 'Install', exact: true }).count()).toBe(0)
       const open = card.getByRole('button', { name: zh ? `查看广场条目 ${title}` : `View catalog entry ${title}`, exact: true })
+      expect(await card.locator('.catalog-card-meta').innerText()).toBe(zh ? '测试包仓库 · v1.0.0' : 'Test registry · v1.0.0')
+      expect(await card.locator('.card__description').count()).toBe(0)
       await open.click()
       let dialog = page.getByRole('dialog', { name: title, exact: true })
+      const sections = dialog.locator('.catalog-install-sections > .plugin-detail-section')
+      await dialog.getByRole('heading', { name: zh ? '来源' : 'Source', exact: true }).waitFor()
+      const sourceLink = dialog.getByRole('link', { name: '@fixture/editor', exact: true })
+      await sourceLink.waitFor()
+      expect(await sourceLink.getAttribute('href')).toBe('https://www.npmjs.com/package/@fixture/editor')
+      const sourceFacts = dialog.locator('.catalog-entry-facts')
+      await sourceFacts.getByText(zh ? '广场版本' : 'Catalog version', { exact: true }).waitFor()
+      await sourceFacts.getByText('@fixture/editor@1.0.0', { exact: true }).waitFor()
+      const { sourceLeft, valueOffsets } = await sourceFacts.evaluate(list => ({
+        sourceLeft: list.querySelector('a')?.getBoundingClientRect().left,
+        valueOffsets: [...new Set([...list.querySelectorAll('dd')].map(value => value.getBoundingClientRect().left))],
+      }))
+      expect(valueOffsets).toEqual([sourceLeft])
+      expect(await dialog.getByText(zh ? '技术详情' : 'Technical details', { exact: true }).count()).toBe(0)
+      await dialog.getByRole('heading', { name: zh ? '将安装' : 'This entry will install', exact: true }).waitFor()
+      await dialog.getByRole('heading', { name: zh ? '对话' : 'Conversation', exact: true }).waitFor()
+      expect(await dialog.getByRole('heading', { name: title, exact: true }).count()).toBe(1)
+      expect(await sections.count()).toBe(4)
+      expect(await sections.evaluateAll(nodes => nodes[1]!.getBoundingClientRect().top - nodes[0]!.getBoundingClientRect().bottom)).toBe(12)
+      await dialog.getByText(zh ? 'OpenAI 兼容' : 'OpenAI compatible', { exact: true }).click()
+      await dialog.getByRole('textbox', { name: zh ? '模型名称' : 'Model name', exact: true }).waitFor()
+      await dialog.getByText(/^MODEL · /u).waitFor()
       const publish = dialog.getByRole('checkbox', { name: zh ? '发布到平台应用中心' : 'Publish to the platform app center', exact: true })
       expect(await publish.isChecked()).toBe(false)
       if (!zh) {
@@ -106,9 +162,13 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
         expect(await publish.isChecked()).toBe(true)
       }
       if (zh) {
-        const preinstall = dialog.getByRole('checkbox', { name: /^为 .+ 预装$/u }).first()
-        await preinstall.press('Space')
-        expect(await preinstall.isChecked()).toBe(true)
+        await dialog.getByRole('button', { name: '添加分组', exact: true }).click()
+        const picker = page.getByRole('dialog', { name: '添加分组', exact: true })
+        const group = picker.getByRole('checkbox', { name: '默认分组', exact: true })
+        await group.press('Space')
+        expect(await group.isChecked()).toBe(true)
+        await picker.getByRole('button', { name: '确认选择', exact: true }).click()
+        await dialog.getByText('默认分组', { exact: true }).waitFor()
       } else {
         const stale = await page.request.post(origin + '/admin/api/suites', {
           headers: { origin },
@@ -144,6 +204,36 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
         expect(stale.status()).toBe(409)
       }
       await dialog.getByRole('button', { name: zh ? '关闭广场条目详情' : 'Close catalog entry details', exact: true }).click()
+      if (!zh) {
+        await page.getByRole('tab', { name: 'Plugins', exact: true }).click()
+        const openPlugin = page.getByRole('button', { name: 'View plugin @fixture/editor', exact: true })
+        const openAccessSettings = async () => {
+          await openPlugin.click()
+          await page.getByRole('tab', { name: 'Access settings', exact: true }).click()
+          const service = page.getByRole('region', { name: 'Service backends', exact: true })
+          await service.locator('summary').filter({ hasText: 'OpenAI compatible' }).click()
+          return service
+        }
+        const service = await openAccessSettings()
+        await service.getByLabel('URL', { exact: true }).fill('https://service.example.test/v1')
+        await service.getByLabel('KEY', { exact: true }).fill('fixture-service-key')
+        const model = service.getByLabel('Model name', { exact: true })
+        await model.fill('fixture-model')
+        const closePlugin = page.getByRole('button', { name: 'Close plugin details', exact: true })
+        await closePlugin.click()
+        await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).getByRole('button', { name: 'Continue editing', exact: true }).click()
+        await service.getByRole('button', { name: 'Save configuration', exact: true }).click()
+        await service.getByText('Service configuration saved.', { exact: true }).waitFor()
+        await closePlugin.click()
+        const reopened = await openAccessSettings()
+        expect(await reopened.getByLabel('Model name', { exact: true }).inputValue()).toBe('fixture-model')
+        expect(await reopened.getByLabel('KEY', { exact: true }).inputValue()).toBe('')
+        await reopened.getByLabel('Model name', { exact: true }).fill('unsaved-model')
+        await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()
+        await page.getByRole('button', { name: 'Plugin catalog', exact: true }).click()
+        await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).getByRole('button', { name: 'Discard changes', exact: true }).click()
+        await page.getByRole('tab', { name: 'Plugin catalog', exact: true, selected: true }).waitFor()
+      }
       await card.getByRole('button', { name: zh ? '卸载' : 'Uninstall', exact: true }).click()
       await dialog.getByText(zh ? '将移除：' : 'This will remove:', { exact: true }).waitFor()
       await dialog.getByRole('button', { name: zh ? '确认卸载' : 'Confirm uninstall', exact: true }).click()

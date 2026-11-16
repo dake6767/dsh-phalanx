@@ -72,7 +72,7 @@ it('rolls back a batch import and a referenced skill deletion, then cascades onl
   }
 })
 
-it('renames pack membership, grants, choices and receipts together and preserves their order', async () => {
+it('renames pack membership, grants, choices and receipts together while reading members by name', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pack-rename-'))
   const database = await openTestDatabase(root)
   try {
@@ -101,7 +101,11 @@ it('renames pack membership, grants, choices and receipts together and preserves
     await work.run(async tx => {
       await tx.packs.rename('old', { ...original, name: 'next', skills: ['two', 'one'] })
     })
-    expect((await packs.list())[0]).toMatchObject({ name: 'next', skills: ['two', 'one'] })
+    expect((await packs.list())[0]).toMatchObject({ name: 'next', skills: ['one', 'two'] })
+    expect(await database.query("SELECT skill_name, position FROM dsh_phalanx.skill_pack_members WHERE pack_name='next' ORDER BY position")).toEqual([
+      { skill_name: 'two', position: 0 },
+      { skill_name: 'one', position: 1 },
+    ])
     expect(await grants.get('default')).toEqual(['next'])
     expect(await choices.get(member.spaceId)).toEqual(['next'])
     expect(await grants.contributionReceipt!('default', 'next')).toEqual({ id: 'receipt', revision: 'approved' })

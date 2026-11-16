@@ -213,10 +213,8 @@ it('edits native feature defaults with dirty guards, unavailable explanations an
   const visibility = platform.getByRole('checkbox', { name: 'Show Platform App Center', exact: true })
   expect(await visibility.isChecked()).toBe(false)
   await platform.getByText('Applies when members refresh their DSH page. Existing resources remain available.', { exact: true }).waitFor()
-  await dialog
-    .getByRole('region', { name: 'DSH native features', exact: true })
-    .getByText(/Applies the next time an instance starts/)
-    .waitFor()
+  expect(await dialog.getByRole('heading', { name: 'DSH native features', exact: true }).count()).toBe(0)
+  expect(await dialog.getByText(/Applies the next time an instance starts/).count()).toBe(0)
   const terminal = dialog.getByRole('checkbox', { name: 'Manual terminal access', exact: true })
   expect(await terminal.isChecked()).toBe(true)
   const presets = dialog.getByRole('region', { name: 'DSH built-in Agent presets', exact: true })

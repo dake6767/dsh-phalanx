@@ -1,4 +1,5 @@
 import { legacyCatalogExecutionVariables } from '../domain/execution-service-environment.js'
+import { assertGithubRepository } from '../domain/plugin-library.js'
 import { compareSuiteVersions } from '../domain/suite-install.js'
 import type { SuiteUnavailableReason } from './suite-availability.js'
 import type { CommunitySuiteInstallView, CommunitySuiteCatalogView } from '../domain/admin-contract.js'
@@ -55,6 +56,33 @@ export function busySuiteDependents(installs: readonly SuiteInstallRecord[], id:
   return installs.filter(row => row.id !== id && row.dependencies?.includes(id) && row.status !== 'installed' && row.status !== 'failed').map(row => row.id)
 }
 
+function githubSourceLink(url: string) {
+  const match = /^https:\/\/github\.com\/([^/?#]+\/[^/?#]+)(?:\/|$)/u.exec(url)
+  if (!match) return
+  const repository = match[1]!.replace(/\.git$/u, '')
+  try {
+    assertGithubRepository(repository)
+    return { label: repository, href: `https://github.com/${repository}` }
+  } catch {
+    return
+  }
+}
+
+function catalogSourceLinks(entry: SuiteCatalogEntry) {
+  const links = new Map<string, { label: string; href: string }>()
+  for (const item of entry.items) {
+    if (item.kind === 'plugin') {
+      const link = item.archive ? githubSourceLink(item.archive.url) : { label: item.packageName, href: `https://www.npmjs.com/package/${item.packageName}` }
+      if (link) links.set(link.href, link)
+    }
+    if (item.kind === 'skill') {
+      const link = githubSourceLink(item.source.url)
+      if (link) links.set(link.href, link)
+    }
+  }
+  return [...links.values()]
+}
+
 export async function suiteCatalogView(
   entries: readonly SuiteCatalogEntry[],
   state: SuiteInstallState,
@@ -71,6 +99,8 @@ export async function suiteCatalogView(
         const suite = entry.category !== 'dependency' ? entry : undefined
         const packName = suite?.items.find(item => item.kind === 'skill-pack')?.name
         const plugin = suite?.items.find((item): item is SuiteCatalogPluginItem => item.kind === 'plugin')
+        // Rejected entries may be projected before their archive extensions have been read.
+        const sourceLinks = entry.unavailableReason ? [] : catalogSourceLinks(entry)
         const services: CommunityCatalogServiceDefinition[] = entry.items.flatMap(item =>
           (item.kind === 'execution' || item.kind === 'plugin') && item.serviceSlots?.length
             ? [
@@ -92,6 +122,7 @@ export async function suiteCatalogView(
           title: entry.title,
           description: entry.description,
           source: entry.source,
+          ...(sourceLinks.length ? { sourceLinks } : {}),
           version: entry.version,
           commands: [...new Set(entry.items.flatMap(item => (item.kind === 'runtime-dependency' ? item.commands : [])))],
           available: Object.keys(reason).length === 0,

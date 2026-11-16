@@ -11,6 +11,7 @@ import { preparePluginUpdate, pluginUpdateRoute } from './plugin-update-route.js
 import { communityAccountView } from './community-account-view.js'
 import type { NativeFeatures } from '../use-cases/native-features.js'
 import { nativeFeatureRoute } from './native-feature-route.js'
+import { systemConfigurationRoute } from './system-configuration-route.js'
 import type { CommunitySystemStatus } from '../use-cases/community-system-status.js'
 import type { UsagePolicy } from '../use-cases/usage-policy.js'
 import type { InstanceResources } from '../use-cases/instance-resources.js'
@@ -19,6 +20,8 @@ import { usageAdminRoute } from './usage-admin-route.js'
 import type { Experts } from '../use-cases/experts.js'
 import { expertRoute } from './expert-route.js'
 import type { DownloadSources } from '../use-cases/download-sources.js'
+import type { PlatformVoice } from '../use-cases/platform-voice.js'
+import type { PlatformSearchSettings } from '../use-cases/platform-search-settings.js'
 import type { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
 import { runtimeDependencyRoute } from './runtime-dependency-route.js'
 import type { SuiteCatalog } from '../use-cases/suite-catalog.js'
@@ -105,6 +108,8 @@ export function createCommunityAdminRoute(deps: {
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
   readonly downloads?: DownloadSources
+  readonly platformSearch: PlatformSearchSettings
+  readonly platformVoice: PlatformVoice
   readonly systemStatus?: CommunitySystemStatus
   readonly updates: CommunitySystemUpdate
 }) {
@@ -153,42 +158,7 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 200, body)
         return
       }
-      if (url.pathname === '/admin/api/download-sources' && deps.downloads) {
-        if (request.method === 'GET') {
-          sendCommunityJson(response, 200, await deps.downloads.view(caller))
-          return
-        }
-        if (request.method === 'POST') {
-          assertCommunityOrigin(request, deps.origin())
-          sendCommunityJson(response, 200, await deps.downloads.save(caller, await readCommunityJson(request)))
-          return
-        }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
-        return
-      }
-      if (url.pathname === '/admin/api/system-status' && deps.systemStatus) {
-        if (request.method === 'GET') {
-          sendCommunityJson(response, 200, await deps.systemStatus.view(caller))
-          return
-        }
-        if (request.method === 'POST') {
-          assertCommunityOrigin(request, deps.origin())
-          const input = (await readCommunityJson(request)) as { action?: unknown; fingerprint?: unknown }
-          if (
-            !input ||
-            typeof input !== 'object' ||
-            Array.isArray(input) ||
-            Object.keys(input).length !== 2 ||
-            input.action !== 'confirm-backup' ||
-            typeof input.fingerprint !== 'string'
-          )
-            throw new CommunityRequestError(400, 'Confirm the offline backup of the displayed master key.', 'master-key-fingerprint-required')
-          sendCommunityJson(response, 200, await deps.systemStatus.confirmBackup(caller, input.fingerprint))
-          return
-        }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
-        return
-      }
+      if (await systemConfigurationRoute(request, response, url, caller, deps, deps.origin())) return
       if (url.pathname === '/admin/api/system-update') {
         if (request.method === 'GET') {
           if ([...url.searchParams.keys()].some(key => key !== 'operation') || url.searchParams.getAll('operation').length > 1)

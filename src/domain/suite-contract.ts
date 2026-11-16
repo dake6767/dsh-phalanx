@@ -19,6 +19,8 @@ export interface CommunitySuiteInstallEntry {
 export interface CommunitySuiteInstallPlanEntry {
   readonly kind: SuiteEntryKind
   readonly name: string
+  /** Concrete skill names when the original install plan name is a count. */
+  readonly names?: readonly string[]
   readonly commands?: readonly string[]
   readonly detail?: string
 }
@@ -38,6 +40,7 @@ export interface CommunitySuiteCatalogEntryView {
   readonly title: Readonly<Record<'en' | 'zh-CN', string>>
   readonly description: Readonly<Record<'en' | 'zh-CN', string>>
   readonly source: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly sourceLinks?: readonly { readonly label: string; readonly href: string }[]
   readonly identity?: Readonly<Record<'en' | 'zh-CN', string>>
   readonly skills?: readonly string[]
   readonly packName?: string

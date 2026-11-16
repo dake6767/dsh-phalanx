@@ -289,6 +289,7 @@ export default function CommunitySkillsPage() {
       {selectedPack !== undefined ? (
         <CommunitySkillPackEditor
           name={selectedPack}
+          originName={originName}
           onClose={() => setSelectedPack(undefined)}
           onSaved={() => {
             setSelectedPack(undefined)
@@ -313,7 +314,7 @@ export default function CommunitySkillsPage() {
       {selected ? (
         <CommunityDialog
           drawer
-          drawerClassName="plugin-drawer"
+          drawerClassName="plugin-drawer compact-detail-drawer"
           title={selected}
           closeLabel={t('Close skill details')}
           busy={busy}

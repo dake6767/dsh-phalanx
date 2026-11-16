@@ -136,7 +136,7 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
       dependencies: {},
     },
   }
-  const slots: CatalogPluginServiceSlot[] = [
+  let slots: CatalogPluginServiceSlot[] = [
     {
       id: 'image',
       label: { en: 'Image', 'zh-CN': 'Image' },
@@ -157,11 +157,13 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
     selected = true,
     enabled = true,
     actualEnabled = true,
+    actualVersion = '1.0.0',
     serviceOrigin: string | undefined = 'suite',
     version = '1.0.0',
     key = 'fixture-provider-key',
     revision = 1
   let gateway = ''
+  let imageProviderKey = 'fixture-image-key'
   const access = new NativePluginServiceAccess({
     accounts: {
       ...accountState(username => (username === member.username ? member : undefined)),
@@ -182,12 +184,21 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
           identity: { id: 'fixture-suite', version },
           ownerVersion: integrity,
           slots,
-          settings: [{ slot: 'image', backend: 'seedream', enabled, values: { ENDPOINT: upstream + '/v3', KEY: key, MODEL: 'seedream-fixture' } }],
+          settings: [
+            { slot: 'image', backend: 'seedream', enabled, values: { ENDPOINT: upstream + '/v3', KEY: key, MODEL: 'seedream-fixture' } },
+            { slot: 'image', backend: 'openai', enabled, values: { MODEL: 'seedream-fixture' } },
+          ],
         },
       }),
     },
+    upstreams: {
+      list: async () => [{ name: 'image-provider', baseUrl: upstream + '/v1', headers: [], credential: imageProviderKey }],
+    },
     runtime: { status: () => ({ state: 'ready', instance }) },
-    manager: { list: async () => [{ packageName, version: '1.0.0', enabled: actualEnabled, archiveIntegrity: integrity }], verifyArchive: async () => true },
+    manager: {
+      list: async () => [{ packageName, version: actualVersion, enabled: actualEnabled, archiveIntegrity: integrity }],
+      verifyArchive: async () => true,
+    },
     origin: () => new URL('http://127.0.0.1:4180'),
     gatewayOrigin: () => new URL(gateway),
     signingKey: { read: () => 'fixture-signing-key' },
@@ -332,10 +343,50 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
     deadline.abort()
     clock.mockRestore()
   }
+  instance = { ...instance, resourceKey: 'replacement' }
+  expect((await call(grant.url)).status).toBe(200)
+  expect(await access.issue(member, instance, packageName, 'image', 'seedream', AbortSignal.timeout(5000))).toEqual(grant)
+
+  actualVersion = '1.1.0'
+  expect((await call(grant.url)).status).toBe(403)
+  actualVersion = '1.0.0'
   version = '1.1.0'
   revision++
   expect((await call(grant.url)).status).toBe(403)
-  instance = { ...instance, resourceKey: 'replacement' }
+
+  member.sessionEpoch++
   expect((await call(grant.url)).status).toBe(401)
-  expect(requests).toHaveLength(10)
+  expect(requests).toHaveLength(11)
+
+  slots = [
+    {
+      id: 'image',
+      label: { en: 'Image', 'zh-CN': 'Image' },
+      backends: [{ ...backend('openai', 'openai-image'), fields: [{ name: 'MODEL', type: 'text', required: true }], upstream: { model: 'MODEL' } }],
+      binding: {
+        kind: 'json-settings',
+        file: 'media-desk/settings.json',
+        upstream: 'image-provider',
+        fields: [
+          { path: ['image', 'baseUrl'], source: 'gateway-url' },
+          { path: ['image', 'apiKey'], source: 'service-token' },
+          { path: ['image', 'model'], source: 'model' },
+        ],
+      },
+    },
+  ]
+  revision++
+  const image = await access.issue(member, instance, packageName, 'image', 'openai', AbortSignal.timeout(5000))
+  const imageRequest = () =>
+    fetch(image.url + '/images/generations', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + image.token, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'seedream-fixture', prompt: 'Fixture' }),
+    })
+  expect((await imageRequest()).status).toBe(200)
+  expect(requests.at(-1)).toMatchObject({ path: '/v1/images/generations', key: 'Bearer fixture-image-key' })
+  imageProviderKey = 'rotated-image-key'
+  revision++
+  expect((await imageRequest()).status).toBe(200)
+  expect(requests.at(-1)).toMatchObject({ key: 'Bearer rotated-image-key' })
 })

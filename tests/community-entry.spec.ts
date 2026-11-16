@@ -420,3 +420,37 @@ describe('community entry language sync', () => {
     ])
   })
 })
+
+it('keeps ready containers off the public entry until launch settings complete', async () => {
+  let markStarted!: () => void
+  let markWritten!: () => void
+  const started = new Promise<void>(resolve => {
+    markStarted = resolve
+  })
+  const written = new Promise<void>(resolve => {
+    markWritten = resolve
+  })
+  const entry = new CommunityEntry(
+    { getState: async () => account, authenticate: async () => account },
+    runtime,
+    { exchangeLaunchToken: async () => [] },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      ensureLaunch: async () => {
+        markStarted()
+        await written
+      },
+    },
+  )
+  const start = entry.start(account.username, new URL('https://example.test'))
+  await started
+  expect(await entry.status(account.username)).toEqual({ state: 'starting', stage: 'preparing' })
+  expect(entry.currentInstance(account.username, instance)).toBe(false)
+  markWritten()
+  await start
+  expect(await entry.status(account.username)).toEqual({ state: 'ready', instance })
+  expect(entry.currentInstance(account.username, instance)).toBe(true)
+})

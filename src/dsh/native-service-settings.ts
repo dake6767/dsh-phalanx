@@ -82,7 +82,7 @@ function planSettings(loaded,input) {
   return {status:'write',fingerprint,observed,data};
 }
 
-export async function syncNativeServiceSettings(invoke,input) {
+async function syncNativeServiceSettings(invoke,input) {
   const {service}=input.binding;
   if (!settingsKey(service)) return {status:'unsupported'};
   const load=()=>invoke(service+'/load',{});

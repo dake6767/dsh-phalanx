@@ -16,7 +16,8 @@ export default function CommunityInstalledServiceSettings({
   kind,
   name,
   onDraft,
-}: InstalledServiceOwner & { onDraft: (key: string, dirty: boolean, busy: boolean) => void }) {
+  onChanged,
+}: InstalledServiceOwner & { onDraft: (key: string, dirty: boolean, busy: boolean) => void; onChanged?: () => void }) {
   const { t, locale, errorText } = usePlatformLanguage()
   const [view, setView] = useState<CommunityInstalledServices>()
   const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({})
@@ -81,6 +82,7 @@ export default function CommunityInstalledServiceSettings({
       }
       setConfirmation(undefined)
       setSaved(true)
+      onChanged?.()
     } catch (failure) {
       setError(failure)
       setConfirmation(undefined)
@@ -95,7 +97,7 @@ export default function CommunityInstalledServiceSettings({
     const values = drafts[key] ?? {}
     const edited = Object.keys(values).length > 0
     return (
-      <details key={backend.id} className="plugin-detail-section">
+      <details key={backend.id} className="catalog-service-backend">
         <summary>
           {backend.label[locale]}{' '}
           <Chip size="sm" variant="soft" color={backend.enabled ? 'success' : 'default'}>
@@ -108,10 +110,11 @@ export default function CommunityInstalledServiceSettings({
             return (
               <div className="page-stack" key={field.name}>
                 <CommunityField
-                  label={field.name}
+                  label={field.label?.[locale] ?? field.name}
                   type={field.type === 'secret' ? 'password' : field.type}
                   autoComplete={field.type === 'secret' ? 'new-password' : 'off'}
                   description={[
+                    field.label ? field.name : '',
                     field.required
                       ? t('Required field')
                       : field.requiredGroup
@@ -119,7 +122,7 @@ export default function CommunityInstalledServiceSettings({
                             '{fields}',
                             backend.fields
                               .filter(other => other.requiredGroup === field.requiredGroup)
-                              .map(other => other.name)
+                              .map(other => other.label?.[locale] ?? other.name)
                               .join(' / '),
                           )
                         : '',
@@ -217,8 +220,10 @@ export default function CommunityInstalledServiceSettings({
       ) : null}
       {saved ? <CommunityMessage role="status" status="success" title={t('Service configuration saved.')} /> : null}
       {view?.slots.map(slot => (
-        <section className="page-stack" key={slot.id}>
+        <section className="catalog-service-slot" key={slot.id} aria-label={slot.label[locale]}>
           <h3>{slot.label[locale]}</h3>
+          {slot.jsonSettings ? <p>{t('Plugin upstream {name}. Changes apply at the next instance startup.', { name: slot.jsonSettings.upstream })}</p> : null}
+          {slot.jsonSettings?.personal ? <p role="status">{t('Some members have switched to personal plugin settings.')}</p> : null}
           {slot.backends.map(backend => backendForm(slot.id, backend))}
         </section>
       ))}

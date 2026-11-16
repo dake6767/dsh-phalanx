@@ -101,11 +101,10 @@ it('applies group terminal choices only on restart, preserves agent and platform
         'pluginManager/listPlugins',
         {},
       )
-      for (const moduleName of ['@deepseek-ai/dsh-api-terminal-controller', '@deepseek-ai/dsh-client-ui-sidebar-terminal']) {
-        const rows = inventory.filter(row => row.moduleName === moduleName)
-        expect(rows).toHaveLength(1)
-        expect(rows[0]).toMatchObject({ enabled, fiberPhase: enabled ? 'active' : null })
-      }
+      const controller = inventory.filter(row => row.moduleName === '@deepseek-ai/dsh-api-terminal-controller')
+      expect(controller).toEqual([expect.objectContaining({ enabled: true, fiberPhase: 'active' })])
+      const sidebar = inventory.filter(row => row.moduleName === '@deepseek-ai/dsh-client-ui-sidebar-terminal')
+      expect(sidebar).toEqual([expect.objectContaining({ enabled, fiberPhase: enabled ? 'active' : null })])
       const response = await context.request.post(communityEntryUrl(origin, cookie) + 'api/terminal/create', {
         headers: { origin, 'content-type': 'application/json', 'accept-language': 'en-US' },
         data: rpcBody('terminal/create', { agentId: sessionId, request: { id: 'native-feature-probe', cols: 80, rows: 24 } }),
@@ -169,6 +168,16 @@ it('applies group terminal choices only on restart, preserves agent and platform
     expect(await memberCarrier()).toBe(running)
     await page.unroute(settingsPath)
     await refreshAppCenter(page, true)
+    const terminalBundle = await createBrowserDshRpc(member).remoteRpc<{ application: string }>(
+      origin,
+      await cookieHeader(member, origin),
+      'pluginManager/setBundleEnabled',
+      {
+        name: '@deepseek-ai/dsh-experimental-terminal-bundle',
+        enabled: true,
+      },
+    )
+    expect(['applied', 'restart-required']).toContain(terminalBundle.application)
     await terminal(member, true)
     await select('default', ['terminal'])
     await terminal(member, true) // Saving does not change the running instance.
@@ -221,6 +230,9 @@ it('applies group terminal choices only on restart, preserves agent and platform
     const bundles = await createBrowserDshRpc(member).remoteRpc<{ name: string }[]>(origin, await cookieHeader(member, origin), 'pluginManager/listBundles', {})
     expect(bundles.some(bundle => bundle.name === '@deepseek-ai/dsh-experimental-plugin-market-bundle')).toBe(false)
     const { sessionId } = await observe(member, { operation: 'create' })
+    const agentTerminal = await observe(member, { operation: 'tool', sessionId, name: 'terminal_open', args: { type: 'shell', name: 'Agent-only terminal' } })
+    expect(agentTerminal.value).toMatchObject({ name: 'Agent-only terminal', type: 'shell', sessionId: expect.any(String) })
+    await observe(member, { operation: 'tool', sessionId, name: 'terminal_close', args: { sessionId: agentTerminal.value.sessionId } })
     const bash = async (command: string) =>
       (
         await observe(member, {

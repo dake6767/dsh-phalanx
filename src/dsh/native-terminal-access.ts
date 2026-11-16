@@ -1,7 +1,7 @@
 import { nativeFeatureLocale } from './native-feature-locale.js'
 import { DSH_RPC_PREFIX } from './session-protocol.js'
 
-/** The disabled controller has no native descriptor; explain the group choice at its public HTTP seam. */
+/** Keep the controller available to agents while refusing manual terminal creation at the native HTTP seam. */
 export const nativeTerminalAccessModule = `
 export const name = 'phalanx-native-terminal-access';
 export const inject = ['connection', 'settings'];

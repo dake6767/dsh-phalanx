@@ -9,6 +9,7 @@ it('refuses member installs and never-enabled optional bundles while preserving 
   const module = await import(
     'data:text/javascript;base64,' + Buffer.from(nativePluginPolicyModule({ subject: 'member', generation: 'launch', allowInstall: false })).toString('base64')
   )
+  expect(Object.keys(module).sort()).toEqual(['apply', 'inject', 'name'])
   module.apply({
     connection: {
       browserPeer: {},
@@ -20,7 +21,7 @@ it('refuses member installs and never-enabled optional bundles while preserving 
         calls.push(input.method)
         return input.method === 'listBundles'
           ? [
-              { name: 'existing', official: true, optional: true, enabled: false, installed: true },
+              { name: 'existing', official: true, optional: true, enabled: false, installed: true, update: 'registry' },
               { name: 'never', official: true, optional: true, enabled: false, installed: false },
               { name: '@deepseek-ai/dsh-experimental-plugin-market-bundle' },
             ]
@@ -44,7 +45,9 @@ it('refuses member installs and never-enabled optional bundles while preserving 
   expect(await call('setBundleEnabled', { name: 'never', enabled: true })).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
   expect(await call('setBundleEnabled', { name: 'existing', enabled: true })).toMatchObject({ result: { ok: true } })
   expect(await call('setBundleEnabled', { name: 'never', enabled: false })).toMatchObject({ result: { ok: true } })
-  expect((await call('listBundles', {})).result.value).toHaveLength(2)
+  const inventory = (await call('listBundles', {})).result.value
+  expect(inventory).toHaveLength(2)
+  expect(inventory[0]).toMatchObject({ name: 'existing', update: 'registry' })
   expect(calls).not.toContain('installBundle')
   expect(routes.has('/api/phalanx/native-plugins/install')).toBe(false)
 })

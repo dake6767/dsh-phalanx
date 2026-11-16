@@ -149,15 +149,14 @@ async function setup(mode: 'image' | 'retrieval'): Promise<{ page: Page; inputs:
     models: [{ name: mode === 'image' ? 'deepseek-flash' : 'deepseek-chat', enabled: true }],
   })
   if (mode === 'image') expect(settings.providers[0]!.models[0]!.input).toBe('text+image')
-  else
-    await save(settings.revision, {
-      name: 'Real retrieval provider',
-      baseUrl: 'https://api.deepseek.com/anthropic',
-      apiFormat: 'anthropic-messages',
-      apiKey: inputs.deepseekSearchApiKey,
-      enabled: true,
-      models: [{ name: 'deepseek-chat', enabled: true }],
+  else {
+    const response = await admin.request.post(origin + '/admin/api/platform-search', {
+      headers: { origin },
+      data: { action: 'save', revision: 0, enabled: true, apiKey: inputs.deepseekSearchApiKey },
     })
+    expect(response.status()).toBe(200)
+    expect((await response.text()).includes(inputs.deepseekSearchApiKey)).toBe(false)
+  }
   expect(
     (await admin.request.post(origin + '/admin/api/accounts', { headers: { origin }, data: { username: 'member', email: '', password: 'password' } })).status(),
   ).toBe(201)
@@ -166,25 +165,6 @@ async function setup(mode: 'image' | 'retrieval'): Promise<{ page: Page; inputs:
   page.setDefaultTimeout(60000)
   await signInCommunity(page, origin, 'member', 'password')
   await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath('', true), true)
-  if (mode === 'retrieval') {
-    // The production default is off; exercise the same member opt-in as the controlled browser case.
-    await page.getByRole('button', { name: 'Plugins', exact: true }).click()
-    await page.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor()
-    await page.getByRole('button', { name: 'View Web search', exact: true }).click()
-    const toggle = page.getByRole('switch', { name: 'Use the new Web Search API', exact: true })
-    expect(await toggle.isChecked()).toBe(false)
-    expect(await page.getByLabel('API key', { exact: true }).inputValue()).toBe('')
-    await toggle.click()
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect.poll(() => page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), { timeout: 20000 }).toBe(true)
-    expect(await toggle.isChecked()).toBe(true)
-    await page
-      .getByRole('button', { name: 'New session', exact: true })
-      .filter({ hasNot: page.locator('[data-copy-version]') })
-      .first()
-      .click()
-    await page.locator('[data-composer-input]').waitFor()
-  }
   return { page, inputs }
 }
 

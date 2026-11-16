@@ -20,7 +20,7 @@ import { PluginAccessAdministration } from './plugin-access-administration.js'
 import { resolvedPluginItem } from './suite-entry-kinds.js'
 
 export function assertCatalogPluginBindings(item: SuiteCatalogPluginItem, prepared: PreparedPlugin): void {
-  if (item.serviceSlots?.some(slot => !prepared.services?.includes(slot.binding.service)))
+  if (item.serviceSlots?.some(slot => slot.binding.kind === 'revisioned-rpc' && !prepared.services?.includes(slot.binding.service)))
     throw new BusinessRuleError('invalid', 'The plugin did not register its declared settings service.', 'suite-catalog-invalid')
   const cache = item.resourceBindings?.find(binding => binding.kind === 'native-package-cache')
   if (!cache) return

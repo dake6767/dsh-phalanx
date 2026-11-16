@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "ticket": 6,
+  "status": "accepted",
+  "candidate": "run-43769022174",
+  "commit": "4760f8eda3cf72269a27d9577506c8c5c106dfef",
+  "runId": "43769022174",
+  "platformSha256": "5dc19d4047713a7493e2aa0893ae09a1fefba5e61cbc8853bccfa2d9dd944503",
+  "ociArchiveSha256": "a332424e3534266ae78f86f0f54f831275f7fd7d73ebda168d1a9c283af62ced",
+  "imageDigest": "sha256:aa0ee88e035a1180a1a9527a2b77ef0164f919c5383b80fca2740e5789c21ac9",
+  "dshRevision": "38a6a5c965aa99ab525161efb7cc5cf1fe62fced",
+  "manifestSha256": "118122b791e27f851c4c76adc3137e456a05bfa51a930222d2c00fbbe1f8d95e",
+  "checks": {
+    "ci": "passed",
+    "linux": "passed",
+    "upgrade": "passed",
+    "cleanInstall": "passed"
+  },
+  "summarySha256": "410bb776804e454d4cdf87bf8030505e9153c40e982b729ee9bd835d8a62fa75"
+}

@@ -51,9 +51,18 @@ it('preserves matching backend settings on label changes and refuses to delete c
   const installed = installServiceDefinition({ id: 'design', version: '1.0.0' }, slots)!
   const configured = configureServiceBackend(installed, { slot: 'image', backend: 'first', action: 'save', values: { TOKEN: 'private' } })
   const enabled = configureServiceBackend(configured, { slot: 'image', backend: 'first', action: 'enable' })
-  const renamed = slots.map(slot => ({ ...slot, label: { ...slot.label, en: 'Renamed' } }))
+  const fieldLabel = { en: 'API key', 'zh-CN': 'API 密钥' }
+  const renamed = slots.map(slot => ({
+    ...slot,
+    label: { ...slot.label, en: 'Renamed' },
+    backends: slot.backends.map(backend => ({
+      ...backend,
+      fields: backend.fields.map(field => (field.name === 'TOKEN' ? { ...field, label: fieldLabel } : field)),
+    })),
+  }))
   const updated = installServiceDefinition({ id: 'design', version: '2.0.0' }, renamed, enabled)
   expect(updated?.settings[0]).toMatchObject({ enabled: true, values: { TOKEN: 'private' } })
+  expect(installedServiceView(updated!).slots[0]?.backends[0]?.fields[1]).toMatchObject({ label: fieldLabel, configured: true })
   expect(installServiceDefinition({ id: 'other', version: '2.0.0' }, renamed, enabled)?.settings).toEqual([])
   expect(() => installServiceDefinition({ id: 'design', version: '2.0.0' }, undefined, enabled)).toThrow()
 })

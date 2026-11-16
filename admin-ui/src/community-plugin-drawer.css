@@ -115,6 +115,7 @@
 .plugin-settings-panel > .plugin-detail-section h2, .native-feature-settings > .plugin-detail-section h2 { margin: 0; color: var(--foreground); font-weight: 600; }
 .plugin-settings-panel > .plugin-removal { border-color: color-mix(in oklab, var(--danger-ink) 30%, var(--separator)); }
 .plugin-catalog-origin { margin-top: 16px; font-size: 13px; }
+.plugin-catalog-origin button { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 
 .plugin-settings-actions {
   padding-top: 12px;
@@ -163,6 +164,34 @@
 .mcp-catalog-card .card__footer.plugin-card-status { align-items: center; flex-wrap: nowrap; }
 .mcp-catalog-card .plugin-card-status .chip { flex: none; }
 .mcp-catalog-credential { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.mcp-catalog-import { display: block; padding-top: 4px; }
-.mcp-catalog-import-note { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 20px; }
-.mcp-catalog-import-note svg { flex: none; margin-top: 2px; }
+.mcp-catalog-import { padding-top: 4px; }
+
+.skill-pack-editor { display: grid; gap: 16px; }
+.catalog-install-sections { display: grid; gap: 12px; }
+.skill-pack-editor > .plugin-detail-section + .plugin-detail-section { margin-top: 0; }
+.compact-detail-drawer .drawer__heading { font-size: 17px; }
+.compact-detail-drawer .tabs__panel.plugin-settings-panel:not([data-inert]) { display: grid; gap: 12px; }
+.compact-detail-drawer .plugin-settings-panel > .plugin-detail-section,
+.compact-detail-drawer .plugin-settings-panel .skill-content > section { display: grid; padding-block: 12px; gap: 8px; }
+.compact-detail-drawer .plugin-settings-panel > .plugin-detail-section + .plugin-detail-section { margin-top: 0; }
+.compact-detail-drawer .plugin-settings-panel > .plugin-detail-section h2,
+.compact-detail-drawer .skill-content > section > h3 { font-size: 15px; }
+.compact-detail-drawer .skill-content { display: contents; }
+.compact-detail-drawer .skill-file-tree { margin: 0; }
+.execution-rule-values { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.execution-rule-values code { overflow-wrap: anywhere; }
+.catalog-plan-rows > li { min-height: 44px; padding-block: 8px; }
+.catalog-install-sections .catalog-plan-title { display: block; }
+.catalog-entry-description { color: var(--foreground); }
+.catalog-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.catalog-source a { text-decoration: underline; }
+.catalog-install-note { margin: 0; color: var(--muted); font-size: 12px; }
+.catalog-install-dependencies, .catalog-service-slot { display: grid; gap: 8px; min-width: 0; }
+.catalog-service-backend > summary { cursor: pointer; }
+.catalog-service-backend[open] > summary { margin-bottom: 12px; }
+.catalog-warning, .catalog-warning-actions, .publication-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.catalog-warning { color: var(--warning-ink); }
+.catalog-warning p { flex: 1 1 auto; }
+.publication-controls { justify-content: flex-end; max-width: 100%; }
+.publication-reason { color: var(--muted); font-size: 12px; }
+.skill-pack-editor .skill-pack-member-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

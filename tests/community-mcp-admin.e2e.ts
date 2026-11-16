@@ -129,6 +129,14 @@ it('manages remote MCP services and group grants through the existing administra
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
       await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-tools-desktop.png'), fullPage: true })
     await page.getByRole('tab', { name: 'Basic information', exact: true }).click()
+    const publication = page.getByRole('region', { name: 'Platform App Center', exact: true })
+    expect(
+      await publication
+        .locator('.plugin-section-heading')
+        .getByRole('button', { name: /Publish/u })
+        .count(),
+    ).toBe(1)
+    expect(await publication.locator(':scope > p').count()).toBe(1)
     await page.getByRole('button', { name: 'Publish MCP service', exact: true }).click()
     await page.getByRole('dialog', { name: 'Confirm MCP publication', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
     await page.getByRole('region', { name: 'Platform App Center', exact: true }).getByRole('button', { name: 'Unpublish MCP service', exact: true }).waitFor()

@@ -1,4 +1,9 @@
-import type { NativePluginInstallTransport, NativeServiceSettingsTransport } from '../ports/member-native-plugins.js'
+import type {
+  NativeJsonSettingsIntent,
+  NativeJsonSettingsResult,
+  NativePluginInstallTransport,
+  NativeServiceSettingsTransport,
+} from '../ports/member-native-plugins.js'
 import { DSH_BUNDLE_INSTALL } from '../dsh/plugin-manager-protocol.js'
 import { dshCookieHeader, launchExchangeCookies } from '../dsh/launch-token.js'
 import { rpcRequestBody, rpcResponseValue } from '../dsh/session-protocol.js'
@@ -54,6 +59,34 @@ export class SignedNativeInstallTransport implements NativePluginInstallTranspor
       return { status: result.status, fingerprint: result.fingerprint, refresh: result.refresh } as const
     if (result?.status === 'conflict' || result?.status === 'unsupported') return { status: result.status } as const
     return { status: 'failed' } as const
+  }
+  async syncJsonSettings(
+    instance: Parameters<NativeServiceSettingsTransport['syncSettings']>[0],
+    origin: URL,
+    input: NativeJsonSettingsIntent,
+    signal: AbortSignal,
+  ): Promise<NativeJsonSettingsResult> {
+    const result = await this.invoke<NativeJsonSettingsResult>(instance, origin, NATIVE_PLATFORM_SETTINGS_PATH, NATIVE_PLATFORM_SETTINGS_METHOD, input, signal)
+    if (result?.status === 'conflict' || result?.status === 'unsupported') return { status: result.status }
+    const digest = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)
+    if (result?.status !== 'prepared' && result?.status !== 'applied') return { status: 'failed' }
+    const fields = result.fields
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length !== Object.keys(input.fields).length)
+      return { status: 'failed' }
+    for (const key of Object.keys(input.fields)) {
+      const field = Object.hasOwn(fields, key) && fields[key]
+      if (!field || typeof field !== 'object') return { status: 'failed' }
+      if ('detached' in field) {
+        if (field.detached !== true || Object.keys(field).length !== 1) return { status: 'failed' }
+      } else if (
+        (field.applied !== null && !digest(field.applied)) ||
+        ('pending' in field ? result.status !== 'prepared' || !digest(field.pending) || Object.keys(field).length !== 2 : Object.keys(field).length !== 1)
+      ) {
+        return { status: 'failed' }
+      }
+    }
+    if (result.status === 'applied') return { status: 'applied', fields }
+    return input.phase === 'preview' && digest(result.revision) ? { status: 'prepared', revision: result.revision, fields } : { status: 'failed' }
   }
   private async invoke<T>(
     instance: Parameters<NativePluginInstallTransport['install']>[0],

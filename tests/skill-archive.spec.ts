@@ -83,7 +83,7 @@ it('reserves shipped runtime skills without reserving runtime test fixtures and 
   await expect(
     inspectSkillArchive(skillZip([{ path: 'SKILL.md', content: validSkill.replace('example-skill', 'preview-tour') }]), runtimeSkillNames()),
   ).resolves.toMatchObject({ name: 'preview-tour' })
-  for (const name of ['office-docx', 'office', 'office-export-pdf', 'office-recalculate', 'office-render']) {
+  for (const name of ['dsh-doc', 'office-docx', 'office', 'office-pptx', 'office-xlsx']) {
     await expect(
       inspectSkillArchive(skillZip([{ path: 'SKILL.md', content: validSkill.replace('example-skill', name) }]), runtimeSkillNames()),
     ).rejects.toMatchObject({ code: 'skill-builtin-conflict' })

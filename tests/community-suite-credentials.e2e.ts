@@ -106,8 +106,9 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     await openWizard(page, card)
     const wizard = page.getByRole('dialog', { name: 'Team suite' })
     await wizard.getByText('Team credentials (optional)', { exact: true }).waitFor()
-    await wizard.getByText('Uses the team key through platform delegated execution.', { exact: true }).waitFor()
-    await wizard.getByText('Delegated execution · team-cli · TEAM_KEY').waitFor()
+    await wizard.getByText('Delegated CLI with a team key', { exact: true }).waitFor()
+    expect(await wizard.getByText('Uses the team key through platform delegated execution.', { exact: true }).count()).toBe(0)
+    await wizard.getByRole('listitem').filter({ hasText: 'team-cli' }).getByText('TEAM_KEY', { exact: true }).waitFor()
     await wizard.getByRole('button', { name: 'Install entry', exact: true }).click()
     await wizard.getByText('Missing credentials', { exact: true }).first().waitFor({ timeout: 60000 })
     expect(await execution()).toMatchObject({ enabled: false, suiteOrigin: 'suite:team-suite', variables: [{ name: 'TEAM_KEY', configured: false }] })
@@ -234,7 +235,7 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     const zhWizard = page.getByRole('dialog', { name: '团队套件' })
     await zhWizard.getByText('团队凭据（可选）', { exact: true }).waitFor()
     await zhWizard.getByText('可以跳过这一步。凭据全部保存之前，代执行保持关闭。', { exact: true }).waitFor()
-    await zhWizard.getByText('代执行 · team-cli · TEAM_KEY').waitFor()
+    await zhWizard.getByRole('listitem').filter({ hasText: 'team-cli' }).getByText('TEAM_KEY', { exact: true }).waitFor()
     await zhWizard.getByRole('button', { name: '安装条目', exact: true }).click()
     await zhWizard.getByText('缺少凭据', { exact: true }).waitFor({ timeout: 60000 })
     await page.getByRole('dialog', { name: '团队套件' }).getByText('保存以下凭据之前，代执行保持关闭：TEAM_KEY').waitFor()
@@ -322,7 +323,10 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
       } else await route.continue()
     })
     await wizard.getByRole('button', { name: 'Install entry', exact: true }).click()
-    await wizard.getByText('Installation succeeded. Some setup actions still need attention.', { exact: true }).waitFor()
+    const setupWarning = wizard.locator('.plugin-detail-section').filter({
+      has: page.getByRole('alert').getByText('Installation succeeded. Some setup actions still need attention.', { exact: true }),
+    })
+    await setupWarning.getByRole('alert').getByText('Warning', { exact: true }).waitFor()
     const stored = async () => await (await page.request.get(origin + '/admin/api/skills/execution/services?name=team-cli')).json()
     const firstBackend = async () => (await stored()).slots[0].backends[0]
     expect((await stored()).slots[0].backends[1]).toMatchObject({ complete: false })
@@ -343,6 +347,16 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     await page.getByRole('button', { name: 'View skills in team-suite', exact: true }).click()
     await page.getByRole('button', { name: 'View skill team-cli', exact: true }).click()
     await page.getByRole('tab', { name: 'Platform execution', exact: true }).click()
+    const executionPanel = page.getByRole('tabpanel', { name: 'Platform execution', exact: true })
+    await executionPanel.getByRole('heading', { name: 'Execution rules', exact: true }).waitFor()
+    const headings = await executionPanel.locator(':scope > section > h2, :scope > section > .plugin-section-heading > h2').allTextContents()
+    expect(headings.filter(heading => heading !== 'Execution preparation')).toEqual([
+      'Execution status',
+      'Service backends',
+      'Execution rules',
+      'Try execution',
+    ])
+    expect(await executionPanel.getByRole('button', { name: 'Add command', exact: true }).count()).toBe(0)
     const settings = page.getByRole('region', { name: 'Service backends', exact: true })
     await settings.locator('summary').filter({ hasText: 'Compatible API' }).click()
     expect(await settings.getByLabel('TEAM_URL', { exact: true }).inputValue()).toBe('https://service.example.test/v1')
@@ -437,7 +451,7 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
 async function openWizard(page: Page, card: ReturnType<Page['locator']>) {
   await card.getByText('Not installed', { exact: true }).waitFor()
   await card.getByRole('button', { name: 'View catalog entry Team suite', exact: true }).click()
-  await page.getByRole('dialog', { name: 'Team suite' }).getByText('This entry will install:', { exact: true }).waitFor()
+  await page.getByRole('dialog', { name: 'Team suite' }).getByText('This entry will install', { exact: true }).waitFor()
 }
 async function uninstall(page: Page, card: ReturnType<Page['locator']>, expert?: string) {
   await card.getByRole('button', { name: 'Uninstall', exact: true }).click()

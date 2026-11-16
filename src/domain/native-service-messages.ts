@@ -1,4 +1,7 @@
 export const en = {
+  'Restart the instance to apply service settings': 'Restart the instance to apply service settings',
+  'Personal plugin settings are preserved.': 'Personal plugin settings are preserved.',
+  'Platform settings apply at the next instance startup.': 'Platform settings apply at the next instance startup.',
   'Plugin setup': 'Plugin setup',
   'Platform settings changed. Apply them to this plugin.': 'Platform settings changed. Apply them to this plugin.',
   'Apply service settings': 'Apply service settings',
@@ -13,6 +16,9 @@ export const en = {
 }
 
 export const zhCN = {
+  'Restart the instance to apply service settings': '重启实例以应用服务设置',
+  'Personal plugin settings are preserved.': '已保留成员的个人插件配置。',
+  'Platform settings apply at the next instance startup.': '平台设置将在下次启动实例时生效。',
   'Plugin setup': '插件设置状态',
   'Platform settings changed. Apply them to this plugin.': '平台设置已更改，请应用到此插件。',
   'Apply service settings': '应用服务设置',

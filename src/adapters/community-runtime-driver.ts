@@ -19,7 +19,7 @@ import { communitySpacePath } from '../domain/community-space.js'
 import { instanceResourcesApplied, type InstanceResourceLimits } from '../domain/instance-resources.js'
 import { webServiceArgs } from '../dsh/cli.js'
 import { buildCommunityContainerLaunchCommand, communityContainerPassthroughEnvironment } from '../dsh/container.js'
-import { instanceResourceArguments } from '../dsh/member-resource-limits.js'
+import { applyContainerResources } from './apply-container-resources.js'
 import { memberSkillsMount, memberSkillsProvider } from '../dsh/member-skills.js'
 import { DSH_CONTAINER_HOME } from '../dsh/profile-layout.js'
 import { privateLaunchUrl } from '../dsh/readiness.js'
@@ -47,6 +47,9 @@ import { prepareManagedPlugins } from './managed-plugins.js'
 import { memberMcpPreparation } from './mcp-projection.js'
 import { prepareMemberExperts } from './member-experts.js'
 import { prepareMemberDependencyMounts, prepareMemberSkills } from './member-skills.js'
+import { prepareMemberVoiceProfile } from './member-voice-profile.js'
+import { nativeVoiceLaunch } from '../dsh/native-voice.js'
+import type { MemberVoicePreferencesPort, PreparedVoice } from '../ports/platform-voice.js'
 import { prepareMemberProfileInventory } from './member-profile-archive-facts.js'
 import { preparePluginCoordination } from './plugin-coordination.js'
 import { futurePluginYieldEntries, readonlyPreinstallPlugins } from './preinstall-plugin-coordination.js'
@@ -93,6 +96,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       readonly publicKey?: string
     },
     private readonly memberModels?: import('../ports/shared-models.js').MemberModelsProjectionPort,
+    private readonly platformVoice?: { prepared(): Promise<PreparedVoice | undefined>; preferences: MemberVoicePreferencesPort },
   ) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
@@ -205,8 +209,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const publicUrl = new URL(communitySpacePath(spaceId), publicOrigin)
     const listenerPort = this.config.container?.internalPort ?? (await loopbackPort())
     let preinstallFailures: readonly string[] = []
+    const voice = this.platformVoice ? await this.platformVoice.prepared() : undefined
+    let voiceSelected = false
     try {
       const runtimeHome = this.config.container ? DSH_CONTAINER_HOME : home
+      if (this.platformVoice) voiceSelected = await prepareMemberVoiceProfile(home, voice !== undefined, spaceId, this.platformVoice.preferences)
       const future = await futurePluginYieldEntries(
         this.config.dataRoot,
         readonlyPreinstallPlugins({
@@ -248,6 +255,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       environment.PATH = `${join(root, 'commands', 'live')}:${join(root, 'dependencies', 'live')}:${environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`
     }
     if (this.config.container && !this.hostnames) throw new Error('Container hostname storage is required to start an instance')
+    const voiceLaunch = nativeVoiceLaunch(voiceSelected ? voice : undefined, !!this.config.container, home)
     const containerInput = this.config.container
       ? {
           config: this.config,
@@ -267,7 +275,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
           gatewayUrl: access.url,
           ownership: this.ownership,
           environment,
-          dependencyVolumes,
+          dependencyVolumes: [...(dependencyVolumes ?? []), ...voiceLaunch.volumes],
           ...(managedPlugins ? { managedPlugins } : {}),
           ...(memberSkills ? { memberSkills } : {}),
           ...(memberMcp ? { memberMcp } : {}),
@@ -286,6 +294,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         platformPatch,
         ...(memberModels ? { modelsOverlay: memberModels.patch } : {}),
         overlays: [managedPlugins, memberSkills, memberMcp, memberExperts],
+        ...(this.platformVoice ? { voiceRows: voiceLaunch.rows } : {}),
         ...(containerInput ? { container: containerInput } : {}),
       },
       nativePatch,
@@ -439,19 +448,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits) {
     const container = this.config.container
     if (!container || !instance.containerName || !this.processes.has(instance)) throw new Error('Current member container is unavailable')
-    await this.containers.assertCarrier(instance)
-    try {
-      await execFileText(container.runtime, ['update', ...instanceResourceArguments(limits), instance.containerName], {
-        env: containerClientEnvironment(),
-        timeout: 30_000,
-      })
-    } catch {
-      /* A still-readable carrier can fall back to a confirmed restart. */
-    }
-    await this.containers.assertCarrier(instance)
-    const observed = await this.cgroups.read(instance.processId)
-    Object.assign(instance, { resourceLimits: observed })
-    return observed
+    return await applyContainerResources(container.runtime, this.containers, this.cgroups, instance, limits)
   }
   async running(instances: readonly CommunityUserInstance[]): Promise<readonly CommunityUserInstance[]> {
     if (this.config.container === undefined) return instances.filter(instance => this.processAlive(instance))

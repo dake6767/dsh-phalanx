@@ -13,7 +13,7 @@ function MarketPackRows({packs,resource,locale,renderSkill}){
   );
  })),detail?h(Modal,{open:true,title:detail.displayName??detail.name,description:detail.description,closeLabel:text('Close skill pack details'),onClose:()=>setSelected(undefined),className:'phalanx-market-dialog',contentClassName:'phalanx-market-modal phalanx-market-dialog-content'},
   h('div',{className:'phalanx-market-detail-body'},
-   h('section',null,h('h3',null,text('Skills')),h('ol',null,detail.skills.map(name=>h('li',{key:name},name)))),
+   h('section',null,h('h3',null,text('Skills')),h('ul',null,detail.skills.map(name=>h('li',{key:name},name)))),
    detail.instructions?h(MarketContent,{markdown:detail.instructions,locale,title:text('Orchestration instructions')}):null)
  ):null);
 }

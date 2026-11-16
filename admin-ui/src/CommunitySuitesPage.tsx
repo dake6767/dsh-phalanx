@@ -184,20 +184,15 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
                       <Card.Title>{entry.title[locale]}</Card.Title>
                       <CommunityIcon name="chevron" size={14} />
                     </div>
-                    <p className="plugin-summary-meta">
+                    <p className="plugin-summary-meta catalog-card-meta" title={`${entry.source[locale]} · v${entry.version}`}>
                       {entry.source[locale]} · v{entry.version}
-                      {entry.plugin
-                        ? ` · ${entry.plugin.packageName}`
-                        : entry.skills?.length
-                          ? ` · ${t('{count} skills', { count: entry.skills.length })}`
-                          : ''}
                     </p>
-                    <Card.Description>{entry.description[locale]}</Card.Description>
+                    {entry.description[locale].trim() !== entry.title[locale].trim() ? <Card.Description>{entry.description[locale]}</Card.Description> : null}
                   </Card.Header>
                   {entryError(entry) ? <p className="plugin-card-error">{t(entryError(entry)!)}</p> : null}
                   {entry.unavailableDetail ? <p className="plugin-card-error">{entry.unavailableDetail}</p> : null}
                   {manualOf(entry) !== undefined && installation === undefined ? (
-                    <p className="plugin-summary-meta">{t('Your manual dependency {name} is used; its version is not pinned', { name: manualOf(entry)! })}</p>
+                    <p className="plugin-card-error">{t('Your manual dependency {name} is used; its version is not pinned', { name: manualOf(entry)! })}</p>
                   ) : null}
                   {installation?.failureCode === 'skill-catalog-limit-exceeded' ? (
                     <p className="plugin-card-error" role="alert">
@@ -343,68 +338,73 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
           onClose={() => setDetails(undefined)}
           onSubmitted={refresh}
         >
-          {setupPending => (
-            <div className="plugin-settings-panel">
+          {(setupPending, installError, reload) => (
+            <>
               <section className="plugin-detail-section">
                 <div className="plugin-section-heading">
-                  <h2>{t('Installation record')}</h2>
+                  <h2>{t('Source')}</h2>
                   <Chip size="sm" variant="soft" color={selectedStatus?.tone}>
                     <span role="status">{selectedStatus?.label}</span>
                   </Chip>
                 </div>
+                {installError}
+                {reload}
                 {installationOf(details)?.failureCode === 'skill-catalog-limit-exceeded' ? (
                   <CommunityMessage role="alert" status="danger" title={platformError(locale, { code: 'skill-catalog-limit-exceeded', error: '' })} />
                 ) : null}
                 {entryError(details) && !selectedInstallation ? <p className="plugin-card-error">{t(entryError(details)!)}</p> : null}
                 {details.unavailableDetail ? <p className="plugin-card-error">{details.unavailableDetail}</p> : null}
-                <details className="mcp-preparation-log">
-                  <summary>{t('Technical details')}</summary>
-                  <dl className="catalog-entry-facts">
+                <dl className="catalog-entry-facts">
+                  <div>
+                    <dt>{details.sourceLinks?.length ? details.source[locale] : t('Source')}</dt>
+                    <dd className="catalog-source">
+                      {details.sourceLinks?.length
+                        ? details.sourceLinks.map(({ label, href }) => (
+                            <a key={href} href={href} target="_blank" rel="noreferrer">
+                              {label}
+                            </a>
+                          ))
+                        : details.source[locale]}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t('Catalog version')}</dt>
+                    <dd>
+                      {selectedInstallation?.version ?? details.version}
+                      {details.updateAvailable ? ` → ${details.version}` : ''}
+                    </dd>
+                  </div>
+                  {details.plugin ? (
                     <div>
-                      <dt>{t('Source')}</dt>
-                      <dd>{details.source[locale]}</dd>
-                    </div>
-                    <div>
-                      <dt>{t('Catalog version')}</dt>
+                      <dt>{t('Package')}</dt>
                       <dd>
-                        {selectedInstallation?.version ?? details.version}
-                        {details.updateAvailable ? ` → ${details.version}` : ''}
+                        {details.plugin.packageName}@{details.plugin.version}
                       </dd>
                     </div>
-                    {details.plugin ? (
-                      <div>
-                        <dt>{t('Package')}</dt>
-                        <dd>
-                          {details.plugin.packageName}@{details.plugin.version}
-                        </dd>
-                      </div>
-                    ) : null}
-                    {details.packName ? (
-                      <div>
-                        <dt>{t('Skill pack')}</dt>
-                        <dd>{details.packName}</dd>
-                      </div>
-                    ) : null}
-                    {details.serviceAddresses?.length ? (
-                      <div>
-                        <dt>{t('Service addresses')}</dt>
-                        <dd>{details.serviceAddresses.join(', ')}</dd>
-                      </div>
-                    ) : null}
-                    {details.execution ? (
-                      <div>
-                        <dt>{t('Delegated execution')}</dt>
-                        <dd>
-                          {details.execution.commands
-                            .map(
-                              row => row.command + (row.blocked.length ? ` (${t('Blocked first arguments: {names}', { names: row.blocked.join(' ') })})` : ''),
-                            )
-                            .join(', ')}
-                        </dd>
-                      </div>
-                    ) : null}
-                  </dl>
-                </details>
+                  ) : null}
+                  {details.packName ? (
+                    <div>
+                      <dt>{t('Skill pack')}</dt>
+                      <dd>{details.packName}</dd>
+                    </div>
+                  ) : null}
+                  {details.serviceAddresses?.length ? (
+                    <div>
+                      <dt>{t('Service addresses')}</dt>
+                      <dd>{details.serviceAddresses.join(', ')}</dd>
+                    </div>
+                  ) : null}
+                  {details.execution ? (
+                    <div>
+                      <dt>{t('Delegated execution')}</dt>
+                      <dd>
+                        {details.execution.commands
+                          .map(row => row.command + (row.blocked.length ? ` (${t('Blocked first arguments: {names}', { names: row.blocked.join(' ') })})` : ''))
+                          .join(', ')}
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
                 {selectedInstallation?.dependencies?.length ? (
                   <ul className="grant-rows">
                     {selectedInstallation.dependencies
@@ -426,25 +426,13 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
                     ))}
                   </ul>
                 ) : null}
+                {selectedInstallation?.log ? (
+                  <details className="mcp-preparation-log">
+                    <summary>{t('Task log')}</summary>
+                    <pre className="plugin-preparation-log">{selectedInstallation.log}</pre>
+                  </details>
+                ) : null}
               </section>
-              {selectedInstallation?.status === 'installed' && selectedInstallation.execution?.variables?.length ? (
-                <section className="plugin-detail-section">
-                  <CommunitySuiteCredentials
-                    key={JSON.stringify([selectedInstallation.version, selectedInstallation.contentHash])}
-                    entry={details}
-                    installation={selectedInstallation}
-                    onSaved={refresh}
-                    onDraft={reportDraft}
-                  />
-                </section>
-              ) : null}
-              {!setupPending && selectedInstallation?.status === 'installed'
-                ? selectedInstallation.entries.map(({ kind, name }) =>
-                    kind === 'execution' || kind === 'plugin' ? (
-                      <CommunityInstalledServiceSettings key={kind + ':' + name} kind={kind} name={name} onDraft={reportDraft} />
-                    ) : null,
-                  )
-                : null}
               {installationOf(details)?.entries.length ? (
                 <section className="plugin-detail-section">
                   <h2>{t('Installed entries')}</h2>
@@ -487,15 +475,25 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
                   </ul>
                 </section>
               ) : null}
-              {installationOf(details)?.log ? (
+              {selectedInstallation?.status === 'installed' && selectedInstallation.execution?.variables?.length ? (
                 <section className="plugin-detail-section">
-                  <details className="mcp-preparation-log">
-                    <summary>{t('Task log')}</summary>
-                    <pre className="plugin-preparation-log">{installationOf(details)!.log}</pre>
-                  </details>
+                  <CommunitySuiteCredentials
+                    key={JSON.stringify([selectedInstallation.version, selectedInstallation.contentHash])}
+                    entry={details}
+                    installation={selectedInstallation}
+                    onSaved={refresh}
+                    onDraft={reportDraft}
+                  />
                 </section>
               ) : null}
-            </div>
+              {!setupPending && selectedInstallation?.status === 'installed'
+                ? selectedInstallation.entries.map(({ kind, name }) =>
+                    kind === 'execution' || kind === 'plugin' ? (
+                      <CommunityInstalledServiceSettings key={kind + ':' + name} kind={kind} name={name} onDraft={reportDraft} />
+                    ) : null,
+                  )
+                : null}
+            </>
           )}
         </CommunitySuiteInstallDialog>
       ) : null}

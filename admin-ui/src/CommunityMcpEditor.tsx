@@ -217,6 +217,11 @@ export default function McpEditor({
             <Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>
               {t('Cancel')}
             </Button>
+            {settings && dirty ? (
+              <Button variant="tertiary" isDisabled={busy} onPress={discard}>
+                {t('Discard changes')}
+              </Button>
+            ) : null}
             <Button type="submit" form={id} isDisabled={busy || !valid || !dirty}>
               {busy ? t('Saving…') : t('Save')}
             </Button>
@@ -261,7 +266,6 @@ export default function McpEditor({
                 onReview={() => {
                   void reviewPublication()
                 }}
-                onDiscard={discard}
               />
 
               <McpBasicFields draft={draft} settings={settings} busy={busy} onChange={setDraft} />

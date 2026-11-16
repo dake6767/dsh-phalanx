@@ -8,7 +8,7 @@ it('installs a suite with skills, a pack and the CLI dependency, and honors wiza
   const preview = await f.suites.installPreview(actor, 'fixture-suite')
   expect(preview.creates).toEqual([
     { kind: 'runtime-dependency', name: 'suite-cli', commands: ['suite-cli'] },
-    { kind: 'skill', name: '2 skills', detail: 'https://git.example/repository @ aaaaaaa' },
+    { kind: 'skill', name: '2 skills', names: ['one', 'two'], detail: 'https://git.example/repository @ aaaaaaa' },
     { kind: 'skill-pack', name: 'fixture-suite', detail: '2 skills' },
   ])
   await f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa1', groups: ['team'], publish: true })

@@ -1,11 +1,10 @@
 import { useId, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
-import { Input } from '@heroui/react/input'
-import { Label } from '@heroui/react/label'
 import { PLUGIN_UPLOAD_MAX_BYTES } from '../../src/domain/plugin-library'
 import { uploadCommunityPlugin } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
+import CommunityFileField from './CommunityFileField'
 import CommunityMessage from './CommunityMessage'
 import { useDraftGuard } from './useDraftGuard'
 
@@ -62,18 +61,16 @@ export default function CommunityPluginUploadDialog({ onClose, onAdded, replacin
             void save()
           }}
         >
-          <Label htmlFor={`${id}-file`}>{t('Plugin archive (.tgz)')}</Label>
-          <Input
-            id={`${id}-file`}
-            type="file"
+          <CommunityFileField
+            label={t('Plugin archive (.tgz)')}
+            description={t('Choose an npm pack archive, up to 50 MB. Package information is checked in an isolated container.')}
             accept=".tgz,application/gzip"
             disabled={busy}
-            onChange={event => {
-              setFile(event.target.files?.[0])
+            onChange={next => {
+              setFile(next)
               setError(undefined)
             }}
           />
-          <p>{t('Choose an npm pack archive, up to 50 MB. Package information is checked in an isolated container.')}</p>
           {file && !valid ? <CommunityMessage role="alert" status="danger" title={t('Choose a nonempty .tgz file no larger than 50 MB.')} /> : null}
           {busy ? <p role="status">{t('Uploading and inspecting…')}</p> : null}
         </form>

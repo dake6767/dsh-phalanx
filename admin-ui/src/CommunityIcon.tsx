@@ -14,6 +14,7 @@ type IconName =
   | 'more'
   | 'logout'
   | 'close'
+  | 'trash'
   | 'shield'
   | 'chevron'
   | 'check'
@@ -27,6 +28,7 @@ type IconName =
   | 'usage'
   | 'brand'
 const paths: Record<IconName, string> = {
+  trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5',
   chevron: 'm9 5 7 7-7 7',
   check: 'M22 12a10 10 0 1 1-6-9M8 11l4 4L22 5',
   activity: 'M2 12h4l3-9 6 18 3-9h4',

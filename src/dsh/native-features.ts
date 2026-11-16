@@ -28,7 +28,7 @@ export function dshNativeFeatures(additions: readonly DshNativeFeatureRegistrati
     if (registration.feature.availability.available && !registration.entries.length) throw new TypeError('Available native features require entry bindings')
   const entries = new Map<string, readonly string[]>([
     ['plugin-install', ['tool-plugin-manager', 'tool-plugin-market']],
-    ['terminal', ['terminal-controller', 'ui-sidebar-terminal']],
+    ['terminal', ['ui-sidebar-terminal']],
     ...BUILTIN_NATIVE_PRESET_IDS.map(id => [`preset-${id}`, [`preset-${id}`]] as const),
     ...registrations.map(item => [item.feature.id, item.entries] as const),
   ])
@@ -60,7 +60,7 @@ export function nativeFeatureProjection(
     files['plugin-policy.mjs'] = nativePluginPolicyModule(policy)
     entries.push({ id: 'phalanx-native-plugin-policy', name: join(directory, 'plugin-policy.mjs') })
   }
-  if (patch.some(row => row.id === 'terminal-controller')) {
+  if (patch.some(row => row.id === 'ui-sidebar-terminal')) {
     files['terminal-access.mjs'] = nativeTerminalAccessModule
     entries.push({ id: 'phalanx-native-terminal-access', name: join(directory, 'terminal-access.mjs') })
   }

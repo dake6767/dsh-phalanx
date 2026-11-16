@@ -128,7 +128,7 @@ export default function CommunitySuiteUninstallDialog({
           ) : null}
           {preview.dependencies.length ? (
             <div className="page-stack">
-              <p>{t('Shared runtime dependencies:')}</p>
+              <p>{t('Shared runtime dependencies')}</p>
               {preview.dependencies.map(row =>
                 row.references.length ? (
                   <p key={row.id}>

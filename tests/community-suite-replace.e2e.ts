@@ -127,8 +127,9 @@ it('replaces confirmed manual entries in place, reuses a manual shared tool and 
     const card = (name: string) => page.locator('.plugin-library-card').filter({ hasText: name })
     await card('Chat suite').getByRole('button', { name: 'View catalog entry Chat suite', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Chat suite' })
-    await dialog.getByText('Shared tool · Your manual dependency my-shared is used; its version is not pinned', { exact: true }).waitFor()
-    await dialog.getByText('These manual entries will be replaced by the catalog version:', { exact: true }).waitFor()
+    const shared = dialog.getByRole('listitem').filter({ hasText: 'Shared tool' })
+    await shared.getByText('Your manual dependency my-shared is used; its version is not pinned', { exact: true }).waitFor()
+    await dialog.getByRole('alert').getByText('These manual entries will be replaced by the catalog version', { exact: true }).waitFor()
     await dialog.getByText('Runtime dependencies · my-chat', { exact: true }).waitFor()
     await dialog.getByText('Skills · chat-send', { exact: true }).waitFor()
     // Installing stays unavailable until the administrator confirms the takeover.

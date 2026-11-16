@@ -34,21 +34,33 @@ export default function CommunityPublicationSection({
   paused,
   unavailable,
   reason,
+  action,
+  consequence,
   children,
 }: {
   published: boolean
   paused?: boolean
   unavailable?: boolean
   reason?: ReactNode
-  children: ReactNode
+  action: ReactNode
+  consequence?: string
+  children?: ReactNode
 }) {
   const { t } = usePlatformLanguage()
   return (
     <CommunityGrantSection
       title={t('Platform App Center')}
-      action={<CommunityPublicationStatus published={published} paused={paused} unavailable={unavailable} />}
+      action={
+        <div className="publication-controls">
+          {reason ? <span className="publication-reason">{reason}</span> : null}
+          <CommunityPublicationStatus published={published} paused={paused} unavailable={unavailable} />
+          {action}
+        </div>
+      }
     >
-      {reason ? <p className="section-note">{reason}</p> : null}
+      <p className="section-note">
+        {consequence ?? t(published ? 'Members can select this resource when it is available.' : 'Members cannot select this resource in the app center.')}
+      </p>
       {children}
     </CommunityGrantSection>
   )

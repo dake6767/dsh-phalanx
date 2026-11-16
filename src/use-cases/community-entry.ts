@@ -20,6 +20,7 @@ interface EntryStartup {
 export class CommunityEntry {
   private closed = false
   private readonly starts = new Map<string, EntryStartup>()
+  private readonly entered = new WeakSet<CommunityUserInstance>()
   constructor(
     private readonly accounts: Pick<CommunityAccountOnboardingStorePort, 'authenticate' | 'getState'>,
     private readonly runtime: CommunityRuntimePort,
@@ -67,6 +68,7 @@ export class CommunityEntry {
     const status = this.runtime.status(userId)
     return (
       status.state === 'ready' &&
+      (!this.nativeServices || this.entered.has(status.instance)) &&
       status.instance.userId === userId &&
       status.instance.processId === instance.processId &&
       status.instance.origin === instance.origin
@@ -76,7 +78,9 @@ export class CommunityEntry {
     await this.storage?.assertAvailable()
     await this.account(userId)
     const status = this.runtime.status(userId)
-    return status.state === 'ready' && this.preinstalls?.firstEntryPending(status.instance) ? ({ state: 'starting', stage: 'preparing' } as const) : status
+    return status.state === 'ready' && (this.preinstalls?.firstEntryPending(status.instance) || (this.nativeServices && !this.entered.has(status.instance)))
+      ? ({ state: 'starting', stage: 'preparing' } as const)
+      : status
   }
   async startup(userId: string): Promise<CommunityStartupView> {
     const account = await this.account(userId)
@@ -194,6 +198,7 @@ export class CommunityEntry {
     const instance = await this.ensure(account.username, origin)
     await this.preinstalls?.awaitFirstEntry(instance, origin)
     await this.nativeServices?.ensureLaunch(account, instance, origin)
+    this.entered.add(instance)
     return instance
   }
   private async admit(account: CommunityAccountState, origin: URL, cookie?: string): Promise<{ instance: CommunityUserInstance; cookies: string[] }> {

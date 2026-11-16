@@ -21,7 +21,7 @@ it('pages matching skill summaries by stable cursor and rejects a member request
   }
 })
 
-it('creates ordered references and a note, previews conservative cascading deletion and rejects stale decisions', async () => {
+it('lists saved references by name, preserves the note and previews conservative cascading deletion', async () => {
   const f = await postgresSkillService()
   const {
     actor,
@@ -35,7 +35,7 @@ it('creates ordered references and a note, previews conservative cascading delet
     const input = { name: 'research', description: 'Research', skills: ['three', 'one', 'two'], instructions: 'Read one then two', published: true }
     await service.save(actor, input, await service.revision(actor))
     await service.publish(actor, input.name, true, await service.revision(actor))
-    expect((await service.list(actor))[0]).toMatchObject({ ...input, empty: false })
+    expect((await service.list(actor))[0]).toMatchObject({ ...input, skills: ['one', 'three', 'two'], empty: false })
     expect((await service.market(actor))[0]?.source).toBeNull()
     expect((await service.detail(actor, 'research')).removal.groups).toEqual([])
     await packs.grants.set('admin', ['research'])

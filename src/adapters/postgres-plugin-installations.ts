@@ -1,13 +1,15 @@
+import { nativeJsonSettingsHistoryKey } from '../ports/plugin-installations.js'
 import type {
   NativeServiceSettingsHistory,
   PluginInstallation,
+  PluginJsonSettingsSummaryPort,
   PluginInstallationsPort,
   PluginServiceSettingsHistoryPort,
 } from '../ports/plugin-installations.js'
 import { pluginSql, pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
 
 /** Latest successful native delivery per package survives plugin retirement. */
-export class PostgresPluginInstallations implements PluginInstallationsPort, PluginServiceSettingsHistoryPort {
+export class PostgresPluginInstallations implements PluginInstallationsPort, PluginServiceSettingsHistoryPort, PluginJsonSettingsSummaryPort {
   constructor(private readonly connection: PluginRepositoryConnection) {}
   async get(spaceId: string): Promise<readonly PluginInstallation[]> {
     return (
@@ -36,7 +38,8 @@ export class PostgresPluginInstallations implements PluginInstallationsPort, Plu
     await pluginSql(this.connection).query(
       `INSERT INTO dsh_phalanx.plugin_deliveries(space_id,package_name,version,source,integrity,service_origin,resource_origin) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(space_id,package_name) DO UPDATE SET version=EXCLUDED.version,source=EXCLUDED.source,integrity=EXCLUDED.integrity,service_origin=EXCLUDED.service_origin,resource_origin=EXCLUDED.resource_origin,service_settings=CASE
         WHEN EXCLUDED.service_origin IS NOT NULL AND plugin_deliveries.service_origin=EXCLUDED.service_origin
-        THEN plugin_deliveries.service_settings ELSE NULL END`,
+        THEN plugin_deliveries.service_settings
+        ELSE (SELECT jsonb_object_agg(key, value) FROM jsonb_each(plugin_deliveries.service_settings) WHERE value ? 'jsonFiles') END`,
       [spaceId, record.packageName, record.version, record.source, record.integrity ?? null, record.serviceOrigin ?? null, record.resourceOrigin ?? null],
     )
   }
@@ -57,11 +60,21 @@ export class PostgresPluginInstallations implements PluginInstallationsPort, Plu
     )
     return rows.length === 1
   }
+  async personalJsonFields(packageName: string, serviceOrigin: string): Promise<readonly { file: string; path: string }[]> {
+    return await pluginSql(this.connection).query<{ file: string; path: string }>(
+      `SELECT DISTINCT file.key AS file, field.key AS path
+       FROM dsh_phalanx.plugin_deliveries delivery
+       CROSS JOIN LATERAL jsonb_each(delivery.service_settings->$3::text->'jsonFiles') file
+       CROSS JOIN LATERAL jsonb_each(file.value) field
+       WHERE delivery.package_name=$1 AND delivery.service_origin=$2 AND field.value->'detached' = 'true'::jsonb`,
+      [packageName, serviceOrigin, nativeJsonSettingsHistoryKey],
+    )
+  }
   async resetForSpace(spaceId: string): Promise<void> {
     await pluginTransaction(this.connection, async sql => {
       await sql.query("DELETE FROM dsh_phalanx.plugin_deliveries WHERE space_id=$1 AND source='preinstall'", [spaceId])
       await sql.query(
-        'UPDATE dsh_phalanx.plugin_deliveries SET service_origin=NULL,resource_origin=NULL,service_settings=NULL WHERE space_id=$1 AND (service_origin IS NOT NULL OR resource_origin IS NOT NULL)',
+        'UPDATE dsh_phalanx.plugin_deliveries SET service_origin=NULL,resource_origin=NULL,service_settings=NULL WHERE space_id=$1 AND (service_origin IS NOT NULL OR resource_origin IS NOT NULL OR service_settings IS NOT NULL)',
         [spaceId],
       )
     })

@@ -1,6 +1,6 @@
 # dsh-phalanx admin UI design
 
-Updated: 2026-11-09. Applies to the admin app in `admin-ui/src` and the server-rendered
+Updated: 2026-11-15. Applies to the admin app in `admin-ui/src` and the server-rendered
 entry pages in `src/inbound` (sign in, account chooser, first-run setup, recovery).
 
 Phalanx surfaces inside native DSH follow the separate
@@ -48,11 +48,25 @@ Use these before writing new markup.
 - Workspace tabs: `.skill-library-tabs.library-workspace-tabs`.
 - Drawers: [`admin-ui/src/CommunityDialog.tsx`](src/CommunityDialog.tsx) with `drawer`; body is
   `.plugin-settings-panel` > `.plugin-detail-section`. The header shows the title once; no eyebrow, no repeated identity.
+- Catalog install drawers and installed plugin and skill drawers use 17px drawer titles, 15px section headings,
+  a 12px section gap, 12px vertical section padding, and an 8px gap inside sections.
+  In the skill contents tab, keep publication, the file list, and the file contents as separate sections on that same grid.
+- Catalog install drawers show the installation status beside Source. Keep task logs in their own disclosure.
+  Keep replacement and conflict notices in the affected section with a warning chip and plain text.
+  Put shared dependencies inside the install plan and keep backend options under their slot heading.
+  Show repository, package, or service documentation links and catalog facts directly in the Source section.
+  Align source links with the other fact values in the same column.
+  In the install plan, put the muted version immediately after the item name.
+- Installed catalog service backends stay editable under Access settings for plugins and Platform execution for skills.
+  In Platform execution, use sibling sections for status, service backends, execution rules, preparation when present, and trial execution.
+  Show catalog-managed commands as read-only text and secret credentials by saved status. Keep the editable controls for manual skill definitions.
+- Catalog card metadata stays on one line as “source · version”. Put the full value in details when the card truncates it.
 - Bordered section with optional action: [`admin-ui/src/CommunityGrantSection.tsx`](src/CommunityGrantSection.tsx).
 - Publication: [`admin-ui/src/CommunityPublicationSection.tsx`](src/CommunityPublicationSection.tsx)
   presents the first detail section and shared list status for plugins, skills, packs
   and MCP services. Each resource owns its impact confirmation and mutation. Publication
   and availability remain separate; MCP required-service policy uses a separate Use rules section.
+  Keep the status and action in the heading row. Put the current consequence on one line and any disabled reason next to the action.
 - MCP display fields share `McpDisplayFields`; localized catalog defaults remain separate from administrator overrides. Cards use the display title and retain a secondary technical identifier. (user-confirmed)
 - Grants: [`admin-ui/src/CommunityGrantList.tsx`](src/CommunityGrantList.tsx), a granted list plus an "Add" picker.
 - Dependency choice: [`admin-ui/src/CommunityDependencyPicker.tsx`](src/CommunityDependencyPicker.tsx), title-only checkboxes.

@@ -19,7 +19,7 @@ export class PostgresSkillPackStore implements SkillPackStorePort {
       revision: string
       skills: string[]
     }>(
-      `SELECT p.*,COALESCE((SELECT jsonb_agg(m.skill_name ORDER BY m.position) FROM dsh_phalanx.skill_pack_members m WHERE m.pack_name=p.name),'[]'::jsonb) AS skills FROM dsh_phalanx.skill_packs p ORDER BY p.name`,
+      `SELECT p.*,COALESCE((SELECT jsonb_agg(m.skill_name ORDER BY m.skill_name COLLATE "C") FROM dsh_phalanx.skill_pack_members m WHERE m.pack_name=p.name),'[]'::jsonb) AS skills FROM dsh_phalanx.skill_packs p ORDER BY p.name`,
     )
     return rows.map(row => ({
       name: row.name,

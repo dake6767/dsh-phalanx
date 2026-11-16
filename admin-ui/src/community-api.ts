@@ -44,6 +44,12 @@ import type {
 } from '../../src/domain/admin-contract'
 import type { CommunityEnvironmentResetResult, CommunityEnvironmentResetFailure } from '../../src/domain/admin-contract'
 import type { CommunityModelAction, CommunityModelSettings } from '../../src/domain/admin-contract'
+import type {
+  PlatformSearchSettingsChange,
+  PlatformSearchSettingsView,
+  PlatformVoiceSettingsChange,
+  PlatformVoiceSettingsView,
+} from '../../src/domain/admin-contract'
 
 export class CommunityApiRequestError extends Error {
   constructor(
@@ -70,12 +76,8 @@ export async function request<T>(path: string, init?: RequestInit, recovery = fa
   }
   return (await response.json()) as T
 }
-export function communitySession(signal?: AbortSignal): Promise<CommunityManagementSession> {
-  return request('/admin/api/session', { signal })
-}
-export function communityAccounts(signal?: AbortSignal): Promise<CommunityAccountsPageData> {
-  return request('/admin/api/accounts', { signal })
-}
+export const communitySession = (signal?: AbortSignal) => request<CommunityManagementSession>('/admin/api/session', { signal })
+export const communityAccounts = (signal?: AbortSignal) => request<CommunityAccountsPageData>('/admin/api/accounts', { signal })
 export function createCommunityAccount(input: CommunityCreateAccountRequest): Promise<CommunityAccountView> {
   return request('/admin/api/accounts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
 }
@@ -493,6 +495,22 @@ export function communityDownloadSources(signal?: AbortSignal): Promise<Communit
 }
 export function saveCommunityDownloadSources(input: DownloadSourceSelection): Promise<CommunityDownloadSourcesView> {
   return request('/admin/api/download-sources', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+}
+
+export const platformVoiceSettings = (signal?: AbortSignal) => request<PlatformVoiceSettingsView>('/admin/api/platform-voice', { signal })
+export const savePlatformVoiceSettings = (input: PlatformVoiceSettingsChange) =>
+  request<PlatformVoiceSettingsView>('/admin/api/platform-voice', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+
+export function platformSearchSettings(signal?: AbortSignal): Promise<PlatformSearchSettingsView> {
+  return request('/admin/api/platform-search', { signal })
+}
+
+export function savePlatformSearchSettings(input: PlatformSearchSettingsChange): Promise<PlatformSearchSettingsView> {
+  return request('/admin/api/platform-search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
 }
 
 export function communityExperts(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityExpertLibrary> {

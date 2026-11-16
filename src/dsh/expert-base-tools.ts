@@ -1,4 +1,4 @@
-// Public standard preset configuration for DSH 66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db.
+// Public standard preset configuration for DSH 38a6a5c965aa99ab525161efb7cc5cf1fe62fced.
 // Keep the complete list aligned whenever the supported DSH revision changes.
 const entries: readonly Record<string, unknown>[] = [
   {
@@ -58,6 +58,14 @@ const entries: readonly Record<string, unknown>[] = [
   {
     id: 'skill-filesystem',
     name: '@deepseek-ai/dsh-skill-filesystem',
+    config: {
+      customSkillDirs: [
+        {
+          __jsExpr:
+            "process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')), 'skills')",
+        },
+      ],
+    },
   },
   {
     id: 'tool-skill',
@@ -128,6 +136,7 @@ const entries: readonly Record<string, unknown>[] = [
       {
         id: 'tool-subagent-control',
         name: '@deepseek-ai/dsh-tool-subagent-control',
+        config: { interrupt: false },
       },
       {
         id: 'tool-subagent',
@@ -182,6 +191,10 @@ const entries: readonly Record<string, unknown>[] = [
   {
     id: 'present',
     name: '@deepseek-ai/dsh-tool-present',
+  },
+  {
+    id: 'tool-office',
+    name: '@deepseek-ai/dsh-tool-office',
   },
   {
     id: 'tool-plugin-manager',

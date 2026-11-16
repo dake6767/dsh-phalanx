@@ -7,6 +7,7 @@ const authorizationTables = [
   'plugin_runtime_dependencies',
   'plugin_grants',
   'plugin_choices',
+  'plugin_access_settings',
   'plugin_upstream_settings',
   'plugin_upstreams',
 ].map(table => 'dsh_phalanx.' + table)

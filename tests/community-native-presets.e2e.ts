@@ -153,6 +153,7 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     await api(expertPath, { names: [expert.id], revision: (await api(expertPath)).revision, confirmed: true })
     const home = join(await memberSpacePath(root, 'member'), 'home')
     await mkdir(join(home, 'Documents/deepseek-harness/default-workspace'), { recursive: true, mode: 0o700 })
+    await writeFile(join(home, 'Documents/deepseek-harness/default-workspace/rc3-search-probe.txt'), 'Workspace search probe')
     const observer = join(home, 'preset-fixture')
     await mkdir(observer, { mode: 0o700 })
     await copyFile('tests/fixtures/native-preset-observer.mjs', join(observer, 'index.mjs'))
@@ -174,8 +175,17 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     await signInCommunity(page, origin, 'member', 'password')
     const workspace = CONTAINER_HOME + '/Documents/deepseek-harness/default-workspace'
     await selectCommunityWorkspace(member, page, origin, workspace, true)
+    await expect.poll(() => page.locator('[data-native-directory-flows]').getAttribute('data-native-directory-flows')).toBe('1,1,1')
     const rpc = createBrowserDshRpc(member)
     const remote = async <T>(method: string, args: object = {}) => rpc.remoteRpc<T>(origin, await cookieHeader(member, origin), method, args)
+    const picker = await remote<{ moduleName: string; enabled: boolean }[]>('pluginManager/listPlugins')
+    expect(picker).toContainEqual(expect.objectContaining({ moduleName: '@deepseek-ai/dsh-host-directory-picker-auto', enabled: false }))
+    expect(picker).toContainEqual(
+      expect.objectContaining({
+        moduleName: '@deepseek-ai/dsh-client-ui-directory-picker-browse',
+        enabled: true,
+      }),
+    )
     const roster = async () => (await remote<{ presets: { id: string; broken?: string; isDefault: boolean }[] }>('agentPresets/list')).presets
     const adopted = await remote<{ workspace: { workspaceId: string } }>('workspace/create', { request: { path: workspace } })
     const workspaceId = adopted.workspace.workspaceId
@@ -253,14 +263,33 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
       expect(session.agentPreset).toBe(id)
       const catalog = await observe('catalog', session.sessionId)
       expect(catalog.names).not.toContain('web_fetch')
-      if (id !== 'minimal') expect(catalog.names).toContain('web_search')
+      expect((await observe('refresh-tools', session.sessionId)).names).not.toContain('web_search')
       const probe = await observe('fetch-guard', session.sessionId, id === 'ptc')
       expect(probe.attempted).toBe(false)
       expect(JSON.stringify(probe.outcome)).toContain('Web fetch is unavailable in this deployment.')
       expect(fetchProbeHits).toBe(0)
       if (id === 'standard' || id === 'cordis') await completeTurn(session.sessionId)
     }
+    const forge = await remote<{ application: string }>('pluginManager/setBundleEnabled', {
+      name: '@deepseek-ai/dsh-experimental-forge-bundle',
+      enabled: true,
+    })
+    expect(['applied', 'restart-required']).toContain(forge.application)
+    if (forge.application === 'restart-required') await restart()
+    const inventory = await remote<{ moduleName: string; enabled: boolean; fiberPhase: string | null }[]>('pluginManager/listPlugins')
+    expect(inventory).toContainEqual(expect.objectContaining({ moduleName: '@deepseek-ai/dsh-experimental-forge', enabled: true, fiberPhase: 'active' }))
+    expect(inventory).toContainEqual(expect.objectContaining({ moduleName: '@deepseek-ai/dsh-experimental-client-ui-forge', enabled: true }))
     const admission = await create('standard')
+    const files = await remote<{ matches: { path: string; type: string }[] }>('workspaceFiles/search', {
+      workspaceFileScopeId: admission.sessionId,
+      request: { query: 'rc3-search-probe', excludedPaths: [], includeHidden: false, respectGitignore: true },
+    })
+    expect(files.matches).toContainEqual({ path: 'rc3-search-probe.txt', type: 'file' })
+    await remote('agentTeams/setEnabled', { agentId: admission.sessionId, enabled: true })
+    expect((await observe('refresh-tools', admission.sessionId)).names).toContain('team_task_list')
+    await remote('agentTeams/setEnabled', { agentId: admission.sessionId, enabled: false })
+    expect((await observe('refresh-tools', admission.sessionId)).names).not.toContain('team_task_list')
+    await completeTurn(admission.sessionId)
     expect(await observe('writer-lock-resolve', admission.sessionId)).toEqual({ hmrReleasedBeforeWriter: true })
     expect(await observe('cancel-resolve', admission.sessionId)).toEqual({ cancelledWhileBlocked: true, expectedReason: true })
     const service = (endpoint: string) => ({ name: 'p-admission', description: 'Step admission fixture', url: modelOrigin + endpoint })
@@ -361,12 +390,20 @@ it('restricts builtin presets at restart, repairs only disabled defaults, retain
     const expertSession = await create()
     expect(expertSession.agentPreset).toBe(expertPreset)
     expect((await observe('catalog', expertSession.sessionId)).names).not.toContain('web_fetch')
+    expect((await observe('refresh-tools', expertSession.sessionId)).names).not.toContain('web_search')
     expect((await observe('fetch-guard', expertSession.sessionId)).attempted).toBe(false)
     expect(fetchProbeHits).toBe(0)
     expect(await observe('tool', expertSession.sessionId)).toMatchObject({
       isError: false,
       value: { exitCode: 0, stdout: { text: 'PRESET_EXPERT_TOOL_OK\n' } },
     })
+    const search = await api('platform-search')
+    await api('platform-search', { action: 'save', revision: search.revision, enabled: true, apiKey: 'fictional-expert-search-key' })
+    expect((await observe('refresh-tools', expertSession.sessionId)).names).not.toContain('web_search')
+    await restart()
+    const expertWithSearch = await create(expertPreset)
+    expect((await observe('refresh-tools', expertWithSearch.sessionId)).names).toContain('web_search')
+    expect((await observe('catalog', expertWithSearch.sessionId)).names).not.toContain('web_fetch')
     await setDefault('ptc')
     await restart()
     expect((await create()).agentPreset).toBe('minimal')

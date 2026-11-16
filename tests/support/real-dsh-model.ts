@@ -10,14 +10,16 @@ export function latestHumanText(body: unknown): string {
         : Array.isArray(content)
           ? content.filter(block => isRecord(block) && block.type === 'text').map(block => String(block.text ?? ''))
           : []
-    // Native Anthropic adapters serialize synthetic time and skill catalog context
-    // as user messages after the human prompt. These are not fixture tasks.
+    // Native Anthropic adapters serialize runtime context, time and skill catalog
+    // reminders as user messages after the human prompt.
     const humanText = textBlocks
       .filter(
         text =>
           !text.startsWith('Current runtime context') &&
           !text.startsWith('Time sampled while preparing turn ') &&
           !text.startsWith('[model changed:') &&
+          !text.startsWith('<system-reminder>\nThe following information describes your current session') &&
+          !text.startsWith('<system-reminder>\nCurrent runtime context: none.') &&
           !text.startsWith('<system-reminder>\nThe available skill catalog changed.') &&
           !text.startsWith('<system-reminder>\nA skill is a reusable set of task-specific instructions.'),
       )

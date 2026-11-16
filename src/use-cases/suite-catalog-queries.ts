@@ -130,7 +130,13 @@ export class SuiteCatalogQueries {
       reason === undefined
         ? entry.items.map(item => {
             const plan = this.operationsFor(item.kind).plan(item)
-            return { kind: item.kind, name: plan.name, ...(plan.commands ? { commands: plan.commands } : {}), ...(plan.detail ? { detail: plan.detail } : {}) }
+            return {
+              kind: item.kind,
+              name: plan.name,
+              ...(item.kind === 'skill' ? { names: item.names } : {}),
+              ...(plan.commands ? { commands: plan.commands } : {}),
+              ...(plan.detail ? { detail: plan.detail } : {}),
+            }
           })
         : []
     const dependencies = [

@@ -8,7 +8,6 @@ import { DEEPSEEK_WEB_TOOLS_HOST } from '../src/dsh/web-tools.js'
 import { MemorySessionRegistry } from '../src/adapters/memory-session-registry.js'
 import { CommunityModelAccessError } from '../src/domain/community-model.js'
 import { communityWebToolsMessage } from '../src/domain/community-web-tools.js'
-import type { SharedModelState } from '../src/domain/shared-models.js'
 import type { WebToolsOperation } from '../src/ports/community-web-tools.js'
 
 const listen = async (server: Server) => {
@@ -20,22 +19,6 @@ const readBody = async (request: IncomingMessage) => {
   for await (const chunk of request) chunks.push(Buffer.from(chunk as Uint8Array))
   return Buffer.concat(chunks).toString('utf8')
 }
-const deepSeekState = (apiKey = 'platform-deepseek-fixture'): SharedModelState => ({
-  revision: 1,
-  defaultModelId: 'deepseek-chat',
-  providers: [
-    {
-      id: 'provider',
-      name: 'DeepSeek',
-      baseUrl: 'https://api.deepseek.com/anthropic',
-      apiFormat: 'anthropic-messages',
-      apiKey,
-      enabled: true,
-      models: [{ id: 'deepseek-chat', name: 'deepseek-chat', enabled: true, input: 'text' }],
-    },
-  ],
-})
-
 describe('member web retrieval gateway', () => {
   const servers: Server[] = []
   afterEach(async () => {
@@ -47,7 +30,7 @@ describe('member web retrieval gateway', () => {
 
   const host = async (input: {
     operation?: WebToolsOperation
-    fixtures: { state?: SharedModelState; upstream?: (request: IncomingMessage, response: import('node:http').ServerResponse) => void }
+    fixtures: { credential?: () => string | undefined; upstream?: (request: IncomingMessage, response: import('node:http').ServerResponse) => void }
     timeoutMs?: number
   }) => {
     let base = 'https://api.deepseek.com/v1/tools'
@@ -67,10 +50,10 @@ describe('member web retrieval gateway', () => {
         return 'member'
       }),
       connections,
-      upstream:
-        input.fixtures.upstream === undefined
-          ? communityWebToolsUpstream({ read: () => input.fixtures.state ?? deepSeekState() })
-          : communityWebToolsUpstream({ read: () => input.fixtures.state ?? deepSeekState() }, base),
+      upstream: communityWebToolsUpstream(
+        { credential: async () => (input.fixtures.credential ? input.fixtures.credential() : 'platform-deepseek-fixture') },
+        input.fixtures.upstream === undefined ? undefined : base,
+      ),
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     })
     const operation = input.operation ?? 'search'
@@ -115,11 +98,11 @@ describe('member web retrieval gateway', () => {
     expect(captured).toEqual({
       path: '/v1/tools/search',
       authorization: 'Bearer platform-deepseek-fixture',
-      body: { query: 'fixture query', count: 8, need_content: false, ori_question: 'how do I' },
+      body: { query: 'fixture query', count: 8, need_content: false },
     })
   })
 
-  it('normalizes a fetch URL and never accepts a non-HTTP target', async () => {
+  it('does not send fetch requests to the upstream', async () => {
     const captured: { path: string | undefined; body: Record<string, unknown> | undefined } = { path: undefined, body: undefined }
     const origin = await host({
       operation: 'fetch',
@@ -132,8 +115,8 @@ describe('member web retrieval gateway', () => {
         },
       },
     })
-    expect((await call(origin, JSON.stringify({ url: 'https://example.test/a' }))).status).toBe(200)
-    expect(captured).toEqual({ path: '/v1/tools/fetch', body: { url: 'https://example.test/a' } })
+    expect((await call(origin, JSON.stringify({ url: 'https://example.test/a' }))).status).toBe(503)
+    expect(captured).toEqual({ path: undefined, body: undefined })
     expect((await call(origin, JSON.stringify({ url: 'file:///etc/passwd' }))).status).toBe(400)
     expect((await call(origin, JSON.stringify({ url: 'javascript:alert(1)' }))).status).toBe(400)
   })
@@ -153,11 +136,11 @@ describe('member web retrieval gateway', () => {
   })
 
   it('reports the missing platform credential without naming a member key', async () => {
-    const origin = await host({ fixtures: { state: { revision: 1, defaultModelId: null, providers: [] } } })
+    const origin = await host({ fixtures: { credential: () => undefined } })
     const response = await call(origin, JSON.stringify({ query: 'fixture query' }))
     expect(response.status).toBe(503)
     const text = await response.text()
-    expect(text).toContain(`credential for ${DEEPSEEK_WEB_TOOLS_HOST}`)
+    expect(text).toContain(`Platform DeepSeek Search for ${DEEPSEEK_WEB_TOOLS_HOST} is not configured`)
     expect(text).toContain('administrator')
     expect(text).not.toContain('API key')
   })
@@ -222,7 +205,7 @@ describe('member web retrieval gateway', () => {
 })
 
 describe('production retrieval destination', () => {
-  const store = { read: () => deepSeekState() }
+  const store = { credential: async () => 'platform-deepseek-fixture' }
 
   it('keeps the official host unless an explicit test-only seam allows another', () => {
     expect(() => new SharedCommunityWebToolsUpstream(store, 'https://mirror.example.test/v1/tools')).toThrow(DEEPSEEK_WEB_TOOLS_HOST)

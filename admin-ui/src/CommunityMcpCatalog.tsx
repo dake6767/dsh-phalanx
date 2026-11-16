@@ -76,10 +76,10 @@ export default function CommunityMcpCatalog({
                     <Card.Title>{entry.title[locale]}</Card.Title>
                     <CommunityIcon name="chevron" size={14} />
                   </div>
-                  <p className="plugin-summary-meta">
-                    {t(locationKey(entry.location))} · v{entry.version}
+                  <p className="plugin-summary-meta catalog-card-meta" title={`${t('Platform catalog')} · v${entry.version}`}>
+                    {t('Platform catalog')} · v{entry.version}
                   </p>
-                  <Card.Description>{entry.description[locale]}</Card.Description>
+                  {entry.description[locale].trim() !== entry.title[locale].trim() ? <Card.Description>{entry.description[locale]}</Card.Description> : null}
                 </Card.Header>
                 <Card.Footer className="plugin-card-status">
                   <span className="mcp-catalog-credential">{entry.credentialLabel?.[locale] ?? t('No credential required')}</span>
@@ -108,6 +108,7 @@ export default function CommunityMcpCatalog({
       {selected ? (
         <CatalogImport
           entry={selected}
+          imports={rows?.flatMap(row => (row.catalog?.id === selected.id ? [row.catalog.status] : []))}
           onClose={() => setSelected(undefined)}
           onImported={next => {
             onImported(next)
@@ -120,10 +121,12 @@ export default function CommunityMcpCatalog({
 }
 function CatalogImport({
   entry,
+  imports,
   onClose,
   onImported,
 }: {
   entry: CommunityMcpCatalogEntry
+  imports: readonly NonNullable<CommunityMcpSettings['catalog']>['status'][] | undefined
   onClose: () => void
   onImported: (rows: readonly CommunityMcpSettings[]) => void
 }) {
@@ -136,6 +139,19 @@ function CatalogImport({
   const [display, setDisplay] = useState<CommunityMcpCatalogInput['display']>()
   const [requestId] = useState(communityRequestId),
     pending = useRef(false)
+  const ready = imports?.filter(status => status === 'ready').length ?? 0
+  const activity = imports?.includes('preparing') ? 'Preparing dependencies…' : imports?.includes('testing') ? 'Testing imported service…' : undefined
+  const failed = imports?.includes('failed')
+  const installationStatus = activity
+    ? ({ color: 'warning', label: t(activity) } as const)
+    : failed
+      ? ({ color: 'danger', label: t('Import failed') } as const)
+      : ready
+        ? ({ color: 'success', label: t('{count} imported services', { count: ready }) } as const)
+        : ({
+            color: 'default',
+            label: imports === undefined && entry.imported ? t('{count} imported services', { count: entry.imported }) : t('Not installed'),
+          } as const)
   const submit = async () => {
     if (pending.current) return
     pending.current = true
@@ -155,7 +171,7 @@ function CatalogImport({
   return (
     <CommunityDialog
       drawer
-      drawerClassName="plugin-drawer library-form-drawer mcp-service-drawer"
+      drawerClassName="plugin-drawer library-form-drawer mcp-service-drawer compact-detail-drawer"
       title={entry.title[locale]}
       busy={busy}
       onClose={onClose}
@@ -170,33 +186,50 @@ function CatalogImport({
         </>
       }
     >
-      <p className="plugin-summary-description">{entry.description[locale]}</p>
-      {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
       <form
         id={id}
-        className="plugin-settings-panel mcp-catalog-import"
+        className="plugin-settings-panel catalog-install-sections mcp-catalog-import"
         onSubmit={event => {
           event.preventDefault()
           void submit()
         }}
       >
-        <section className="plugin-detail-section" aria-label={t('Service details')}>
+        {entry.description[locale].trim() && entry.description[locale].trim() !== entry.title[locale].trim() ? (
+          <section className="plugin-detail-section" aria-label={t('Description')}>
+            <p className="catalog-entry-description">{entry.description[locale]}</p>
+          </section>
+        ) : null}
+        <section className="plugin-detail-section">
           <div className="plugin-section-heading">
-            <h2>{t('Service details')}</h2>
+            <h2>{t('Source')}</h2>
+            <Chip size="sm" variant="soft" color={installationStatus.color}>
+              <span role="status">{installationStatus.label}</span>
+            </Chip>
+          </div>
+          {error ? (
+            <p role="alert" className="plugin-card-error">
+              {errorText(error)}
+            </p>
+          ) : null}
+          <p className="catalog-source">
+            {t(locationKey(entry.location))}
             <a href={entry.documentation} target="_blank" rel="noreferrer">
               {t('Service documentation')}
             </a>
-          </div>
-          <div className="plugin-section-heading">
-            <p>{t('Catalog version {version}', { version: entry.version })}</p>
-            <Chip size="sm" variant="soft">
-              {t(locationKey(entry.location))}
-            </Chip>
-          </div>
-          <p className="mcp-section-note">{t('Connection settings are maintained by the platform.')}</p>
+          </p>
         </section>
-        <section className="plugin-detail-section" aria-label={t('Access settings')}>
-          <h2>{t('Access settings')}</h2>
+        <section className="plugin-detail-section">
+          <h2>{t('This entry will install')}</h2>
+          <ul className="grant-rows catalog-plan-rows">
+            <li>
+              <div className="grant-row-main">
+                <p className="grant-row-title catalog-plan-title">
+                  <span>{t('MCP service')} ·</span> <strong>{name}</strong>
+                  <span> · {t('Catalog version {version}', { version: entry.version })}</span>
+                </p>
+              </div>
+            </li>
+          </ul>
           <CommunityField
             label={t('MCP service name')}
             value={name}
@@ -214,6 +247,11 @@ function CatalogImport({
             busy={busy}
             onChange={setDisplay}
           />
+        </section>
+        <section className="plugin-detail-section">
+          <h2>{t('Service backends')}</h2>
+          <h3>{t(locationKey(entry.location))}</h3>
+          <p className="section-note">{t('Connection settings are maintained by the platform.')}</p>
           {entry.credentialLabel ? (
             <CommunityField
               label={entry.credentialLabel[locale]}
@@ -228,10 +266,10 @@ function CatalogImport({
             <p className="mcp-section-note">{t('No credential required')}</p>
           )}
         </section>
-        <p className="mcp-catalog-import-note">
-          <CommunityIcon name="shield" size={16} />
-          <span>{t('Adding a service does not grant access or publish it.')}</span>
-        </p>
+        <section className="plugin-detail-section">
+          <h2>{t('Access and publication')}</h2>
+          <p className="section-note">{t('Adding a service does not grant access or publish it.')}</p>
+        </section>
       </form>
     </CommunityDialog>
   )

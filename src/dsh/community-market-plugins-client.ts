@@ -157,19 +157,22 @@ function PluginsPanel({ setupOnly = false } = {}) {
    failed: 'Platform service setup failed.',
    inactive: 'Platform service unavailable. Choose a service in the plugin settings.',
    conflict: 'Plugin settings changed. Review them before retrying.',
+   personal: 'Personal plugin settings are preserved.',
    unsupported: 'This plugin version or configuration does not support platform services.',
   };
-  const retry = bindings.some(binding => ['failed', 'conflict', 'inactive', 'pending'].includes(binding.status));
+  const retry = bindings.some(binding => !binding.nextStart && ['failed', 'conflict', 'inactive', 'pending'].includes(binding.status));
+  const restart = bindings.some(binding => binding.nextStart && ['failed', 'conflict', 'pending'].includes(binding.status));
   const refresh = bindings.some(binding => binding.refresh);
-  const pending = bindings.some(binding => binding.status === 'pending');
+  const pending = bindings.some(binding => binding.status === 'pending' && !binding.nextStart);
   return h(React.Fragment, null,
    bindings.filter(binding => statusText[binding.status]).map(binding => h('p', {
     key: binding.slot, className: 'phalanx-market-status', role: 'status',
-   }, (binding.slot ? binding.slot + ' · ' : '') + text(statusText[binding.status]))),
+   }, (binding.slot ? binding.slot + ' · ' : '') + text(binding.nextStart && binding.status === 'pending' ? 'Platform settings apply at the next instance startup.' : statusText[binding.status]))),
    retry ? h(Button, {
     variant: 'outline', size: 'sm', disabled: busy !== undefined,
     onClick: () => void change(packageName, 'retry-settings'),
    }, text(pending ? 'Apply service settings' : 'Retry service setup')) : null,
+   restart ? h('a', { href: '/recovery' }, text('Restart the instance to apply service settings')) : null,
    refresh ? h('p', { className: 'phalanx-market-status', role: 'status' }, text('Platform settings saved. Reload the plugin panel.')) : null);
  }
 

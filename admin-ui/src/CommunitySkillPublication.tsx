@@ -44,20 +44,19 @@ export default function CommunitySkillPublication({ detail }: { detail: Communit
       published={detail.published}
       unavailable={detail.conflict}
       reason={detail.conflict ? t('Conflicts with a bundled runtime skill. Distribution is paused.') : undefined}
+      action={
+        <Button
+          variant="secondary"
+          isDisabled={busy || (!detail.published && !!detail.conflict)}
+          onPress={() => {
+            void review()
+          }}
+        >
+          {t(detail.published ? 'Unpublish resource' : 'Publish resource')}
+        </Button>
+      }
     >
-      <p>{t('Publishing lets all members select this resource when it is available.')}</p>
-      <p>{t('Unpublishing clears selections of this skill. Group grants and skill packs are kept.')}</p>
-      <p>{t('Republishing does not restore removed member selections.')}</p>
       {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
-      <Button
-        variant="secondary"
-        isDisabled={busy || (!detail.published && !!detail.conflict)}
-        onPress={() => {
-          void review()
-        }}
-      >
-        {t(detail.published ? 'Unpublish resource' : 'Publish resource')}
-      </Button>
       {confirmation ? (
         <CommunityDialog
           title={t(title)}
@@ -88,7 +87,7 @@ export default function CommunitySkillPublication({ detail }: { detail: Communit
             )}
           </p>
           {confirmation.hasPlatformCredential ? <p>{t('All members can use the platform credentials through this resource.')}</p> : null}
-          <p>{t('Republishing does not restore removed member selections.')}</p>
+          {confirmation.published ? <p>{t('Republishing does not restore removed member selections.')}</p> : null}
           <p>{t('{count} members selected this skill.', { count: confirmation.selectedMembers })}</p>
           <CommunityMessage status="warning" title={t('Changes apply to new sessions. Running tasks using this skill may fail.')} />
         </CommunityDialog>

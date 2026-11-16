@@ -39,7 +39,7 @@ export function nativeInstallProof(
 
 /** One named verifier owns the bounded replay facts for its immutable member generation. */
 export const nativeInstallVerifierModule = `import {createHash,createPublicKey,verify} from 'node:crypto';
-export function createVerifier(publicKey,subject,generation,now=Date.now) {
+function createVerifier(publicKey,subject,generation,now=Date.now) {
   const key=createPublicKey(publicKey);
   const used=new Map();
   return {

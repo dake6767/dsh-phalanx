@@ -10,10 +10,12 @@ it('accepts populated rebuildable subtrees and refuses durable facts, unknown si
     await mkdir(join(root, 'skills/artifacts/fixture'), { recursive: true })
     await writeFile(join(root, 'skills/artifacts/fixture/manifest.json'), '{}')
     await mkdir(join(root, 'plugins/uploads/incoming'), { recursive: true })
+    await mkdir(join(root, 'platform-voice/blobs'), { recursive: true })
+    await writeFile(join(root, 'platform-voice/blobs/model'), 'cached')
     await mkdir(join(root, 'mcp/members/member'), { recursive: true })
     await writeFile(join(root, 'platform.lock'), '')
     expect(await inspectDataRoot(root)).toEqual({
-      artifacts: ['plugins/uploads/incoming', 'skills/artifacts'],
+      artifacts: ['platform-voice', 'plugins/uploads/incoming', 'skills/artifacts'],
       projections: ['mcp/members'],
       runtime: [],
       files: ['platform.lock'],

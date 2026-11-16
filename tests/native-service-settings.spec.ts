@@ -1,3 +1,5 @@
+import { nativeReplacementImports } from '../src/dsh/native-plugin-replacement.js'
+import { nativeJsonServiceSettingsModule } from '../src/dsh/native-json-service-settings.js'
 import { expect, it, vi } from 'vitest'
 import { nativeServiceSettingsModule } from '../src/dsh/native-service-settings.js'
 
@@ -18,7 +20,7 @@ const intent = {
 }
 
 async function settingsWorker() {
-  const module = 'data:text/javascript;base64,' + Buffer.from(nativeServiceSettingsModule).toString('base64')
+  const module = 'data:text/javascript;base64,' + Buffer.from(nativeServiceSettingsModule + '\nexport { syncNativeServiceSettings }').toString('base64')
   const { syncNativeServiceSettings } = (await import(/* @vite-ignore */ module)) as {
     syncNativeServiceSettings: (
       invoke: (endpoint: string, args: object) => Promise<unknown>,
@@ -143,4 +145,31 @@ it('retains every personal profile when the signed plugin limit is already reach
   const configured = { ...intent, binding: { ...binding, maxProfiles: 1 } }
   expect(await run(fixture.invoke, configured)).toEqual({ status: 'conflict' })
   expect(fixture.save).not.toHaveBeenCalled()
+})
+
+it('preserves a member-edited JSON field permanently while updating the other platform fields', async () => {
+  const module =
+    'data:text/javascript;base64,' +
+    Buffer.from(nativeReplacementImports + nativeServiceSettingsModule + nativeJsonServiceSettingsModule + '\nexport { jsonSettingsPlan }').toString('base64')
+  const { jsonSettingsPlan } = await import(/* @vite-ignore */ module)
+  const input = {
+    binding: { fields: [{ path: ['image', 'apiKey'] }, { path: ['image', 'model'] }] },
+    fields: { 'image.apiKey': 'token-one', 'image.model': 'model-one' },
+    previous: {},
+  }
+  const first = jsonSettingsPlan({ notes: 'member note' }, input)
+  expect(first.next).toEqual({ notes: 'member note', image: { apiKey: 'token-one', model: 'model-one' } })
+  const previous = {
+    'image.apiKey': { applied: first.fields['image.apiKey'].pending },
+    'image.model': { applied: first.fields['image.model'].pending },
+  }
+  const personal = { ...first.next, image: { ...first.next.image, model: 'personal-model' } }
+  const second = jsonSettingsPlan(personal, { ...input, previous, fields: { 'image.apiKey': 'token-two', 'image.model': 'model-two' } })
+  expect(second.next).toEqual({ notes: 'member note', image: { apiKey: 'token-two', model: 'personal-model' } })
+  expect(second.fields['image.model']).toEqual({ detached: true })
+  const restored = { ...second.next, image: { ...second.next.image, model: 'model-one' } }
+  const third = jsonSettingsPlan(restored, { ...input, previous: second.fields, fields: { 'image.apiKey': 'token-two', 'image.model': 'model-three' } })
+  expect(third.next.image.model).toBe('model-one')
+  expect(third.fields['image.model']).toEqual({ detached: true })
+  expect(third.fields['image.apiKey']).toEqual({ applied: second.fields['image.apiKey'].pending })
 })

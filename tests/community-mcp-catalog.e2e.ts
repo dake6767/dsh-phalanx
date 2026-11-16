@@ -90,6 +90,19 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     const preset = page.getByRole('button', { name: 'View MCP service Amap', exact: true })
     await preset.focus()
     await page.keyboard.press('Enter')
+    const drawer = page.getByRole('dialog', { name: 'Amap', exact: true })
+    expect(await drawer.locator('.catalog-install-sections > .plugin-detail-section h2').allTextContents()).toEqual([
+      'Source',
+      'This entry will install',
+      'Service backends',
+      'Access and publication',
+    ])
+    const source = drawer.getByRole('link', { name: 'Service documentation', exact: true })
+    await source.waitFor()
+    expect(await source.getAttribute('href')).toBe('https://lbs.amap.com/api/mcp-server/gettingstarted')
+    const plan = drawer.getByRole('listitem').filter({ has: page.getByText('p-amap', { exact: true }) })
+    await plan.getByText('MCP service ·', { exact: true }).waitFor()
+    await plan.getByText(/Catalog version/u).waitFor()
     await page.getByLabel('MCP service name', { exact: true }).fill('p-map')
     expect(await page.getByLabel('Display name', { exact: true }).inputValue()).toBe('Amap')
     await page.getByLabel('Display name', { exact: true }).fill('地图助手')
@@ -99,6 +112,11 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     await row.getByText('Import failed', { exact: true }).waitFor()
     await page.reload()
     await row.getByText('Import failed', { exact: true }).waitFor()
+    await page.getByRole('tab', { name: 'MCP catalog', exact: true }).click()
+    await preset.click()
+    await drawer.getByRole('status').getByText('Import failed', { exact: true }).waitFor()
+    await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.getByRole('tab', { name: 'MCP services', exact: true }).click()
     const settings = async () => (await page.request.get(origin + '/admin/api/mcp')).json()
     const saved = (await settings())[0]
     expect(saved.display).toMatchObject({ name: '地图助手', defaults: { name: { en: 'Amap', 'zh-CN': '高德地图' } } })

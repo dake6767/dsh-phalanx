@@ -1,6 +1,8 @@
 /** Shared publication presentation; resource-specific consequences remain explicit. */
 export const en = {
   'Platform App Center': 'Platform App Center',
+  'Members can select this resource when it is available.': 'Members can select this resource when it is available.',
+  'Members cannot select this resource in the app center.': 'Members cannot select this resource in the app center.',
   'Publishing lets all members select this resource when it is available.': 'Publishing lets all members select this resource when it is available.',
   'Resource published': 'Live in Platform App Center',
   'Resource not published': 'Not published',
@@ -39,6 +41,8 @@ export const en = {
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
   'Platform App Center': '平台应用中心',
+  'Members can select this resource when it is available.': '资源可用时，成员可在应用中心自选。',
+  'Members cannot select this resource in the app center.': '成员无法在应用中心自选此资源。',
   'Publishing lets all members select this resource when it is available.': '上架后，资源可用时全体成员均可自选。',
   'Resource published': '已上架',
   'Resource not published': '未上架',

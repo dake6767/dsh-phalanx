@@ -19,7 +19,7 @@ ARG CURL_VERSION=7.88.1-10+deb12u15
 # The pinned upstream revision: declared here so both stages share one default
 # (an ARG re-declared without a value inherits this one).
 ARG DSH_REPO=https://github.com/deepseek-ai/deepseek-harness.git
-ARG DSH_REV=66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db
+ARG DSH_REV=38a6a5c965aa99ab525161efb7cc5cf1fe62fced
 ARG DSH_PNPM=11.28.5
 ARG NPM_REGISTRY=https://registry.npmjs.org
 
@@ -81,10 +81,13 @@ RUN corepack pnpm run build
 # which is the resolution DSH's profile boot code expects, and the one
 # workspace script the runtime depends on (restoring the executable bit on
 # node-pty's prebuilt spawn helper) runs explicitly.
+# The rc.3 web Typert descriptor imports zod without declaring it. Restore
+# its workspace-root resolution from the locked session controller dependency.
 RUN corepack pnpm install --frozen-lockfile --prod --ignore-scripts \
        --fetch-timeout=600000 --fetch-retries=5 --network-concurrency=4 \
        --config.fetch-min-speed-ki-bps=5 \
   && node /usr/local/lib/dsh-phalanx/link-workspace-packages.mjs \
+  && ln -s ../packages/api/session-controller/node_modules/zod node_modules/zod \
   && node packages/subprocess/subprocess-local/scripts/ensure-spawn-helper.mjs \
   && rm -rf /opt/dsh/.git
 
@@ -123,11 +126,20 @@ LABEL dsh.revision="$DSH_REV"
 LABEL dsh.base.image="$NODE_IMAGE"
 
 ENV DSH_CLI=/opt/dsh/apps/cli/lib/bin.js
+# Numeric rootless users can lack a shell entry. Use Bash as the image default
+# so DSH can recognize prompt readiness through the confined terminal wrapper.
+ENV SHELL=/bin/bash
 USER node
 WORKDIR /home/node
 
 # Exercise the runtime user outside the DSH workspace, with no network fallback.
 RUN --network=none test "$(COREPACK_ENABLE_NETWORK=0 pnpm --version)" = "$DSH_PNPM"
+RUN --network=none node --input-type=module -e "await import('/opt/dsh/packages/web/web/lib/typert.host.js')"
+RUN --network=none node --input-type=module -e "\
+  import { createRequire } from 'node:module'; \
+  const require = createRequire('/opt/dsh/packages/experimental/speech-to-text-sensevoice/lib/worker.js'); \
+  const sherpa = require('sherpa-onnx-node'); \
+  if (typeof sherpa.OfflineRecognizer !== 'function' || typeof sherpa.Vad !== 'function') throw Error('SenseVoice native inference unavailable');"
 
 # Generated command from src/dsh/cli.ts; run node scripts/build-container-command.mjs.
 CMD ["node","/opt/dsh/apps/cli/lib/bin.js","--profile","web"]

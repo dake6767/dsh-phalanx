@@ -12,15 +12,22 @@ import { FileContributionArtifacts } from '../adapters/contribution-storage.js'
 import { HttpDshSession } from '../adapters/dsh-session.js'
 import { NodeInstanceResourceHost } from '../adapters/instance-resource-cgroup.js'
 import { MemorySessionRegistry } from '../adapters/memory-session-registry.js'
-import { FilePlatformDatabaseConfig } from '../adapters/platform-database-config.js'
-import { prepareDatabaseSwitchRecovery } from '../adapters/platform-database-switch-recovery.js'
-import { PlatformDatabase } from '../adapters/platform-database.js'
-import { finishPlatformKeyRecovery, preparePlatformKeyRecovery } from '../adapters/platform-key-recovery.js'
+import type { PlatformDatabase } from '../adapters/platform-database.js'
+import { finishPlatformKeyRecovery } from '../adapters/platform-key-recovery.js'
 import { PlatformLock } from '../adapters/platform-lock.js'
 import { YamlPluginAccessSyntax } from '../adapters/plugin-access-syntax.js'
 import { FilePluginContributionPreparation } from '../adapters/plugin-contribution-preparation.js'
 import { PostgresCommunityAccountStore } from '../adapters/postgres-community-accounts.js'
 import { PostgresCommunityModelAccess } from '../adapters/postgres-community-model-access.js'
+import {
+  closeCommunityStores,
+  createCommunityVoice,
+  initializeCommunityStores,
+  openCommunityDatabase,
+  recoverCommunityStores,
+  startCommunityFeatures,
+} from './community-feature-lifecycle.js'
+import { PostgresPlatformSearchSettings } from '../adapters/postgres-platform-search-settings.js'
 import { PostgresSessionKey } from '../adapters/postgres-session-key.js'
 import { PostgresUsageRecords } from '../adapters/postgres-usage-records.js'
 import { declaredPlatformVersion, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
@@ -78,13 +85,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let cleanupAgent: Agent | undefined
   let cleanupProxy: { close(): void } | undefined
   try {
-    prepareDatabaseSwitchRecovery(config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json', dataRoot)
-    preparePlatformKeyRecovery(config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json', dataRoot)
-    const savedDatabase: ReturnType<typeof FilePlatformDatabaseConfig.open> = FilePlatformDatabaseConfig.open(
-      config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json',
-      dataRoot,
-    )
-    const database: PlatformDatabase = new PlatformDatabase(savedDatabase.connection, savedDatabase.security)
+    const database: PlatformDatabase = openCommunityDatabase(config.platformDatabaseConfigFile, dataRoot)
     cleanupDatabase = database
     const usageStore: PostgresUsageRecords = new PostgresUsageRecords(database)
     const accounts: PostgresCommunityAccountStore = new PostgresCommunityAccountStore(database)
@@ -104,6 +105,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const { store: modelStore, memberModels: memberModelsProjection } = createSharedModelStorage(database, dataRoot, config.runtime)
     // The per-space projection owner reads the committed state through the store it is handed to.
     const modelAccess: PostgresCommunityModelAccess = new PostgresCommunityModelAccess(database)
+    const platformSearch = new PostgresPlatformSearchSettings(database)
     const userSpaces: FileCommunityUserSpaces = new FileCommunityUserSpaces(config.runtime, accounts, spaceStorage.guard)
     const {
       skillStorage,
@@ -160,6 +162,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       pluginStore,
       accessStore,
       upstreamStore,
+      memberUpstreams,
       pluginGrants,
       localCopies,
       managedPlugins,
@@ -200,9 +203,11 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       changed: () => executionPreparation.changed(),
     })
     const environmentStorage = options.environment ?? new FileCommunityEnvironment(userSpaces.root, userSpaces, clock)
+    const { feature: platformVoice, launch: voiceLaunch } = createCommunityVoice(database, accounts, downloadSourceStore, dataRoot)
     const memberGatewayAccess = async (userId: string) => ({
       url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`,
       token: await modelAccess.forUser(userId, (await accounts.getState(userId))!.spaceId),
+      platformSearchEnabled: (await platformSearch.view()).enabled,
     })
     const runtime: CommunityRuntimePort =
       options.runtime ??
@@ -223,6 +228,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
           canDiscardArtifacts,
           native,
           memberModelsProjection,
+          voiceLaunch,
         ),
         memberGatewayAccess,
         async (userId, instance, origin) => {
@@ -301,12 +307,14 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       kind => (kind === 'skill' ? executionPreparation.changed() : Promise.resolve()),
     )
     const { mcpImports, memberMcpProbe, mcpProbe, proxyAgent, proxy, preview, origin, databaseOnboarding, listeners } = createCommunityEntryHandlers({
+      platformSearch,
+      platformVoice,
       ...pluginMembers,
       accounts,
       modelAccess,
       pluginStore,
       pluginGrants,
-      upstreamStore,
+      upstreamStore: memberUpstreams,
       localCopies,
       runtime,
       nativeFeatures: native.policy,
@@ -394,40 +402,43 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       runtime,
       connections,
       startBackgroundWork: async () => {
-        await usage.start()
-        await runtimeDependencies.start()
+        await startCommunityFeatures(platformVoice, usage, runtimeDependencies)
         contributions.start()
         mcpPreparation.start()
         await residentInstances.scan()
       },
       prepareBootstrap: async () => {
         await databaseBootstrap.claim(() => lifecycle.fail())
-        await database.initialize()
-        await spaceStorage.initialize()
-        await skillStore.initialize()
-        await sessionKey.initialize()
-        await modelStore.initialize()
-        await modelAccess.initialize()
-        await upstreamStore.initialize()
-        await runtimeStorage.initialize()
-        await expertStorage.initialize()
-        await mcpStore.initialize()
-        await accessStore.initialize()
-        await downloadSourceStore.initialize()
+        await initializeCommunityStores(
+          database,
+          spaceStorage,
+          skillStore,
+          sessionKey,
+          modelStore,
+          modelAccess,
+          upstreamStore,
+          runtimeStorage,
+          expertStorage,
+          mcpStore,
+          accessStore,
+          downloadSourceStore,
+        )
         assertCommunityDataRoot(dataRoot, await accounts.bootstrapComplete())
-        await executionRunner.recover()
-        await mcpPreparation.recover()
-        await runtimeDependencies.recover()
-        await suites.recover()
-        await executionPreparation.recover()
-        await credential.prepare()
-        await experts.recover()
-        await skills.recover()
-        await mcp.interruptCatalogTests()
-        await plugins.recover()
-        await compatibility.recover()
-        await contributions.recover()
-        await managedPlugins.recover()
+        await recoverCommunityStores(
+          executionRunner,
+          mcpPreparation,
+          runtimeDependencies,
+          suites,
+          executionPreparation,
+          credential,
+          experts,
+          skills,
+          { recover: () => mcp.interruptCatalogTests() },
+          plugins,
+          compatibility,
+          contributions,
+          managedPlugins,
+        )
       },
       checkIdle: idle.check,
       checkIntervalMs: idle.intervalMs,
@@ -443,6 +454,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
             nativeJobs.stop(),
             nativeSettings?.stop(),
             runtimeDependencies.stop(),
+            platformVoice.stop(),
             mcpImports.stop(),
             mcpPreparation.stop(),
             memberMcpProbe.stop(),
@@ -467,18 +479,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
             await usage.stop()
           } finally {
             try {
-              await Promise.allSettled([
-                skillStorage.close(),
-                expertStorage.close(),
-                modelStore.close(),
-                modelAccess.close(),
-                sessionKey.close(),
-                upstreamStore.close(),
-                runtimeStorage.close(),
-                mcpStore.close(),
-                accessStore.close(),
-                downloadSourceStore.close(),
-              ])
+              await closeCommunityStores(
+                [skillStorage, expertStorage, modelStore, modelAccess, sessionKey],
+                [upstreamStore, runtimeStorage, mcpStore, accessStore, downloadSourceStore],
+              )
               await database.close()
             } finally {
               lock.close()

@@ -1,6 +1,7 @@
 // Validation: T2; real credentials: none; installed rootless DSH, browser controls and independent kernel cgroup observations.
-import { execFile, execFileSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { request } from 'node:http'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,8 +18,10 @@ import { signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
+import { communityEntryUrl } from './support/community-space.js'
+import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
-import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
+import { assertPinnedDshRevision, CONTAINER_HOME, runtimeSection } from './support/real-dsh-runtime.js'
 
 let root: string | undefined, app: CommunityApplication | undefined, browser: Browser | undefined, runtime: CommunityRuntimeConfig | undefined
 afterEach(async test => {
@@ -45,7 +48,7 @@ afterEach(async test => {
   if (errors.length) throw new AggregateError(errors, 'Member resource acceptance cleanup failed')
 })
 
-it('applies defaults and overrides to real member cgroups, restores unlimited limits and observes a kernel OOM', async () => {
+it('applies defaults and overrides to real member cgroups, restores unlimited limits and isolates an import-induced kernel OOM', async () => {
   if (process.platform !== 'linux' || process.getuid?.() === 0 || !runtimeSettings.containerImage) throw new Error('Actual rootless Linux DSH is required')
   assertPinnedDshRevision(runtimeSettings)
   root = await mkdtemp(join(tmpdir(), 'member-resources-'))
@@ -221,6 +224,26 @@ it('applies defaults and overrides to real member cgroups, restores unlimited li
   await signInCommunity(memberPage, origin, 'member', 'password')
   unlimited()
   expect(await member()).toMatchObject({ source: 'custom', target: { cpus: null, memoryMiB: null, pids: null } })
+  const peerCreated = await adminContext.request.post(origin + '/admin/api/accounts', {
+    headers: { origin },
+    data: { username: 'upload-peer', email: '', password: 'password' },
+  })
+  expect(peerCreated.status()).toBe(201)
+  const peer = await newValidationContext(browser, { locale: 'en' })
+  const peerPage = await peer.newPage()
+  await signInCommunity(peerPage, origin, 'upload-peer', 'password')
+  await peerPage.locator('[data-conversation-content][data-conversation-session] [data-composer-input][contenteditable="true"]').waitFor()
+  const rpc = createBrowserDshRpc(memberContext),
+    peerRpc = createBrowserDshRpc(peer),
+    peerCookie = await cookieHeader(peer, origin)
+  const peerSessions = () => peerRpc.remoteRpc(origin, peerCookie, 'session/list', { _request: {} })
+  const baseline = await peerSessions()
+  expect(baseline).toMatchObject({ items: [expect.objectContaining({ blank: true, running: false })] })
+  const bundle = await rpc.remoteRpc<{ application: string }>(origin, await cookieHeader(memberContext, origin), 'pluginManager/setBundleEnabled', {
+    name: '@deepseek-ai/dsh-deepseek-chat-import',
+    enabled: true,
+  })
+  expect(['applied', 'restart-required']).toContain(bundle.application)
   const beforeOom = await member()
   const saving = await adminContext.request.post(endpoint(), {
     headers: { origin },
@@ -229,7 +252,7 @@ it('applies defaults and overrides to real member cgroups, restores unlimited li
       revision: beforeOom.revision,
       username: 'member',
       spaceId: beforeOom.spaceId,
-      override: { cpus: 0.5, memoryMiB: 1536, pids: 256 },
+      override: { cpus: 0.5, memoryMiB: 512, pids: 256 },
     },
   })
   expect(saving.status()).toBe(200)
@@ -247,7 +270,20 @@ it('applies defaults and overrides to real member cgroups, restores unlimited li
       })
     ).status(),
   ).toBe(200)
-  bounded(0.5, 1536, 256)
+  if (bundle.application === 'restart-required') {
+    const restarted = await memberContext.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true }, timeout: 300_000 })
+    expect(restarted.ok(), await restarted.text()).toBe(true)
+  }
+  await signInCommunity(memberPage, origin, 'member', 'password')
+  bounded(0.5, 512, 256)
+  const cookie = await cookieHeader(memberContext, origin)
+  const limit = await rpc.remoteRpc<{ maxUploadBytes: number }>(origin, cookie, 'deepseekChatImport/limits', {})
+  expect(limit.maxUploadBytes).toBe(512 * 1024 * 1024)
+  const workspace = await rpc.remoteRpc<{ workspace: { workspaceId: string } }>(origin, cookie, 'workspace/create', {
+    request: { path: CONTAINER_HOME + '/Documents' },
+  })
+  const url = new URL('api/deepseek-chat-import/archive', communityEntryUrl(origin, cookie))
+  url.searchParams.set('workspaceId', workspace.workspace.workspaceId)
   const name = currentCarrier(),
     pid = Number(execFileSync(cli, ['inspect', '--format', '{{.State.Pid}}', name], { encoding: 'utf8' }).trim())
   const path = (await readFile(`/proc/${pid}/cgroup`, 'utf8'))
@@ -267,15 +303,39 @@ it('applies defaults and overrides to real member cgroups, restores unlimited li
         if (['ENOENT', 'ENODEV'].includes((error as NodeJS.ErrnoException).code ?? '')) break
         throw error
       }
-      await sleep(2)
+      await sleep(10)
     }
   })()
   try {
-    await new Promise<void>(resolve => {
-      execFile(cli, ['exec', name, 'node', '-e', 'const held=[];setInterval(()=>{held.push(Buffer.alloc(16*1024*1024,1))},20)'], { timeout: 30_000 }, () =>
-        resolve(),
+    const upload = await new Promise<number>((resolve, reject) => {
+      const signal = AbortSignal.timeout(90_000)
+      const requestHandle = request(
+        url,
+        {
+          method: 'POST',
+          headers: { cookie, 'content-type': 'application/octet-stream', 'content-length': limit.maxUploadBytes },
+          signal,
+        },
+        response => {
+          response.resume()
+          response.once('end', () => resolve(response.statusCode!))
+          response.once('error', reject)
+        },
       )
+      requestHandle.once('error', reject)
+      const chunk = Buffer.alloc(1024 * 1024, 65)
+      let remaining = limit.maxUploadBytes
+      const write = () => {
+        while (remaining > 0) {
+          remaining -= chunk.length
+          if (!requestHandle.write(chunk)) return
+        }
+        requestHandle.end()
+      }
+      requestHandle.on('drain', write)
+      write()
     })
+    expect(upload).toBe(502)
     try {
       observedKills = Math.max(observedKills, kills(await readFile(events, 'utf8')))
     } catch (error) {
@@ -286,5 +346,6 @@ it('applies defaults and overrides to real member cgroups, restores unlimited li
     await watch
   }
   expect(observedKills).toBeGreaterThan(initialKills)
+  expect(await peerSessions()).toEqual(baseline)
   console.info('Member resource kernel evidence', { unlimitedApplication: method, initialOomKills: initialKills, observedOomKills: observedKills })
 }, 600_000)

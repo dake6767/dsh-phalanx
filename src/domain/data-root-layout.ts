@@ -10,6 +10,7 @@ export const dataRootLayout = {
     'contributions/artifacts',
     'contributions/plugin-intake',
     'runtime-dependencies/.trees',
+    'platform-voice',
   ],
   projections: [
     'skills/members',

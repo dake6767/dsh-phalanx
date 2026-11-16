@@ -466,13 +466,12 @@ it('installs Feishu and HyperFrames through the generated adapters and enforces 
   const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
-    // Technical details show Feishu's declared address. HyperFrames runs locally and has no address.
+    // The source section shows Feishu's declared address. HyperFrames runs locally and has no address.
     for (const title of ['Feishu', 'HyperFrames']) {
       const entry = card(running.page, title)
       await entry.getByText('Not installed', { exact: true }).waitFor()
       await entry.getByRole('button', { name: `View catalog entry ${title}`, exact: true }).click()
       const details = running.page.getByRole('dialog', { name: title, exact: true })
-      await details.getByText('Technical details', { exact: true }).click()
       if (title === 'Feishu') await details.getByText(exchange.origin, { exact: true }).waitFor()
       else expect(await details.getByText('Service addresses', { exact: true }).count()).toBe(0)
       await details.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()

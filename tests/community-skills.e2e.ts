@@ -94,6 +94,14 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByText('No skills yet', { exact: true }).waitFor()
   const upload = async (body: string, includeScript = true) => {
     await page.getByRole('button', { name: 'Import skill', exact: true }).click()
+    const input = page.getByLabel('Skill archive (.zip)', { exact: true })
+    expect(
+      await input.evaluate(element => {
+        const hintId = element.getAttribute('aria-describedby')
+        const hint = hintId ? document.getElementById(hintId) : null
+        return Boolean(hint?.textContent && hint.parentElement === element.parentElement)
+      }),
+    ).toBe(true)
     await page.getByLabel('Skill archive (.zip)', { exact: true }).setInputFiles({
       name: 'skill.zip',
       mimeType: 'application/zip',
@@ -337,12 +345,24 @@ it('groups the main skill library by packs while keeping standalone skills reach
   await library.getByText('No skills match this filter.', { exact: true }).waitFor()
   await library.getByRole('button', { name: 'Show all skills', exact: true }).click()
   await library.getByRole('button', { name: 'View skill pack research', exact: true }).click({ position: { x: 12, y: 12 } })
+  const publishSection = page.getByRole('region', { name: 'Platform App Center', exact: true })
+  await publishSection.getByRole('heading', { name: 'Platform App Center', exact: true }).waitFor()
+  expect(await publishSection.locator(':scope > p').count()).toBe(1)
+  expect(await publishSection.getByText('Republishing does not restore removed member selections.', { exact: true }).count()).toBe(0)
+  const removeChild = page.getByRole('button', { name: 'Remove skill child', exact: true })
+  await removeChild.click()
+  expect(await removeChild.count()).toBe(0)
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click()
+  await removeChild.waitFor()
   await page.getByLabel('Pack description', { exact: true }).fill('Unsaved draft')
   expect(await page.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).isDisabled()).toBe(true)
   await page.getByRole('button', { name: 'Discard changes', exact: true }).click()
   await page.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).click()
   await page.getByRole('dialog', { name: 'Confirm skill pack publication', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
-  await page.getByRole('button', { name: 'Unpublish', exact: true }).waitFor()
+  await publishSection.getByRole('button', { name: 'Unpublish', exact: true }).click()
+  const unpublishPack = page.getByRole('dialog', { name: 'Confirm skill pack unpublication', exact: true })
+  await unpublishPack.getByText('Republishing does not restore removed member selections.', { exact: true }).waitFor()
+  await unpublishPack.getByRole('button', { name: 'Cancel', exact: true }).click()
   await page.getByRole('button', { name: 'Close skill pack details', exact: true }).click()
   await page.getByRole('dialog').waitFor({ state: 'detached' })
   await library.getByRole('button', { name: /Filter by publication/u }).click()

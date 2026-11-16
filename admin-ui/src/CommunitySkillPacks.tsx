@@ -113,6 +113,7 @@ export default function CommunitySkillPacks() {
       {selected !== undefined ? (
         <CommunitySkillPackEditor
           name={selected}
+          originName={originName}
           onClose={() => setSelected(undefined)}
           onSaved={() => {
             setSelected(undefined)

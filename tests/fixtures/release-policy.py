@@ -67,6 +67,15 @@ else:raise AssertionError('Older account schema admitted by a development rebuil
 # The immediately preceding formal release remains a schema-15 source.
 formal_previous={**predecessor,'targetVersion':'0.1.28'}
 compatible(formal_previous,target,15)
+# The immediately preceding formal release can transition from rc.1 to the new runtime.
+v035=json.loads(Path('releases/acceptance/0.1.35.json').read_text())
+assert v035['status']=='accepted'
+rc1_source={**formal_previous,'targetVersion':'0.1.35','dshRevision':v035['dshRevision']}
+assert rc1_source['dshRevision']!=revision
+compatible(rc1_source,target,schema)
+try:compatible({**rc1_source,'dshRevision':'e'*40},target,schema)
+except InstallError:pass
+else:raise AssertionError('Undeclared runtime accepted for the immediately preceding release')
 # Candidate promotion retains the current schema, even when version numbers match.
 compatible(target,target,schema,source_channel={'kind':'candidate'},target_channel={'kind':'formal'})
 for forbidden in (14,schema+1):

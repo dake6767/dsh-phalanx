@@ -1,4 +1,4 @@
-import type { CatalogExecutionServiceSlot } from './suite-service-slots.js'
+import type { CatalogExecutionServiceSlot, CatalogServiceFieldLabel } from './suite-service-slots.js'
 import { executionCommandPath, executionLongOption } from './execution-command-line.js'
 import { readCatalogPluginItem } from './suite-plugin.js'
 import { pythonPackagePins } from './python-library.js'
@@ -99,9 +99,10 @@ export interface SuiteCatalogExecutionItem {
   }[]
   readonly variables: readonly { readonly name: string; readonly optional?: boolean; readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
   readonly serviceSlots?: readonly CatalogExecutionServiceSlot[]
+  readonly serviceFieldLabels?: readonly CatalogServiceFieldLabel[]
 }
 export type SuiteCatalogItem =
-  | import('./suite-catalog.js').SuiteCatalogPluginItem
+  | (import('./suite-catalog.js').SuiteCatalogPluginItem & { readonly serviceFieldLabels?: readonly CatalogServiceFieldLabel[] })
   | SuiteCatalogRuntimeDependencyItem
   | SuiteCatalogSkillItem
   | SuiteCatalogSkillPackItem

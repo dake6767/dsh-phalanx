@@ -90,6 +90,9 @@ export const PLATFORM_TABLES = [
   'native_feature_group_settings',
   'native_plugin_baselines',
   'native_plugin_history',
+  'platform_search_settings',
+  'platform_voice_settings',
+  'member_voice_preferences',
 ] as const
 /** Zero-argument platform routines introduced by recorded migrations, never unrelated schema functions. */
 export const PLATFORM_ROUTINES = [
@@ -181,6 +184,38 @@ export const PLATFORM_MIGRATIONS: readonly { readonly version: number; readonly 
     version: 24,
     name: 'member native service settings history',
     sql: 'ALTER TABLE dsh_phalanx.plugin_deliveries ADD COLUMN service_settings jsonb, ADD COLUMN resource_origin text;',
+  },
+  {
+    version: 25,
+    name: 'platform search settings',
+    sql: `CREATE TABLE dsh_phalanx.platform_search_settings (
+      id integer PRIMARY KEY CHECK(id=1),
+      revision bigint NOT NULL CHECK(revision>=0),
+      enabled boolean NOT NULL,
+      api_key jsonb CHECK(NOT enabled OR api_key IS NOT NULL)
+    );
+    INSERT INTO dsh_phalanx.platform_search_settings(id,revision,enabled) VALUES(1,0,false);`,
+  },
+  {
+    version: 26,
+    name: 'platform voice settings',
+    sql: `CREATE TABLE dsh_phalanx.platform_voice_settings (
+      id integer PRIMARY KEY CHECK(id=1),
+      revision bigint NOT NULL CHECK(revision>=0),
+      enabled boolean NOT NULL,
+      precision text NOT NULL CHECK(precision IN ('int8','fp32')),
+      active_precision text CHECK(active_precision IN ('int8','fp32')),
+      status text NOT NULL CHECK(status IN ('off','preparing','ready','failed')),
+      failure text CHECK(failure IN ('download','integrity','storage')),
+      CHECK(enabled=(status<>'off')),
+      CHECK((status='failed')=(failure IS NOT NULL)),
+      CHECK(status<>'ready' OR (active_precision IS NOT NULL AND active_precision=precision))
+    );
+    INSERT INTO dsh_phalanx.platform_voice_settings(id,revision,enabled,precision,status) VALUES(1,0,false,'int8','off');
+    CREATE TABLE dsh_phalanx.member_voice_preferences (
+      space_id text PRIMARY KEY REFERENCES dsh_phalanx.accounts(space_id) ON DELETE CASCADE,
+      state text NOT NULL CHECK(state IN ('offering','offered','suspended'))
+    );`,
   },
 ]
 

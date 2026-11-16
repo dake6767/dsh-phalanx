@@ -45,8 +45,8 @@ export default function CommunityExecutionTrialPanel({ name, disabled }: { name:
     }
   }
   return (
-    <section className="plugin-access-template" aria-label={t('Try execution')}>
-      <h4>{t('Try execution')}</h4>
+    <section className="plugin-detail-section" aria-label={t('Try execution')}>
+      <h2>{t('Try execution')}</h2>
       <p>{t('Run as yourself in your own workspace. Save configuration changes first. Arguments are literal; shell operators are not expanded.')}</p>
       {!isolated ? <CommunityMessage status="warning" title={t('Platform execution is not isolated. Development only.')} /> : null}
       <CommunityField label={t('Command line')} value={line} onChange={setLine} disabled={busy} />

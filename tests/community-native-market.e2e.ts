@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { showAppCenterForFixture } from './support/app-center-visibility.js'
-import { mkdir, mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -13,8 +13,9 @@ import { candidateApplication } from './support/candidate-application.js'
 import { openTestAccounts } from './support/community-application.js'
 import { platformPluginClient } from './support/platform-client.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
-import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
-import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
+import { communityEntryUrl } from './support/community-space.js'
+import { cookieHeader, createRealDshRpc, rpcBody } from './support/real-dsh-rpc.js'
+import { assertPinnedDshRevision, CONTAINER_HOME, memberSpacePath, runtimeSection } from './support/real-dsh-runtime.js'
 
 it('renders the platform market with native DSH controls, theme and locale while retaining install feedback', async () => {
   assertPinnedDshRevision(runtimeSettings)
@@ -118,6 +119,37 @@ it('renders the platform market with native DSH controls, theme and locale while
       enabled: terminal.enabled,
     })
     expect(unchanged.application).toBe('applied')
+    const chatImportName = '@deepseek-ai/dsh-deepseek-chat-import'
+    expect(bundles).toContainEqual(expect.objectContaining({ name: chatImportName, enabled: false }))
+    const change = await rpc.remoteRpc<{ application: string }>(origin, memberCookie, 'pluginManager/setBundleEnabled', {
+      name: chatImportName,
+      enabled: true,
+    })
+    expect(['applied', 'restart-required']).toContain(change.application)
+    const updated = await rpc.remoteRpc<{ name: string; enabled: boolean }[]>(origin, memberCookie, 'pluginManager/listBundles', {})
+    expect(updated).toContainEqual(expect.objectContaining({ name: chatImportName, enabled: true }))
+    if (change.application === 'restart-required') {
+      const restart = await page.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true }, timeout: 300_000 })
+      expect(restart.ok(), await restart.text()).toBe(true)
+      await page.reload()
+    }
+    const activeCookie = await cookieHeader(page.context(), origin)
+    expect(await rpc.remoteRpc(origin, activeCookie, 'deepseekChatImport/limits', {})).toEqual({ maxUploadBytes: 512 * 1024 * 1024 })
+    const workspacePath = 'Documents/deepseek-harness/default-workspace'
+    const memberHome = join(await memberSpacePath(root, 'member'), 'home')
+    await mkdir(join(memberHome, workspacePath), { recursive: true, mode: 0o700 })
+    const directory = CONTAINER_HOME + '/' + workspacePath
+    const adopted = await rpc.remoteRpc<{ workspace: { workspaceId: string } }>(origin, activeCookie, 'workspace/create', { request: { path: directory } })
+    const archive = new URL('api/deepseek-chat-import/archive', communityEntryUrl(origin, activeCookie))
+    archive.searchParams.set('workspaceId', adopted.workspace.workspaceId)
+    const upload = await page.request.post(archive.href, { headers: { 'content-type': 'application/octet-stream' }, data: Buffer.from('invalid zip') })
+    expect(upload.ok(), await upload.text()).toBe(true)
+    const outcome = (await upload.text())
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line))
+      .at(-1)
+    expect(outcome).toMatchObject({ type: 'outcome', outcome: { ok: false } })
     await page.getByRole('button', { name: 'Plugins', exact: true }).click()
     await page.getByText('Experimental plugins', { exact: true }).waitFor()
     await page.locator('[data-plugin-group="extensions"]').getByRole('button', { name: 'More', exact: true }).click()
@@ -132,6 +164,71 @@ it('renders the platform market with native DSH controls, theme and locale while
       managementPage.getByRole('link', { name: 'Open admin’s DSH', exact: true }).click(),
     ])
     await adminPage.waitForURL(url => url.origin === origin && /^\/app\/[^/]+\/$/u.test(url.pathname))
+    await adminPage.getByRole('button', { name: /^Platform account:/u }).waitFor()
+    const liveshare = '@deepseek-ai/dsh-experimental-liveshare'
+    const memberSession = () =>
+      rpc.remoteRpc<{ sessionId: string }>(origin, activeCookie, 'session/create', {
+        request: { workspaceId: adopted.workspace.workspaceId },
+      })
+    const sources = [(await memberSession()).sessionId, (await memberSession()).sessionId]
+    // Restore one offline source so the public addSessions path can be tested
+    // without publishing a share to an external Relay.
+    const ownerState = join(memberHome, '.dsh', 'liveshare')
+    await mkdir(ownerState, { recursive: true, mode: 0o700 })
+    await writeFile(
+      join(ownerState, 'owner-shares.json'),
+      JSON.stringify({
+        instanceId: 'fixture-owner',
+        shares: [
+          {
+            shareId: 'fixture-multi-source',
+            sessionIds: [sources[0]],
+            sessionTitle: 'Multi-source fixture',
+            accessMode: 'open',
+            relay: 'http://127.0.0.1:1',
+            gatewayToken: 'fixture-relay-token',
+            allowedSubjectIds: [],
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    )
+    const enableLiveshare = async (context: typeof adminContext) => {
+      const cookie = await cookieHeader(context, origin)
+      const enabled = await rpc.remoteRpc<{ application: string }>(origin, cookie, 'pluginManager/setBundleEnabled', { name: liveshare, enabled: true })
+      expect(['applied', 'restart-required']).toContain(enabled.application)
+      if (enabled.application === 'restart-required') {
+        const restart = await context.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true }, timeout: 300_000 })
+        expect(restart.ok(), await restart.text()).toBe(true)
+      }
+      return await cookieHeader(context, origin)
+    }
+    const memberOwner = await enableLiveshare(page.context())
+    const otherOwner = await enableLiveshare(adminContext)
+    const shareRequest = { request: { shareId: 'fixture-multi-source', sessionIds: [sources[1]] } }
+    expect(await rpc.remoteRpc(origin, memberOwner, 'liveshareShares/addSessions', shareRequest)).toEqual({
+      shareId: 'fixture-multi-source',
+      sessionIds: sources,
+    })
+    expect(await rpc.remoteRpcResult(origin, otherOwner, 'liveshareShares/addSessions', shareRequest)).toMatchObject({
+      ok: false,
+      error: { code: 'liveshareShares/share-not-found' },
+    })
+    expect(await rpc.remoteRpc(origin, memberOwner, 'liveshareShares/list', {})).toMatchObject({
+      shares: [expect.objectContaining({ shareId: 'fixture-multi-source', sessionIds: sources })],
+    })
+    expect(await rpc.remoteRpc(origin, otherOwner, 'liveshareShares/list', {})).toEqual({ shares: [] })
+    for (const method of ['liveshareShares/list', 'session/list']) {
+      const refused = await adminContext.request.post(new URL('api/' + method, communityEntryUrl(origin, memberOwner)).href, {
+        data: rpcBody(method, method === 'session/list' ? { _request: {} } : {}),
+        maxRedirects: 0,
+      })
+      expect(refused.status()).toBe(403)
+    }
+    const peerSessions = await rpc.remoteRpc<{ items: { sessionId: string }[] }>(origin, otherOwner, 'session/list', { _request: {} })
+    expect(peerSessions.items.map(row => row.sessionId)).not.toContain(sources[0])
+    expect(peerSessions.items.map(row => row.sessionId)).not.toContain(sources[1])
     for (const reload of [false, true]) {
       if (reload) await adminPage.reload()
       // Closing the admin console can return focus to a different tab.

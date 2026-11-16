@@ -34,8 +34,9 @@ export function memberRuntimeEnvironment(
     [SKILL_USAGE_ENDPOINT_ENV]: new URL(SKILL_USAGE_PATH, access.url).href,
     [SKILL_USAGE_PROVIDERS_ENV]: JSON.stringify(skillProviders),
     DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token,
-    [WEB_TOOLS_MEMBER_TOKEN_ENV]: access.token,
   }
+  delete environment[WEB_TOOLS_MEMBER_TOKEN_ENV]
+  if (access.platformSearchEnabled) environment[WEB_TOOLS_MEMBER_TOKEN_ENV] = access.token
   const managed = config.container === undefined ? modelsDirectory : managedModelsContainerPath
   Object.assign(environment, {
     DSH_PHALANX_MANAGED_MODELS_CONFIG: join(managed, managedModelsConfig),

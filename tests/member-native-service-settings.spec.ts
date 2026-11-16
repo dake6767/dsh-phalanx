@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import type { CatalogPluginServiceSlot } from '../src/domain/suite-service-slots.js'
 import type { NativeServiceSettingsTransport } from '../src/ports/member-native-plugins.js'
-import type { PluginInstallation } from '../src/ports/plugin-installations.js'
+import { nativeJsonSettingsHistoryKey, type PluginInstallation } from '../src/ports/plugin-installations.js'
 import { MemberNativeServiceSettings } from '../src/use-cases/member-native-service-settings.js'
 
 const actor = { username: 'member', spaceId: 'space', sessionEpoch: 0 }
@@ -74,4 +74,71 @@ it('persists an intent before native save and recovers a committed save after a 
   expect(syncSettings.mock.calls[2]?.[2].previous).toEqual([null, fingerprint])
   expect(JSON.stringify(syncSettings.mock.calls)).not.toContain('raw-provider-key')
   expect(JSON.stringify(record)).not.toContain('member-scope')
+})
+
+it('defers JSON bindings until the next entry and persists detached fields even when no write is needed', async () => {
+  let record: PluginInstallation = { packageName: 'native', source: 'selected', version: '1.0.0', integrity: 'digest', serviceOrigin: 'catalog' }
+  const jsonSlot: CatalogPluginServiceSlot = {
+    ...slot,
+    binding: {
+      kind: 'json-settings',
+      file: 'media-desk/settings.json',
+      upstream: 'image',
+      fields: [
+        { path: ['image', 'baseUrl'], source: 'gateway-url' },
+        { path: ['image', 'model'], source: 'model' },
+        { path: ['image', 'apiKey'], source: 'service-token' },
+      ],
+    },
+  }
+  let filename = 'media-desk/settings.json'
+  const fields = {
+    'image.baseUrl': { applied: 'a'.repeat(64) },
+    'image.model': { detached: true },
+    'image.apiKey': { applied: 'b'.repeat(64) },
+  } as const
+  const pending = { ...fields, 'image.apiKey': { applied: null, pending: 'b'.repeat(64) } }
+  const syncJsonSettings = vi.fn<NonNullable<NativeServiceSettingsTransport['syncJsonSettings']>>()
+  syncJsonSettings.mockResolvedValueOnce({ status: 'prepared', revision: 'c'.repeat(64), fields: pending }).mockResolvedValueOnce({ status: 'applied', fields })
+  const settings = new MemberNativeServiceSettings(
+    {
+      get: async () => [record],
+      replaceServiceSettings: async (_space, expected, next) => {
+        if (JSON.stringify(record) !== JSON.stringify(expected)) return false
+        record = { ...expected, serviceSettings: next }
+        return true
+      },
+    },
+    {
+      installedServices: async () => ({
+        revision: 'ready',
+        configuration: {
+          identity: { id: 'catalog', version: '1.0.0' },
+          ownerVersion: 'digest',
+          slots: [jsonSlot.binding.kind === 'json-settings' ? { ...jsonSlot, binding: { ...jsonSlot.binding, file: filename } } : jsonSlot],
+          settings: [{ slot: 'chat', backend: 'chat', enabled: true, values: {} }],
+        },
+      }),
+    },
+    { issue: async () => ({ token: 'member-scope', url: 'http://localhost/scoped', model: 'model', protocol: 'openai-image' }) },
+    { syncSettings: vi.fn(), syncJsonSettings },
+  )
+  expect(await settings.apply(actor, instance, 'native', origin)).toEqual([{ slot: 'chat', status: 'pending', nextStart: true }])
+  expect(syncJsonSettings).not.toHaveBeenCalled()
+  await settings.ensureLaunch(actor, instance, origin)
+  expect(syncJsonSettings.mock.calls.map(call => call[2].phase)).toEqual(['preview', 'apply'])
+  expect(record.serviceSettings?.[nativeJsonSettingsHistoryKey]?.jsonFiles).toEqual({ 'media-desk/settings.json': fields })
+  expect(JSON.stringify(record)).not.toContain('member-scope')
+  expect(settings.view(instance, 'native')).toEqual([{ slot: 'chat', status: 'personal', nextStart: true }])
+
+  filename = 'media-desk/replacement.json'
+  syncJsonSettings.mockResolvedValueOnce({ status: 'applied', fields })
+  await settings.ensureLaunch(actor, { ...instance, processId: 43 }, origin)
+  expect(syncJsonSettings.mock.calls.at(-1)?.[2].previous).toEqual({})
+  expect(Object.keys(record.serviceSettings?.[nativeJsonSettingsHistoryKey]?.jsonFiles ?? {})).toHaveLength(2)
+
+  filename = 'media-desk/settings.json'
+  syncJsonSettings.mockResolvedValueOnce({ status: 'applied', fields })
+  await settings.ensureLaunch(actor, { ...instance, processId: 44 }, origin)
+  expect(syncJsonSettings.mock.calls.at(-1)?.[2].previous).toEqual(fields)
 })

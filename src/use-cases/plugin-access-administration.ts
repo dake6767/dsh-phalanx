@@ -10,6 +10,7 @@ import { mergePluginAccessInput, pluginAccessConfiguration, pluginAccessReferenc
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { PluginAccessStorePort, PluginAccessSyntaxPort } from '../ports/plugin-access.js'
+import type { PluginJsonSettingsSummaryPort } from '../ports/plugin-installations.js'
 import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
 import type { PluginUpstreamReferencesPort, PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 
@@ -21,10 +22,11 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
     private readonly store: PluginAccessStorePort,
     private readonly upstreams: Pick<PluginUpstreamsPort, 'list'>,
     private readonly syntax: PluginAccessSyntaxPort,
+    private readonly jsonSettings?: PluginJsonSettingsSummaryPort,
   ) {}
   async services(actor: CommunityAccountActor, packageName: string) {
-    const { current } = await this.catalogServices(actor, packageName)
-    return { ...installedServiceView(current.configuration), revision: current.revision }
+    const { current, origin } = await this.catalogServices(actor, packageName)
+    return await this.serviceView(packageName, origin, current.configuration, current.revision)
   }
   async saveServices(actor: CommunityAccountActor, packageName: string, revision: string, change: unknown) {
     const { current, origin } = await this.catalogServices(actor, packageName)
@@ -33,7 +35,14 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
     if (origin === null && configuration.settings.some(row => row.enabled))
       throw new BusinessRuleError('invalid', 'Detached catalog backends cannot be enabled.', 'execution-config-invalid')
     const committed = await this.store.saveInstalledServices(packageName, origin, configuration, revision)
-    return { ...installedServiceView(configuration), revision: committed ?? revision }
+    return await this.serviceView(packageName, origin, configuration, committed ?? revision)
+  }
+  private async serviceView(packageName: string, origin: string | null, configuration: Parameters<typeof installedServiceView>[0], revision: string) {
+    const personal =
+      origin && configuration.slots.some(slot => 'binding' in slot && slot.binding.kind === 'json-settings')
+        ? await this.jsonSettings?.personalJsonFields(packageName, origin)
+        : undefined
+    return { ...installedServiceView(configuration, personal), revision }
   }
   private async catalogServices(actor: CommunityAccountActor, packageName: string) {
     await this.assertAdmin(actor, packageName)

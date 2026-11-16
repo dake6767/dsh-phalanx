@@ -308,6 +308,7 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)(
       const projection = join(dataRoot, 'skills/members', memberAccount.spaceId)
       const generation = await readlink(join(projection, 'live'))
       const reset = (await (await request('accounts/member/reset-environment', { confirmed: true })).json()) as CommunityEnvironmentResetResult
+      member = (await openCommunityHttpEntry(origin, member, 300_000)).cookie
       const afterReset = await fresh()
       expect((await definition(afterReset))?.description).toBe('MANAGED')
       expect((await definition(afterReset, 'selected-skill'))?.description).toBe('SELECTED')

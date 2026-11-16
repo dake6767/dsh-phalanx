@@ -20,9 +20,6 @@ export const DEEPSEEK_WEB_TOOLS_BASE_URL = `https://${DEEPSEEK_WEB_TOOLS_HOST}/v
 /** Environment variable the member process resolves to the platform gateway token. */
 export const WEB_TOOLS_MEMBER_TOKEN_ENV = 'DSH_PHALANX_WEB_TOOLS_ACCESS_TOKEN'
 
-/** Longest triggering question the Search API accepts. */
-export const WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS = 128
-
 /** Operation one member path forwards, without a second path table elsewhere. */
 export function webToolsOperationForPath(pathname: string): WebToolsOperation | undefined {
   return (Object.entries(WEB_TOOLS_GATEWAY_PATHS) as [WebToolsOperation, string][]).find(([, path]) => path === pathname)?.[0]

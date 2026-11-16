@@ -8,6 +8,7 @@ import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/commu
 import type { PluginGroupConfigurationPort } from '../ports/managed-plugins.js'
 import type { PlatformSigningKeyPort } from '../ports/platform-signing-key.js'
 import type { PluginAccessStorePort } from '../ports/plugin-access.js'
+import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import type { PluginInstallationsPort } from '../ports/plugin-installations.js'
 import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
 import type { MemberPluginManagerPort } from '../ports/plugin-market.js'
@@ -38,6 +39,7 @@ export class NativePluginServiceAccess {
       grants: Pick<PluginGroupConfigurationPort, 'preinstalls'>
       installations: Pick<PluginInstallationsPort, 'get'>
       services: Required<Pick<PluginAccessStorePort, 'installedServices' | 'installedServiceOwner'>>
+      upstreams?: Pick<PluginUpstreamsPort, 'list'>
       runtime: Pick<CommunityRuntimePort, 'status'>
       manager: Pick<MemberPluginManagerPort, 'list'> & Required<Pick<MemberPluginManagerPort, 'verifyArchive'>>
       origin: () => URL
@@ -78,7 +80,7 @@ export class NativePluginServiceAccess {
       throw denied()
     const { binding, model, protocol } = await this.resolve(selection, account, instance, signal)
     await this.commit(account, instance, revision, signal, () => undefined)
-    const token = this.token(account, instance, { ...selection, binding })
+    const token = this.token(account, { ...selection, binding })
     const origin = this.deps.gatewayOrigin()
     if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1') throw unavailable()
     const path = [actor.username, packageName, slot, backend, binding].map(encodeURIComponent).join('/')
@@ -90,7 +92,7 @@ export class NativePluginServiceAccess {
     const account = await this.deps.accounts.get(scope.username)
     if (!account) throw invalidToken()
     const instance = this.currentInstance(account)
-    if (!instance || !timingSafeEqual(Buffer.from(token), Buffer.from(this.token(account, instance, scope)))) throw invalidToken()
+    if (!instance || !timingSafeEqual(Buffer.from(token), Buffer.from(this.token(account, scope)))) throw invalidToken()
     return { account, instance }
   }
 
@@ -154,21 +156,10 @@ export class NativePluginServiceAccess {
     return instance.resourceKey && instance.userId === account.username && instance.spaceId === account.spaceId ? instance : undefined
   }
 
-  private token(account: CommunityAccountRecord, instance: CommunityUserInstance, scope: NativePluginServiceScope) {
+  private token(account: CommunityAccountRecord, scope: NativePluginServiceScope) {
     return createHmac('sha256', this.deps.signingKey.read())
       .update('native-plugin-service\0')
-      .update(
-        JSON.stringify([
-          account.username,
-          account.spaceId,
-          account.sessionEpoch,
-          instance.resourceKey,
-          scope.packageName,
-          scope.slot,
-          scope.backend,
-          scope.binding,
-        ]),
-      )
+      .update(JSON.stringify([account.username, account.spaceId, account.sessionEpoch, scope.packageName, scope.slot, scope.backend, scope.binding]))
       .digest('base64url')
   }
 
@@ -227,13 +218,27 @@ export class NativePluginServiceAccess {
   private async resolve(scope: ServiceSelection, account: CommunityAccountRecord, instance: CommunityUserInstance, signal: AbortSignal): Promise<ServiceGrant> {
     const { packageName } = scope
     const { plugin, prepared, services } = await this.qualifiedDelivery(packageName, account, instance)
-    const backend = services.configuration.slots.find(row => row.id === scope.slot)?.backends.find(row => row.id === scope.backend)
+    const slot = services.configuration.slots.find(row => row.id === scope.slot)
+    const backend = slot?.backends.find(row => row.id === scope.backend)
     const settings = services.configuration.settings.find(row => row.slot === scope.slot && row.backend === scope.backend)
-    if (!backend || !settings?.enabled || backend.fields.some(field => field.required && !settings.values[field.name])) throw unavailable()
+    if (!slot || !backend || !settings?.enabled || backend.fields.some(field => field.required && !settings.values[field.name])) throw unavailable()
     const { endpoint, key, model } = backend.upstream
-    const base = new URL(settings.values[endpoint]!)
-    const credential = settings.values[key]!
-    if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.hash || base.search || /[^\x21-\x7e]/u.test(credential))
+    const upstreamName = slot.binding.kind === 'json-settings' ? slot.binding.upstream : undefined
+    const upstream = upstreamName ? (await this.deps.upstreams?.list(packageName))?.find(row => row.name === upstreamName) : undefined
+    const baseUrl = upstreamName ? upstream?.baseUrl : endpoint && settings.values[endpoint]
+    const credential = upstreamName ? upstream?.credential : key && settings.values[key]
+    const base = baseUrl ? URL.parse(baseUrl) : null
+    if (
+      !base ||
+      !credential ||
+      upstream?.secretUnavailable ||
+      !['http:', 'https:'].includes(base.protocol) ||
+      base.username ||
+      base.password ||
+      base.hash ||
+      base.search ||
+      /[^\x21-\x7e]/u.test(credential)
+    )
       throw unavailable()
     const checkSignal = AbortSignal.any([signal, AbortSignal.timeout(15_000)])
     const actual = (await this.deps.manager.list(instance, this.deps.origin(), checkSignal)).find(row => row.packageName === packageName)

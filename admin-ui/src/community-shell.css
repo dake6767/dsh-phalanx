@@ -194,9 +194,6 @@
 .grant-tab-panel { display: grid; gap: 12px; }
 .grant-tab-panel > .section-note { margin: 0; color: var(--muted); font-size: 13px; }
 .native-feature-settings { display: grid; gap: 16px; margin-top: 16px; }
-.native-feature-intro { display: grid; gap: 2px; color: var(--muted); font-size: 13px; line-height: 1.6; }
-.native-feature-intro h2 { margin: 0; color: var(--foreground); font-size: 15px; font-weight: 600; }
-.native-feature-intro p { margin: 0; }
 .native-feature-list { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
 .native-feature-list > li { display: grid; gap: 2px; min-width: 0; }
 .native-feature-list p { margin: 0; padding-inline-start: 28px; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
@@ -322,3 +319,8 @@ html:has(.admin-shell) .provider-options .provider-choice.button[aria-pressed="t
 .system-update .update-disclosure .disclosure__heading > .button:hover { background: none; text-decoration: underline; }
 .system-update .update-disclosure .disclosure__body { padding: 4px 0 0; }
 .system-update .update-disclosure .update-notes { margin: 0; padding: 10px 12px; border-radius: calc(var(--radius) * 2); background: var(--default); font-size: 12px; }
+
+.page-stack { display: grid; gap: 16px; min-width: 0; }
+.page-stack > :is(p, ul) { margin-block: 0; }
+.platform-file-field { display: grid; gap: 6px; min-width: 0; }
+.platform-file-field .input { min-width: 0; }

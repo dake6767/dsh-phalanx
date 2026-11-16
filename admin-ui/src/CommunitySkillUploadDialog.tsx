@@ -1,9 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
-import { Input } from '@heroui/react/input'
 import { Tabs } from '@heroui/react/tabs'
 import CommunityField from './CommunityField'
-import { Label } from '@heroui/react/label'
 import type { CommunitySkillImportPreview } from '../../src/domain/admin-contract'
 import { SKILL_IMPORT_MAX_BYTES } from '../../src/domain/skill-import'
 import { importDraft, importInput } from './community-import-draft'
@@ -11,6 +9,7 @@ import CommunitySkillImportReview from './CommunitySkillImportReview'
 import { CommunityApiRequestError, changeCommunitySkill, previewSkillImport, confirmSkillImport, previewGitSkills } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
+import CommunityFileField from './CommunityFileField'
 import CommunityMessage from './CommunityMessage'
 import CommunitySkillImportFailures from './CommunitySkillImportFailures'
 
@@ -166,18 +165,16 @@ export default function CommunitySkillUploadDialog({
           </>
         ) : (
           <>
-            <Label htmlFor={`${id}-file`}>{t('Skill archive (.zip)')}</Label>
-            <Input
-              id={`${id}-file`}
-              type="file"
+            <CommunityFileField
+              label={t('Skill archive (.zip)')}
+              description={t('Choose a ZIP up to 100 MB. Each extracted skill must be at most 20 MB.')}
               accept=".zip,application/zip"
               disabled={busy}
-              onChange={event => {
-                setFile(event.target.files?.[0])
+              onChange={next => {
+                setFile(next)
                 setError(undefined)
               }}
             />
-            <p>{t('Choose a ZIP up to 100 MB. Each extracted skill must be at most 20 MB.')}</p>
             {file && !valid ? <CommunityMessage role="alert" status="danger" title={t('Choose a nonempty .zip file no larger than 100 MB.')} /> : null}
           </>
         )}

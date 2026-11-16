@@ -37,7 +37,7 @@ and behavior at official seams.
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
 | Session RPC, native mux frames and activity query | `dsh/session-protocol.ts` | `adapters/dsh-session.ts`; native traffic passes through the entry unchanged |
 | Per-protocol gateway paths and supplier transport, bounded usage observation and default gateway URL | `dsh/model-protocol.ts`, `dsh/model-usage.ts` | `adapters/community-model-upstream.ts`, `inbound/community-model-gateway.ts` |
-| DeepSeek Search and Fetch API transport, member paths and upstream headers | `dsh/web-tools.ts` | `adapters/community-web-tools-upstream.ts`, `inbound/community-web-tools-gateway.ts` |
+| DeepSeek Search API transport, member gateway paths and disabled Fetch boundary | `dsh/web-tools.ts` | `adapters/community-web-tools-upstream.ts`, `inbound/community-web-tools-gateway.ts` |
 | Legacy profile defaults; workspace invocation overlay | `dsh/community-profile.ts` | `adapters/community-profile.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web environment reset carriers | `dsh/community-environment.ts` | `adapters/community-environment.ts` |
 | Global contribution tool, foreground confirmation and embedded guide | `dsh/contribution-tool.ts` | `adapters/community-platform-plugin.ts` |
@@ -665,7 +665,25 @@ a separate loopback model listener and closes the public model route.
 `CommunityModelAuthorization` captures one admission and compares account/token versions
 after intake and response headers, reauthorizing only after a change. The model gateway
 parses the request body once and routes it by the supplier's configured protocol; the upstream transport serializes the routed object once. `FileCommunityModelAccess` owns protected durable opaque per-space
-tokens. `PostgresSharedModelStore` owns private shared-provider state; the model projection owners publish public configuration per member space. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing supplier transport selected by its protocol. Shared catalogs contain opaque model identities and provider labels, without upstream keys. `CommunityWebToolsGateway` authenticates the member token, forwards only the documented Search or Fetch fields, rechecks current identity after upstream response headers, bounds request and response size and one 60-second call, rejects redirects, and keeps no response cache. Its usage metadata goes through `UsagePolicy`. `SharedCommunityWebToolsUpstream` chooses one enabled shared provider whose base URL host is `api.deepseek.com` — the default model's provider first, then the first such provider — and injects its key only at the outgoing retrieval transport; with no such provider the gateway returns an explicit administrator-facing explanation. A provider proxying another host supplies no retrieval credential. Container mode closes the public retrieval routes and serves them only through the private member gateway, like the model route.
+tokens. `PostgresSharedModelStore` owns private shared-provider state; the model projection owners publish public configuration per member space. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing supplier transport selected by its protocol. Shared catalogs contain opaque model identities and provider labels, without upstream keys.
+`CommunityWebToolsGateway` authenticates the member token, forwards approved Search fields
+without the original question, rechecks identity after upstream response headers, and bounds
+request size, response size and call duration. It rejects redirects and records each attempt
+through `UsagePolicy`. `PostgresPlatformSearchSettings` stores the independent deployment-wide
+credential in a field-bound envelope. The transport reads the current enabled credential per
+request and sends it only to the official HTTPS Search endpoint. Rotation takes effect on the
+next call. Disabling returns an unconfigured response immediately and omits the search token
+from subsequent member launches. Fetch is disabled in DSH and refused at the gateway.
+Container mode limits retrieval routes to the private member listener.
+
+`PlatformVoice` owns the deployment's desired and active SenseVoice precision. The
+PostgreSQL revision fences stale preparation, while the asset store verifies the
+fixed bytes and SHA-256 before publishing a content-addressed model directory.
+Only a ready model and VAD file are mounted read-only into a new member carrier.
+Changing precision retains the active model while preparation is pending.
+The native profile records the optional Bundle selection, and a PostgreSQL record preserves
+a member's choice to turn it off across carrier restarts.
+DSH runs recognition inside the member carrier with its native CPU worker.
 
 `PluginUpstreamAdministration` owns administrator-only upstream settings and redacts
 credential values in every management projection. `PostgresPluginUpstreams` reads package configuration on demand and protects credentials, headers and diagnostic requests with field-bound envelopes. `PostgresPluginAccessStore` likewise reads on demand and updates changed protected fields by key. `PluginUpstreamAccess`

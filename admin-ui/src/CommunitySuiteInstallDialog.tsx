@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Checkbox } from '@heroui/react/checkbox'
+import { Chip } from '@heroui/react/chip'
 import type {
   CommunityGroupView,
   CommunitySuiteCatalogEntryView,
@@ -10,12 +11,13 @@ import type {
 import { communityGroups, communitySuiteInstallPreview, installCommunitySuite, CommunityApiRequestError } from './community-api'
 import CommunityField from './CommunityField'
 import CommunityDialog from './CommunityDialog'
+import CommunityGrantList from './CommunityGrantList'
+import { communityGroupLabel } from './community-group-label'
 import { communityRequestId } from './community-request-id'
 import { suiteKindLabels as kindLabels } from './community-suite-labels'
 import { filledCredentials } from './community-suite-credentials'
 import { Button } from '@heroui/react/button'
 import { usePlatformLanguage } from './CommunityLanguage'
-import CommunityMessage from './CommunityMessage'
 import { useDraftGuard } from './useDraftGuard'
 import { catalogPluginDistribution, catalogServiceActions, serviceDraftKey } from './community-catalog-setup'
 
@@ -34,7 +36,7 @@ export default function CommunitySuiteInstallDialog({
   entry: CommunitySuiteCatalogEntryView
   titleOf: (id: string) => string
   installation: CommunitySuiteInstallView | undefined
-  children: (setupPending: boolean) => ReactNode
+  children: (setupPending: boolean, installError: ReactNode, reload: ReactNode) => ReactNode
   onClose: () => void
   onSubmitted: () => void
   onAccepted: (view: CommunitySuiteCatalogView) => void
@@ -149,6 +151,7 @@ export default function CommunitySuiteInstallDialog({
   const ordinaryGroups = groups?.filter(group => group.kind !== 'admin') ?? []
   const preview = loaded?.contentHash === entry.contentHash && loaded?.version === entry.version ? loaded : undefined
   const previewChanged = loaded !== undefined && preview === undefined
+  const execution = entry.execution && entry.execution.variables.length ? entry.execution : undefined
   const submit = async () => {
     if (
       draftIdentity.current !== catalogIdentity ||
@@ -219,7 +222,7 @@ export default function CommunitySuiteInstallDialog({
   return (
     <CommunityDialog
       drawer
-      drawerClassName="plugin-drawer library-form-drawer catalog-form-drawer"
+      drawerClassName="plugin-drawer library-form-drawer catalog-form-drawer compact-detail-drawer"
       closeLabel={t('Close catalog entry details')}
       title={entry.title[locale]}
       busy={blocked}
@@ -242,299 +245,310 @@ export default function CommunitySuiteInstallDialog({
         </>
       }
     >
-      {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
-      {entry.description[locale] ? <p className="plugin-summary-description">{entry.description[locale]}</p> : null}
-      {entry.identity ? <p>{entry.identity[locale]}</p> : null}
-      {children(installation?.status === 'installed' && setup.length > 0 && !setupErrors.length)}
-      {refreshError && installing ? (
-        <Button variant="secondary" onPress={onSubmitted}>
-          {t('Reload catalog')}
-        </Button>
-      ) : null}
-      {setupErrors.length ? (
-        <CommunityMessage role="alert" status="warning" title={t('Installation succeeded. Some setup actions still need attention.')}>
-          <ul>
-            {setupErrors.map(({ task, error }, index) => (
-              <li key={index}>
-                {task.label} · {errorText(error)}
-              </li>
-            ))}
-          </ul>
-          {manualOwners.size ? <p>{t('Review and enter these values in the installed service settings.')}</p> : null}
-          <div className="catalog-entry-actions">
-            {retryTasks.length ? (
-              <Button
-                variant="secondary"
-                isDisabled={blocked || installedDraft}
-                onPress={() => {
-                  if (setupErrors.some(({ error }) => error instanceof CommunityApiRequestError && error.code === 'plugin-publication-credential-confirmation'))
-                    setConfirmPublish(true)
-                  else void runSetup(retryTasks)
-                }}
-              >
-                {t('Retry setup')}
-              </Button>
-            ) : null}
-            <Button
-              variant="tertiary"
-              isDisabled={blocked}
-              onPress={() => {
-                setSetup([])
-                setSetupErrors([])
-                setServiceDrafts({})
-              }}
-            >
-              {t('Discard pending setup')}
+      <div className="plugin-settings-panel catalog-install-sections">
+        {entry.description[locale].trim() && entry.description[locale].trim() !== entry.title[locale].trim() ? (
+          <section className="plugin-detail-section" aria-label={t('Description')}>
+            <p className="catalog-entry-description">{entry.description[locale]}</p>
+          </section>
+        ) : null}
+        {children(
+          installation?.status === 'installed' && setup.length > 0 && !setupErrors.length,
+          error !== undefined ? (
+            <p role="alert" className="plugin-card-error">
+              {errorText(error)}
+            </p>
+          ) : null,
+          refreshError && installing ? (
+            <Button variant="secondary" onPress={onSubmitted}>
+              {t('Reload catalog')}
             </Button>
-          </div>
-        </CommunityMessage>
-      ) : null}
-      {confirmPublish ? (
-        <CommunityDialog
-          title={t('Confirm credential sharing')}
-          onClose={() => setConfirmPublish(false)}
-          footer={
-            <>
-              <Button variant="tertiary" onPress={() => setConfirmPublish(false)}>
-                {t('Cancel')}
-              </Button>
-              <Button
-                onPress={() => {
-                  setConfirmPublish(false)
-                  void runSetup(retryTasks, true)
-                }}
-              >
-                {t('Confirm')}
-              </Button>
-            </>
-          }
-        >
-          <p>{t('All members can use the platform credentials through this resource.')}</p>
-        </CommunityDialog>
-      ) : null}
-      {guard.dialog}
-      {!canInstall || installing ? null : preview === undefined ? (
-        error || previewChanged ? (
-          <Button
-            variant="secondary"
-            onPress={() => {
-              setError(undefined)
-              if (previewChanged) onSubmitted()
-              setPreviewReload(value => value + 1)
-            }}
-          >
-            {t('Reload catalog')}
-          </Button>
-        ) : (
-          <p role="status">{t('Loading…')}</p>
-        )
-      ) : (
-        <>
+          ) : null,
+        )}
+        {setupErrors.length ? (
           <section className="plugin-detail-section">
-            <h2>{t('This entry will install:')}</h2>
-            <ul className="grant-rows">
-              {preview.creates.map(item => (
-                <li key={item.kind + ':' + item.name}>
-                  {t(kindLabels[item.kind])} · {item.name}
-                  {item.commands?.length ? ` (${item.commands.join(', ')})` : ''}
-                  {item.detail ? ` · ${item.detail}` : ''}
+            <CatalogWarning message={t('Installation succeeded. Some setup actions still need attention.')} />
+            <ul>
+              {setupErrors.map(({ task, error }, index) => (
+                <li key={index}>
+                  {task.label} · {errorText(error)}
                 </li>
               ))}
             </ul>
-          </section>
-          {preview.dependencies?.length ? (
-            <section className="plugin-detail-section">
-              <h2>{t('Shared runtime dependencies:')}</h2>
-              <ul className="grant-rows">
-                {preview.dependencies.map(row => (
-                  <li key={row.id}>
-                    {titleOf(row.id)} ·{' '}
-                    {row.action === 'manual'
-                      ? t('Your manual dependency {name} is used; its version is not pinned', { name: row.name ?? row.id })
-                      : t(row.action === 'install' ? 'Installed together with this tool' : 'Already in the library; reused without preparing again')}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-          {preview.replacements?.length && preview.creates.length ? (
-            <div className="page-stack">
-              <CommunityMessage role="alert" status="warning" title={t('These manual entries will be replaced by the catalog version:')} />
-              <ul>
-                {preview.replacements.map(row => (
-                  <li key={row.kind + ':' + row.name}>
-                    {t(kindLabels[row.kind])} · {row.name}
-                  </li>
-                ))}
-              </ul>
-              <p>
-                {t(
-                  'The catalog takes these entries over under the same names, so their references, group grants, publication and member selections carry over. If the install fails, they stay as they were.',
-                )}
-              </p>
-              <Checkbox isSelected={replace} onChange={setReplace} isDisabled={busy}>
-                <Checkbox.Content>
-                  <Checkbox.Control>
-                    <Checkbox.Indicator />
-                  </Checkbox.Control>
-                  {t('Replace these manual entries')}
-                </Checkbox.Content>
-              </Checkbox>
-            </div>
-          ) : null}
-          {preview.pluginConflicts?.length ? (
-            <CommunityMessage
-              role="alert"
-              status="warning"
-              title={t('This plugin package belongs to another catalog entry: {names}', { names: preview.pluginConflicts.join(', ') })}
-            />
-          ) : null}
-          {preview.dependencyConflicts?.length ? (
-            <CommunityMessage
-              role="alert"
-              status="warning"
-              title={t('These dependencies already provide the same commands: {names}', { names: preview.dependencyConflicts.join(', ') })}
-            />
-          ) : null}
-          {preview.packConflicts?.length ? (
-            <CommunityMessage
-              role="alert"
-              status="warning"
-              title={t('These skill pack names are already used by a manual pack; rename or remove it first: {names}', {
-                names: preview.packConflicts.join(', '),
-              })}
-            />
-          ) : null}
-          {preview.commandConflicts?.length ? (
-            <CommunityMessage
-              role="alert"
-              status="warning"
-              title={t('These commands are already delegated by another skill: {names}', { names: preview.commandConflicts.join(', ') })}
-            />
-          ) : null}
-          {preview.conflicts?.length ? (
-            <CommunityMessage
-              role="alert"
-              status="warning"
-              title={t('These skills already exist with a different origin: {names}', { names: preview.conflicts.join(', ') })}
-            />
-          ) : null}
-          <p>{t('Preparation uses your configured download sources and verifies every download.')}</p>
-          {entry.execution?.variables.length && preview.creates.length ? (
-            <div className="page-stack">
-              <h2>{t('Team credentials (optional)')}</h2>
-              {entry.execution.variables.map(variable => (
-                <CommunityField
-                  key={variable.name}
-                  label={variable.name}
-                  type="password"
-                  autoComplete="new-password"
-                  value={credentials[variable.name] ?? ''}
-                  onChange={value => setCredentials(current => ({ ...current, [variable.name]: value }))}
-                  disabled={busy}
-                  description={variable.purpose[locale]}
-                />
-              ))}
-              <p>
-                {t(
-                  entry.execution.variables.some(row => row.optional)
-                    ? 'You can skip this step. Configure only the backend you use; unrelated optional settings can stay blank.'
-                    : 'You can skip this step. Delegated execution stays off until every credential is saved.',
-                )}
-              </p>
-            </div>
-          ) : null}
-          {entry.services?.length && preview.creates.length ? (
-            <section className="plugin-detail-section">
-              <h2>{t('Set up service backends')}</h2>
-              <p>{t('Service configuration is optional. You can also add it after installation.')}</p>
-              {entry.services.map(owner =>
-                owner.slots.map(slot => (
-                  <section key={JSON.stringify([owner.kind, owner.name, slot.id])} className="page-stack">
-                    <h3>{slot.label[locale]}</h3>
-                    {slot.backends.map(backend => {
-                      const key = serviceDraftKey(owner, slot.id, backend.id)
-                      return (
-                        <details key={key} className="plugin-detail-section">
-                          <summary>{backend.label[locale]}</summary>
-                          <div className="page-stack">
-                            {backend.fields.map(field => (
-                              <CommunityField
-                                key={field.name}
-                                label={field.name}
-                                type={field.type === 'secret' ? 'password' : field.type}
-                                autoComplete={field.type === 'secret' ? 'new-password' : 'off'}
-                                value={serviceDrafts[key]?.[field.name] ?? ''}
-                                disabled={blocked}
-                                description={
-                                  field.required
-                                    ? t('Required field')
-                                    : field.requiredGroup
-                                      ? t('Fill one of {fields}').replace(
-                                          '{fields}',
-                                          backend.fields
-                                            .filter(other => other.requiredGroup === field.requiredGroup)
-                                            .map(other => other.name)
-                                            .join(' / '),
-                                        )
-                                      : undefined
-                                }
-                                onChange={value => setServiceDrafts(current => ({ ...current, [key]: { ...current[key], [field.name]: value } }))}
-                              />
-                            ))}
-                          </div>
-                        </details>
-                      )
-                    })}
-                  </section>
-                )),
-              )}
-            </section>
-          ) : null}
-          {entry.plugin || entry.packName ? (
-            <div className="page-stack">
-              <h2>{t('Access and publication (optional)')}</h2>
-              {groupsError ? (
-                <CommunityMessage role="alert" status="warning" title={errorText(groupsError)}>
-                  <Button variant="secondary" onPress={() => setPreviewReload(value => value + 1)}>
-                    {t('Reload')}
-                  </Button>
-                </CommunityMessage>
+            {manualOwners.size ? <p>{t('Review and enter these values in the installed service settings.')}</p> : null}
+            <div className="catalog-entry-actions">
+              {retryTasks.length ? (
+                <Button
+                  variant="secondary"
+                  isDisabled={blocked || installedDraft}
+                  onPress={() => {
+                    if (
+                      setupErrors.some(({ error }) => error instanceof CommunityApiRequestError && error.code === 'plugin-publication-credential-confirmation')
+                    )
+                      setConfirmPublish(true)
+                    else void runSetup(retryTasks)
+                  }}
+                >
+                  {t('Retry setup')}
+                </Button>
               ) : null}
-              {ordinaryGroups.length ? (
-                ordinaryGroups.map(group => (
-                  <Checkbox
-                    key={group.id}
-                    isSelected={granted.includes(group.id)}
-                    onChange={selected => setGranted(current => (selected ? [...current, group.id] : current.filter(id => id !== group.id)))}
-                    isDisabled={busy}
-                  >
+              <Button
+                variant="tertiary"
+                isDisabled={blocked}
+                onPress={() => {
+                  setSetup([])
+                  setSetupErrors([])
+                  setServiceDrafts({})
+                }}
+              >
+                {t('Discard pending setup')}
+              </Button>
+            </div>
+          </section>
+        ) : null}
+        {confirmPublish ? (
+          <CommunityDialog
+            title={t('Confirm credential sharing')}
+            onClose={() => setConfirmPublish(false)}
+            footer={
+              <>
+                <Button variant="tertiary" onPress={() => setConfirmPublish(false)}>
+                  {t('Cancel')}
+                </Button>
+                <Button
+                  onPress={() => {
+                    setConfirmPublish(false)
+                    void runSetup(retryTasks, true)
+                  }}
+                >
+                  {t('Confirm')}
+                </Button>
+              </>
+            }
+          >
+            <p>{t('All members can use the platform credentials through this resource.')}</p>
+          </CommunityDialog>
+        ) : null}
+        {guard.dialog}
+        {!canInstall || installing ? null : preview === undefined ? (
+          <section className="plugin-detail-section">
+            <h2>{t('This entry will install')}</h2>
+            {error || previewChanged ? (
+              <Button
+                variant="secondary"
+                onPress={() => {
+                  setError(undefined)
+                  if (previewChanged) onSubmitted()
+                  setPreviewReload(value => value + 1)
+                }}
+              >
+                {t('Reload catalog')}
+              </Button>
+            ) : (
+              <p role="status">{t('Loading…')}</p>
+            )}
+          </section>
+        ) : (
+          <>
+            <section className="plugin-detail-section">
+              <h2>{t('This entry will install')}</h2>
+              <ul className="grant-rows catalog-plan-rows">
+                {preview.creates.map(item => {
+                  const versionAt = item.kind === 'plugin' ? item.name.lastIndexOf('@') : -1
+                  const name = versionAt > 0 ? item.name.slice(0, versionAt) : (item.names?.join(', ') ?? item.name)
+                  const version = versionAt > 0 ? item.name.slice(versionAt + 1) : item.kind === 'skill' ? 'v' + preview.version : undefined
+                  const meta = [item.detail, item.commands?.join(', ')].filter(Boolean).join(' · ')
+                  return (
+                    <li key={item.kind + ':' + item.name}>
+                      <div className="grant-row-main">
+                        <p className="grant-row-title catalog-plan-title">
+                          <span>{t(kindLabels[item.kind])} ·</span> <strong>{name}</strong>
+                          {version ? <span> · {version}</span> : null}
+                        </p>
+                        {meta ? <p>{meta}</p> : null}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+              {preview.dependencies?.length ? (
+                <div className="catalog-install-dependencies">
+                  <h3>{t('Shared runtime dependencies')}</h3>
+                  <ul className="grant-rows">
+                    {preview.dependencies.map(row => (
+                      <li key={row.id}>
+                        <div className="grant-row-main">
+                          <strong>{titleOf(row.id)}</strong>
+                          <p>
+                            {row.action === 'manual'
+                              ? t('Your manual dependency {name} is used; its version is not pinned', { name: row.name ?? row.id })
+                              : t(row.action === 'install' ? 'Installed together with this tool' : 'Already in the library; reused without preparing again')}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {preview.replacements?.length && preview.creates.length ? (
+                <div className="page-stack">
+                  <CatalogWarning message={t('These manual entries will be replaced by the catalog version')} />
+                  <ul>
+                    {preview.replacements.map(row => (
+                      <li key={row.kind + ':' + row.name}>
+                        {t(kindLabels[row.kind])} · {row.name}
+                      </li>
+                    ))}
+                  </ul>
+                  <p>
+                    {t(
+                      'The catalog takes these entries over under the same names, so their references, group grants, publication and member selections carry over. If the install fails, they stay as they were.',
+                    )}
+                  </p>
+                  <Checkbox isSelected={replace} onChange={setReplace} isDisabled={busy}>
                     <Checkbox.Content>
                       <Checkbox.Control>
                         <Checkbox.Indicator />
                       </Checkbox.Control>
-                      {t(entry.plugin ? 'Preinstall for {name}' : 'Grant to {name}', { name: group.name })}
+                      {t('Replace these manual entries')}
                     </Checkbox.Content>
                   </Checkbox>
-                ))
-              ) : groups ? (
-                <p>{t('No ordinary groups yet.')}</p>
-              ) : groupsError ? null : (
-                <p role="status">{t('Loading…')}</p>
-              )}
-              <Checkbox isSelected={publish} onChange={setPublish} isDisabled={busy}>
-                <Checkbox.Content>
-                  <Checkbox.Control>
-                    <Checkbox.Indicator />
-                  </Checkbox.Control>
-                  {t('Publish to the platform app center')}
-                </Checkbox.Content>
-              </Checkbox>
-              <p>{t(entry.plugin ? 'Members can manage their preinstalled copies.' : 'Both choices are optional and can be changed later.')}</p>
-            </div>
-          ) : null}
-        </>
-      )}
+                </div>
+              ) : null}
+              {(
+                [
+                  [preview.pluginConflicts, 'This plugin package belongs to another catalog entry ({names})'],
+                  [preview.dependencyConflicts, 'These dependencies already provide the same commands ({names})'],
+                  [preview.packConflicts, 'Rename or remove the existing manual skill packs ({names})'],
+                  [preview.commandConflicts, 'Another skill already delegates these commands ({names})'],
+                  [preview.conflicts, 'These skills already exist with a different origin ({names})'],
+                ] as const
+              ).map(([names, message]) => (names?.length ? <CatalogWarning key={message} message={t(message, { names: names.join(', ') })} /> : null))}
+            </section>
+            {(execution || entry.services?.length) && preview.creates.length ? (
+              <section className="plugin-detail-section">
+                <h2>{t('Set up service backends')}</h2>
+                {entry.services?.length ? <p>{t('Service configuration is optional. You can also add it after installation.')}</p> : null}
+                {execution ? (
+                  <div className="page-stack">
+                    <h3>{t('Team credentials (optional)')}</h3>
+                    {execution.variables.map(variable => (
+                      <CommunityField
+                        key={variable.name}
+                        label={variable.name}
+                        type="password"
+                        autoComplete="new-password"
+                        value={credentials[variable.name] ?? ''}
+                        onChange={value => setCredentials(current => ({ ...current, [variable.name]: value }))}
+                        disabled={busy}
+                        description={variable.purpose[locale]}
+                      />
+                    ))}
+                    <p>
+                      {t(
+                        execution.variables.some(row => row.optional)
+                          ? 'You can skip this step. Configure only the backend you use; unrelated optional settings can stay blank.'
+                          : 'You can skip this step. Delegated execution stays off until every credential is saved.',
+                      )}
+                    </p>
+                  </div>
+                ) : null}
+                {entry.services?.map(owner =>
+                  owner.slots.map(slot => (
+                    <section key={JSON.stringify([owner.kind, owner.name, slot.id])} className="catalog-service-slot" aria-label={slot.label[locale]}>
+                      <h3>{slot.label[locale]}</h3>
+                      {slot.backends.map(backend => {
+                        const key = serviceDraftKey(owner, slot.id, backend.id)
+                        return (
+                          <details key={key} className="catalog-service-backend">
+                            <summary>{backend.label[locale]}</summary>
+                            <div className="page-stack">
+                              {backend.fields.map(field => (
+                                <CommunityField
+                                  key={field.name}
+                                  label={field.label?.[locale] ?? field.name}
+                                  type={field.type === 'secret' ? 'password' : field.type}
+                                  autoComplete={field.type === 'secret' ? 'new-password' : 'off'}
+                                  value={serviceDrafts[key]?.[field.name] ?? ''}
+                                  disabled={blocked}
+                                  description={[
+                                    field.label ? field.name : '',
+                                    field.required
+                                      ? t('Required field')
+                                      : field.requiredGroup
+                                        ? t('Fill one of {fields}', {
+                                            fields: backend.fields
+                                              .filter(other => other.requiredGroup === field.requiredGroup)
+                                              .map(other => other.label?.[locale] ?? other.name)
+                                              .join(' / '),
+                                          })
+                                        : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                  onChange={value => setServiceDrafts(current => ({ ...current, [key]: { ...current[key], [field.name]: value } }))}
+                                />
+                              ))}
+                            </div>
+                          </details>
+                        )
+                      })}
+                    </section>
+                  )),
+                )}
+              </section>
+            ) : null}
+            {entry.plugin || entry.packName ? (
+              <section className="plugin-detail-section">
+                <h2>{t('Access and publication (optional)')}</h2>
+                {groupsError ? (
+                  <div className="catalog-warning-actions">
+                    <CatalogWarning message={errorText(groupsError)} />
+                    <Button size="sm" variant="secondary" onPress={() => setPreviewReload(value => value + 1)}>
+                      {t('Reload')}
+                    </Button>
+                  </div>
+                ) : null}
+                {groups ? (
+                  <CommunityGrantList
+                    rows={ordinaryGroups.map(group => ({ id: group.id, name: communityGroupLabel(group, t) }))}
+                    selected={granted}
+                    onChange={setGranted}
+                    busy={busy}
+                    addLabel={t('Add groups')}
+                    dialogTitle={t('Add groups')}
+                    emptyLabel={t('No groups selected.')}
+                    noCandidatesLabel={t('No ordinary groups available to add.')}
+                  />
+                ) : groupsError ? null : (
+                  <p role="status">{t('Loading…')}</p>
+                )}
+                <Checkbox isSelected={publish} onChange={setPublish} isDisabled={busy}>
+                  <Checkbox.Content>
+                    <Checkbox.Control>
+                      <Checkbox.Indicator />
+                    </Checkbox.Control>
+                    {t('Publish to the platform app center')}
+                  </Checkbox.Content>
+                </Checkbox>
+                <p>{t(entry.plugin ? 'Members can manage their preinstalled copies.' : 'Both choices are optional and can be changed later.')}</p>
+              </section>
+            ) : null}
+            <p className="catalog-install-note">{t('Preparation uses your configured download sources and verifies every download.')}</p>
+          </>
+        )}
+      </div>
     </CommunityDialog>
+  )
+}
+
+function CatalogWarning({ message }: { message: string }) {
+  const { t } = usePlatformLanguage()
+  return (
+    <div className="catalog-warning" role="alert">
+      <Chip size="sm" variant="soft" color="warning">
+        {t('Warning')}
+      </Chip>
+      <p>{message}</p>
+    </div>
   )
 }

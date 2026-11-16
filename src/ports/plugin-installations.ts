@@ -15,6 +15,11 @@ export interface PluginInstallationsPort {
   resetForSpace(spaceId: string): Promise<void>
 }
 
+export const nativeJsonSettingsHistoryKey = '@json-settings'
+
+export type NativeJsonFieldState = { readonly applied: string | null; readonly pending?: string } | { readonly detached: true }
+export type NativeJsonFieldHistory = Readonly<Record<string, NativeJsonFieldState>>
+
 export type NativeServiceSettingsHistory = Readonly<
   Record<
     string,
@@ -22,10 +27,15 @@ export type NativeServiceSettingsHistory = Readonly<
       readonly contract: string
       readonly applied: string | null
       readonly pending?: string
+      readonly jsonFiles?: Readonly<Record<string, NativeJsonFieldHistory>>
     }
   >
 >
 
 export interface PluginServiceSettingsHistoryPort {
   replaceServiceSettings(spaceId: string, expected: PluginInstallation, next: NativeServiceSettingsHistory): Promise<boolean>
+}
+
+export interface PluginJsonSettingsSummaryPort {
+  personalJsonFields(packageName: string, serviceOrigin: string): Promise<readonly { file: string; path: string }[]>
 }

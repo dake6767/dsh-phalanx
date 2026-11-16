@@ -15,6 +15,7 @@ export const en = {
   'Preparing catalog update\u2026': 'Preparing catalog update\u2026',
   'Testing catalog update\u2026': 'Testing catalog update\u2026',
 
+  'Platform catalog': 'Platform catalog',
   'No credential required': 'No credential required',
   'Testing imported service…': 'Testing imported service…',
   'Import failed': 'Import failed',
@@ -149,6 +150,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Preparing catalog update\u2026': '正在准备广场更新…',
   'Testing catalog update\u2026': '正在测试广场更新…',
 
+  'Platform catalog': '平台广场',
   'No credential required': '无需凭据',
   'Testing imported service…': '正在测试引入的服务…',
   'Import failed': '引入失败',

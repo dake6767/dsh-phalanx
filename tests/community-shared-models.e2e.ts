@@ -8,6 +8,7 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityModelSettings } from '../src/domain/admin-contract.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
+import { sharedModelProviderKey } from '../src/dsh/shared-models.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { openNativeSettings, runCommunityTerminal, selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
@@ -322,6 +323,11 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
         })
       ).ok,
     ).toBe(false)
+    const retryEdit = await rpc.remoteRpcResult(origin, world.cookie, 'settings/update', {
+      ns: 'phalanx-shared-models',
+      patch: { providers: { [sharedModelProviderKey(settings.providers[0]!.id)]: { retryPolicy: { mode: 'normal', maxRetries: 0 } } } },
+    })
+    expect(retryEdit.ok).toBe(false)
     await openNativeSettings(world.page)
     expect(await world.page.getByRole('button', { name: 'Models', exact: true }).count()).toBe(0)
     expect(await world.page.getByText('Reasoning levels', { exact: true }).count()).toBe(0)

@@ -37,6 +37,7 @@ export type CommunityReclaimResult = 'reclaimed' | 'busy' | 'not-running' | 'alr
 export interface CommunityModelGatewayAccess {
   readonly url: string
   readonly token: string
+  readonly platformSearchEnabled?: boolean
 }
 
 export class CommunityRuntimeUnavailableError extends Error {

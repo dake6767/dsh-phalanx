@@ -57,11 +57,13 @@ it('composes the same context the stores have always written', () => {
   for (const table of ['', 'Upper', 'dsh_phalanx.plugin_upstreams']) expect(() => protectedTable(table)).toThrow('platform table name')
 })
 
-it('keeps a baseline envelope for every protected table the stores declare', async () => {
+it('covers every declared protected table with historical or current persistence evidence', async () => {
   const { readdir } = await import('node:fs/promises')
   const declared = new Set<string>()
   for (const file of await readdir('src/adapters')) {
     for (const match of readFileSync(join('src/adapters', file), 'utf8').matchAll(/protectedTable\('([a-z_]+)'\)/gu)) declared.add(match[1]!)
   }
-  expect([...declared].sort()).toEqual([...new Set(fixture.entries.map(entry => entry.context.table))].sort())
+  // Introduced in schema 25. Its first stored envelope is covered by platform-search-settings.spec.ts.
+  const currentTables = ['platform_search_settings']
+  expect([...declared].sort()).toEqual([...new Set([...fixture.entries.map(entry => entry.context.table), ...currentTables])].sort())
 })

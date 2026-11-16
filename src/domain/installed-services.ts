@@ -52,9 +52,18 @@ export function validServiceValue(type: CatalogServiceBackend['fields'][number][
 }
 
 function serviceProjection(slot: InstalledServiceSlot, backend: CatalogServiceBackend) {
-  const { label, ...fields } = backend
+  const { label, fields, ...definition } = backend
   void label
-  return canonicalJson({ slot: 'binding' in slot ? slot.binding : [...slot.commands].sort(), backend: fields })
+  return canonicalJson({
+    slot: 'binding' in slot ? slot.binding : [...slot.commands].sort(),
+    backend: {
+      ...definition,
+      fields: fields.map(({ label, ...field }) => {
+        void label
+        return field
+      }),
+    },
+  })
 }
 
 export function installServiceDefinition<Slot extends InstalledServiceSlot>(
@@ -185,7 +194,14 @@ export function configureServiceBackend<Slot extends InstalledServiceSlot>(state
   }
 }
 
-export function installedServiceView(state: InstalledServices) {
+function jsonSettingsPersonal(
+  binding: import('./suite-service-slots.js').CatalogJsonServiceBinding,
+  fields: readonly { file: string; path: string }[],
+): boolean {
+  return fields.some(field => field.file === binding.file && binding.fields.some(declared => declared.path.join('.') === field.path))
+}
+
+export function installedServiceView(state: InstalledServices, personalJsonFields: readonly { file: string; path: string }[] = []) {
   return {
     identity: state.identity,
     ...(state.legacyValues
@@ -198,6 +214,11 @@ export function installedServiceView(state: InstalledServices) {
     slots: state.slots.map(slot => ({
       id: slot.id,
       label: slot.label,
+      ...('binding' in slot && slot.binding.kind === 'json-settings'
+        ? {
+            jsonSettings: { upstream: slot.binding.upstream, personal: jsonSettingsPersonal(slot.binding, personalJsonFields) },
+          }
+        : {}),
       backends: slot.backends.map(backend => {
         const settings = state.settings.find(row => row.slot === slot.id && row.backend === backend.id)
         const values = settings?.values ?? {}

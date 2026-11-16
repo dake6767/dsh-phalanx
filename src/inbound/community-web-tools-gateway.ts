@@ -9,7 +9,7 @@ import type { CommunityWebToolsUpstreamPort, WebToolsOperation } from '../ports/
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import { CommunityRequestError, readCommunityJson } from './community-request.js'
 import { downstreamAbort } from './upstream-stream.js'
-import { DEEPSEEK_WEB_TOOLS_HOST, WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS } from '../dsh/web-tools.js'
+import { DEEPSEEK_WEB_TOOLS_HOST } from '../dsh/web-tools.js'
 
 /** Retrieval request bodies are small; the bound rejects anything that is not one. */
 export const WEB_TOOLS_MAX_BODY_BYTES = 64 * 1024
@@ -188,7 +188,6 @@ interface SanitizedSearch {
   query: string
   count?: number
   need_content: false
-  ori_question?: string
 }
 interface SanitizedFetch {
   url: string
@@ -213,12 +212,8 @@ function sanitizeRetrievalBody(operation: WebToolsOperation, value: unknown): Sa
           ? (body.count as number)
           : undefined
     if (body.count !== undefined && count === undefined) return undefined
-    const question =
-      typeof body.ori_question === 'string'
-        ? Array.from(body.ori_question.replace(/\s+/gu, ' ').trim()).slice(0, WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS).join('')
-        : ''
     // The DSH provider always asks for snippets only; keep that fixed so the platform contract matches the plugin default.
-    return { query, ...(count === undefined ? {} : { count }), need_content: false, ...(question.length === 0 ? {} : { ori_question: question }) }
+    return { query, ...(count === undefined ? {} : { count }), need_content: false }
   }
   if (typeof body.url !== 'string' || body.url.length > MAX_URL_CHARS) return undefined
   let target: URL

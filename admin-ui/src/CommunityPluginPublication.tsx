@@ -66,32 +66,27 @@ export default function CommunityPluginPublication({
       published={plugin.published}
       paused={plugin.publicationPaused}
       unavailable={plugin.incompatible || plugin.stage !== 'available'}
-      reason={
+      consequence={
         plugin.publicationPaused
           ? t('Publication remains paused until a compatible version is selected. Cancel automatic republication to keep it unpublished.')
-          : plugin.incompatible
-            ? t('Incompatible with the current version')
-            : plugin.stage !== 'available'
-              ? t(pluginStageLabels[plugin.stage])
-              : undefined
+          : undefined
+      }
+      reason={plugin.incompatible ? t('Incompatible with the current version') : plugin.stage !== 'available' ? t(pluginStageLabels[plugin.stage]) : undefined}
+      action={
+        <Button
+          variant="secondary"
+          isDisabled={busy || plugin.removing || (!plugin.published && !plugin.publicationPaused && plugin.stage !== 'available')}
+          onPress={() =>
+            onRequest(() => {
+              void review()
+            })
+          }
+        >
+          {t(plugin.publicationPaused ? 'Cancel automatic republication' : plugin.published ? 'Unpublish resource' : 'Publish resource')}
+        </Button>
       }
     >
-      <p>{t('Publishing lets all members select this resource when it is available.')}</p>
-      <p>{consequences(plugin)}</p>
-      <p>{t('Republishing does not restore removed member selections.')}</p>
-      <p>{t('{count} member selections', { count: plugin.selectedMembers ?? 0 })}</p>
       {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
-      <Button
-        variant="secondary"
-        isDisabled={busy || plugin.removing || (!plugin.published && !plugin.publicationPaused && plugin.stage !== 'available')}
-        onPress={() =>
-          onRequest(() => {
-            void review()
-          })
-        }
-      >
-        {t(plugin.publicationPaused ? 'Cancel automatic republication' : plugin.published ? 'Unpublish resource' : 'Publish resource')}
-      </Button>
       {confirmation ? (
         <CommunityDialog
           title={t(confirmation.published ? 'Confirm resource publication' : 'Confirm resource unpublication')}
@@ -126,7 +121,7 @@ export default function CommunityPluginPublication({
           </p>
           {confirmation.plugin.hasPlatformCredential ? <p>{t('All members can use the platform credentials through this resource.')}</p> : null}
           {!confirmation.published ? <p>{consequences(confirmation.plugin)}</p> : null}
-          <p>{t('Republishing does not restore removed member selections.')}</p>
+          {!confirmation.published ? <p>{t('Republishing does not restore removed member selections.')}</p> : null}
         </CommunityDialog>
       ) : null}
     </CommunityPublicationSection>

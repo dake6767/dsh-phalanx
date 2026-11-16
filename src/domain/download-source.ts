@@ -8,6 +8,10 @@ export interface DownloadSourceSelection {
   readonly preset: DownloadSourcePreset
   readonly overrides?: Partial<DownloadSourceValues>
 }
+export const voiceModelSource: Readonly<Record<DownloadSourcePreset, string>> = {
+  official: 'https://huggingface.co',
+  mainland: 'https://hf-mirror.com',
+}
 export const downloadSourcePresets: Readonly<Record<DownloadSourcePreset, DownloadSourceValues>> = { official: presets.official, mainland: presets.mainland }
 const prefixes: readonly DownloadSourceCategory[] = ['containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi']
 

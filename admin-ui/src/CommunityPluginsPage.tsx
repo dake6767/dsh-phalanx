@@ -7,6 +7,7 @@ import CommunityPluginDependencies from './CommunityPluginDependencies'
 import CommunityLibraryMaintenance from './CommunityLibraryMaintenance'
 import CommunityContributions from './CommunityContributions'
 import CommunityPluginAccess from './CommunityPluginAccess'
+import CommunityInstalledServiceSettings from './CommunityInstalledServiceSettings'
 import CommunityPluginPublication from './CommunityPluginPublication'
 import { CommunityPublicationStatus } from './CommunityPublicationSection'
 import CommunityPluginUpstreams from './CommunityPluginUpstreams'
@@ -25,6 +26,7 @@ import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
 import CommunityMessage from './CommunityMessage'
 import CommunitySelect from './CommunitySelect'
+import { useDraftGuard } from './useDraftGuard'
 
 export default function CommunityPluginsPage() {
   const { t, locale, errorText } = usePlatformLanguage()
@@ -38,10 +40,16 @@ export default function CommunityPluginsPage() {
   const [adding, setAdding] = useState(false)
   const accessCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined)
   const dependencyCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined)
+  const [serviceDraft, setServiceDraft] = useState({ dirty: false, busy: false })
+  const [serviceReset, setServiceReset] = useState(0)
+  const onServiceDraft = useCallback((_key: string, dirty: boolean, busy: boolean) => setServiceDraft({ dirty, busy }), [])
+  const serviceGuard = useDraftGuard(serviceDraft.dirty, undefined, () => setServiceReset(value => value + 1), serviceDraft.busy)
   const guarded = (close: () => void) => {
+    if (serviceDraft.busy) return
+    const service = () => serviceGuard.request(close)
     const access = () => {
-      if (accessCloseGuard.current) accessCloseGuard.current(close)
-      else close()
+      if (accessCloseGuard.current) accessCloseGuard.current(service)
+      else service()
     }
     if (dependencyCloseGuard.current) dependencyCloseGuard.current(access)
     else access()
@@ -54,6 +62,11 @@ export default function CommunityPluginsPage() {
   const [retrying, setRetrying] = useState<string>()
   const pending = useRef(false)
   const refresh = useCallback(() => setRevision(value => value + 1), [])
+  const showLibraryTab = (tab: string) => {
+    setLibraryTab(tab)
+    window.history.replaceState(null, '', tab === 'catalog' ? '/admin/plugins?tab=catalog' : '/admin/plugins')
+    refresh()
+  }
   useEffect(() => {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -139,15 +152,7 @@ export default function CommunityPluginsPage() {
           </Button>
         </>
       ) : null}
-      <Tabs
-        className="skill-library-tabs library-workspace-tabs"
-        selectedKey={libraryTab}
-        onSelectionChange={key => {
-          setLibraryTab(String(key))
-          window.history.replaceState(null, '', key === 'catalog' ? '/admin/plugins?tab=catalog' : '/admin/plugins')
-          refresh()
-        }}
-      >
+      <Tabs className="skill-library-tabs library-workspace-tabs" selectedKey={libraryTab} onSelectionChange={key => showLibraryTab(String(key))}>
         <Tabs.ListContainer>
           <Tabs.List aria-label={t('Plugin library')}>
             <Tabs.Tab id="plugins">
@@ -312,7 +317,14 @@ export default function CommunityPluginsPage() {
         />
       ) : null}
       {detail ? (
-        <CommunityDialog drawer drawerClassName="plugin-drawer" title={detail.title} closeLabel={t('Close plugin details')} onClose={closeDetails}>
+        <CommunityDialog
+          drawer
+          drawerClassName="plugin-drawer compact-detail-drawer"
+          title={detail.title}
+          closeLabel={t('Close plugin details')}
+          onClose={closeDetails}
+        >
+          {serviceGuard.dialog}
           <div className="drawer-identity plugin-identity">
             <span className="plugin-card-icon" aria-hidden="true">
               <CommunityIcon name="plugins" size={22} />
@@ -388,6 +400,14 @@ export default function CommunityPluginsPage() {
                 />
               </Tabs.Panel>
               <Tabs.Panel id="access" className="plugin-settings-panel" shouldForceMount>
+                {detail.suiteOrigin ? (
+                  <CommunityInstalledServiceSettings
+                    key={`${detail.packageName}:${serviceReset}`}
+                    kind="plugin"
+                    name={detail.packageName}
+                    onDraft={onServiceDraft}
+                  />
+                ) : null}
                 <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName} onChanged={refresh} />
                 <CommunityPluginAccess
                   key={detail.packageName + '-access'}
@@ -404,7 +424,18 @@ export default function CommunityPluginsPage() {
                 {detail.suiteOrigin ? (
                   <>
                     <p className="plugin-catalog-origin">
-                      {t('From “{name}”', { name: originName(detail.suiteOrigin) })} · <a href="/admin/plugins?tab=catalog">{t('Plugin catalog')}</a>
+                      {t('From “{name}”', { name: originName(detail.suiteOrigin) })} ·{' '}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          guarded(() => {
+                            setSelected(undefined)
+                            showLibraryTab('catalog')
+                          })
+                        }
+                      >
+                        {t('Plugin catalog')}
+                      </button>
                     </p>
                     {integrity}
                   </>

@@ -8,7 +8,7 @@ it('authorizes one exact platform install for the bound member and launch, then 
     () => now,
     () => 'fixture-nonce',
   )
-  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule).toString('base64'))
+  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule + '\nexport { createVerifier }').toString('base64'))
   const verifier = module.createVerifier(authority.publicKey, 'member', 'fixture-launch', () => now)
   const body = JSON.stringify({ type: 'client-request', method: 'pluginManager/installBundle', payload: { args: { spec: '/fixture/plugin.tgz' } } })
   const authorization = authority.authorize({ userId: 'member', resourceKey: 'fixture-launch' }, body)
@@ -27,7 +27,7 @@ it.each([
     () => 100000,
     () => 'fixture-nonce',
   )
-  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule).toString('base64'))
+  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule + '\nexport { createVerifier }').toString('base64'))
   const verifier = module.createVerifier(authority.publicKey, subject, generation, () => 100000)
   const authorization = authority.authorize({ userId: 'member', resourceKey: 'fixture-launch' }, 'original')
   expect(verifier.check(authorization, method, path, body)).toMatchObject({ ok: false, reason: 'target' })
@@ -39,7 +39,7 @@ it('rejects expired and implausibly future grants using an injected clock', asyn
     () => now,
     () => 'fixture-nonce',
   )
-  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule).toString('base64'))
+  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule + '\nexport { createVerifier }').toString('base64'))
   const verifier = module.createVerifier(authority.publicKey, 'member', 'fixture-launch', () => now)
   const authorization = authority.authorize({ userId: 'member', resourceKey: 'fixture-launch' }, 'body')
   now += 30000
@@ -57,7 +57,7 @@ it('does not accept signatures from another platform key or reuse a grant after 
     () => 100000,
     () => 'fixture-nonce',
   )
-  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule).toString('base64'))
+  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule + '\nexport { createVerifier }').toString('base64'))
   const verifier = module.createVerifier(second.publicKey, 'member', 'fixture-launch', () => 100000)
   expect(
     verifier.check(first.authorize({ userId: 'member', resourceKey: 'fixture-launch' }, 'body'), 'POST', NATIVE_PLATFORM_INSTALL_PATH, 'body'),
@@ -68,7 +68,7 @@ it.each([undefined, {}, { proof: '.', signature: 'invalid' }, { proof: 'a'.repea
   'refuses malformed authorization without throwing',
   async authorization => {
     const authority = new NativeInstallAuthority()
-    const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule).toString('base64'))
+    const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule + '\nexport { createVerifier }').toString('base64'))
     const verifier = module.createVerifier(authority.publicKey, 'member', 'fixture-launch')
     expect(verifier.check(authorization, 'POST', NATIVE_PLATFORM_INSTALL_PATH, 'body')).toMatchObject({ ok: false, reason: 'proof' })
   },
@@ -80,7 +80,7 @@ it('requires a captured launch before creating platform authorization', () => {
 
 it('scopes signed settings requests to their own path and carrier', async () => {
   const authority = new NativeInstallAuthority()
-  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule).toString('base64'))
+  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule + '\nexport { createVerifier }').toString('base64'))
   const verifier = module.createVerifier(authority.publicKey, 'member', 'fixture-launch')
   const authorization = authority.authorize({ userId: 'member', resourceKey: 'fixture-launch' }, 'settings', NATIVE_PLATFORM_SETTINGS_PATH)
   expect(verifier.check(authorization, 'POST', NATIVE_PLATFORM_INSTALL_PATH, 'settings')).toMatchObject({ ok: false, reason: 'target' })

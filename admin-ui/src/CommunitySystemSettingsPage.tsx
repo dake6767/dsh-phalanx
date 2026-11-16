@@ -8,8 +8,10 @@ import CommunityDownloadSources from './CommunityDownloadSources'
 import CommunityUsageSettings from './CommunityUsageSettings'
 import CommunityInstanceResourceSettings from './CommunityInstanceResourceSettings'
 import CommunityExecutionSettings from './CommunityExecutionSettings'
+import CommunityPlatformSearchSettings from './CommunityPlatformSearchSettings'
+import CommunityPlatformVoiceSettings from './CommunityPlatformVoiceSettings'
 
-const tabs = ['overview', 'download-sources', 'resources', 'retention'] as const
+const tabs = ['overview', 'download-sources', 'dsh-features', 'resources', 'retention'] as const
 type SettingsTab = (typeof tabs)[number]
 // Legacy anchors keep landing on the panel they used to scroll to.
 const initialTab = (): SettingsTab => {
@@ -51,6 +53,10 @@ export default function CommunitySystemSettingsPage() {
               {t('Resources and limits')}
               <Tabs.Indicator />
             </Tabs.Tab>
+            <Tabs.Tab id="dsh-features">
+              {t('DSH features')}
+              <Tabs.Indicator />
+            </Tabs.Tab>
             {featureVisible('usage') ? (
               <Tabs.Tab id="retention">
                 {t('Usage record retention')}
@@ -69,6 +75,10 @@ export default function CommunitySystemSettingsPage() {
         <Tabs.Panel id="resources" shouldForceMount className="system-settings-panel">
           <CommunityInstanceResourceSettings />
           <CommunityExecutionSettings />
+        </Tabs.Panel>
+        <Tabs.Panel id="dsh-features" shouldForceMount className="system-settings-panel">
+          <CommunityPlatformSearchSettings />
+          <CommunityPlatformVoiceSettings />
         </Tabs.Panel>
         {featureVisible('usage') ? (
           <Tabs.Panel id="retention" shouldForceMount className="system-settings-panel">

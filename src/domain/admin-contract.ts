@@ -33,6 +33,32 @@ export type CommunityInstanceResourceAction =
     }
   | { readonly action: 'apply'; readonly revision: number; readonly confirmed: boolean; readonly targets: readonly CommunityInstanceResourceTarget[] }
 
+export type PlatformVoicePrecision = 'int8' | 'fp32'
+export interface PlatformVoiceSettingsView {
+  readonly revision: number
+  readonly enabled: boolean
+  readonly precision: PlatformVoicePrecision
+  readonly activePrecision: PlatformVoicePrecision | null
+  readonly status: 'off' | 'preparing' | 'ready' | 'failed'
+  readonly progress?: { readonly received: number; readonly total: number }
+  readonly failure?: import('./platform-voice.js').PlatformVoiceFailureCode
+}
+export type PlatformVoiceSettingsChange = {
+  readonly revision: number
+  readonly enabled: boolean
+  readonly precision: PlatformVoicePrecision
+}
+
+export interface PlatformSearchSettingsView {
+  readonly revision: number
+  readonly enabled: boolean
+  readonly hasKey: boolean
+}
+
+export type PlatformSearchSettingsChange =
+  | { readonly action: 'save'; readonly revision: number; readonly enabled: boolean; readonly apiKey?: string }
+  | { readonly action: 'clear'; readonly revision: number }
+
 export interface CommunitySessionInfo {
   readonly username: string
   readonly admin: boolean

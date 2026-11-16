@@ -5,11 +5,18 @@ import type { SuiteCatalogExecutionItem } from './suite-catalog.js'
 
 export interface CatalogServiceField {
   readonly name: string
+  readonly label?: Label
   readonly type: 'text' | 'url' | 'secret'
   readonly required: boolean
   readonly requiredGroup?: string
 }
 type Label = Readonly<Record<'en' | 'zh-CN', string>>
+export interface CatalogServiceFieldLabel {
+  readonly slot: string
+  readonly backend: string
+  readonly field: string
+  readonly label: Label
+}
 
 export interface CatalogServiceBackend {
   readonly id: string
@@ -33,6 +40,34 @@ const list = (value: unknown, limit: number): value is readonly unknown[] => Arr
 const label = (value: unknown): value is Label =>
   object(value, ['en', 'zh-CN']) &&
   [value.en, value['zh-CN']].every(text => typeof text === 'string' && text.trim().length > 0 && text.length <= 160 && !/\p{Cc}/u.test(text))
+
+interface ServiceSlotWithFields {
+  readonly id: string
+  readonly backends: readonly CatalogServiceBackend[]
+}
+
+/** Labels are signed alongside slots so older readers can still consume the original field shape. */
+export function withServiceFieldLabels<Slot extends ServiceSlotWithFields>(slots: readonly Slot[], value: unknown): readonly Slot[] | undefined {
+  if (value === undefined) return slots
+  if (!list(value, 4096)) return
+  const declared = new Map<CatalogServiceField, Label>()
+  for (const row of value) {
+    if (!object(row, ['slot', 'backend', 'field', 'label']) || !label(row.label)) return
+    const field = slots
+      .find(slot => slot.id === row.slot)
+      ?.backends.find(backend => backend.id === row.backend)
+      ?.fields.find(field => field.name === row.field)
+    if (!field || declared.has(field)) return
+    declared.set(field, row.label)
+  }
+  return slots.map(slot => ({
+    ...slot,
+    backends: slot.backends.map(backend => ({
+      ...backend,
+      fields: backend.fields.map(field => (declared.has(field) ? { ...field, label: declared.get(field)! } : field)),
+    })),
+  }))
+}
 
 function readField(value: unknown): CatalogServiceField | undefined {
   if (!object(value, ['name', 'type', 'required', 'requiredGroup'])) return
@@ -127,11 +162,10 @@ function validBackendSelection(backends: readonly ExecutionBackend[], commands: 
 export interface CatalogPluginServiceSlot {
   readonly id: string
   readonly label: Label
-  /** Paths are within data returned by the service's revisioned load/save methods. */
-  readonly binding: CatalogPluginServiceBinding
+  readonly binding: CatalogPluginServiceBinding | CatalogJsonServiceBinding
   readonly backends: readonly PluginBackend[]
 }
-interface CatalogPluginServiceBinding {
+export interface CatalogPluginServiceBinding {
   readonly kind: 'revisioned-rpc'
   readonly service: string
   readonly active: readonly string[]
@@ -143,10 +177,19 @@ interface CatalogPluginServiceBinding {
   readonly empty?: Readonly<Record<string, string | boolean>>
   readonly maxProfiles?: number
 }
+export type CatalogJsonServiceField = { readonly path: readonly string[] } & (
+  { readonly source: 'literal'; readonly value: 'http' | 'openai' | boolean } | { readonly source: 'gateway-url' | 'model' | 'service-token' }
+)
+export interface CatalogJsonServiceBinding {
+  readonly kind: 'json-settings'
+  readonly file: string
+  readonly upstream: string
+  readonly fields: readonly CatalogJsonServiceField[]
+}
 interface PluginBackend extends CatalogServiceBackend {
   readonly protocol: 'openai-chat' | 'openai-image' | 'seedream-image'
   readonly mode: string
-  readonly upstream: { readonly endpoint: string; readonly key: string; readonly model: string }
+  readonly upstream: { readonly model: string; readonly endpoint?: string; readonly key?: string }
   readonly profile?: Readonly<Record<string, string | boolean>>
 }
 
@@ -179,14 +222,44 @@ function readPluginBinding(value: unknown): CatalogPluginServiceBinding | undefi
   return defaults && (!Object.hasOwn(defaults, key) || defaults[key] === '') ? { ...binding, empty: defaults } : undefined
 }
 
-function readPluginBackend(value: unknown): PluginBackend | undefined {
+function readJsonBinding(value: unknown): CatalogJsonServiceBinding | undefined {
+  if (!object(value, ['kind', 'file', 'upstream', 'fields']) || value.kind !== 'json-settings') return
+  const { file, upstream, fields: rawFields } = value
+  if (
+    typeof file !== 'string' ||
+    file.length > 256 ||
+    !file.endsWith('.json') ||
+    !file.split('/').every(segment => /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.exec(segment)?.[0] === segment) ||
+    !identifier(upstream) ||
+    !list(rawFields, 16)
+  )
+    return
+  const fields: CatalogJsonServiceField[] = []
+  for (const field of rawFields) {
+    if (!object(field, ['path', 'source', 'value']) || !dataPath(field.path)) return
+    const { path, source, value: literal } = field
+    if (source === 'literal') {
+      if (literal !== 'http' && literal !== 'openai' && typeof literal !== 'boolean') return
+      fields.push({ path, source, value: literal })
+    } else {
+      if (Object.hasOwn(field, 'value') || (source !== 'gateway-url' && source !== 'model' && source !== 'service-token')) return
+      fields.push({ path, source })
+    }
+  }
+  if (['gateway-url', 'model', 'service-token'].some(source => fields.filter(field => field.source === source).length !== 1)) return
+  return { kind: 'json-settings', file, upstream, fields }
+}
+
+function readPluginBackend(value: unknown, json: boolean): PluginBackend | undefined {
   if (!object(value, ['id', 'label', 'fields', 'protocol', 'mode', 'upstream', 'profile'])) return
   const { id, label: title, fields: values, protocol, mode, upstream, profile } = value
   if (!identifier(id) || !label(title) || !list(values, 64) || !identifier(mode)) return
   if (protocol !== 'openai-chat' && protocol !== 'openai-image' && protocol !== 'seedream-image') return
   if (!object(upstream, ['endpoint', 'key', 'model'])) return
   const { endpoint, key, model } = upstream
-  if (!dataKey(endpoint) || !dataKey(key) || !dataKey(model)) return
+  if (!dataKey(model)) return
+  if (json && (protocol !== 'openai-image' || profile !== undefined || endpoint !== undefined || key !== undefined)) return
+  if (!json && (!dataKey(endpoint) || !dataKey(key))) return
   const fields: CatalogServiceField[] = []
   for (const raw of values) {
     const field = readField(raw)
@@ -194,8 +267,17 @@ function readPluginBackend(value: unknown): PluginBackend | undefined {
     fields.push(field)
   }
   const mapsRequired = (name: string, type: CatalogServiceField['type']) => fields.some(field => field.name === name && field.type === type && field.required)
-  if (!mapsRequired(endpoint, 'url') || !mapsRequired(key, 'secret') || !mapsRequired(model, 'text')) return
-  const result = { id, label: title, fields, protocol, mode, upstream: { endpoint, key, model } } as const
+  if (!mapsRequired(model, 'text')) return
+  if (json && fields.length !== 1) return
+  if (!json && (!dataKey(endpoint) || !mapsRequired(endpoint, 'url') || !dataKey(key) || !mapsRequired(key, 'secret'))) return
+  const result = {
+    id,
+    label: title,
+    fields,
+    protocol,
+    mode,
+    upstream: { ...(json ? {} : { endpoint: endpoint as string, key: key as string }), model },
+  } as const
   if (profile === undefined) return result
   const settings = readPluginProfile(profile)
   return settings ? { ...result, profile: settings } : undefined
@@ -214,20 +296,20 @@ function readPluginProfile(input: unknown): Readonly<Record<string, string | boo
   return Object.fromEntries(entries)
 }
 
-/** Plugin declarations may map data owned by one revisioned settings service. */
+/** Plugin declarations may map settings through a revisioned service or a JSON file. */
 export function readPluginServiceSlots(value: unknown): readonly CatalogPluginServiceSlot[] | undefined {
   if (!list(value, 16)) return
   const slots: CatalogPluginServiceSlot[] = []
   const writes = new Set<string>()
   for (const raw of value) {
     if (!object(raw, ['id', 'label', 'binding', 'backends']) || !identifier(raw.id) || !label(raw.label) || !list(raw.backends, 16)) return
-    const binding = readPluginBinding(raw.binding)
+    const binding = readPluginBinding(raw.binding) ?? readJsonBinding(raw.binding)
     if (!binding || slots.some(slot => slot.id === raw.id)) return
     const backends: PluginBackend[] = []
-    const fieldKeys = new Set(Object.values(binding.fields))
+    const fieldKeys = new Set(binding.kind === 'revisioned-rpc' ? Object.values(binding.fields) : [])
     const profileKeys = new Set<string>()
     for (const definition of raw.backends) {
-      const backend = readPluginBackend(definition)
+      const backend = readPluginBackend(definition, binding.kind === 'json-settings')
       if (!backend || backends.some(other => other.id === backend.id || other.mode === backend.mode)) return
       if (backends.some(other => (other.protocol === 'openai-chat') !== (backend.protocol === 'openai-chat'))) return
       for (const name of Object.keys(backend.profile ?? {})) {
@@ -236,10 +318,14 @@ export function readPluginServiceSlots(value: unknown): readonly CatalogPluginSe
       }
       backends.push(backend)
     }
-    if (Object.keys(binding.empty ?? {}).some(key => !fieldKeys.has(key) && !profileKeys.has(key))) return
-    const paths = [binding.selection, binding.profiles, ...[...fieldKeys, ...profileKeys].map(key => [...binding.active, key])]
+    if (binding.kind === 'revisioned-rpc' && Object.keys(binding.empty ?? {}).some(key => !fieldKeys.has(key) && !profileKeys.has(key))) return
+    const paths =
+      binding.kind === 'revisioned-rpc'
+        ? [binding.selection, binding.profiles, ...[...fieldKeys, ...profileKeys].map(key => [...binding.active, key])]
+        : binding.fields.map(field => field.path)
+    const namespace = binding.kind === 'revisioned-rpc' ? binding.service : binding.file + ':'
     for (const path of paths) {
-      const absolute = [binding.service, ...path].join('.')
+      const absolute = [namespace, ...path].join('.')
       if ([...writes].some(other => other === absolute || other.startsWith(absolute + '.') || absolute.startsWith(other + '.'))) return
       writes.add(absolute)
     }

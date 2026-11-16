@@ -90,6 +90,7 @@
 .catalog-entry-facts dd { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; color: var(--foreground); overflow-wrap: anywhere; }
 .plugin-detail-section .catalog-entry-facts { margin: 0; font-size: 13px; }
 .plugin-detail-section .catalog-entry-facts > div { grid-template-columns: 120px minmax(0, 1fr); }
+.plugin-detail-section .catalog-entry-facts dt { white-space: normal; overflow-wrap: anywhere; }
 .catalog-entry-card .plugin-card-error { margin: 8px 0 0; font-size: 12px; }
 .catalog-entry-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .panel-filter-actions { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
@@ -103,3 +104,5 @@
 .catalog-entry-card .card__footer.plugin-card-status { flex-wrap: wrap; row-gap: 8px; }
 .catalog-entry-card .plugin-card-status > .chip { flex: none; }
 .catalog-entry-actions { flex: none; flex-wrap: nowrap; margin-left: auto; }
+
+.catalog-card-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

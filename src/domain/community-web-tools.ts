@@ -15,13 +15,9 @@ export function communityWebToolsMessage(
 ): string {
   switch (kind) {
     case 'unconfigured':
-      return (
-        'DeepSeek Search and Fetch are unavailable: no shared model ' +
-        `credential for ${host} is configured. Ask an administrator to configure a DeepSeek provider in ` +
-        'Model management. A provider that proxies another host does not supply this retrieval credential.'
-      )
+      return `Platform DeepSeek Search for ${host} is not configured. Ask an administrator to check DSH features in System settings.`
     case 'credential-rejected':
-      return 'The platform DeepSeek credential was rejected by the retrieval service. ' + 'Ask an administrator to update the shared model provider.'
+      return 'The platform DeepSeek Search credential was rejected. Ask an administrator to update it in DSH features.'
     case 'timeout':
       return 'The platform DeepSeek retrieval request timed out. Retry the search or fetch later.'
     case 'upstream':

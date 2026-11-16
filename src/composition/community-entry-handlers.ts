@@ -5,8 +5,7 @@ import { InitialModelSetup } from '../use-cases/initial-model-setup.js'
 import type { PluginIntake } from '../use-cases/plugin-intake.js'
 import { createNativePluginHistoryGateway } from '../inbound/native-plugin-history-gateway.js'
 import type { NativeFeatures } from '../use-cases/native-features.js'
-import { createProxyServer } from 'http-proxy-3'
-import { Agent, type IncomingMessage } from 'node:http'
+import type { Agent, IncomingMessage } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { BootstrapDatabase } from '../adapters/bootstrap-database.js'
 import { CommunityBootstrapCredential } from '../adapters/community-bootstrap.js'
@@ -27,7 +26,7 @@ import { PostgresCommunityAccountStore } from '../adapters/postgres-community-ac
 import { PostgresCommunityModelAccess } from '../adapters/postgres-community-model-access.js'
 import { PostgresPluginGrants } from '../adapters/postgres-plugin-grants.js'
 import { PostgresPluginLibraryStore } from '../adapters/postgres-plugin-library.js'
-import { PostgresPluginUpstreams } from '../adapters/postgres-plugin-upstreams.js'
+import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import { PostgresSharedModelStore } from '../adapters/postgres-shared-model-store.js'
 import { PostgresSystemStatus } from '../adapters/postgres-system-status.js'
 import { NodeNetworkResolver, NodeNetworkTransport } from '../adapters/public-network.js'
@@ -37,6 +36,7 @@ import { type CommunityConfig } from '../domain/community-config.js'
 import { SHARED_MCP_REQUEST_CEILING_MS } from '../domain/mcp-service.js'
 import { AdminAssetServer } from '../inbound/admin-assets.js'
 import { communityAccountRoutes } from '../inbound/community-account-routes.js'
+import type { PlatformVoice } from '../use-cases/platform-voice.js'
 import { createCommunityAdminRoute } from '../inbound/community-admin-route.js'
 import { protectCommunityEntry } from '../inbound/community-http-entry.js'
 import { createCommunityMemberRoute } from '../inbound/community-member-route.js'
@@ -52,7 +52,7 @@ import { PlatformSessionCodec, createEntrySessionGate, previewIdentity, remember
 import { createPluginDownload } from '../inbound/plugin-download.js'
 import { createPluginMarketRoute } from '../inbound/plugin-market-route.js'
 import { createPluginUpstreamGateway } from '../inbound/plugin-upstream-gateway.js'
-import { closeIncompleteProxyResponse, handleProxyError } from '../inbound/proxy-error.js'
+import { createRuntimeProxy } from '../inbound/runtime-proxy.js'
 import { createGatewayOnlyServer, createPublicServer } from '../inbound/public-server.js'
 import { servicePreviewEntry } from '../inbound/service-preview-entry.js'
 import { createServicePreviewGateway } from '../inbound/service-preview-gateway.js'
@@ -69,6 +69,8 @@ import { CommunityOnboarding } from '../use-cases/community-onboarding.js'
 import { CommunitySystemStatus } from '../use-cases/community-system-status.js'
 import { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
 import { DownloadSources } from '../use-cases/download-sources.js'
+import { PlatformSearchSettings } from '../use-cases/platform-search-settings.js'
+import type { PlatformSearchSettingsStore } from '../ports/platform-search-settings.js'
 import { ExecutionAdministration } from '../use-cases/execution-administration.js'
 import { ExecutionOperations } from '../use-cases/execution-operations.js'
 import { InstanceResources } from '../use-cases/instance-resources.js'
@@ -107,7 +109,7 @@ export function createCommunityEntryHandlers(input: {
   modelAccess: PostgresCommunityModelAccess
   pluginStore: PostgresPluginLibraryStore
   pluginGrants: PostgresPluginGrants
-  upstreamStore: PostgresPluginUpstreams
+  upstreamStore: Pick<PluginUpstreamsPort, 'list' | 'authorizationRevision'>
   localCopies: PluginLocalCopies
   runtime: CommunityRuntimePort
   nativePluginHistory: import('../ports/native-plugin-history.js').MemberNativePluginHistory
@@ -129,6 +131,8 @@ export function createCommunityEntryHandlers(input: {
   execution: PlatformExecution
   connections: MemorySessionRegistry
   modelStore: PostgresSharedModelStore
+  platformSearch: PlatformSearchSettingsStore
+  platformVoice: PlatformVoice
   testOnlyWebToolsBaseUrl: string | undefined
   sessions: PlatformSessionCodec
   clock: Clock
@@ -186,6 +190,8 @@ export function createCommunityEntryHandlers(input: {
     execution,
     connections,
     modelStore,
+    platformSearch,
+    platformVoice,
     testOnlyWebToolsBaseUrl,
     sessions,
     clock,
@@ -259,16 +265,13 @@ export function createCommunityEntryHandlers(input: {
     authorization: modelAuthorization,
     connections,
     usage,
-    upstream: communityWebToolsUpstream(modelStore, testOnlyWebToolsBaseUrl),
+    upstream: communityWebToolsUpstream(platformSearch, testOnlyWebToolsBaseUrl),
   })
   const networkAccess = new CommunityNetworkAccess(modelAuthorization, new NodeNetworkResolver(config.listen.publicOrigin, config.network?.hostPublicAddresses))
   const network = createCommunityNetworkProxy({ access: networkAccess, transport: new NodeNetworkTransport(), connections })
-  const proxyAgent = new Agent({ keepAlive: true })
+  const { agent: proxyAgent, proxy } = createRuntimeProxy()
   ownAgent(proxyAgent)
-  const proxy = createProxyServer({ ws: true, agent: proxyAgent })
   ownProxy(proxy)
-  proxy.on('error', handleProxyError)
-  proxy.on('proxyRes', closeIncompleteProxyResponse)
   const session = createEntrySessionGate(sessions, accounts)
   const authenticate = session.authenticate
   const preview = new ServicePreview(
@@ -320,6 +323,8 @@ export function createCommunityEntryHandlers(input: {
     runtimeDependencies,
     suites,
     downloads,
+    platformSearch: new PlatformSearchSettings(accounts, platformSearch),
+    platformVoice,
     mcp,
     mcpTest,
     mcpImports,

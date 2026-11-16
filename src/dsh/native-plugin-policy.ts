@@ -3,6 +3,7 @@ import { DSH_RPC_PREFIX } from './session-protocol.js'
 import { nativeReplacementImports, nativeReplacementModule } from './native-plugin-replacement.js'
 import { DSH_SETTINGS_UPDATE, DSH_SETTINGS_REPLACE, DSH_SETTINGS_MUTATE } from './settings-protocol.js'
 import { nativePackageCacheModule } from './native-package-cache.js'
+import { nativeJsonServiceSettingsModule } from './native-json-service-settings.js'
 import { nativeServiceSettingsModule } from './native-service-settings.js'
 import { nativeFeatureLocale } from './native-feature-locale.js'
 import {
@@ -36,6 +37,7 @@ ${nativeReplacementImports}
 ${nativeReplacementModule}
 ${nativeFeatureLocale}
 ${nativeServiceSettingsModule}
+${nativeJsonServiceSettingsModule}
 ${nativePackageCacheModule(configuration.generation)}
 async function retainedArchiveIntegrity(spec) {
   if (typeof spec!=='string') return;
@@ -124,6 +126,12 @@ export function apply(ctx) {
       const reply=value=>Response.json({type:'server-response',rpcId:body.rpcId,result:{ok:true,value}});
       try {
         return await serialized(async()=>{
+          if (input.binding?.kind==='json-settings') {
+            const archive=archivePath(input.integrity);
+            if (!archive || typeof input.packageName!=='string' || !/^(?:@[a-z0-9._-]+[/])?[a-z0-9][a-z0-9._-]*$/.test(input.packageName)
+              || !await resolvedArchive(input.packageName,archive,input.integrity)) return reply({status:'unsupported'});
+            return reply(await syncNativeJsonSettings(process.env.DSH_HOME,input));
+          }
           const provider=await settingsProvider(input);
           if (!provider) return reply({status:'unsupported'});
           const service=input.binding.service;

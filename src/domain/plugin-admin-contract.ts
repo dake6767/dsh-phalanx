@@ -92,7 +92,8 @@ export interface CommunityMarketPluginView {
 }
 export interface CommunityNativeServiceBindingView {
   readonly slot: string
-  readonly status: 'applied' | 'inactive' | 'failed' | 'conflict' | 'unsupported' | 'pending'
+  readonly status: 'applied' | 'inactive' | 'failed' | 'conflict' | 'unsupported' | 'pending' | 'personal'
+  readonly nextStart?: true
   readonly refresh?: true
 }
 export interface CommunityMarketNativeServiceView {

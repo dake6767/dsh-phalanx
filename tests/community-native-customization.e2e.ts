@@ -169,9 +169,12 @@ it('keeps shared model selections and an installed network plugin usable across 
   const sharedId = settings.providers.find(provider => provider.name === 'Shared personal fixture')!.models[0]!.id
   const bobCookie = await cookieHeader(bob.context, origin)
   const rpc = createRealDshRpc()
-  const plugins = await rpc.remoteRpc<
-    { entryId: string; localId: string; moduleName: string; enabled: boolean; fiberPhase: string | null; readOnlyReason?: string }[]
-  >(origin, bobCookie, 'pluginManager/listPlugins', {})
+  const plugins = await rpc.remoteRpc<{ entryId: string; moduleName: string; enabled: boolean; fiberPhase: string | null; readOnlyReason?: string }[]>(
+    origin,
+    bobCookie,
+    'pluginManager/listPlugins',
+    {},
+  )
   const platform = plugins.find(row => row.moduleName.endsWith('/platform-plugin/plugin.mjs'))!
   expect(platform?.fiberPhase).toBe('active')
   expect(platform.readOnlyReason).toBe('unaddressable')
@@ -215,23 +218,12 @@ it('keeps shared model selections and an installed network plugin usable across 
   await chat(alice, 'DEFAULT_CHOICE_TASK: Reply with your fixture marker.', 'COMMUNITY_MODEL_READY', true)
   await chat(bob, 'PERSONAL_CHOICE_TASK: Reply with your fixture marker.', 'PERSONAL_MODEL_READY')
   await page.getByRole('button', { name: 'Plugins', exact: true }).click()
-  // Search and Fetch are mounted and authenticated by the platform gateway
-  // token. The switch stays off until the member opts in (Q36), and the page
-  // still edits Messages search while it is off.
   await page.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor()
-  // The provider row is mounted and active because the platform credential
-  // ships with the runtime; the member selection still defaults to Messages
-  // search and local HTTP fetch (Q36), so the new fields stay hidden.
   const webApiRows = plugins.filter(row => row.moduleName.includes('dsh-web-deepseek-api'))
   expect(webApiRows).toHaveLength(1)
-  expect(webApiRows[0]).toBeDefined()
   expect(webApiRows[0]).toMatchObject({ enabled: true, fiberPhase: 'active' })
-  await page.getByRole('button', { name: 'View Web search', exact: true }).click()
-  // The Messages section proves the page rendered before the switch state and field counts.
-  await page.getByText('Messages API base URL', { exact: true }).waitFor()
-  expect(await page.getByRole('switch', { name: 'Use the new Web Search API', exact: true }).isChecked()).toBe(false)
-  expect(await page.getByText('Search / Fetch API base URL', { exact: true }).count()).toBe(0)
-  expect(await page.getByText('Results per search', { exact: true }).count()).toBe(0)
+  await page.getByRole('button', { name: 'View Web search and fetch', exact: true }).click()
+  await page.getByText('Web search provider', { exact: true }).waitFor()
   await page.getByRole('button', { name: 'Back to plugins', exact: true }).click()
   await page.getByRole('button', { name: 'Add plugin', exact: true }).click()
   if (process.env.DSH_PHALANX_E2E_NPM_MIRROR === '1') {
@@ -307,6 +299,11 @@ it('keeps shared model selections and an installed network plugin usable across 
     .getByText(/dsh-web-search-tavily/u)
     .first()
     .waitFor()
+  const searchProviders = async (world: typeof bob, entryOrigin: string) => {
+    const cookie = await cookieHeader(world.page.context(), entryOrigin)
+    return await createRealDshRpc().remoteRpc<{ search: { id: string }[] }>(entryOrigin, cookie, 'web/listProviders', {})
+  }
+  expect((await searchProviders(afterBob, restartedOrigin)).search).toContainEqual(expect.objectContaining({ id: 'tavily' }))
   await newSession(afterBob)
   await chat(afterBob, 'PLUGIN_NETWORK_TASK: Use web_search after restart.', 'PLUGIN_NETWORK_CONFIRMED')
   if (runtime.container !== undefined) {
@@ -363,7 +360,8 @@ const direct = target => new Promise((resolve,reject) => {
   await chat(secondBob, 'PLUGIN_NETWORK_TASK: Use web_search after another restart.', 'PLUGIN_NETWORK_CONFIRMED')
   expect(await secondAlice.page.getByRole('button', { name: /current deepseek-chat$/u }).count()).toBe(1)
   await secondAlice.page.getByRole('button', { name: 'Plugins', exact: true }).click()
-  await secondAlice.page.getByText('Web search', { exact: true }).first().waitFor()
+  await secondAlice.page.getByText('Web search and fetch', { exact: true }).first().waitFor()
+  expect((await searchProviders(secondAlice, secondOrigin)).search).not.toContainEqual(expect.objectContaining({ id: 'tavily' }))
   expect(await secondAlice.page.getByText(/dsh-web-search-tavily/u).count()).toBe(0)
 }, 600_000)
 

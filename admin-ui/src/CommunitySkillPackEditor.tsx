@@ -14,6 +14,7 @@ import { usePlatformLanguage } from './CommunityLanguage'
 import { useDraftGuard } from './useDraftGuard'
 import CommunityDialog from './CommunityDialog'
 import CommunityField from './CommunityField'
+import CommunityIcon from './CommunityIcon'
 import CommunityMessage from './CommunityMessage'
 import CommunitySkillPackPicker from './CommunitySkillPackPicker'
 import type { CommunitySkillPackMember } from '../../src/domain/skill-admin-contract'
@@ -26,7 +27,17 @@ const input = (row: CommunitySkillPackInput): CommunitySkillPackInput => ({
   instructions: row.instructions,
   published: row.published,
 })
-export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { name: string; onClose: () => void; onSaved: () => void }) {
+export default function CommunitySkillPackEditor({
+  name,
+  originName,
+  onClose,
+  onSaved,
+}: {
+  name: string
+  originName: (origin: string) => string
+  onClose: () => void
+  onSaved: () => void
+}) {
   const { t, errorText } = usePlatformLanguage()
   const [draft, setDraft] = useState<CommunitySkillPackInput>(blank),
     [saved, setSaved] = useState<CommunitySkillPackInput>(blank)
@@ -151,15 +162,11 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
       setBusy(false)
     }
   }
-  const move = (index: number, direction: number) => {
-    const names = [...draft.skills]
-    ;[names[index], names[index + direction]] = [names[index + direction]!, names[index]!]
-    setDraft({ ...draft, skills: names })
-  }
   const byName = new Map(members.map(row => [row.name, row]))
   const term = search.trim().toLowerCase()
-  const visible = draft.skills
-    .map((name, index) => ({ name, index, row: byName.get(name) }))
+  const visible = [...draft.skills]
+    .sort()
+    .map(name => ({ name, row: byName.get(name) }))
     .filter(({ name, row }) => name.toLowerCase().includes(term) || row?.description.toLowerCase().includes(term))
   const pageSize = 12
   const currentPage = Math.min(page, Math.max(0, Math.ceil(visible.length / pageSize) - 1))
@@ -177,6 +184,11 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
             <Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>
               {t('Cancel')}
             </Button>
+            {detail && dirty ? (
+              <Button variant="tertiary" isDisabled={busy} onPress={discard}>
+                {t('Discard changes')}
+              </Button>
+            ) : null}
             <Button
               isDisabled={busy || !revision || !dirty || !(readOnly ? displayName : draft.name).trim() || !draft.description.trim()}
               onPress={() => {
@@ -198,12 +210,15 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
             <p role="status">{t('Loading…')}</p>
           )
         ) : (
-          <div className="plugin-access-template">
+          <div className="plugin-settings-panel skill-pack-editor">
+            {detail?.suiteOrigin ? (
+              <p className="plugin-summary-meta">{t('From catalog {source} · Name {name}', { source: originName(detail.suiteOrigin), name })}</p>
+            ) : null}
             <CommunityPublicationSection
               published={detail?.published ?? false}
               unavailable={!!detail?.unavailable}
-              reason={
-                detail?.unavailable
+              consequence={
+                detail?.published && detail.unavailable
                   ? t(
                       detail.unavailable === 'empty'
                         ? 'Empty packs are temporarily unavailable to members.'
@@ -211,57 +226,43 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
                     )
                   : undefined
               }
-            >
-              <p>{t('Publishing lets all members select this resource when it is available.')}</p>
-              <p>{t('Unpublishing clears selections of this pack. Group grants and individual skill selections are kept.')}</p>
-              <p>{t('Republishing does not restore removed member selections.')}</p>
-              {detail ? (
-                <>
-                  <Button
-                    variant="secondary"
-                    isDisabled={busy || dirty}
-                    onPress={() => {
-                      void reviewPublication()
-                    }}
-                  >
-                    {t(detail.published ? 'Unpublish resource' : 'Publish resource')}
-                  </Button>
-                  {dirty ? (
-                    <>
-                      <p>{t('Save or discard changes before publishing.')}</p>
-                      <Button variant="tertiary" isDisabled={busy} onPress={discard}>
-                        {t('Discard changes')}
-                      </Button>
-                    </>
-                  ) : null}
-                </>
-              ) : (
-                <p>{t('Save this resource before publishing.')}</p>
-              )}
-            </CommunityPublicationSection>
-
-            {readOnly ? (
-              <section className="plugin-detail-section">
-                <p>{t('Catalog source {name}', { name: detail!.suiteOrigin!.replace(/^suite:/u, '') })}</p>
-                <CommunityField label={t('Pack name')} value={name} readOnly />
-              </section>
-            ) : null}
-            <CommunityField
-              label={t(readOnly ? 'Pack display name' : 'Pack name')}
-              value={readOnly ? displayName : draft.name}
-              description={readOnly ? t(detail?.displayOverrides?.includes('displayName') ? 'Local override' : 'Uses catalog value') : undefined}
-              disabled={busy}
-              onChange={value => (readOnly ? setDisplayName(value) : setDraft({ ...draft, name: value }))}
-              required
+              reason={!detail ? t('Save this resource before publishing.') : dirty ? t('Save or discard changes before publishing.') : undefined}
+              action={
+                <Button variant="secondary" isDisabled={busy || dirty || !detail} onPress={() => void reviewPublication()}>
+                  {t(detail?.published ? 'Unpublish resource' : 'Publish resource')}
+                </Button>
+              }
             />
-            <CommunityField
-              label={t('Pack description')}
-              value={draft.description}
-              description={readOnly ? t(detail?.displayOverrides?.includes('description') ? 'Local override' : 'Uses catalog value') : undefined}
-              disabled={busy}
-              onChange={value => setDraft({ ...draft, description: value })}
-              required
-            />
+            <section className="plugin-detail-section">
+              <h2>{t('Basic information')}</h2>
+              <CommunityField
+                label={t(readOnly ? 'Pack display name' : 'Pack name')}
+                value={readOnly ? displayName : draft.name}
+                description={readOnly ? t(detail?.displayOverrides?.includes('displayName') ? 'Local override' : 'Uses catalog value') : undefined}
+                disabled={busy}
+                onChange={value => (readOnly ? setDisplayName(value) : setDraft({ ...draft, name: value }))}
+                required
+              />
+              <CommunityField
+                label={t('Pack description')}
+                value={draft.description}
+                description={readOnly ? t(detail?.displayOverrides?.includes('description') ? 'Local override' : 'Uses catalog value') : undefined}
+                disabled={busy}
+                onChange={value => setDraft({ ...draft, description: value })}
+                required
+              />
+              <TextField
+                value={draft.instructions}
+                onChange={value => setDraft({ ...draft, instructions: value })}
+                isDisabled={busy}
+                isReadOnly={readOnly}
+                fullWidth
+              >
+                <Label>{t('Orchestration instructions (optional)')}</Label>
+                <TextArea rows={8} />
+              </TextField>
+              <p>{t('Instructions become an additional skill named after this pack. The name must be unique.')}</p>
+            </section>
             <section className="plugin-detail-section" aria-label={t('Pack skills')}>
               <div className="plugin-section-heading">
                 <h3>
@@ -286,49 +287,29 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
                 <p>{t('This pack has no skills.')}</p>
               )}
               {draft.skills.length && !visible.length ? <p>{t('No skills match this filter.')}</p> : null}
-              <ol className="grant-rows">
-                {visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(({ name, row, index }) => (
+              <ul className="grant-rows">
+                {visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(({ name, row }) => (
                   <li key={name}>
                     <div className="grant-row-main">
-                      <strong>
-                        {index + 1}. {name}
-                      </strong>
-                      {row?.description ? <p>{row.description}</p> : null}
+                      <strong>{name}</strong>
+                      {row?.description ? <p className="skill-pack-member-description">{row.description}</p> : null}
                       {!row || row.conflict ? <p>{t('Skill is unavailable.')}</p> : null}
                     </div>
                     {readOnly ? null : (
-                      <div className="catalog-entry-actions">
-                        <Button
-                          size="sm"
-                          variant="tertiary"
-                          isDisabled={busy || !!term || index === 0}
-                          aria-label={t('Move {name} up', { name })}
-                          onPress={() => move(index, -1)}
-                        >
-                          ↑
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="tertiary"
-                          isDisabled={busy || !!term || index === draft.skills.length - 1}
-                          aria-label={t('Move {name} down', { name })}
-                          onPress={() => move(index, 1)}
-                        >
-                          ↓
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="tertiary"
-                          isDisabled={busy}
-                          onPress={() => setDraft({ ...draft, skills: draft.skills.filter(skill => skill !== name) })}
-                        >
-                          {t('Remove skill {name}', { name })}
-                        </Button>
-                      </div>
+                      <Button
+                        size="sm"
+                        variant="tertiary"
+                        isIconOnly
+                        isDisabled={busy}
+                        aria-label={t('Remove skill {name}', { name })}
+                        onPress={() => setDraft(current => ({ ...current, skills: current.skills.filter(skill => skill !== name) }))}
+                      >
+                        <CommunityIcon name="trash" size={16} />
+                      </Button>
                     )}
                   </li>
                 ))}
-              </ol>
+              </ul>
               {visible.length > pageSize ? (
                 <div className="catalog-entry-actions">
                   <Button size="sm" variant="secondary" isDisabled={currentPage === 0} onPress={() => setPage(currentPage - 1)}>
@@ -340,17 +321,6 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
                 </div>
               ) : null}
             </section>
-            <TextField
-              value={draft.instructions}
-              onChange={value => setDraft({ ...draft, instructions: value })}
-              isDisabled={busy}
-              isReadOnly={readOnly}
-              fullWidth
-            >
-              <Label>{t('Orchestration instructions (optional)')}</Label>
-              <TextArea rows={8} />
-            </TextField>
-            <p>{t('Instructions become an additional skill named after this pack. The name must be unique.')}</p>
             {name && !readOnly ? (
               <Button variant="danger" isDisabled={busy || dirty} onPress={() => setRemoving(true)}>
                 {t('Remove skill pack')}
@@ -457,7 +427,7 @@ export default function CommunitySkillPackEditor({ name, onClose, onSaved }: { n
             )}
           </p>
           {confirmation.hasPlatformCredential ? <p>{t('All members can use the platform credentials through this resource.')}</p> : null}
-          <p>{t('Republishing does not restore removed member selections.')}</p>
+          {confirmation.published ? <p>{t('Republishing does not restore removed member selections.')}</p> : null}
         </CommunityDialog>
       ) : null}
       {guard.dialog}

@@ -6,8 +6,9 @@
 
 # The official converter discovers the image's pinned redistributable fonts.
 # Keep kit fallback groups: an explicit fontFallbacks value would replace them.
-- id: office-to-pdf
+- id: office-kit
   config:
+    outputDirectory: !!js dshHomePath('office-kit', 'outputs')
     fontDirectories: !!js "process.platform === 'linux' ? ['/usr/share/fonts', '/usr/local/share/fonts', process.env.HOME + '/.local/share/fonts', process.env.HOME + '/.fonts'] : undefined"
 
 # Browser directory selection uses the official DSH remote-host picker.
@@ -19,13 +20,24 @@
     - id: ui-directory-picker-browse
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
 
-# DeepSeek Search and Fetch go through the member gateway with the shared model
-# credential; only the member-scoped access token reaches this process. The web
-# service keeps the upstream default selection (Messages search and local HTTP
-# fetch), so the member opts in from the Web search page (Q36: default off).
-# The path and environment name are owned by src/dsh/web-tools.ts; the seam
-# binding test fails if either literal here drifts from those constants.
+# Keep account notifications inside the member runtime.
+- id: deepseek-account
+  config:
+    desktopPlatform: null
+    allowLoopbackHttp: true
+    harnessOrigin: http://127.0.0.1:1
+
+# Search can only use the platform gateway. Fetch and the legacy direct
+# search provider have no credentials or reachable destination.
 - id: web-deepseek-api
   config:
-    baseURL: !!js new URL('/_dsh-phalanx/web/v1/tools', process.env.DSH_PHALANX_MODEL_GATEWAY_URL).href
-    apiKeyEnv: DSH_PHALANX_WEB_TOOLS_ACCESS_TOKEN
+    searchBaseURL: !!js new URL('/_dsh-phalanx/web/v1/tools', process.env.DSH_PHALANX_MODEL_GATEWAY_URL || 'http://127.0.0.1:1').href
+    searchApiKeyEnv: DSH_PHALANX_WEB_TOOLS_ACCESS_TOKEN
+    searchBilling: api-key
+    sendOriginalQuestion: false
+    fetchBaseURL: http://127.0.0.1:1
+    fetchApiKeyEnv: DSH_PHALANX_DISABLED_SEARCH_KEY
+- id: web-search-deepseek
+  config:
+    baseURL: http://127.0.0.1:1
+    apiKeyEnv: DSH_PHALANX_DISABLED_SEARCH_KEY

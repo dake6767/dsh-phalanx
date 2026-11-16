@@ -58,7 +58,7 @@ it('holds a candidate set for review, requires each replacement and imports the 
       ['two', false],
     ])
     expect((await fixture.storage.packs.store.list()).find(row => row.name === 'workflow')).toMatchObject({
-      skills: ['two', 'one'],
+      skills: ['one', 'two'],
       note: { hash: 'note' },
       instructions: '# workflow',
     })

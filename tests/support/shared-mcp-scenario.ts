@@ -206,6 +206,13 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
         await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'shared-mcp-editor.png'), fullPage: true })
     }
     expect((await post('groups/' + members[0]!.groupId + '/mcp', { names: ['p-search'] })).status).toBe(200)
+    if (scenario === 'lifecycle') {
+      const member = members[0]!
+      const nativeProbe = await rpc.remoteRpcResult(origin, member.cookie, 'mcpManager/probe', { name: 'p-search' })
+      // The native manager owns personal entries. A platform MCP grant mounts
+      // its own client and must not become a native manager entry.
+      expect(nativeProbe).toMatchObject({ ok: false, error: { message: expect.stringContaining('unknown server') } })
+    }
     const prompt = async (member: (typeof members)[number], marker: string, success = true) => {
       await rpc.remoteRpc(origin, member.cookie, 'session/prompt', {
         request: { requestId: randomUUID(), sessionId: member.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] },

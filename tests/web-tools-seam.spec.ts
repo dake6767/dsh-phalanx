@@ -1,12 +1,17 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { DEEPSEEK_WEB_TOOLS_BASE_URL, WEB_TOOLS_GATEWAY_BASE_PATH, WEB_TOOLS_MEMBER_TOKEN_ENV, isDeploymentWebToolsBaseUrl } from '../src/dsh/web-tools.js'
+import { parse } from 'yaml'
+import { DEEPSEEK_WEB_TOOLS_BASE_URL, isDeploymentWebToolsBaseUrl } from '../src/dsh/web-tools.js'
 
 describe('web retrieval seam binding', () => {
-  it('binds the deployed overlay literals to the seam owner constants', () => {
-    const overlay = readFileSync('runtime/community.cordis.yml', 'utf8')
-    expect(overlay).toContain(`new URL('${WEB_TOOLS_GATEWAY_BASE_PATH}'`)
-    expect(overlay).toContain(`apiKeyEnv: ${WEB_TOOLS_MEMBER_TOKEN_ENV}`)
+  it('uses a loopback-only endpoint for account notifications', () => {
+    const overlay = parse(readFileSync('runtime/community.cordis.yml', 'utf8'), {
+      customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: (value: string) => value }],
+    })
+    expect(overlay).toContainEqual({
+      id: 'deepseek-account',
+      config: { desktopPlatform: null, allowLoopbackHttp: true, harnessOrigin: 'http://127.0.0.1:1' },
+    })
   })
 
   it('accepts only the official HTTPS destination on its default port', () => {

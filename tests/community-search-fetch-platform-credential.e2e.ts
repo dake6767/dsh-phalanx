@@ -1,7 +1,6 @@
 // Validation: T3 development checkout; real credentials: none; requires native DSH source mode for the retrieval upstream seam.
 import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile, readdir, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -11,9 +10,9 @@ import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import type { CommunityModelSettings } from '../src/domain/admin-contract.js'
-import { DSH_PATCH_CONFIG, dshWebProfilePath } from '../src/dsh/profile-layout.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
-import { runCommunityTerminal, selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
+import { WEB_TOOLS_MEMBER_TOKEN_ENV } from '../src/dsh/web-tools.js'
+import { selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { createCommunityApplication, modelAccessToken, openTestAccounts } from './support/community-application.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
@@ -24,7 +23,6 @@ import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, r
 const PLATFORM_KEY = 'platform-deepseek-fixture-key'
 const MEMBER_MODEL_KEY = 'community-provider-fixture-key'
 const SEARCH_MARKER = 'PLATFORM_WEB_TOOLS_MARKER'
-const FETCH_MARKER = 'PLATFORM_FETCH_MARKER'
 
 interface CapturedCall {
   path: string
@@ -47,8 +45,6 @@ async function startRetrievalUpstream() {
       response.setHeader('content-type', 'application/json')
       if (request.url === '/v1/tools/search') {
         response.end(JSON.stringify({ results: [{ title: 'Platform fixture', url: 'https://example.test/fixture', snippet: SEARCH_MARKER, date: null }] }))
-      } else if (request.url === '/v1/tools/fetch') {
-        response.end(JSON.stringify({ content: `# Platform fixture page\n${FETCH_MARKER}` }))
       } else {
         response.writeHead(404)
         response.end('{}')
@@ -130,49 +126,11 @@ async function startToolModel() {
         return
       }
       if (prompt.includes('PLATFORM_WEB_FETCH_TASK')) {
-        const result = resultText(body, 'platform-web-fetch')
-        if (result !== undefined) toolResults.push(result)
-        if (result !== undefined) {
-          finish(result.includes(FETCH_MARKER) ? 'PLATFORM_FETCH_CONFIRMED' : 'PLATFORM_FETCH_FAILED')
-          return
-        }
-        if (!tool('web_fetch')) {
-          finish('PLATFORM_FETCH_UNAVAILABLE')
-          return
-        }
-        streamToolCall(response, 'platform-web-fetch', 'web_fetch', { url: 'https://example.test/page' })
+        finish(tool('web_fetch') ? 'PLATFORM_FETCH_UNEXPECTED' : 'PLATFORM_FETCH_UNAVAILABLE')
         return
       }
-      if (prompt.includes('PLATFORM_WEB_UNAVAILABLE_TASK')) {
-        const result = resultText(body, 'platform-web-unavailable')
-        if (result !== undefined) toolResults.push(result)
-        if (result !== undefined) {
-          finish(
-            result.includes('no shared model credential for api.deepseek.com')
-              ? `PLATFORM_UNAVAILABLE_CONFIRMED ${result.slice(0, 400)}`
-              : `PLATFORM_UNAVAILABLE_UNEXPECTED ${result}`,
-          )
-          return
-        }
-        if (!tool('web_search')) {
-          finish('PLATFORM_TOOL_MISSING')
-          return
-        }
-        streamToolCall(response, 'platform-web-unavailable', 'web_search', { queries: ['fixture query'] })
-        return
-      }
-      if (prompt.includes('PLATFORM_WEB_FAKE_KEY_TASK')) {
-        const result = resultText(body, 'platform-web-fake-key')
-        if (result !== undefined) toolResults.push(result)
-        if (result !== undefined) {
-          finish(/Model access is required|Authentication is required/u.test(result) ? 'PLATFORM_FAKE_KEY_REJECTED' : `PLATFORM_FAKE_KEY_UNEXPECTED ${result}`)
-          return
-        }
-        if (!tool('web_search')) {
-          finish('PLATFORM_TOOL_MISSING')
-          return
-        }
-        streamToolCall(response, 'platform-web-fake-key', 'web_search', { queries: ['fixture query'] })
+      if (prompt.includes('PLATFORM_WEB_DISABLED_TASK')) {
+        finish(tool('web_search') ? 'PLATFORM_SEARCH_UNEXPECTED' : 'PLATFORM_SEARCH_DISABLED')
         return
       }
       finish('PLATFORM_UNEXPECTED_TASK')
@@ -231,7 +189,7 @@ afterEach(async () => {
   model = undefined
 })
 
-it('enables DeepSeek Search and Fetch through the platform gateway without exposing the platform key', async () => {
+it('uses the independent platform key for rc.3 search and keeps fetch unavailable', async () => {
   assertPinnedDshRevision(runtimeSettings)
   retrieval = await startRetrievalUpstream()
   model = await startToolModel()
@@ -279,7 +237,7 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
       name: 'DeepSeek retrieval',
       baseUrl: 'https://api.deepseek.com/anthropic',
       apiFormat: 'anthropic-messages',
-      apiKey: PLATFORM_KEY,
+      apiKey: 'distinct-shared-deepseek-key',
       enabled: true,
       models: [{ name: 'deepseek-flash', enabled: true }],
     },
@@ -295,123 +253,118 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   page.setDefaultTimeout(20_000)
   await signInCommunity(page, origin, 'alice', 'password')
   if ('container' in runtime) throw new Error('This scenario requires native DSH source mode')
-  await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(await defaultWorkspacePath(root, 'alice'), false), false)
-  const cookie = await cookieHeader(context, origin)
+  const workspace = instanceWorkspacePath(await defaultWorkspacePath(root, 'alice'), false)
+  await selectCommunityWorkspace(context, page, origin, workspace, false)
   const rpc = createRealDshRpc()
-
-  // The switch is available and saves. The platform-injected credential makes the
-  // editable key control irrelevant: a filled value is refused by the gateway.
-  await page.getByRole('button', { name: 'Plugins', exact: true }).click()
-  await page.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor()
-  await page.getByRole('button', { name: 'View Web search', exact: true }).click()
-  const toggle = page.getByRole('switch', { name: 'Use the new Web Search API', exact: true })
-  expect(await toggle.isChecked()).toBe(false)
-  await toggle.click()
-  await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect.poll(() => page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), { timeout: 20_000 }).toBe(true)
-  expect(await toggle.isChecked()).toBe(true)
-  const key = page.getByLabel('API key', { exact: true })
-  expect(await key.inputValue()).toBe('')
-  await page.getByText('A key is configured.', { exact: true }).waitFor()
-  const selection = await rpc.remoteRpc<{ searchProvider?: string; fetchProvider?: string }>(origin, cookie, 'settings/describe', {})
-  expect(JSON.stringify(selection)).toContain('deepseek-search-api')
-  expect(JSON.stringify(selection)).not.toContain(PLATFORM_KEY)
-
-  await page
-    .getByRole('button', { name: 'New session', exact: true })
-    .filter({ hasNot: page.locator('[data-copy-version]') })
-    .first()
-    .click()
-  await page.locator('[data-composer-input]').waitFor()
-  // Search reaches the platform gateway and the upstream receives the platform key, never the member token.
   const memberHome = join(await memberSpacePath(root, 'alice'), 'home')
-  const memberCheck = async (command: string, output: string): Promise<string> => {
-    await runCommunityTerminal(page, `${command}; printf '%s' '${output}'`, output)
-    return await readFile(join(memberHome, '.e2e-check'), 'utf8')
+  const inspectMemberProcess = async () => {
+    const pids = execFileSync('pgrep', ['-f', runtime.args[0]!], { encoding: 'utf8' }).trim().split('\n')
+    for (const pid of pids) {
+      const environment =
+        process.platform === 'linux'
+          ? (await readFile(`/proc/${pid}/environ`, 'utf8').catch(() => '')).replaceAll('\0', ' ')
+          : execFileSync('ps', ['eww', '-p', pid], { encoding: 'utf8' })
+      if (!environment.includes(`HOME=${memberHome} `)) continue
+      expect(environment.includes(PLATFORM_KEY)).toBe(false)
+      return {
+        hasSearchToken: environment.includes(` ${WEB_TOOLS_MEMBER_TOKEN_ENV}=`),
+        gatewayUrl: / DSH_PHALANX_MODEL_GATEWAY_URL=(\S+)/u.exec(environment)?.[1],
+      }
+    }
+    throw new Error('Member DSH process was not found')
   }
+
+  const composer = page.locator('[data-composer-input]')
+  const ask = async (text: string, marker: string) => {
+    const replies = page.getByText(marker, { exact: true })
+    const previous = await replies.count()
+    await composer.fill(text)
+    await composer.press('Enter')
+    await replies.nth(previous).waitFor({ timeout: 120_000 })
+  }
+  const searchSettings = async (input?: object) => {
+    const url = origin + '/admin/api/platform-search'
+    const response = input ? await admin.request.post(url, { headers: { origin }, data: input }) : await admin.request.get(url)
+    expect(response.ok(), await response.text()).toBe(true)
+    return await response.json()
+  }
+  const initial = await searchSettings()
+  expect(initial).toEqual({ enabled: false, hasKey: false, revision: 0 })
+  expect((await inspectMemberProcess()).hasSearchToken).toBe(false)
+  await ask('PLATFORM_WEB_DISABLED_TASK', 'PLATFORM_SEARCH_DISABLED')
+  expect(retrieval.calls).toEqual([])
+  const configured = await searchSettings({ action: 'save', revision: initial.revision, enabled: true, apiKey: PLATFORM_KEY })
+  await ask('PLATFORM_WEB_DISABLED_TASK after saving', 'PLATFORM_SEARCH_DISABLED')
+  const restart = async () => {
+    const response = await context.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true }, timeout: 300_000 })
+    expect(response.ok(), await response.text()).toBe(true)
+    await page.reload()
+    await page.getByRole('button', { name: /^Platform account:/u }).waitFor()
+    await selectCommunityWorkspace(context, page, origin, workspace, false)
+  }
+  await restart()
+  const { hasSearchToken, gatewayUrl } = await inspectMemberProcess()
+  expect(hasSearchToken).toBe(true)
+  expect(gatewayUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//u)
+  const describe = async () =>
+    await rpc.remoteRpc<{ namespaces: { ns: string; value: unknown; revision: number }[] }>(
+      origin,
+      await cookieHeader(context, origin),
+      'settings/describe',
+      {},
+    )
+  const native = await describe()
+  expect(native.namespaces.find(row => row.ns === 'web-deepseek-api')?.value).toMatchObject({
+    searchBaseURL: new URL('/_dsh-phalanx/web/v1/tools', gatewayUrl).href,
+    searchApiKeyEnv: WEB_TOOLS_MEMBER_TOKEN_ENV,
+    sendOriginalQuestion: false,
+  })
+  expect(JSON.stringify(native)).not.toContain(PLATFORM_KEY)
+  await ask('PLATFORM_WEB_SEARCH_TASK: the user question is private.', 'PLATFORM_SEARCH_CONFIRMED')
+  expect(retrieval.calls).toEqual([
+    { path: '/v1/tools/search', authorization: `Bearer ${PLATFORM_KEY}`, body: expect.objectContaining({ query: 'fixture query', need_content: false }) },
+  ])
+  expect(retrieval.calls[0]!.body).not.toHaveProperty('ori_question')
+  expect(await filesContaining(memberHome, PLATFORM_KEY)).toEqual([])
+  await ask('PLATFORM_WEB_FETCH_TASK', 'PLATFORM_FETCH_UNAVAILABLE')
+  // The native settings menu saves through the same DSH settings RPC.
+  const setSearchProvider = async (searchProvider: string) => {
+    const view = await describe()
+    const web = view.namespaces.find(row => row.ns === 'web')
+    expect(web).toBeDefined()
+    await rpc.remoteRpc(origin, await cookieHeader(context, origin), 'settings/update', {
+      ns: 'web',
+      patch: { searchProvider },
+      expectedRevision: web!.revision,
+    })
+  }
+  await setSearchProvider('deepseek-official')
+  await restart()
+  await ask('PLATFORM_WEB_DISABLED_TASK after member opts out', 'PLATFORM_SEARCH_DISABLED')
+  expect(retrieval.calls).toHaveLength(1)
+  await setSearchProvider('deepseek-search-api')
+  const rotated = await searchSettings({ action: 'save', revision: configured.revision, enabled: true, apiKey: 'rotated-search-fixture-key' })
   const accounts = await openTestAccounts(root)
-  let memberToken: string
+  let token: string
   try {
-    memberToken = await modelAccessToken(root, 'alice', (await accounts.getState('alice'))!.spaceId)
+    token = await modelAccessToken(root, 'alice', (await accounts.getState('alice'))!.spaceId)
   } finally {
     await accounts.close()
   }
-  expect(memberToken).toMatch(/^[A-Za-z0-9_-]{43}$/u)
-  const homeProfile = join(dshWebProfilePath(join(await memberSpacePath(root, 'alice'), 'home')), DSH_PATCH_CONFIG)
-  const composer = page.locator('[data-composer-input]')
-  const ask = async (text: string, marker: string) => {
-    await composer.fill(text)
-    await composer.press('Enter')
-    await page.getByText(marker, { exact: false }).first().waitFor({ timeout: 120_000 })
-  }
-  await ask('PLATFORM_WEB_SEARCH_TASK: search the fixture.', 'PLATFORM_SEARCH_CONFIRMED')
-  const searchCall = retrieval.calls.find(call => call.path === '/v1/tools/search')
-  expect(searchCall).toBeDefined()
-  expect(searchCall!.authorization).toBe(`Bearer ${PLATFORM_KEY}`)
-  expect(searchCall!.authorization).not.toContain(memberToken)
-  expect(searchCall!.body).toMatchObject({ query: 'fixture query', need_content: false })
-  await ask('PLATFORM_WEB_FETCH_TASK: fetch the fixture.', 'PLATFORM_FETCH_UNAVAILABLE')
-  const fetchCall = retrieval.calls.find(call => call.path === '/v1/tools/fetch')
-  expect(fetchCall).toBeUndefined()
-  expect(retrieval.calls.every(call => call.authorization === `Bearer ${PLATFORM_KEY}`)).toBe(true)
-  expect(retrieval.calls.every(call => !call.authorization.includes(memberToken!))).toBe(true)
-
-  // The key is absent from the member environment, profile, settings responses and the spawned DSH process.
-  const checks = await memberCheck(
-    `node -e 'const fs=require("node:fs");const file=process.env.HOME+"/.e2e-check";const env=JSON.stringify(process.env).includes(${JSON.stringify(PLATFORM_KEY)});const profile=fs.readFileSync(${JSON.stringify(homeProfile)},"utf8").includes(${JSON.stringify(PLATFORM_KEY)});fs.writeFileSync(file,"ENV="+(env?"1":"0")+" PROFILE="+(profile?"1":"0"))'`,
-    'E2E_CHECK',
-  )
-  expect(checks).toBe('ENV=0 PROFILE=0')
-  expect(await filesContaining(memberHome, PLATFORM_KEY)).toEqual([])
-  const settingsRead = await rpc.remoteRpc<unknown>(origin, cookie, 'settings/describe', {})
-  expect(JSON.stringify(settingsRead)).not.toContain(PLATFORM_KEY)
-  expect('args' in runtime).toBe(true)
-  const dshBin = ('args' in runtime ? runtime.args[0] : undefined)!
-  const pids = execFileSync('pgrep', ['-f', dshBin], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).map(Number)
-  expect(pids.length).toBeGreaterThan(0)
-  const dshEnvironment = (pid: number): string =>
-    process.platform === 'linux' ? readFileSync(`/proc/${pid}/environ`).toString() : execFileSync('ps', ['eww', '-p', String(pid)], { encoding: 'utf8' })
-  expect(pids.filter(pid => dshEnvironment(pid).includes(PLATFORM_KEY))).toEqual([])
-
-  // Removing the DeepSeek provider leaves an explicit unavailable explanation about the host, not key guidance.
-  const retrievalProvider = settings.providers.find(provider => provider.name === 'DeepSeek retrieval')!
-  settings = await save({ revision: settings.revision, action: 'delete-provider', providerId: retrievalProvider.id })
-  await ask('PLATFORM_WEB_UNAVAILABLE_TASK: search with no platform credential.', 'PLATFORM_UNAVAILABLE_CONFIRMED')
-  const unavailableResult = model.toolResults.find(text => text.includes('DeepSeek Search and Fetch are unavailable'))
-  expect(unavailableResult).toContain('no shared model credential for api.deepseek.com')
-  expect(unavailableResult).toContain('administrator')
-  expect(unavailableResult).not.toMatch(/API [Kk]ey/u)
-
-  // A key typed into the native control cannot replace the platform credential: the gateway refuses it before upstream.
-  settings = await save({
-    revision: settings.revision,
-    action: 'save-provider',
-    provider: {
-      name: 'DeepSeek retrieval',
-      baseUrl: 'https://api.deepseek.com/anthropic',
-      apiFormat: 'anthropic-messages',
-      apiKey: PLATFORM_KEY,
-      enabled: true,
-      models: [{ name: 'deepseek-flash', enabled: true }],
-    },
-  })
-  const callsBeforeFake = retrieval.calls.length
-  await page.getByRole('button', { name: 'Plugins', exact: true }).click()
-  await page.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor()
-  await page.getByRole('button', { name: 'View Web search', exact: true }).click()
-  await page.getByLabel('API key', { exact: true }).fill('member-typed-fake-key')
-  await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect.poll(() => page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), { timeout: 20_000 }).toBe(true)
-  await page
-    .getByRole('button', { name: 'New session', exact: true })
-    .filter({ hasNot: page.locator('[data-copy-version]') })
-    .first()
-    .click()
-  const fakeComposer = page.locator('[data-composer-input]')
-  await fakeComposer.waitFor()
-  await fakeComposer.fill('PLATFORM_WEB_FAKE_KEY_TASK: search with a typed key.')
-  await fakeComposer.press('Enter')
-  await page.getByText('PLATFORM_FAKE_KEY_REJECTED', { exact: false }).first().waitFor({ timeout: 120_000 })
-  expect(retrieval.calls.length).toBe(callsBeforeFake)
-  expect(model.toolResults.some(text => text.includes('Model access is required'))).toBe(true)
-})
+  const gateway = () =>
+    fetch(origin + '/_dsh-phalanx/web/v1/tools/search', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'fixture query', ori_question: 'private original' }),
+    })
+  expect((await gateway()).status).toBe(200)
+  expect(retrieval.calls.at(-1)?.authorization).toBe('Bearer rotated-search-fixture-key')
+  expect(retrieval.calls.at(-1)?.body).not.toHaveProperty('ori_question')
+  const disabled = await searchSettings({ action: 'save', revision: rotated.revision, enabled: false })
+  expect(disabled).toMatchObject({ enabled: false, hasKey: true })
+  expect((await gateway()).status).toBe(503)
+  await restart()
+  expect((await inspectMemberProcess()).hasSearchToken).toBe(false)
+  await ask('PLATFORM_WEB_DISABLED_TASK after restart', 'PLATFORM_SEARCH_DISABLED')
+  expect(await searchSettings({ action: 'clear', revision: disabled.revision })).toMatchObject({ enabled: false, hasKey: false })
+}, 300_000)

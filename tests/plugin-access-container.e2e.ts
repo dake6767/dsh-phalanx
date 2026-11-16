@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { seedLegacyNativeServiceToken } from './support/legacy-native-service-token.js'
 import { assertLegacyNativeServiceCopy } from './support/legacy-native-service-copy.js'
 import { showAppCenterForFixture } from './support/app-center-visibility.js'
 import { memberSpacePath } from './support/real-dsh-runtime.js'
@@ -241,7 +242,8 @@ it.skipIf(!runtimeSettings.containerImage)(
 )
 
 const packageName = 'qiaomu-cover-design-dsh'
-const integrity = 'sha512-Lq31kbA5Dv3HijBh9jgTxvXYL7nwb0/vVHh7kSdC9mL6dP1FL8iwcPG0UQqUHIzUUzh+8sRHko+kbCXVQ51Yxw=='
+const packageVersion = '0.1.5'
+const integrity = 'sha512-d3GQLq3Db0s+BwuHZO8lu/Q+7XQoKGfKnKcMoaJc9cVGdLaidxaXtYpFXWGsohOftOPeWpNLMedxbD+l9Nu8IA=='
 const label = { en: 'Gateway fixture', 'zh-CN': '网关夹具' }
 const imageUrl = 'https://127.0.0.1:49993/result.png'
 const image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVQIW2NgAAIAAAUAAWMrDaUAAAAASUVORK5CYII='
@@ -384,9 +386,9 @@ async function verifyNativePluginServiceGateway() {
           {
             kind: 'plugin',
             packageName,
-            version: '0.1.3',
+            version: packageVersion,
             integrity,
-            archive: { url: 'https://github.com/joeseesun/qiaomu-cover-design-dsh/releases/download/v0.1.3/qiaomu-cover-design-dsh-0.1.3.tgz' },
+            archive: { url: `https://github.com/joeseesun/${packageName}/releases/download/v${packageVersion}/${packageName}-${packageVersion}.tgz` },
             runtimeDependencies: [],
             catalogDependencies: [],
             access: { environment: [], entriesYaml: '' },
@@ -587,8 +589,8 @@ export function apply(ctx) {
   })
   const blank = await load()
   const originalDefaults: Record<string, unknown> = {
-    ...slots[0]!.binding.empty,
-    ...slots[1]!.binding.empty,
+    ...(slots[0]!.binding.kind === 'revisioned-rpc' ? slots[0]!.binding.empty : undefined),
+    ...(slots[1]!.binding.kind === 'revisioned-rpc' ? slots[1]!.binding.empty : undefined),
     chats: [],
     chatId: '',
     images: [],
@@ -698,12 +700,15 @@ export function apply(ctx) {
   expect((await call('image', 'seedream', { prompt: 'same instance after rotation' })).status).toBe(200)
   expect(observed.at(-1)).toMatchObject({ auth: 'Bearer fictional-image-seedream-rotated' })
   const previousGrant = grants.get('image-seedream')!
-  const restart = await fetch(origin + '/recovery/restart', {
-    method: 'POST',
-    headers: { cookie, origin, 'content-type': 'application/json' },
-    body: JSON.stringify({ confirmed: true }),
-  })
-  expect(restart.status, await restart.clone().text()).toBe(200)
+  await seedLegacyNativeServiceToken({ actor, instance, signingKey, previousGrant, load, rpc, origin, cookie, records, packageName })
+  const restart = async () =>
+    await fetch(origin + '/recovery/restart', {
+      method: 'POST',
+      headers: { cookie, origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmed: true }),
+    })
+  const upgraded = await restart()
+  expect(upgraded.status, await upgraded.clone().text()).toBe(200)
   cookie = (await openCommunityHttpEntry(origin, platformCookie, 180000)).cookie
   const afterRestart = await load()
   expect(afterRestart.data).toMatchObject({
@@ -712,10 +717,12 @@ export function apply(ctx) {
   })
   const refreshed = afterRestart.data.settings.ai
   expect(refreshed.imageKey).toEqual(expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u))
-  expect(refreshed.imageKey).not.toBe(previousGrant.token)
-  expect((await call('image', 'seedream', { prompt: 'retired carrier token' })).status).toBe(401)
-  grants.set('image-seedream', { ...previousGrant, token: String(refreshed.imageKey), url: String(refreshed.imageBaseUrl) })
-  expect((await call('image', 'seedream', { prompt: 'refreshed carrier token' })).status).toBe(200)
+  expect(refreshed.imageKey).toBe(previousGrant.token)
+  expect(refreshed.imageBaseUrl).toBe(previousGrant.url)
+  expect((await restart()).status).toBe(200)
+  cookie = (await openCommunityHttpEntry(origin, platformCookie, 180000)).cookie
+  expect((await load()).revision).toBe(afterRestart.revision)
+  expect((await call('image', 'seedream', { prompt: 'same token after restart' })).status).toBe(200)
   expect(observed.at(-1)).toMatchObject({ auth: 'Bearer fictional-image-seedream-rotated' })
 
   // An installed catalog can move to another exact archive before the member chooses an update.

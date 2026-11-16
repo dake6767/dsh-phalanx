@@ -39,6 +39,9 @@ export async function resetPlatformDatabaseSecrets(
         JSON.stringify(secrets.encrypt({ table: 'shared_model_providers', recordId: provider.id, field: 'api_key' }, '')),
       ])
     await database.query('UPDATE dsh_phalanx.shared_model_settings SET revision=revision+1 WHERE id=1')
+    const [searchSettings] = await database.query<{ present: string | null }>("SELECT to_regclass('dsh_phalanx.platform_search_settings')::text AS present")
+    if (searchSettings?.present)
+      await database.query('UPDATE dsh_phalanx.platform_search_settings SET enabled=false,api_key=NULL,revision=revision+1 WHERE id=1')
     await database.query('DELETE FROM dsh_phalanx.session_signing_key')
     await database.query('DELETE FROM dsh_phalanx.model_access_tokens')
     const upstreams = await database.query<{ package_name: string; configuration: PluginUpstream[] }>(

@@ -611,9 +611,9 @@ it('validates native plugin service bindings for the signed package version', ()
     ],
   }
   const slot = { id: 'image', label, binding, backends: [backend] }
-  const read = (serviceSlots: unknown, platformVersion = '0.1.35') => {
+  const read = (serviceSlots: unknown, platformVersion = '0.1.35', floor = '0.1.35') => {
     const entry = {
-      ...minimal({ engines: { platform: '>=0.1.35' } }),
+      ...minimal({ engines: { platform: '>=' + floor } }),
       kind: 'plugin',
       dependencies: [],
       items: [
@@ -660,6 +660,36 @@ it('validates native plugin service bindings for the signed package version', ()
     [slot, { ...slot, id: 'another' }],
   ])
     expect(read(invalid)).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+
+  const jsonBinding = {
+    kind: 'json-settings',
+    file: 'media-desk/settings.json',
+    upstream: 'image-provider',
+    fields: [
+      { path: ['image', 'source'], source: 'literal', value: 'http' },
+      { path: ['image', 'protocol'], source: 'literal', value: 'openai' },
+      { path: ['image', 'baseUrl'], source: 'gateway-url' },
+      { path: ['image', 'model'], source: 'model' },
+      { path: ['image', 'apiKey'], source: 'service-token' },
+    ],
+  }
+  const jsonBackend = { id: 'openai', label, protocol: 'openai-image', mode: 'api', upstream: { model: 'MODEL' }, fields: [backend.fields[2]] }
+  const jsonSlot = { ...slot, binding: jsonBinding, backends: [jsonBackend] }
+  expect(read([jsonSlot], '0.1.36', '0.1.36')).toMatchObject({ status: 'ok', rejected: [], entries: [{ entry: { items: [{ serviceSlots: [jsonSlot] }] } }] })
+  expect(read([jsonSlot], '0.1.35', '0.1.36')).toMatchObject({ status: 'ok', rejected: [{ reason: 'needs-platform-upgrade' }] })
+  expect(read([jsonSlot], '0.1.36', '0.1.35')).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+  for (const invalid of [
+    { ...jsonBinding, file: '../settings.json' },
+    { ...jsonBinding, file: '/media-desk/settings.json' },
+    { ...jsonBinding, file: 'media-desk/settings.yaml' },
+    { ...jsonBinding, upstream: 'https://example.test' },
+    { ...jsonBinding, fields: [...jsonBinding.fields, { path: ['image', '__proto__'], source: 'model' }] },
+    { ...jsonBinding, fields: [...jsonBinding.fields, { path: ['image'], source: 'model' }] },
+    { ...jsonBinding, fields: [...jsonBinding.fields, { path: ['extra'], source: 'environment' }] },
+    { ...jsonBinding, fields: [...jsonBinding.fields, { path: ['extra'], source: 'literal', value: 'private-secret' }] },
+    { ...jsonBinding, fields: [...jsonBinding.fields, { path: ['extra'], source: 'service-token', value: 'injected' }] },
+  ])
+    expect(read([{ ...jsonSlot, binding: invalid }], '0.1.36', '0.1.36')).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
 })
 
 it('checks and renders bindings to exact locked resources at publication', () => {

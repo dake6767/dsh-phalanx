@@ -184,6 +184,14 @@ it('shows library empty, preparing, failed and available states with retry, deta
   expect(csrf.status()).toBe(403)
   const upload = async (contents: string) => {
     await page.getByRole('button', { name: 'Upload plugin archive', exact: true }).click()
+    const input = page.getByLabel('Plugin archive (.tgz)', { exact: true })
+    expect(
+      await input.evaluate(element => {
+        const hintId = element.getAttribute('aria-describedby')
+        const hint = hintId ? document.getElementById(hintId) : null
+        return Boolean(hint?.textContent && hint.parentElement === element.parentElement)
+      }),
+    ).toBe(true)
     await page
       .getByLabel('Plugin archive (.tgz)', { exact: true })
       .setInputFiles({ name: 'private.tgz', mimeType: 'application/gzip', buffer: Buffer.from(contents) })

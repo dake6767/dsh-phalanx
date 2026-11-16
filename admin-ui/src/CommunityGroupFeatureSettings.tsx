@@ -1,5 +1,4 @@
 import { Checkbox } from '@heroui/react/checkbox'
-import { useId } from 'react'
 import { nativeFeatureCanBeDisabled } from '../../src/domain/native-features'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityGrantSection from './CommunityGrantSection'
@@ -7,7 +6,6 @@ import type { useNativeFeatures } from './useNativeFeatures'
 
 export default function CommunityGroupFeatureSettings({ settings, busy }: { settings: ReturnType<typeof useNativeFeatures>; busy: boolean }) {
   const { locale, t } = usePlatformLanguage()
-  const heading = useId()
   const { data, disabled, setDisabled, showAppCenter, setShowAppCenter, saved } = settings
   if (!data) return <p role="status">{t('Loading…')}</p>
   const sections = [...new Map(data.features.map(feature => [feature.section.id, feature.section])).values()]
@@ -26,12 +24,7 @@ export default function CommunityGroupFeatureSettings({ settings, busy }: { sett
           </Checkbox.Content>
         </Checkbox>
       </CommunityGrantSection>
-      <section className="native-feature-settings" aria-labelledby={heading}>
-        <div className="native-feature-intro">
-          <h2 id={heading}>{t('DSH native features')}</h2>
-          <p>{t('Choose the native features available to this group, including administrators.')}</p>
-          <p>{t('Applies the next time an instance starts. This is not security isolation; members may still use the CLI or edit their own configuration.')}</p>
-        </div>
+      <div className="native-feature-settings">
         {sections.map(section => (
           <CommunityGrantSection key={section.id} title={section.name[locale]}>
             <ul className="native-feature-list">
@@ -63,7 +56,7 @@ export default function CommunityGroupFeatureSettings({ settings, busy }: { sett
             </ul>
           </CommunityGrantSection>
         ))}
-      </section>
+      </div>
       {saved ? (
         <p role="status" className="section-note">
           {t(saved === 'native' ? 'Saved. Restart running instances to apply these changes.' : 'Feature settings saved.')}

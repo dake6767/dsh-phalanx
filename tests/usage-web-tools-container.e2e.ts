@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
+import { WEB_TOOLS_GATEWAY_PATHS } from '../src/dsh/web-tools.js'
+import { modelAccessToken } from './support/community-application.js'
 import { injectedCandidateApplication } from './support/injected-candidate-application.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection, defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
@@ -18,19 +20,22 @@ import { signInCommunity } from './fixtures/community-native-browser.js'
 import type { CommunityUsageRecords } from '../src/domain/admin-contract.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 
-it('retains native search usage across installed restarts and rejects unavailable fetch', async () => {
+it('retains gateway search usage across installed restarts while native retrieval is unavailable', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'usage-web-tools-')),
     completed = new Set<string>()
   let status = 200,
-    fetchCalls = 0
+    fetchCalls = 0,
+    searchCalls = 0
   const failedTools = new Set<string>()
   const model = createServer(async (request, response) => {
     let raw = ''
     for await (const chunk of request) raw += chunk
     const body = JSON.parse(raw),
       marker = latestHumanText(body)
-    expect((body.tools ?? []).map((tool: { name: string }) => tool.name)).not.toContain('web_fetch')
+    const tools = (body.tools ?? []).map((tool: { name: string }) => tool.name)
+    expect(tools).not.toContain('web_fetch')
+    expect(tools).not.toContain('web_search')
     if (hasToolResult(body, marker, true)) failedTools.add(marker)
     response.setHeader('content-type', 'text/event-stream')
     if (marker.startsWith('USE_WEB_')) {
@@ -51,6 +56,7 @@ it('retains native search usage across installed restarts and rejects unavailabl
   const upstream = createServer(async (request, response) => {
     for await (const chunk of request) void chunk
     if (request.url?.endsWith('/fetch')) fetchCalls++
+    if (request.url?.endsWith('/search')) searchCalls++
     response.writeHead(status, { 'content-type': 'application/json' })
     response.end(
       JSON.stringify(
@@ -95,8 +101,8 @@ it('retains native search usage across installed restarts and rejects unavailabl
       expect(response.ok(), await response.text()).toBe(true)
       return response.json()
     }
-    let models = await api('models')
-    models = await api('models', {
+    const models = await api('models')
+    await api('models', {
       revision: models.revision,
       action: 'save-provider',
       provider: {
@@ -108,28 +114,10 @@ it('retains native search usage across installed restarts and rejects unavailabl
         models: [{ name: 'usage-model', enabled: true }],
       },
     })
-    await api('models', {
-      revision: models.revision,
-      action: 'save-provider',
-      provider: {
-        name: 'Retrieval',
-        baseUrl: 'https://api.deepseek.com/anthropic',
-        apiFormat: 'anthropic-messages',
-        apiKey: 'fictional-retrieval-key',
-        enabled: true,
-        models: [{ name: 'deepseek-flash', enabled: true }],
-      },
-    })
     const account = await api('accounts', { username: 'member', password: 'password', email: '' })
     const member = await browser.newPage({ locale: 'en' })
     member.setDefaultTimeout(30000)
     await signInCommunity(member, origin, 'member', 'password')
-    await member.getByRole('button', { name: 'Plugins', exact: true }).click()
-    await member.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor()
-    await member.getByRole('button', { name: 'View Web search', exact: true }).click()
-    await member.getByRole('switch', { name: 'Use the new Web Search API', exact: true }).click()
-    await member.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect.poll(() => member.getByRole('button', { name: 'Save', exact: true }).isDisabled()).toBe(true)
     const rpc = createBrowserDshRpc(member.context()),
       cookie = await cookieHeader(member.context(), origin)
     const prompt = async (marker: string) => {
@@ -152,10 +140,27 @@ it('retains native search usage across installed restarts and rejects unavailabl
     }
     await prompt('USE_WEB_SEARCH')
     await prompt('USE_WEB_FETCH')
+    expect(failedTools.has('USE_WEB_SEARCH')).toBe(true)
     expect(failedTools.has('USE_WEB_FETCH')).toBe(true)
     expect(fetchCalls).toBe(0)
+    expect(searchCalls).toBe(0)
+    const token = await modelAccessToken(runtime.dataRoot, 'member', account.spaceId)
+    const gatewayOrigin = runtimeSettings.containerImage === undefined ? origin : `http://127.0.0.1:${runtimeSettings.containerGatewayPort}`
+    const search = () =>
+      fetch(gatewayOrigin + WEB_TOOLS_GATEWAY_PATHS.search, {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+        body: JSON.stringify({ query: 'PRIVATE_QUERY' }),
+      })
+    const siteSearch = await api('platform-search')
+    await api('platform-search', { action: 'save', revision: siteSearch.revision, enabled: true, apiKey: 'fictional-retrieval-key' })
+    const successful = await search()
+    expect(successful.status).toBe(200)
+    expect(await successful.text()).toContain('PRIVATE_SEARCH_OUTPUT')
     status = 429
-    await prompt('USE_WEB_LIMITED')
+    const limited = await search()
+    expect(limited.status).toBe(429)
+    await limited.text()
     const records = (await api('usage-records')) as CommunityUsageRecords
     expect(records.total).toBe(2)
     expect(records.items.filter(row => row.capability.kind === 'web-tools')).toMatchObject([

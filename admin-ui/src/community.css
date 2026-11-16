@@ -42,6 +42,12 @@ h1{font-size:24px;letter-spacing:-.02em;margin:6px 0 10px;font-weight:600}h2{fon
 /* Shared management panel rhythm for model and system configuration. */
 .panel.settings-panel{padding:8px}
 .settings-panel-body{padding:0 16px 16px;min-width:0;font-size:14px}
+.platform-feature-form{display:grid;gap:12px;max-width:32rem}
+.platform-feature-form p{margin:0}
+.platform-feature-choices{border:0;margin:0;padding:0;display:grid;gap:8px}
+.platform-feature-choices legend{font-weight:var(--font-weight-semibold);margin-bottom:6px}
+.platform-feature-choices label{display:flex;gap:8px;align-items:center}
+.settings-panel-actions{display:flex;flex-wrap:wrap;gap:8px}
 .provider-picker{display:block}
 .provider-options{display:grid;gap:8px}
 .provider-options>p{margin:0;font-size:13px}

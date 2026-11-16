@@ -49,6 +49,7 @@ import { PluginLibrary } from '../use-cases/plugin-library.js'
 import { PluginUpdates } from '../use-cases/plugin-updates.js'
 import { PluginLocalCopies } from '../use-cases/plugin-local-copies.js'
 import { PluginMarket } from '../use-cases/plugin-market.js'
+import { MemberPluginUpstreams } from '../use-cases/member-plugin-upstreams.js'
 import { PluginUpstreamAdministration } from '../use-cases/plugin-upstream-administration.js'
 import { PluginUpstreamTest } from '../use-cases/plugin-upstream-test.js'
 import { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
@@ -77,6 +78,7 @@ export function createCommunityPlugins(input: {
   const installations: PostgresPluginInstallations = new PostgresPluginInstallations(database)
   const selections: PostgresPluginSelections = new PostgresPluginSelections(database)
   const upstreamStore: PostgresPluginUpstreams = new PostgresPluginUpstreams(database)
+  const memberUpstreams = new MemberPluginUpstreams(upstreamStore, accessStore)
   const pluginGrants: PostgresPluginGrants = new PostgresPluginGrants(database)
   const localCopies: PluginLocalCopies = new PluginLocalCopies(
     accounts,
@@ -86,7 +88,7 @@ export function createCommunityPlugins(input: {
     new PostgresPluginSelections(database, 'local'),
     declaredRuntimeRevision(),
     experts,
-    upstreamStore,
+    memberUpstreams,
   )
   const managedPlugins: MemberManagedPlugins = new MemberManagedPlugins(
     accounts,
@@ -96,7 +98,7 @@ export function createCommunityPlugins(input: {
     selections,
     localCopies,
     experts,
-    upstreamStore,
+    memberUpstreams,
   )
   const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime, false, downloads, canDiscardArtifacts)
   const compatibility: PluginCompatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
@@ -136,7 +138,7 @@ export function createCommunityPlugins(input: {
     pluginIntakeToken,
     githubArchives,
   )
-  const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
+  const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax(), installations)
   const memberPluginAccess = new MemberPluginAccess(
     managedPlugins,
     accessStore,
@@ -164,6 +166,7 @@ export function createCommunityPlugins(input: {
     installations,
     selections,
     upstreamStore,
+    memberUpstreams,
     pluginGrants,
     localCopies,
     managedPlugins,
@@ -199,6 +202,7 @@ export function createCommunityPluginMembers(input: {
     selections,
     accessStore,
     upstreamStore,
+    memberUpstreams,
     pluginGrants,
     localCopies,
     managedPlugins,
@@ -220,6 +224,7 @@ export function createCommunityPluginMembers(input: {
     grants: pluginGrants,
     installations,
     services: accessStore,
+    upstreams: upstreamStore,
     runtime,
     manager: native,
     origin: input.origin,
@@ -249,7 +254,7 @@ export function createCommunityPluginMembers(input: {
     actions,
     declaredRuntimeRevision(),
     memberPluginAccess,
-    upstreamStore,
+    memberUpstreams,
     preinstallDelivery,
   )
   const market = new PluginMarket(
@@ -261,7 +266,7 @@ export function createCommunityPluginMembers(input: {
     managedPlugins,
     declaredRuntimeRevision(),
     memberPluginAccess,
-    upstreamStore,
+    memberUpstreams,
     localCopies,
     nativeJobs,
     pluginOperations,

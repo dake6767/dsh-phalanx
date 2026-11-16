@@ -10,7 +10,7 @@ it('exchanges native cookies and sends a signed installation bound to the captur
     () => 100000,
     () => 'request-nonce',
   )
-  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule).toString('base64'))
+  const module = await import('data:text/javascript;base64,' + Buffer.from(nativeInstallVerifierModule + '\nexport { createVerifier }').toString('base64'))
   const verifier = module.createVerifier(authority.publicKey, 'member', 'launch-one', () => 100000)
   const requests: string[] = []
   const server = createServer(async (request, response) => {

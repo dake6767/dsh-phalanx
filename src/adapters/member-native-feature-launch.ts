@@ -20,6 +20,7 @@ export async function prepareMemberNativeFeatureLaunch(
     readonly environment: Readonly<Record<string, string>>
     readonly platformPatch: string
     readonly modelsOverlay?: string
+    readonly voiceRows?: readonly unknown[]
     readonly overlays: readonly ({ readonly patch: string } | undefined)[]
     readonly container?: Parameters<typeof buildCommunityContainerLaunchCommand>[0]
   },
@@ -57,6 +58,7 @@ export async function prepareMemberNativeFeatureLaunch(
       ...(input.config.container && options.publicKey ? { publicKey: options.publicKey } : {}),
     },
     ...(toolPolicyPatch ? { toolPolicyPatch } : {}),
+    ...(input.voiceRows ? { voiceRows: input.voiceRows } : {}),
   })
   return { patches, features }
 }

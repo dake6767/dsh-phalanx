@@ -21,9 +21,17 @@ import { compareSemver, parseSemver, parseSemverRange, satisfiesSemverRange } fr
 import { readCatalogPluginArchive } from './suite-plugin.js'
 import { readCatalogResourceBindings } from './suite-resource-bindings.js'
 import { resourceReadiness } from './suite-resource-readiness.js'
-import { readExecutionServiceSlots, readPluginServiceSlots } from './suite-service-slots.js'
+import { readExecutionServiceSlots, readPluginServiceSlots, withServiceFieldLabels } from './suite-service-slots.js'
 
-const itemExtensionFields = ['archive', 'requiredFiles', 'resourceBindings', 'serviceSlots', 'blockedShortOptions', 'shortOptionsWithValue'] as const
+const itemExtensionFields = [
+  'archive',
+  'requiredFiles',
+  'resourceBindings',
+  'serviceSlots',
+  'serviceFieldLabels',
+  'blockedShortOptions',
+  'shortOptionsWithValue',
+] as const
 const misplacedExtension = 'Catalog extension is declared at the wrong level.'
 
 /** Entries the reader refused; the gallery shows them unavailable with the reason. */
@@ -212,10 +220,16 @@ function readGalleryEntry(
         items[index] = { ...item, delegated }
       }
     }
-    if (Object.hasOwn(raw, 'serviceSlots')) {
-      const updated = itemWithServiceSlots(items[index]!, raw.serviceSlots)
+    if (Object.hasOwn(raw, 'serviceSlots') || Object.hasOwn(raw, 'serviceFieldLabels')) {
+      const updated = itemWithServiceSlots(items[index]!, raw.serviceSlots, raw.serviceFieldLabels)
       if (!updated || !requiresCatalogExtensionPlatform(entry.engines.platform))
         return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Service slots require valid fields and engines.platform >=0.1.35.' } }
+      if (
+        updated.kind === 'plugin' &&
+        updated.serviceSlots?.some(slot => slot.binding.kind === 'json-settings') &&
+        !requiresCatalogExtensionPlatform(entry.engines.platform, '0.1.36')
+      )
+        return { entry: converted, problem: { reason: 'invalid-entry', detail: 'JSON settings bindings require engines.platform >=0.1.36.' } }
       items[index] = updated
     }
   }
@@ -274,19 +288,21 @@ function withProtectedShortOptions(item: SuiteCatalogExecutionItem, declarations
   return delegated
 }
 
-function itemWithServiceSlots(item: SuiteCatalogItem, raw: unknown): SuiteCatalogItem | undefined {
+function itemWithServiceSlots(item: SuiteCatalogItem, raw: unknown, fieldLabels: unknown): SuiteCatalogItem | undefined {
   if (item.kind === 'plugin') {
-    const serviceSlots = readPluginServiceSlots(raw)
+    const slots = readPluginServiceSlots(raw)
+    const serviceSlots = slots && withServiceFieldLabels(slots, fieldLabels)
     return serviceSlots ? { ...item, serviceSlots } : undefined
   }
   if (item.kind === 'execution') {
-    const serviceSlots = readExecutionServiceSlots(item, raw)
+    const slots = readExecutionServiceSlots(item, raw)
+    const serviceSlots = slots && withServiceFieldLabels(slots, fieldLabels)
     return serviceSlots ? { ...item, serviceSlots } : undefined
   }
 }
 
-function requiresCatalogExtensionPlatform(platform: string): boolean {
-  const floor = parseSemver('0.1.35')!
+function requiresCatalogExtensionPlatform(platform: string, minimum = '0.1.35'): boolean {
+  const floor = parseSemver(minimum)!
   return parseSemverRange(platform)!.every(branch =>
     branch.some(bound => (bound.operator === '>' || bound.operator === '>=' || bound.operator === '=') && compareSemver(bound.version, floor) >= 0),
   )

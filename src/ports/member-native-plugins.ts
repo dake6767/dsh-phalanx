@@ -1,6 +1,7 @@
 import type { CommunityUserInstance } from './community-runtime.js'
 import type { PluginIdentity } from '../domain/plugin-library.js'
-import type { CatalogPluginServiceSlot } from '../domain/suite-service-slots.js'
+import type { CatalogJsonServiceBinding, CatalogPluginServiceBinding } from '../domain/suite-service-slots.js'
+import type { NativeJsonFieldHistory } from './plugin-installations.js'
 import type { MemberPluginManagerPort } from './plugin-market.js'
 
 export type NativePluginInstallPhase = 'downloading' | 'installing'
@@ -65,7 +66,7 @@ interface NativeServiceSettingsProjection {
   readonly packageName: string
   readonly version: string
   readonly integrity: string
-  readonly binding: CatalogPluginServiceSlot['binding']
+  readonly binding: CatalogPluginServiceBinding
   readonly id: string
   readonly fields: Readonly<Record<string, string | boolean>>
   readonly keys: readonly string[]
@@ -77,6 +78,17 @@ export type NativeServiceSettingsResult =
   | { readonly status: 'prepared'; readonly fingerprint: string; readonly observed: string | null; readonly revision: string | number }
   | { readonly status: 'applied'; readonly fingerprint: string; readonly refresh: boolean }
   | { readonly status: 'failed' | 'conflict' | 'unsupported' }
+export type NativeJsonSettingsIntent = Pick<NativeServiceSettingsProjection, 'packageName' | 'version' | 'integrity' | 'fields'> & {
+  readonly binding: CatalogJsonServiceBinding
+  readonly previous: NativeJsonFieldHistory
+} & ({ readonly phase: 'preview' } | { readonly phase: 'apply'; readonly revision: string })
+
+export type NativeJsonSettingsResult =
+  | { readonly status: 'prepared'; readonly revision: string; readonly fields: NativeJsonFieldHistory }
+  | { readonly status: 'applied'; readonly fields: NativeJsonFieldHistory }
+  | { readonly status: 'failed' | 'conflict' | 'unsupported' }
+
 export interface NativeServiceSettingsTransport {
+  syncJsonSettings?(instance: CommunityUserInstance, origin: URL, input: NativeJsonSettingsIntent, signal: AbortSignal): Promise<NativeJsonSettingsResult>
   syncSettings(instance: CommunityUserInstance, origin: URL, input: NativeServiceSettingsIntent, signal: AbortSignal): Promise<NativeServiceSettingsResult>
 }

@@ -7,6 +7,22 @@ globalThis.window.__ModuleLoader__.load({
       name: 'native-preset-views',
       inject: ['slots', 'uiConversation'],
       apply(ctx) {
+        const holes = ['conversation.hero.workspace.directoryFlow', 'sidebar.workspaces.directoryFlow', 'workspace.picker.directoryFlow']
+        ctx.effect(() => {
+          const marker = globalThis.document.createElement('span')
+          marker.hidden = true
+          const publish = () => {
+            marker.dataset.nativeDirectoryFlows = holes.map(hole => ctx.slots.entries(hole).length).join(',')
+          }
+          publish()
+          globalThis.document.body.appendChild(marker)
+          const unsubscribes = holes.map(hole => ctx.slots.subscribe(hole, publish))
+          return () => {
+            for (const unsubscribe of unsubscribes) unsubscribe()
+            marker.remove()
+          }
+        })
+
         for (let index = 0; index < 8; index++) {
           const id = 'native-preset-probe-' + index
           ctx.effect(() => ctx.uiConversation.views.register({ target: id, create: () => ({ empty: null, replace: () => null, apply: () => null }) }))
