@@ -70,7 +70,7 @@ export function createIdleReclamation(deps: IdleReclamationDeps): {
           deps.sessions.clearIdle(userId)
           continue
         }
-        if (deps.sessions.hasUser(userId)) {
+        if (deps.sessions.hasActiveConnection(userId)) {
           deps.sessions.setIdleSince(userId, now)
           continue
         }
@@ -82,7 +82,7 @@ export function createIdleReclamation(deps: IdleReclamationDeps): {
           return (
             seconds !== undefined &&
             seconds > 0 &&
-            !deps.sessions.hasUser(userId) &&
+            !deps.sessions.hasActiveConnection(userId) &&
             deps.clock.now() - Math.max(since, deps.previewActivity?.(userId) ?? 0) >= seconds * 1000
           )
         }

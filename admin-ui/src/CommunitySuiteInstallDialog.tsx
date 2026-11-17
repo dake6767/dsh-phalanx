@@ -355,7 +355,7 @@ export default function CommunitySuiteInstallDialog({
                 {preview.creates.map(item => {
                   const versionAt = item.kind === 'plugin' ? item.name.lastIndexOf('@') : -1
                   const name = versionAt > 0 ? item.name.slice(0, versionAt) : (item.names?.join(', ') ?? item.name)
-                  const version = versionAt > 0 ? item.name.slice(versionAt + 1) : item.kind === 'skill' ? 'v' + preview.version : undefined
+                  const version = versionAt > 0 ? item.name.slice(versionAt + 1) : undefined
                   const meta = [item.detail, item.commands?.join(', ')].filter(Boolean).join(' · ')
                   return (
                     <li key={item.kind + ':' + item.name}>
@@ -391,7 +391,7 @@ export default function CommunitySuiteInstallDialog({
               ) : null}
               {preview.replacements?.length && preview.creates.length ? (
                 <div className="page-stack">
-                  <CatalogWarning message={t('These manual entries will be replaced by the catalog version')} />
+                  <CatalogWarning message={t('The catalog will replace these manual entries')} />
                   <ul>
                     {preview.replacements.map(row => (
                       <li key={row.kind + ':' + row.name}>

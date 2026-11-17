@@ -167,7 +167,8 @@ export function createMcpGateway(deps: {
           deps.connections.untrack(request.socket)
           request.socket.destroy()
         })
-        deps.connections.track(current, request.socket)
+        // The local bridge keeps a GET subscription open and serves tool calls on their own POST responses.
+        deps.connections.track(current, request.socket, admitted.run?.location === 'shared' && request.method === 'GET' ? 'passive' : 'active')
         return true
       })
       if (!registered || response.destroyed || controller.signal.aborted) return

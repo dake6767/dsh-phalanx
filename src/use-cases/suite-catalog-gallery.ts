@@ -1,3 +1,4 @@
+import type { McpCatalogSnapshot } from '../domain/mcp-catalog.js'
 import type { CommunitySuiteCatalogSourceView } from '../domain/admin-contract.js'
 import { readSuiteCatalog, type ReadSuiteCatalogEntry } from '../domain/suite-catalog-reader.js'
 import type { TrustedSuiteCatalogKey } from '../domain/suite-catalog-signature.js'
@@ -20,7 +21,7 @@ export interface SuiteCatalogGalleryInput {
   readonly log?: (line: string) => void
 }
 
-interface GalleryState {
+interface GalleryState extends McpCatalogSnapshot {
   readonly entries: readonly SuiteCatalogEntry[]
   readonly source: CommunitySuiteCatalogSourceView
 }
@@ -32,7 +33,7 @@ interface GalleryState {
 export class SuiteCatalogGallery {
   // Absent until the first load; the address then comes from download sources ready at startup.
   private state: GalleryState | undefined
-  private pending: Promise<CommunitySuiteCatalogSourceView> | undefined
+  private pending: Promise<GalleryState> | undefined
   /** Deployer or test address, validated on the same path as the environment loader. */
   private readonly configuredAddress: string | undefined
   constructor(private readonly input: SuiteCatalogGalleryInput) {
@@ -45,6 +46,9 @@ export class SuiteCatalogGallery {
   entries(): readonly SuiteCatalogEntry[] {
     return this.state?.entries ?? []
   }
+  tags() {
+    return this.state?.galleryTags
+  }
   source(): CommunitySuiteCatalogSourceView {
     return this.state?.source ?? { status: 'ok', address: this.address() }
   }
@@ -52,7 +56,13 @@ export class SuiteCatalogGallery {
    * Concurrent gallery opens without their own cancellation share one in-flight request. A caller that passes a
    * signal keeps a private request, so aborting it cannot poison the other waiters.
    */
-  load(signal?: AbortSignal): Promise<CommunitySuiteCatalogSourceView> {
+  async load(signal?: AbortSignal): Promise<CommunitySuiteCatalogSourceView> {
+    return (await this.loadSnapshot(signal)).source
+  }
+  mcpCatalog(): Promise<McpCatalogSnapshot> {
+    return this.loadSnapshot()
+  }
+  private loadSnapshot(signal?: AbortSignal): Promise<GalleryState> {
     if (signal !== undefined) return this.performLoad(signal)
     if (this.pending) return this.pending
     const pending = this.performLoad(new AbortController().signal).finally(() => {
@@ -61,23 +71,32 @@ export class SuiteCatalogGallery {
     this.pending = pending
     return pending
   }
-  private async performLoad(signal: AbortSignal): Promise<CommunitySuiteCatalogSourceView> {
+  private async performLoad(signal: AbortSignal): Promise<GalleryState> {
     const address = this.address()
     try {
       const bytes = await this.input.fetcher.read(address, signal)
       const read = readSuiteCatalog(bytes, { trustedKeys: this.input.trustedKeys, platformVersion: this.input.platformVersion })
       if (read.status === 'rejected') {
-        this.state = { entries: [], source: { status: 'rejected', address, reason: read.reason } }
-        return this.source()
+        this.state = { entries: [], presets: [], source: { status: 'rejected', address, reason: read.reason } }
+        return this.state
       }
       if (read.skipped.length) this.input.log?.(`Suite catalog skipped unsupported entry kinds: ${read.skipped.map(row => `${row.kind}:${row.id}`).join(', ')}`)
       const records = await this.input.installs()
       const online = read.entries.map(row => this.guardImmutability(row, records))
-      this.state = { entries: online, source: { status: 'ok', address, publishedAt: read.publishedAt } }
+      this.state = {
+        entries: online,
+        presets: read.mcp ?? [],
+        ...(read.galleryTags ? { galleryTags: read.galleryTags } : {}),
+        source: { status: 'ok', address, publishedAt: read.publishedAt },
+      }
     } catch (error) {
-      this.state = { entries: [], source: { status: 'unreachable', address, reason: error instanceof Error ? error.message : 'The catalog request failed.' } }
+      this.state = {
+        entries: [],
+        presets: [],
+        source: { status: 'unreachable', address, reason: error instanceof Error ? error.message : 'The catalog request failed.' },
+      }
     }
-    return this.source()
+    return this.state
   }
   /** Same id and version must keep its content: a different hash is treated as tampering. */
   private guardImmutability(row: ReadSuiteCatalogEntry, records: readonly SuiteInstallRecord[]): SuiteCatalogEntry {

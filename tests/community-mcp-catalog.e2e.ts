@@ -9,7 +9,10 @@ import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { loopbackPort } from '../src/adapters/loopback-port.js'
-import { mcpPresets } from '../src/domain/mcp-catalog.js'
+import { withSuiteCatalogContentHash } from '../src/domain/suite-catalog-document.js'
+import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
+import { signedMcpEntries } from './fixtures/mcp-catalog-online.js'
+import { createCatalogSigningKey, signRawCatalog } from './fixtures/suite-catalog-signing.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { createCommunityApplication } from './support/community-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
@@ -18,7 +21,67 @@ it('imports a preset through the skill-pack style market, persists failure, retr
   const root = await mkdtemp(join(tmpdir(), 'mcp-catalog-ui-'))
   const port = await loopbackPort(),
     origin = `http://phalanx.example.test:${port}`
-  const presets = [...structuredClone(mcpPresets)]
+  const signingKey = createCatalogSigningKey()
+  let entryVersion = '1.0.0',
+    catalogOnline = true
+  const suite = onlineCatalogEntries.find(row => row.id === 'wecom')!
+  const label = { en: 'Fixture plugin', 'zh-CN': '夹具插件' }
+  const plugin = withSuiteCatalogContentHash({
+    kind: 'plugin',
+    id: 'fixture-plugin',
+    version: '1.0.0',
+    engines: { platform: '>=0.1.37' },
+    adapters: [],
+    dependencies: [],
+    title: label,
+    description: label,
+    source: label,
+    identity: label,
+    items: [],
+  })
+  let classified = true,
+    includeTravel = true
+  const tags = {
+    tags: [
+      { id: 'maps', label: { en: 'Maps', 'zh-CN': '地图' } },
+      { id: 'travel', label: { en: 'Travel', 'zh-CN': '出行' } },
+      { id: 'collaboration', label: { en: 'Collaboration', 'zh-CN': '协作' } },
+      { id: 'editing', label: { en: 'Editing', 'zh-CN': '编辑' } },
+    ],
+    assignments: [
+      { kind: 'mcp', id: 'amap', tags: ['maps', 'travel'] },
+      { kind: 'suite', id: suite.id, tags: ['collaboration'] },
+      { kind: 'plugin', id: plugin.id, tags: ['editing'] },
+    ],
+  }
+  const catalogServer = createServer((_request, response) => {
+    if (!catalogOnline) {
+      response.writeHead(503).end()
+      return
+    }
+    response.end(
+      signRawCatalog(
+        {
+          format: 1,
+          publishedAt: '2026-11-17T00:00:00Z',
+          entries: [...signedMcpEntries(entryVersion), suite, plugin],
+          ...(classified
+            ? {
+                galleryTags: includeTravel
+                  ? tags
+                  : {
+                      tags: tags.tags.filter(tag => tag.id !== 'travel'),
+                      assignments: tags.assignments.map(row => ({ ...row, tags: row.tags.filter(tag => tag !== 'travel') })),
+                    },
+              }
+            : {}),
+        },
+        signingKey,
+      ),
+    )
+  })
+  await new Promise<void>(resolve => catalogServer.listen(0, '127.0.0.1', resolve))
+  const catalogPort = (catalogServer.address() as { port: number }).port
   let fail = true,
     authenticated = true
   const app = createCommunityApplication(
@@ -33,7 +96,7 @@ it('imports a preset through the skill-pack style market, persists failure, retr
       },
     },
     {
-      mcpPresets: presets,
+      suiteCatalog: { address: `http://127.0.0.1:${catalogPort}/catalog.json`, trustedKeys: [signingKey] },
       mcpTransport: {
         send: async input => {
           const target = new URL(input.upstream.baseUrl)
@@ -85,9 +148,55 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     await page.getByRole('button', { name: 'Create administrator' }).click()
     await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
+    for (const gallery of [
+      { path: 'skills', label: 'Collaboration', excluded: 'Editing', name: 'WeCom' },
+      { path: 'plugins', label: 'Editing', excluded: 'Collaboration', name: 'Fixture plugin' },
+    ]) {
+      await page.goto(`${origin}/admin/${gallery.path}`)
+      const reply = page.waitForResponse(response => response.url() === origin + '/admin/api/suites')
+      await page.getByRole('tab', { name: gallery.path === 'skills' ? 'Skill catalog' : 'Plugin catalog', exact: true }).click()
+      const loaded = await reply
+      expect(loaded.status()).toBe(200)
+      expect(await loaded.json()).toMatchObject({ source: { status: 'ok' }, galleryTags: tags })
+      await page.getByRole('button', { name: 'Filter by tag' }).click()
+      expect(await page.getByRole('option', { name: gallery.excluded }).count()).toBe(0)
+      await page.getByRole('option', { name: gallery.label }).click()
+      const hit = page.getByRole('button', { name: `View catalog entry ${gallery.name}`, exact: true })
+      await hit.waitFor()
+      await page.getByLabel('Search catalog').fill('unmatched fixture')
+      await page.getByText('No matching catalog entries.').waitFor()
+      await page.getByRole('button', { name: 'Clear filters' }).click()
+      await hit.waitFor()
+    }
     await page.getByRole('link', { name: 'MCP library', exact: true }).click()
     await page.getByRole('tab', { name: 'MCP catalog', exact: true }).click()
     const preset = page.getByRole('button', { name: 'View MCP service Amap', exact: true })
+    const trains = page.getByRole('button', { name: 'View MCP service 12306', exact: true })
+    const tag = page.getByRole('button', { name: 'Filter by tag' })
+    await tag.focus()
+    await page.keyboard.press('Enter')
+    await page.getByRole('option', { name: 'Travel' }).waitFor()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await tag.getByText('Travel', { exact: true }).waitFor()
+    await preset.waitFor()
+    expect(await trains.count()).toBe(0)
+    await page.getByLabel('Search catalog').fill('train')
+    await page.getByText('No matching catalog entries.').waitFor()
+    await page.getByRole('button', { name: 'Clear filters' }).click()
+    await trains.waitFor()
+    await tag.click()
+    await page.getByRole('option', { name: 'Unclassified' }).click()
+    await trains.waitFor()
+    expect(await preset.count()).toBe(0)
+    await tag.click()
+    await page.getByRole('option', { name: 'Travel' }).click()
+    await tag.getByText('Travel', { exact: true }).waitFor()
+    includeTravel = false
+    await page.getByRole('button', { name: 'Reload the MCP catalog' }).click()
+    await tag.getByText('All entries', { exact: true }).waitFor()
+    await trains.waitFor()
+    await preset.waitFor()
     await preset.focus()
     await page.keyboard.press('Enter')
     const drawer = page.getByRole('dialog', { name: 'Amap', exact: true })
@@ -102,7 +211,7 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     expect(await source.getAttribute('href')).toBe('https://lbs.amap.com/api/mcp-server/gettingstarted')
     const plan = drawer.getByRole('listitem').filter({ has: page.getByText('p-amap', { exact: true }) })
     await plan.getByText('MCP service ·', { exact: true }).waitFor()
-    await plan.getByText(/Catalog version/u).waitFor()
+    expect(await plan.getByText(/Catalog version/u).count()).toBe(0)
     await page.getByLabel('MCP service name', { exact: true }).fill('p-map')
     expect(await page.getByLabel('Display name', { exact: true }).inputValue()).toBe('Amap')
     await page.getByLabel('Display name', { exact: true }).fill('地图助手')
@@ -146,11 +255,34 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     fail = false
     await row.getByRole('button', { name: 'Retry import', exact: true }).click()
     await row.getByText('Import ready', { exact: true }).waitFor()
-    const index = presets.findIndex(preset => preset.entry.id === saved.catalog.id)
-    presets[index] = { ...presets[index]!, entry: { ...presets[index]!.entry, version: 'http-next' } }
+    entryVersion = '2.0.0'
     await page.reload()
-    await row.getByRole('button', { name: 'Review catalog update', exact: true }).click()
-    await page.getByText(`Catalog update ${saved.catalog.version} → http-next`, { exact: true }).waitFor()
+    const updateAvailable = row.getByRole('button', { name: 'Review catalog update', exact: true })
+    await updateAvailable.waitFor()
+    await page.getByRole('button', { name: 'Add MCP service', exact: true }).click()
+    await page.getByLabel('MCP service name', { exact: true }).fill('p-independent')
+    await page.getByLabel('Remote MCP address', { exact: true }).fill('https://example.test/mcp')
+    let failFirstRefresh = true
+    await page.route('**/admin/api/mcp', async route => {
+      if (route.request().method() === 'GET' && failFirstRefresh) {
+        failFirstRefresh = false
+        await route.fulfill({ status: 503, json: { error: 'Temporary catalog refresh failure' } })
+      } else await route.continue()
+    })
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    const independent = page.locator('.mcp-service-card').filter({ hasText: 'p-independent' })
+    await independent.waitFor()
+    const reloadError = page.getByRole('alert').filter({ hasText: 'Temporary catalog refresh failure' })
+    await reloadError.waitFor()
+    expect(await updateAvailable.isVisible()).toBe(true)
+    await reloadError.waitFor({ state: 'hidden' })
+    await page.unroute('**/admin/api/mcp')
+    await independent.getByRole('button', { name: 'Remove', exact: true }).click()
+    await page.getByRole('button', { name: 'Confirm action', exact: true }).click()
+    await independent.waitFor({ state: 'detached' })
+    await updateAvailable.click()
+    await page.getByText('An update is available for this service.', { exact: true }).waitFor()
+    expect(await page.getByRole('dialog').getByText('2.0.0', { exact: true }).count()).toBe(0)
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     await row.getByRole('button', { name: 'Edit', exact: true }).click()
     expect(await page.getByLabel('Remote MCP address', { exact: true }).count()).toBe(0)
@@ -183,11 +315,34 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
       await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-catalog-en.png'), fullPage: true })
     await page.context().addCookies([{ name: 'dsh-phalanx.lang', value: 'zh-CN', url: origin }])
+    await page.setViewportSize({ width: 390, height: 844 })
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      await page.reload()
+      await page.getByRole('tab', { name: 'MCP 广场', exact: true }).click()
+      await page.getByRole('button', { name: '查看 MCP 服务 高德地图', exact: true }).waitFor()
+      expect(await page.locator('html').getAttribute('data-theme')).toBe(colorScheme)
+      const filters = page.locator('.catalog-gallery-filters')
+      expect(await filters.evaluate(node => node.scrollWidth <= node.clientWidth && getComputedStyle(node).gridTemplateColumns.split(' ').length === 1)).toBe(
+        true,
+      )
+      await filters.getByRole('button', { name: '按标签筛选' }).click()
+      await page.getByRole('option', { name: '地图', exact: true }).waitFor()
+      expect(await page.getByRole('option', { name: '出行', exact: true }).count()).toBe(0)
+      await page.keyboard.press('Escape')
+    }
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
+      await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-catalog-zh.png'), fullPage: true })
+    classified = false
     await page.reload()
     await page.getByRole('tab', { name: 'MCP 广场', exact: true }).click()
     await page.getByRole('button', { name: '查看 MCP 服务 高德地图', exact: true }).waitFor()
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
-      await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-catalog-zh.png'), fullPage: true })
+    expect(await page.getByRole('button', { name: '按标签筛选' }).count()).toBe(0)
+    catalogOnline = false
+    await page.reload()
+    await page.getByRole('tab', { name: 'MCP 广场', exact: true }).click()
+    await page.getByRole('alert').getByText('已安装的 MCP 服务继续使用已保存的配置。').waitFor()
+    expect((await settings())[0]).toMatchObject({ testStatus: 'passed', catalogTargetUnavailable: true })
     expect(authenticated).toBe(true)
     expect(errors).toEqual([])
     expect(await settings()).toHaveLength(1)
@@ -197,6 +352,8 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     forwarder.closeAllConnections()
     await new Promise<void>(resolve => forwarder.close(() => resolve()))
     await app.stop()
+    catalogServer.closeAllConnections()
+    await new Promise<void>(resolve => catalogServer.close(() => resolve()))
     await removeCommunityFixture(root)
   }
 })

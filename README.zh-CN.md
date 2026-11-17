@@ -4,7 +4,7 @@
 
 dsh-phalanx 是面向小团队的多用户 DSH 自托管平台：在一台服务器上运行 DeepSeek Harness（DSH），让每位成员都有独立的用户空间。
 
-团队不必为每个人重复部署 DSH、分发共享模型密钥。部署者安装平台，管理员创建账户、配置共享模型供应商，成员登录后就能在自己的空间里工作。
+部署者在一台主机上安装平台，管理员创建账户并配置共享模型供应商。成员登录后在自己的空间里工作，直接使用已启用的模型。
 
 ## 四项亮点
 
@@ -36,7 +36,7 @@ dsh-phalanx 是面向小团队的多用户 DSH 自托管平台：在一台服务
 
 镜像按[构建配方](containers/dsh/Containerfile)，从固定摘要的 Node.js/Debian 基础镜像开始，拉取 [runtime-versions.json](runtime-versions.json) 指定的官方 DSH 提交，在构建阶段安装锁定依赖并编译，再将构建后的 DSH 目录和生产依赖复制到运行镜像。DSH 源码保持原样，集成通过官方 CLI、配置和插件完成。
 
-镜像不包含账户、模型密钥或成员文件。PostgreSQL 保存平台事实与加密凭据，独立保护的主密钥负责解密。本机制品与生成的投影、成员持久文件分别存放；重建实例会保留成员文件并重新生成平台投影。五层存储及恢复要求见[存储与备份](docs/install.zh-CN.md#存储布局)。自行构建、导入镜像和验证容器运行的步骤见[贡献指南](CONTRIBUTING.md#build-the-dsh-instance-image)。
+镜像不包含账户、模型密钥或成员文件。PostgreSQL 保存平台事实与加密凭据，独立保护的主密钥负责解密。本机制品与生成的投影、成员持久文件分别存放；重建实例会保留成员文件并重新生成平台投影。五层存储及恢复要求见[存储与备份](docs/operations.zh-CN.md#存储布局)。自行构建、导入镜像和验证容器运行的步骤见[贡献指南](CONTRIBUTING.md#build-the-dsh-instance-image)。
 
 管理员在系统升级模块管理兼容的原地更新，查看阶段、诊断及平台自动恢复结果。
 候选部署可以转为同号正式版。兼容要求、任务中断及成员文件的独立备份见
@@ -60,7 +60,10 @@ HTTPS、域名和云安全组由部署者配置，详细步骤见安装说明。
 
 | 你想了解什么 | 文档 |
 | --- | --- |
-| 安装、存储、HTTPS、服务管理与恢复 | [中文安装说明](docs/install.zh-CN.md) · [English](docs/install.md) |
+| 从空主机安装到成员首次打开 DSH | [安装说明](docs/install.zh-CN.md) · [English](docs/install.md) |
+| 备份、升级、迁移与恢复 | [运维指南](docs/operations.zh-CN.md) · [English](docs/operations.md) |
+| 管理账户、模型、平台功能与资源分发 | [管理员指南](docs/admin-guide.zh-CN.md) · [English](docs/admin-guide.md) |
+| 使用 DSH、平台应用中心、文件与恢复功能 | [成员指南](docs/member-guide.zh-CN.md) · [English](docs/member-guide.md) |
 | 分层、接缝归属、运行时保证与设计取舍 | [架构文档（英文）](docs/architecture.md) |
 | 本地开发、镜像构建、真实 DSH 测试与发布流程 | [贡献指南（英文）](CONTRIBUTING.md) |
 | 每次发布的变化与验收记录 | [Releases](https://github.com/dake6767/dsh-phalanx/releases) |

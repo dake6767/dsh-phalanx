@@ -29,6 +29,7 @@ import {
 import { acceptanceProgress } from './acceptance-progress.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
 import { assertRetainedUpgradeAfter } from './installed-retained-after.js'
+import { assertRetainedMcpCatalog, retainedMcpPrompt, seedRetainedMcpCatalog, signedUpgradeCatalog } from './installed-retained-mcp-catalog.js'
 import { seedPausedUpgradeState } from './installed-retained-paused.js'
 import { assertBaselineInstanceResources, configureRetainedUpgrade, signInRetainedUpgrade } from './installed-retained-configure.js'
 import {
@@ -95,6 +96,10 @@ export async function runInstalledUpgrade({
   if (!scope.upgrade || scope.previous === undefined) throw Error(`Version ${targetVersion} has no formal previous release to upgrade from`)
   const baselineVersion = scope.previous
   const baselineUsesSpaceStorage = compareVersions(baselineVersion, '0.1.34') >= 0
+  const externalMcpCatalog = compareVersions(targetVersion, '0.1.37') >= 0
+  const catalogInput = process.env.DSH_PHALANX_UPGRADE_SIGNED_CATALOG
+  const signedCatalog =
+    baselineVersion === '0.1.36' && targetVersion === '0.1.37' && (!realReply || catalogInput) ? signedUpgradeCatalog(catalogInput) : undefined
   const policyTransition = baselineVersion === '0.1.23' && targetVersion === '0.1.24'
   const executorInventoryTransition = baselineVersion === '0.1.33' && targetVersion === '0.1.34'
   const executorJournalTransition = baselineVersion === '0.1.34' && targetVersion === '0.1.35'
@@ -124,6 +129,7 @@ export async function runInstalledUpgrade({
       database: JSON.stringify(database?.identity ?? { kind: 'builtin' }),
       retainedFixtures: retainedFixtureIdentity,
       retainedCatalogSha256,
+      ...(signedCatalog ? { upgradeCatalogTag: signedCatalog.tag, upgradeCatalogSha256: signedCatalog.sha256 } : {}),
     },
     [
       'release-source',
@@ -131,6 +137,7 @@ export async function runInstalledUpgrade({
       'baseline',
       'deployment-inputs',
       'configure',
+      ...(signedCatalog ? ['legacy-mcp-import'] : []),
       'retained-catalog',
       'retained-plugin-library',
       'retained-plugin-access',
@@ -149,6 +156,7 @@ export async function runInstalledUpgrade({
       'enter',
       ...(executorJournalTransition ? ['legacy-plugin-after'] : []),
       'after',
+      ...(signedCatalog ? ['external-mcp-catalog'] : []),
       ...(realReply ? ['real-reply'] : []),
       ...(combination ? ['instance-combination'] : []),
       ...(databaseRollback ? ['observer-finish'] : []),
@@ -170,6 +178,7 @@ export async function runInstalledUpgrade({
     pluginCalls,
     expertReplies,
     state: upstreamState,
+    serveCatalog,
   } = await createRetainedUpgradeUpstream({ address, catalogBytes: retainedCatalog.bytes, progress })
   const browser = await chromium.launch({ headless: true }),
     admin = await browser.newPage({ locale: 'en' }),
@@ -265,9 +274,10 @@ export async function runInstalledUpgrade({
       }),
     )
     // Resume after baseline setup by restoring authentication without replaying fixture writes.
-    if (['updater-check', 'observer-start', 'migration-recovery'].includes(progress.report().resumeFrom ?? ''))
+    if (['legacy-mcp-import', 'updater-check', 'observer-start', 'migration-recovery', 'external-mcp-catalog'].includes(progress.report().resumeFrom ?? ''))
       await signInRetainedUpgrade(admin, member, origin, memberEntry)
     const retainedApi = { get, post, origin, admin, member, groupId }
+    if (signedCatalog) await progress.step('legacy-mcp-import', () => seedRetainedMcpCatalog(retainedApi))
     await progress.step('retained-catalog', async () => {
       await seedRetainedCatalog(retainedApi)
       return { installed: true, catalogSha256: retainedCatalogSha256, contentHash: retainedCatalog.contentHash }
@@ -326,20 +336,7 @@ export async function runInstalledUpgrade({
         beforeContributions,
       }
     })
-    const call = async (marker: string) => {
-      await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
-      // Native creation records workspace membership; RPC cwd alone leaves a session ungrouped.
-      const sessionId = await startCommunitySession(member)
-      await sendCommunityPrompt(member, marker)
-      await expect
-        .poll(() => calls[marker], { timeout: 300000 })
-        .toEqual({ failed: false, valid: true, tools: ['mcp__p-managed__echo', 'mcp__p-selected__echo'] })
-      await member
-        .locator(`[data-conversation-content][data-conversation-session=${JSON.stringify(sessionId)}]:visible`)
-        .getByText('UPGRADE_QUERY_DONE', { exact: true })
-        .waitFor()
-      return sessionId
-    }
+    const call = (marker: string) => retainedMcpPrompt({ member, origin, workspace, marker, calls, expectTrains: Boolean(signedCatalog) })
     const callPlugin = async (marker: string) => {
       await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
       const sessionId = await startCommunitySession(member)
@@ -668,6 +665,7 @@ export async function runInstalledUpgrade({
       assertRetainedUpgradeAfter({
         remote,
         candidate,
+        externalMcpCatalog,
         versions,
         release,
         admin,
@@ -708,6 +706,7 @@ export async function runInstalledUpgrade({
         upstreamState,
       }),
     )
+    if (signedCatalog) await progress.step('external-mcp-catalog', () => assertRetainedMcpCatalog(retainedApi, serveCatalog, signedCatalog))
     if (realReply)
       await progress.step('real-reply', async () => {
         expect(
@@ -822,6 +821,7 @@ export async function runInstalledUpgrade({
             imageTransition: progress.saved('image-transition'),
             enter: progress.saved('enter'),
             retainedData: progress.saved('after'),
+            ...(signedCatalog ? { retainedMcpImport: progress.saved('legacy-mcp-import'), externalMcpCatalog: progress.saved('external-mcp-catalog') } : {}),
             deploymentInputs: progress.saved('deployment-inputs'),
             instanceCombination: combination ? progress.saved('instance-combination') : 'T2 formal upgrade only',
             realReply: realReply ? progress.saved('real-reply') : 'T4 only',

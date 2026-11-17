@@ -135,7 +135,7 @@ export interface SuiteCatalogDocumentSuiteEntry extends SuiteCatalogDocumentEntr
   readonly serviceAddresses?: readonly string[]
   readonly items: readonly SuiteCatalogItem[]
 }
-/** Kinds reserved by the outer format and skipped by this version. */
+/** Base declaration for kinds without the suite or shared dependency item format. */
 export interface SuiteCatalogDocumentReservedEntry extends SuiteCatalogDocumentEntryBase {
   readonly kind: 'mcp' | 'skill'
 }
@@ -188,7 +188,7 @@ export function suiteCatalogContentHash(entry: object): string {
 export type UnsealedSuiteCatalogDocumentEntry =
   | Omit<SuiteCatalogDocumentDependencyEntry, 'contentHash'>
   | Omit<SuiteCatalogDocumentSuiteEntry, 'contentHash'>
-  | Omit<SuiteCatalogDocumentReservedEntry, 'contentHash'>
+  | (Omit<SuiteCatalogDocumentReservedEntry, 'contentHash'> & { readonly documentation?: string })
 /** Validates one entry and returns it normalized (unknown fields dropped); throws on invalid structure. */
 export function normalizeSuiteCatalogDocumentEntry(value: unknown): SuiteCatalogDocumentEntry {
   try {

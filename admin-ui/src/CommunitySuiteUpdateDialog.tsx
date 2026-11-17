@@ -50,12 +50,19 @@ export default function CommunitySuiteUpdateDialog({
   const list = (names: readonly string[]) => names.join(', ')
   const lines = preview
     ? [
-        ...(preview.dependencyChanges ?? []).map(row =>
-          t('Dependency {name}: catalog {from} → {to}', { name: row.name, from: row.from || '—', to: row.to || '—' }),
-        ),
-        preview.plugin ? t('Plugin {name}: {from} → {to}', { name: preview.plugin.packageName, from: preview.plugin.from, to: preview.plugin.to }) : undefined,
-        preview.plugin ? t(preview.plugin.modified ? 'Administrator access settings are kept.' : 'The catalog access template will be applied.') : undefined,
-        preview.plugin
+        ...(preview.dependencyChanges ?? [])
+          .filter(row => row.changed)
+          .map(row =>
+            t(!row.from ? 'Runtime dependency added: {name}' : !row.to ? 'Runtime dependency removed: {name}' : 'Runtime dependency updated: {name}', {
+              name: row.name,
+            }),
+          ),
+        preview.plugin?.modified
+          ? t('Administrator access settings are kept.')
+          : preview.plugin?.configurationChanged
+            ? t('The catalog access template will be applied.')
+            : undefined,
+        preview.plugin && !preview.plugin.modified && preview.plugin.configurationChanged
           ? t('Access template changes: {names}', {
               names:
                 [
@@ -104,7 +111,7 @@ export default function CommunitySuiteUpdateDialog({
     : []
   const blocked =
     preview?.reason === 'up-to-date'
-      ? t('This entry already has the catalog version.')
+      ? t('No update is available for this entry.')
       : preview?.reason === 'dependency-missing'
         ? t('Install the shared dependencies this version needs first: {names}', { names: list((preview.missingDependencies ?? []).map(titleOf)) })
         : preview?.reason === 'skill-conflicts'
@@ -114,6 +121,16 @@ export default function CommunitySuiteUpdateDialog({
             : preview?.reason
               ? t('Another task is running for this entry. Try again when it finishes.')
               : undefined
+  const plugin = preview?.plugin
+  const packageSummary = plugin?.from
+    ? plugin.from !== plugin.to
+      ? t('Plugin {name}: {from} → {to}', { name: plugin.packageName, from: plugin.from, to: plugin.to })
+      : plugin.artifactChanged
+        ? t('Plugin package contents have changed.')
+        : plugin.artifactChanged === false && (plugin.configurationChanged || preview?.dependencyChanges?.some(row => row.changed))
+          ? t('The plugin version is unchanged. Configuration or runtime dependencies have changed.')
+          : undefined
+    : undefined
   return (
     <CommunityDialog
       title={entry.title[locale]}
@@ -140,9 +157,24 @@ export default function CommunitySuiteUpdateDialog({
         <p role="status">{t('Loading…')}</p>
       ) : (
         <>
-          <p>{t('Version {from} → {to}', { from: preview.from, to: preview.to })}</p>
-          {blocked ? <CommunityMessage role="alert" status="warning" title={blocked} /> : null}
-          <ul>{lines.length ? lines.map(line => <li key={line}>{line}</li>) : <li>{t('No changes')}</li>}</ul>
+          {blocked ? (
+            <CommunityMessage role="alert" status="warning" title={blocked} />
+          ) : (
+            <p>{packageSummary ?? t('An update is available for this entry.')}</p>
+          )}
+          {!blocked && !plugin?.from && entry.category === 'plugin' && !preview.skipped.some(row => row.kind === 'plugin') ? (
+            <p>
+              {t('Installed version unknown')}
+              {plugin ? ` · ${t('Catalog target version {version}', { version: plugin.to })}` : ''}
+            </p>
+          ) : null}
+          {lines.length ? (
+            <ul>
+              {lines.map(line => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : null}
           <p>{t('Saved credentials, grants, publication and member selections are kept. If any step fails, the current version stays in use.')}</p>
         </>
       )}

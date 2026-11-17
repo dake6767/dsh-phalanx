@@ -6,15 +6,23 @@ Platform apps are plugins checked in the administrator's library and offered to 
 Ordinary app-center installations and group **Preinstalled plugins** deliveries create native
 copies managed by members. **Platform controlled** grants and shared-credential
 member selections load read-only at the administrator's selected version. See
-[Groups and plugins](install.md#groups-and-plugins) for installation and removal.
+[Groups and plugins](admin-guide.md#groups-and-plugins) for installation and removal.
 
 A plugin upstream holds a service address, request headers and a platform credential.
 Access settings supply environment variables and configuration merged by entry ID.
 Authorized read-only users can use the platform credential without reading its value
-from their spaces. Native copies receive neither platform credentials nor entry settings.
+from their spaces. Native copies do not receive real platform credentials. Supported entries can install scoped native service settings as described in [Platform service settings for native plugins](#platform-service-settings-for-native-plugins).
 Platform-delivered native copies receive ordinary literal environment variables at
 startup, including declared runtime dependency paths, only while a successful delivery record and the actual native installation
 both exist; credential and forwarding templates are excluded. Changes require restart.
+
+## Platform service settings for native plugins
+
+A supported entry declares the plugin settings and service backends it can use. Configure a backend during catalog installation or open the installed plugin's **Access settings → Service backends** afterward. Select the backend, provide its service address, model and credentials as requested, and save. For installed skills, the corresponding backend controls are in **Platform execution**. See [Skill execution](skill-execution.md#review-and-configure) for their setup.
+
+A native copy needs a verified platform delivery of the supported plugin package. The platform synchronizes the declared service settings through a supported plugin RPC or a JSON settings binding. RPC bindings can report a retry or refresh action. A JSON binding is applied at the next instance start. It updates only declared fields, preserves members' personal changes and leaves unrelated settings in place. A failed or unsupported binding is shown in Platform Apps. Members can keep using personal settings in their own plugin.
+
+The member settings carry a gateway address and a scoped platform token. A field called `apiKey` may contain that token. The service token is bound to the member's account session identity, user space, plugin package, service slot, backend and binding. For each request the platform checks the running instance and current eligibility and supplies the real provider credential to the upstream. A stable token across ordinary restarts still requires current authorization. Disabling an account, withdrawing access or disabling the backend can reject the next call even if the token remains in saved settings. Enter upstream keys only in the protected administrator settings. See [Administrator credentials](admin-guide.md#platform-credentials-and-member-credentials).
 
 ## Setup
 
@@ -24,7 +32,7 @@ both exist; credential and forwarding templates are excluded. Changes require re
 4. Save a test request and choose **Test saved request**. This checks the address, credential and headers; complete the access settings and call the actual plugin to verify the full path.
 5. Use `{upstream:name}` for the forwarding address and `{access-token}` for the member token in environment variables or entry configuration. Never put the real key here. Variables apply to the entire instance and override existing launch variables with the same name. DSH resolves a saved credential reference before environment variables; a same-name saved reference can stop platform access. Remove that reference to restore the platform token. Each variable name can belong to only one platform app; platform runtime variables are reserved.
 6. Write YAML using the entry IDs listed in the interface. Objects merge recursively; arrays and scalars replace existing values. YAML tags and expressions are unsupported. Affected members must restart their instances after saving access settings.
-7. Add a Platform controlled group grant or publish for members to select read-only access. Preinstall instead delivers an ordinary native copy without platform credentials. Publishing an app with credentials requires confirmation that all members will be allowed to use them.
+7. Add a Platform controlled group grant or publish for members to select read-only access. Preinstallation delivers a native copy. Supported native service settings follow [the native settings binding](#platform-service-settings-for-native-plugins). Publishing an app with credentials requires confirmation that all members will be allowed to use them.
 
 Upstream address, header and credential changes apply to the next request without a
 member restart. An upstream still referenced by access settings cannot be deleted;
@@ -54,7 +62,7 @@ them before adding library entries. Grant **Platform controlled** access or
 publish the plugin for members to install; installing a catalog entry does not
 itself grant access.
 
-The plugin and skill catalogs use the same signed directory and trust settings;
+The plugin, skill and MCP catalogs use the same signed directory and trust settings;
 see [Catalog source and lifecycle](skill-execution.md#skill-catalog). A platform
 upgrade preserves installed entries without updating them. Review **Update** to
 see the package, dependency and access-template changes. Failed updates restore
@@ -105,18 +113,7 @@ preparation keeps the previous usable version.
 
 ## DeepSeek Search
 
-The built-in DSH web-search plugin offers **DeepSeek Search API**. It is off
-by default; members can enable it in the plugin settings. **The platform already
-injects access; no API Key is needed.** The upstream API Key control remains visible;
-leave it empty. A manually entered key overrides platform access and returns 401.
-The platform disables `web_fetch`; member tool catalogs do not offer page fetching.
-
-The platform uses an enabled shared DeepSeek provider whose base URL host is
-`api.deepseek.com`, preferring the default model's provider, then the first
-eligible provider. Its credential is attached only by the platform gateway and
-never enters member space. A provider on another host does not supply this
-credential. Without an eligible shared credential, the plugin reports that an
-administrator must configure it. Members should not supply a key themselves.
+Web search uses a dedicated DeepSeek Search API key configured by an administrator. See [Platform web search and voice input](admin-guide.md#platform-web-search-and-voice-input) for the controls and when the setting takes effect.
 
 ## Connection examples
 
@@ -240,9 +237,8 @@ import stays unavailable; retry it or delete it. A platform restart marks an
 interrupted test as failed so an administrator can retry it explicitly.
 
 A successful import does not grant, publish or enable the service. Grant it to a
-group or publish it to the member application center afterwards. Administrators
-receive implicit access with their own service disabled by default. Use another
-name to import an independent copy. Repeated submissions of the same import do
+group, including the administrator group, or publish it for members to enable
+in the app center. Use another name to import an independent copy. Repeated submissions of the same import do
 not create another service.
 
 Catalog connection settings are maintained by the platform: endpoint, run mode and
@@ -250,7 +246,7 @@ authentication settings cannot be edited. Names, credentials, grants, publicatio
 required policy and disabled tools remain manageable. Credential changes require
 a new successful test before the service becomes available. Manual additions and
 JSON imports remain configurable and are never converted into catalog services by
-matching their names. The adopted catalog version is recorded for each service.
+matching their names.
 
 The **12306** service needs no Key. After you choose its name, the platform downloads
 and verifies the pinned source archive and installs its locked dependencies inside
@@ -262,16 +258,18 @@ explicit retry; ready dependencies are reused. Each enabled member receives thei
 own isolated on-demand process with no member files mounted. Rail queries depend
 on the provider's current network availability and ticket-sale window.
 
-When a platform upgrade includes a newer catalog version, choose **Review catalog update**
-on the adopted service to compare versions and connection settings. Updates are
-explicit: platform upgrades never replace an adopted configuration automatically.
-The candidate prepares and tests privately while the existing service stays
-available. Failed candidates retain the current service and can be retried from
-the same review action. Successful candidates switch on the next member request.
-Names, credentials, grants, publishing, required-service rules, disabled tools and
-member choices remain in place. Concurrent edits or credential changes invalidate
-the candidate; interrupted updates become failed after restart and require a new
-explicit retry. Newly required credentials must be supplied before validation.
+When a compatible update is available, choose **Review catalog update** on the
+saved service to inspect the configuration changes. Confirm to prepare and test
+the candidate. The current service continues running during validation and
+after a failed candidate. Reopen the review to retry. After a successful
+update, members use the updated service on their next request. The platform
+keeps the saved service name, grants, publishing state, required-service rules,
+disabled tools and member choices. Supply the credential before validation when the updated service
+changes its HTTPS origin or where it sends the credential. Concurrent edits or credential changes invalidate the candidate.
+A restart marks interrupted updates as failed so an administrator can retry.
+
+If the catalog or target is unavailable, the service still uses its saved
+configuration. New imports and updates require a verified target.
 
 ### Choose a run location
 
@@ -410,7 +408,7 @@ the account also rejects subsequent calls.
 System upgrades preserve platform access data. Environment reset clears native copies
 and successful preinstall records, then installs the current group preinstall list once;
 self-selected native plugins are not restored automatically. Read-only selections and
-access configuration remain. See [Groups and plugins](install.md#groups-and-plugins).
+access configuration remain. See [Groups and plugins](admin-guide.md#groups-and-plugins).
 
 ## Boundaries
 

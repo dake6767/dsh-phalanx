@@ -372,7 +372,7 @@ describe('community default model gateway HTTP seam', () => {
         }),
       ).rejects.toThrow()
       expect(registered).toBe(true)
-      expect(registry.hasUser('member')).toBe(false)
+      expect(registry.hasActiveConnection('member')).toBe(false)
       expect(forwarded).toBe(0)
       expect(commitFailure).toMatchObject({ code: 'query-failed', sqlState: '23503' })
     } finally {

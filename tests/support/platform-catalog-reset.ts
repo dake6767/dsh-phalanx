@@ -1,3 +1,5 @@
+import { signedMcpEntries } from '../fixtures/mcp-catalog-online.js'
+import { compileMcpCatalogDeclaration } from '../../src/domain/mcp-catalog-declaration.js'
 import { expect } from 'vitest'
 import type { PlatformDatabase } from '../../src/adapters/platform-database.js'
 import { PostgresCommunityAccountStore } from '../../src/adapters/postgres-community-accounts.js'
@@ -13,7 +15,10 @@ export async function restoreResetCatalog(database: PlatformDatabase): Promise<v
   await store.initialize()
   const account = (await accounts.get('admin'))!,
     actor = { username: account.username, spaceId: account.spaceId, sessionEpoch: account.sessionEpoch }
-  const services = new McpServices(accounts, store, { synchronize: async () => {} })
+  const [entry] = signedMcpEntries()
+  if (entry?.kind !== 'mcp') throw new Error('Invalid fixture')
+  const preset = compileMcpCatalogDeclaration(entry, { ...entry })!
+  const services = new McpServices(accounts, store, { synchronize: async () => {} }, undefined, [preset])
   const probe = {
     probe: async (_username: string, _space: string, name: string) => {
       expect(await services.diagnostic('admin', name)).toMatchObject({ url: 'https://mcp.amap.com/mcp', credential: 'fictional-reconfigured-key' })
@@ -24,12 +29,18 @@ export async function restoreResetCatalog(database: PlatformDatabase): Promise<v
   try {
     const grants = (await store.read()).grants
     expect((await store.read()).services[0]?.catalogUpdate?.candidate).toBeUndefined()
-    expect((await services.list(actor))[0]).toMatchObject({ availableCatalogVersion: '1', credentialConfigured: false })
-    await jobs.update(actor, { name: 'p-service', version: '1', requestId: 'restore-reset-catalog-01', credential: 'fictional-reconfigured-key' })
+    expect((await services.list(actor))[0]).toMatchObject({ availableCatalogVersion: '1.0.0', credentialConfigured: false })
+    await jobs.update(actor, {
+      name: 'p-service',
+      version: entry.version,
+      contentHash: entry.contentHash,
+      requestId: 'restore-reset-catalog-01',
+      credential: 'fictional-reconfigured-key',
+    })
     await jobs.drain()
     expect((await store.read()).services[0]).toMatchObject({
       name: 'p-service',
-      catalog: { id: 'amap', version: '1', status: 'ready' },
+      catalog: { id: 'amap', version: '1.0.0', contentHash: entry.contentHash, status: 'ready' },
       testStatus: 'passed',
       credential: 'fictional-reconfigured-key',
     })

@@ -295,11 +295,41 @@ The protected skill observer accepts only providers from the actual global/exper
 ## Architecture gates
 
 `architecture-exemptions.json` holds only the ratcheted size ledger above; no
-other rule can be exempted. The lint rules cover all source and
-community UI code, and each use case has a matching quick behavior test. Size
-checks also cover CSS and executable test fixtures. Architecture rule samples run
-in `tests/dependency-gate.spec.ts`; changing a rule requires independent review.
-All community source and UI modules are covered by these gates.
+other rule can be exempted. Architecture rules apply to TypeScript in `src/`,
+`admin-ui/src/` and `tests/`. The repository lint command runs ESLint and
+Prettier, then checks architecture assets such as CSS. General ESLint
+configuration also covers executable fixtures, container tooling and scripts.
+Architecture rule samples run in `tests/dependency-gate.spec.ts`. Keep quick
+test coverage next to each use case and review changes to the gates independently.
+
+## Signed catalogs
+
+`SuiteCatalogGallery` fetches and verifies the same catalog for the skill,
+plugin and MCP galleries. The Ed25519 signature covers the canonical JSON
+of the received document after removing its top-level `signature` field.
+The optional `galleryTags` is included in the signed data. Each entry has a separate content hash
+and compatibility range. Gallery tags refer to entry kind and stable ID. Tag
+changes leave the installation identity intact. The online reader discards
+invalid optional metadata and keeps usable signed entries. The publication
+check rejects invalid metadata.
+
+The MCP reader validates a single declarative adapter. A remote HTTPS service
+can bind one credential supplied by the administrator. A shared Node.js service
+declares a GitHub source archive by full commit and SHA-256, and a relative
+entry point. The platform generates the preparation command and uses the saved
+service configuration for runtime admission. New import and update requests pin
+the verified entry version and content hash. The confirmed candidate retains
+those settings during preparation, connection test and promotion. The candidate can
+reuse a saved credential only when the HTTPS origin and credential bindings match.
+The platform fetches the catalog outside the MCP write queue and rechecks actor
+authority and the selected target when accepting the write.
+
+Older platforms skip the MCP kind. A newer platform can read a verified
+catalog with no MCP entries. Existing Amap and 12306 imports retain their
+saved settings, credentials and relationships. The legacy version is equivalent
+to the first external version only when the saved and declared connection
+settings match the known historical configuration. Missing, unreachable or
+rejected catalog targets leave local runtime and access decisions intact.
 
 ## Runtime guarantees and boundaries
 
@@ -343,10 +373,10 @@ selections while retaining grants and their preferences; removal clears all choi
  turns interrupted tests into retryable failure. Shared catalog imports wait for
  preparation through service change notifications, then discover tools through
  the existing diagnostic gateway. Generation and actor checks also guard this
- handoff. Removal and shutdown settle waiters. The 12306 preset pins its source
- archive digest and installs the author's npm lockfile with lifecycle scripts
- disabled; runtime launch does not install packages. Neither importing nor testing
- grants or publishes a service, and management responses contain no secrets.
+ handoff. Removal and shutdown settle waiters. A shared Node.js catalog entry
+ prepares dependencies from the pinned lockfile with lifecycle scripts disabled.
+ Runtime launch uses the prepared dependency. Import and test leave grant and
+ publication decisions to the administrator.
 The administrator JSON import previews standard `mcpServers` entries and confirms
 each service separately through the same save validation. Suspected header,
 query and environment secrets move into write-only credential slots; named slots
@@ -684,6 +714,20 @@ Changing precision retains the active model while preparation is pending.
 The native profile records the optional Bundle selection, and a PostgreSQL record preserves
 a member's choice to turn it off across carrier restarts.
 DSH runs recognition inside the member carrier with its native CPU worker.
+
+Native plugin service bindings are configured in plugin access administration.
+The platform verifies the delivered package and processes each binding in the
+member instance. Revisioned RPC bindings use the plugin’s declared settings
+service. JSON settings bindings verify the archive identity and update declared
+fields in the member’s DSH home. Startup applies JSON bindings and retains the
+member’s unrelated settings. The gateway checks member, space, carrier, package,
+service and backend scope before attaching the real upstream credential. A
+member-visible setting called `apiKey` can carry this scoped platform token.
+Member-owned keys entered in the plugin use the plugin’s storage.
+
+The release visibility rules hide expert, usage and contribution interfaces.
+Their persistence and internal owners remain part of the architecture and
+deployment backup.
 
 `PluginUpstreamAdministration` owns administrator-only upstream settings and redacts
 credential values in every management projection. `PostgresPluginUpstreams` reads package configuration on demand and protects credentials, headers and diagnostic requests with field-bound envelopes. `PostgresPluginAccessStore` likewise reads on demand and updates changed protected fields by key. `PluginUpstreamAccess`

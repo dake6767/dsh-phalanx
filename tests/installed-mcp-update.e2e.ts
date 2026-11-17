@@ -102,11 +102,20 @@ it('updates an installed prior-preset fixture without replacing the live credent
     const account = await post('accounts', { username: 'member', password: 'password', email: '' })
     expect(account.status()).toBe(201)
     groupId = (await account.json()).groupId
+    const signedTarget = (await get('mcp/catalog')).entries.find((row: { id: string }) => row.id === 'amap')
+    expect(signedTarget).toMatchObject({ version: '1.0.0', contentHash: expect.stringMatching(/^[a-f0-9]{64}$/u) })
     expect(
       (
         await post('mcp/catalog', {
           action: 'import',
-          input: { presetId: 'amap', name: 'p-amap', credential: secret, requestId: 'installed-update-original-import' },
+          input: {
+            presetId: 'amap',
+            version: signedTarget.version,
+            contentHash: signedTarget.contentHash,
+            name: 'p-amap',
+            credential: secret,
+            requestId: 'installed-update-original-import',
+          },
         })
       ).status(),
     ).toBe(202)
@@ -174,7 +183,8 @@ it('updates an installed prior-preset fixture without replacing the live credent
       (
         await post('mcp/catalog/update', {
           name: 'p-amap',
-          version: '1',
+          version: signedTarget.version,
+          contentHash: signedTarget.contentHash,
           credential: 'fictional-invalid-market-update-key',
           requestId: 'installed-update-failed-key',
         })
@@ -186,11 +196,17 @@ it('updates an installed prior-preset fixture without replacing the live credent
     await admin.goto(origin + '/admin')
     await admin.getByRole('link', { name: 'MCP library', exact: true }).click()
     await admin.getByRole('button', { name: 'Review catalog update', exact: true }).click()
-    await admin.getByText('Catalog update 0 → 1', { exact: true }).waitFor()
+    await admin.getByText('An update is available for this service.', { exact: true }).waitFor()
     expect((await admin.content()).includes(secret)).toBe(false)
     await admin.getByRole('button', { name: 'Validate and update', exact: true }).click()
     await expect.poll(async () => (await row()).catalogUpdate?.status, { timeout: 90000 }).toBe('applied')
-    expect(await row()).toMatchObject({ description: 'Amap', published: true, credentialConfigured: true, disabledTools, catalog: { version: '1' } })
+    expect(await row()).toMatchObject({
+      description: 'Amap',
+      published: true,
+      credentialConfigured: true,
+      disabledTools,
+      catalog: { version: signedTarget.version, contentHash: signedTarget.contentHash },
+    })
     await call('AFTER_APPLIED_UPDATE')
     const visible = await (await member.request.get(origin + '/market/api/mcp')).json()
     expect(visible[0]).toMatchObject({ name: 'p-amap', enabled: true })

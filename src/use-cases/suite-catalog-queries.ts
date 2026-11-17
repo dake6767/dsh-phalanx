@@ -48,7 +48,7 @@ export class SuiteCatalogQueries {
   private readonly kinds: Readonly<Record<SuiteCatalogItemKind, SuiteItemOperations<SuiteCatalogItem>>>
   private readonly updates: SuiteUpdates
   constructor(
-    private readonly gallery: Pick<SuiteCatalogGallery, 'entries' | 'source' | 'load'>,
+    private readonly gallery: Pick<SuiteCatalogGallery, 'entries' | 'source' | 'load'> & Partial<Pick<SuiteCatalogGallery, 'tags'>>,
     private readonly installs: CatalogInstallRows,
     private readonly references: ExpertReferencesPort,
     private readonly dependencies: RuntimeDependencies,
@@ -85,7 +85,11 @@ export class SuiteCatalogQueries {
     return row
   }
   async catalog(): Promise<CommunitySuiteCatalogView> {
-    return suiteCatalogView(this.entries(), await this.state(), this.gallery.source(), this.execution, entry => this.availability.reason(entry))
+    const entries = this.entries(),
+      source = this.gallery.source(),
+      galleryTags = this.gallery.tags?.()
+    const view = await suiteCatalogView(entries, await this.state(), source, this.execution, entry => this.availability.reason(entry))
+    return galleryTags ? { ...view, galleryTags } : view
   }
   /** Fetches the online catalog for one gallery view; the route awaits this before reading entries. */
 

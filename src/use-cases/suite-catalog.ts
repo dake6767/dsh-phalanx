@@ -79,7 +79,7 @@ export class SuiteCatalog {
   private readonly tasks: SuiteTaskRecords
   constructor(
     private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>,
-    private readonly gallery: Pick<SuiteCatalogGallery, 'entries' | 'source' | 'load'>,
+    private readonly gallery: Pick<SuiteCatalogGallery, 'entries' | 'source' | 'load'> & Partial<Pick<SuiteCatalogGallery, 'tags'>>,
     private readonly storage: SuiteCatalogStorage,
     private readonly dependencies: RuntimeDependencies,
     private readonly clock: Clock,

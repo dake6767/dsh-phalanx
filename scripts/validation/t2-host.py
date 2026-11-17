@@ -98,6 +98,11 @@ def execute(args, temporary):
         if bool(args.reuse_baseline)!=bool(args.reuse_target):raise ValueError('Both rehearsal candidate paths are required')
         if args.reuse_baseline:
             environment.update(DSH_PHALANX_REUSE_SOURCE=str(Path(args.reuse_baseline).resolve()),DSH_PHALANX_REUSE_TARGET=str(Path(args.reuse_target).resolve()))
+        if getattr(args, 'separate_scratch', False):
+            scratch = temporary / 'test-scratch'
+            scratch.mkdir(mode=0o700)
+            os.chown(scratch, identity.pw_uid, identity.pw_gid)
+            environment['DSH_PHALANX_T2_SCRATCH_ROOT'] = str(scratch)
         if getattr(args, 'manual_retries', False): environment['DSH_PHALANX_LINUX_FILE_RETRY'] = 'manual'
         if args.identity: environment['DSH_PHALANX_T2_IDENTITY'] = str(Path(args.identity).resolve())
         if args.source_preset == 'mainland': environment['DSH_PHALANX_E2E_NPM_MIRROR'] = '1'
@@ -185,6 +190,7 @@ def main():
     parser.add_argument('--files', help='Comma-separated regular T2 inventory subset')
     parser.add_argument('--shard', help='Full inventory shard INDEX/4')
     parser.add_argument('--manual-retries', action='store_true')
+    parser.add_argument('--separate-scratch', action='store_true', help='Keep test workspaces outside uploaded results')
     parser.add_argument('--identity', help='Verified bundle identity JSON')
     parser.add_argument('--reuse-baseline')
     parser.add_argument('--reuse-target')

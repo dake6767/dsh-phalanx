@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { declaredRuntimeRevision } from '../src/adapters/runtime-revision.js'
+import officeInputs from './fixtures/office-inputs.json' with { type: 'json' }
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { loopbackPort } from '../src/adapters/loopback-port.js'
 import { withSuiteCatalogContentHash } from '../src/domain/suite-catalog-document.js'
@@ -22,7 +23,7 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
   const plugin = withSuiteCatalogContentHash({
     kind: 'plugin',
     id: 'fixture-editor',
-    version: '1.0.0',
+    version: '7.8.9',
     engines: { platform: '>=0.1.35' },
     adapters: [],
     title: localized,
@@ -117,6 +118,65 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
     await page.getByRole('button', { name: 'Create administrator' }).click()
     await page.getByRole('button', { name: /^(Skip for now and finish installation|暂时跳过，完成安装)$/u }).click()
     await page.waitForURL(`${origin}/admin`)
+    const { repository, commit } = officeInputs.onlyofficeSdk
+    const onlyOffice = withSuiteCatalogContentHash({
+      kind: 'plugin',
+      id: 'onlyoffice',
+      version: '7.8.9',
+      engines: { platform: '>=0.1.35' },
+      adapters: [],
+      title: { en: 'OnlyOffice', 'zh-CN': 'OnlyOffice' },
+      description: { en: 'OnlyOffice', 'zh-CN': 'OnlyOffice' },
+      identity: { en: 'OnlyOffice', 'zh-CN': 'OnlyOffice' },
+      source: { en: 'Plugin package; SDK at pinned commit', 'zh-CN': '插件包；SDK固定提交' },
+      dependencies: [],
+      items: [
+        {
+          kind: 'runtime-dependency',
+          type: 'resource',
+          name: 'onlyoffice-sdk',
+          paths: [],
+          commands: [],
+          downloads: [
+            {
+              source: 'github-assets',
+              url: `${repository}/raw/${commit}/LICENSE`,
+              sha256: { amd64: 'a'.repeat(64), arm64: 'a'.repeat(64) },
+              target: 'LICENSE',
+            },
+          ],
+        },
+        {
+          kind: 'plugin',
+          packageName: officeInputs.onlyofficePlugin.package,
+          version: officeInputs.onlyofficePlugin.version,
+          integrity: officeInputs.onlyofficePlugin.integrity,
+          runtimeDependencies: ['onlyoffice-sdk'],
+          catalogDependencies: [],
+          access: { environment: [], entriesYaml: '' },
+        },
+      ],
+    })
+    catalog.publish([onlyOffice])
+    await page.setViewportSize({ width: 390, height: 844 })
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      await page.goto(origin + '/admin/plugins?tab=catalog')
+      await page.getByRole('button', { name: 'View catalog entry OnlyOffice', exact: true }).click()
+      const facts = page.getByRole('dialog', { name: 'OnlyOffice' }).locator('.catalog-entry-facts')
+      const packageLink = facts.getByRole('link', { name: officeInputs.onlyofficePlugin.package })
+      expect(await packageLink.getAttribute('href')).toBe(`https://www.npmjs.com/package/${officeInputs.onlyofficePlugin.package}`)
+      await facts.getByText(`Available version ${officeInputs.onlyofficePlugin.version}`, { exact: true }).waitFor()
+      const sdk = facts.locator('dd').filter({ hasText: 'onlyoffice-sdk' })
+      expect(await sdk.getByRole('link').getAttribute('href')).toBe(`${repository}/tree/${commit}`)
+      await sdk.getByText(commit, { exact: true }).waitFor()
+      expect(await facts.locator('dt').allTextContents()).toEqual(['Package', 'Runtime dependencies'])
+      expect(await facts.getByText(/7\.8\.9/u).count()).toBe(0)
+      expect(await sdk.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true)
+      expect(await page.locator('html').getAttribute('data-theme')).toBe(colorScheme)
+    }
+    await page.setViewportSize({ width: 1280, height: 720 })
+    catalog.publish([plugin])
     for (const zh of [false, true]) {
       await page.context().addCookies([{ name: 'dsh-phalanx.lang', value: zh ? 'zh-CN' : 'en', url: origin }])
       const title = localized[zh ? 'zh-CN' : 'en']
@@ -129,7 +189,7 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
         .filter({ has: page.getByRole('button', { name: zh ? `查看广场条目 ${title}` : `View catalog entry ${title}`, exact: true }) })
       expect(await card.getByRole('button', { name: zh ? '安装' : 'Install', exact: true }).count()).toBe(0)
       const open = card.getByRole('button', { name: zh ? `查看广场条目 ${title}` : `View catalog entry ${title}`, exact: true })
-      expect(await card.locator('.catalog-card-meta').innerText()).toBe(zh ? '测试包仓库 · v1.0.0' : 'Test registry · v1.0.0')
+      expect(await card.locator('.catalog-card-meta').innerText()).toBe(zh ? '平台广场 · 可安装版本 1.0.0' : 'Platform catalog · Available version 1.0.0')
       expect(await card.locator('.card__description').count()).toBe(0)
       await open.click()
       let dialog = page.getByRole('dialog', { name: title, exact: true })
@@ -139,8 +199,9 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
       await sourceLink.waitFor()
       expect(await sourceLink.getAttribute('href')).toBe('https://www.npmjs.com/package/@fixture/editor')
       const sourceFacts = dialog.locator('.catalog-entry-facts')
-      await sourceFacts.getByText(zh ? '广场版本' : 'Catalog version', { exact: true }).waitFor()
-      await sourceFacts.getByText('@fixture/editor@1.0.0', { exact: true }).waitFor()
+      await sourceFacts.getByText(zh ? '可安装版本 1.0.0' : 'Available version 1.0.0', { exact: true }).waitFor()
+      expect(await dialog.getByText(/7\.8\.9/u).count()).toBe(0)
+      await sourceFacts.getByText('@fixture/editor', { exact: true }).first().waitFor()
       const { sourceLeft, valueOffsets } = await sourceFacts.evaluate(list => ({
         sourceLeft: list.querySelector('a')?.getBoundingClientRect().left,
         valueOffsets: [...new Set([...list.querySelectorAll('dd')].map(value => value.getBoundingClientRect().left))],
@@ -203,8 +264,55 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
         })
         expect(stale.status()).toBe(409)
       }
+      await dialog.getByText(zh ? '任务日志' : 'Task log', { exact: true }).click()
+      const log = dialog.locator('.plugin-preparation-log')
+      expect(await log.innerText()).toContain('Installed.')
+      expect(await log.innerText()).not.toContain('7.8.9')
       await dialog.getByRole('button', { name: zh ? '关闭广场条目详情' : 'Close catalog entry details', exact: true }).click()
+      await card.getByText(zh ? /库内已安装版本 1\.0\.0/u : /Installed library version 1\.0\.0/u).waitFor()
       if (!zh) {
+        if (plugin.kind !== 'plugin') throw Error('Expected a plugin entry')
+        const packageItem = plugin.items[0]!
+        if (packageItem.kind !== 'plugin') throw Error('Expected a plugin fixture')
+        catalog.publish([{ ...plugin, version: '7.9.0', items: [{ ...packageItem, packageName: '@fixture/replacement', version: '1.2.0' }] }])
+        await page.reload()
+        await open.click()
+        const packageFacts = dialog.locator('.catalog-entry-facts > div')
+        const installedPackage = packageFacts.filter({ hasText: 'Installed library package' })
+        await installedPackage.getByText('@fixture/editor', { exact: true }).waitFor()
+        await installedPackage.getByText('Installed library version 1.0.0', { exact: true }).waitFor()
+        const targetPackage = packageFacts.filter({ hasText: 'Catalog target package' })
+        await targetPackage.getByRole('link', { name: '@fixture/replacement', exact: true }).waitFor()
+        await targetPackage.getByText('Catalog target version 1.2.0', { exact: true }).waitFor()
+        const showUpdate = async (item: typeof packageItem) => {
+          catalog.publish([{ ...plugin, version: '7.9.0', items: [item] }])
+          await page.reload()
+          await card.getByRole('button', { name: 'Update', exact: true }).click()
+          return page.getByRole('dialog', { name: title })
+        }
+        let update = await showUpdate({ ...packageItem, version: '1.2.0' })
+        await update.getByText('Plugin @fixture/editor: 1.0.0 → 1.2.0', { exact: true }).waitFor()
+        expect(await update.getByText(/7\.8\.9|7\.9\.0/u).count()).toBe(0)
+        update = await showUpdate({ ...packageItem, access: { environment: [], entriesYaml: '' } })
+        await update.getByText('The plugin version is unchanged. Configuration or runtime dependencies have changed.', { exact: true }).waitFor()
+        update = await showUpdate({ ...packageItem, integrity: 'sha512-' + Buffer.alloc(64, 2).toString('base64') })
+        await update.getByText('Plugin package contents have changed.', { exact: true }).waitFor()
+        catalog.fail(true)
+        await page.reload()
+        const outside = page.getByRole('region', { name: 'Installed entries outside the catalog' })
+        await outside.getByText('Installed library version 1.0.0 · Catalog target version unknown', { exact: true }).waitFor()
+        expect(await outside.getByText(/7\.8\.9/u).count()).toBe(0)
+        await page.route('**/admin/api/plugins', async route => {
+          const response = await route.fetch()
+          const rows = (await response.json()) as { packageName: string; currentVersion: string | null }[]
+          await route.fulfill({ response, json: rows.map(row => (row.packageName === '@fixture/editor' ? { ...row, currentVersion: null } : row)) })
+        })
+        await page.reload()
+        await outside.getByText('Installed version unknown · Catalog target version unknown', { exact: true }).waitFor()
+        await page.unroute('**/admin/api/plugins')
+        catalog.fail(false)
+        catalog.publish([plugin])
+        await page.reload()
         await page.getByRole('tab', { name: 'Plugins', exact: true }).click()
         const openPlugin = page.getByRole('button', { name: 'View plugin @fixture/editor', exact: true })
         const openAccessSettings = async () => {

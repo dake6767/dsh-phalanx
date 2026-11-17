@@ -10,6 +10,10 @@ on:
         description: Optional comma-separated regular T2 inventory subset (full acceptance leaves empty)
         type: string
         default: ""
+      signed_catalog:
+        description: Verified catalog release tag and SHA-256 (<tag>@<sha256>) for the scheduled upgrade scenario
+        type: string
+        default: ""
       force_rebuild:
         type: boolean
         default: false
@@ -40,6 +44,10 @@ on:
         description: Exact source selected by the trusted candidate caller
         type: string
         required: false
+      signed_catalog:
+        description: Verified catalog release tag and SHA-256 (<tag>@<sha256>) for the scheduled upgrade scenario
+        type: string
+        default: ""
       force_rebuild:
         type: boolean
         default: false
@@ -95,6 +103,7 @@ jobs:
     timeout-minutes: 120
     env:
       PREVIOUS: ${{ needs.scope.outputs.previous }}
+      SIGNED_CATALOG: ${{ inputs.signed_catalog }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -103,6 +112,14 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .node-version
+      - name: Check the catalog input before installing the formal baseline
+        run: |
+          if [[ "$PREVIOUS" == "0.1.36" && "$(node -p "require('./package.json').version")" == "0.1.37" ]]; then
+            if [[ ! "$SIGNED_CATALOG" =~ ^catalog-[1-9][0-9]*@[a-f0-9]{64}$ ]]; then
+              echo "Set signed_catalog to the verified 0.1.37 catalog release tag and SHA-256 (<tag>@<sha256>)." >&2
+              exit 1
+            fi
+          fi
       - name: Install the formal previous release with its own installer
         run: |
           set -o pipefail
@@ -178,7 +195,7 @@ jobs:
           sudo install -d -m 0755 "$browsers"
           # Call the installed CLI directly: pnpm as root would rebuild the runner-owned modules directory.
           sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$browsers" node node_modules/playwright/cli.js install --with-deps chromium
-          sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$browsers" \
+          sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$browsers" DSH_PHALANX_UPGRADE_SIGNED_CATALOG="$SIGNED_CATALOG" \
             DSH_PHALANX_FORMAL_UPGRADE_BUNDLE=/var/tmp/dsh-phalanx-upgrade-bundle DSH_PHALANX_FORMAL_UPGRADE_INSTALLER="$GITHUB_WORKSPACE/install.sh" \
             DSH_PHALANX_CANDIDATE_SHA="$SOURCE_SHA" DSH_PHALANX_CANDIDATE_TAG="run-$GITHUB_RUN_ID" DSH_PHALANX_E2E_EVIDENCE_DIR=/var/tmp/dsh-phalanx-upgrade-results \
             node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts tests/installed-formal-upgrade.e2e.ts \
@@ -570,7 +587,7 @@ jobs:
             test -d /var/tmp/dsh-phalanx-reuse-baseline
             mode+=(--reuse-baseline /var/tmp/dsh-phalanx-reuse-baseline --reuse-target /var/tmp/dsh-phalanx-spike-bundle)
           fi
-          sudo env PATH="$PATH" python3 scripts/validation/t2-host.py --source /var/tmp/dsh-phalanx-spike-source --results /var/tmp/dsh-phalanx-spike-results --image "$image" --commit "$SOURCE_SHA" --oci "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar" --identity /var/tmp/dsh-phalanx-spike-bundle/identity.json "${mode[@]}"
+          sudo env PATH="$PATH" python3 scripts/validation/t2-host.py --separate-scratch --source /var/tmp/dsh-phalanx-spike-source --results /var/tmp/dsh-phalanx-spike-results --image "$image" --commit "$SOURCE_SHA" --oci "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar" --identity /var/tmp/dsh-phalanx-spike-bundle/identity.json "${mode[@]}"
       - name: Make private test diagnostics readable by the artifact uploader
         id: diagnostics
         if: always()
@@ -802,7 +819,7 @@ jobs:
         working-directory: /var/tmp/dsh-phalanx-spike-source
         run: |
           image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
-          sudo env PATH="$PATH" python3 scripts/validation/t2-host.py \
+          sudo env PATH="$PATH" python3 scripts/validation/t2-host.py --separate-scratch \
             --source /var/tmp/dsh-phalanx-spike-source \
             --results /var/tmp/dsh-phalanx-spike-results \
             --image "$image" --commit "$SOURCE_SHA" \
@@ -1017,7 +1034,7 @@ jobs:
         working-directory: /var/tmp/dsh-phalanx-spike-source
         run: |
           image=$(node --input-type=module -e 'import{readFileSync}from"node:fs";process.stdout.write(JSON.parse(readFileSync(process.argv[1])).image.reference)' "$BUNDLE_DIR/manifest.json")
-          sudo env PATH="$PATH" python3 scripts/validation/t2-host.py \
+          sudo env PATH="$PATH" python3 scripts/validation/t2-host.py --separate-scratch \
             --source "$SOURCE_DIR" --results "$RESULTS_DIR" --image "$image" --commit "$SOURCE_SHA" \
             --oci "$BUNDLE_DIR/dsh-phalanx-dsh-linux-amd64.oci.tar" \
             --files tests/installed-candidate.e2e.ts --identity "$BUNDLE_DIR/identity.json"

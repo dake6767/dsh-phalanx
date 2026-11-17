@@ -6,15 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { PlatformDatabaseError } from '../domain/platform-database.js'
 import { mcpSecrets, redactMcpValue } from '../domain/mcp-protocol.js'
 import { combineAcquisitionSources } from '../domain/acquisition-sources.js'
-import { assertCatalogConfiguration, mcpPresets, type McpPreset } from '../domain/mcp-catalog.js'
-import type {
-  CommunityMarketMcp,
-  CommunityMcpTool,
-  CommunityMcpInput,
-  CommunityMcpSettings,
-  CommunityMcpGroup,
-  CommunityMcpPublicationImpact,
-} from '../domain/admin-contract.js'
+import { assertCatalogConfiguration, mcpCatalogLoader, type McpPreset, type McpCatalogSnapshot } from '../domain/mcp-catalog.js'
+import type { CommunityMarketMcp, CommunityMcpTool, CommunityMcpInput, CommunityMcpGroup, CommunityMcpPublicationImpact } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { requiredCommunityGroup } from '../domain/community-group.js'
@@ -29,6 +22,7 @@ import type { McpRemovalImpact } from '../domain/mcp-removal.js'
 export class McpServices implements MemberMcpPort {
   private readonly removal: McpServiceRemoval
   private readonly catalogOperations: McpCatalogOperations
+  readonly list: McpCatalogOperations['list']
   readonly catalog: McpCatalogOperations['catalog']
   readonly catalogUpdatePreview: McpCatalogOperations['catalogUpdatePreview']
   readonly beginCatalogUpdate: McpCatalogOperations['beginCatalogUpdate']
@@ -51,14 +45,14 @@ export class McpServices implements MemberMcpPort {
     private readonly store: McpStatePort,
     private readonly projection: McpProjectionPort,
     private readonly runtime?: McpRuntimePort,
-    private readonly presets: readonly McpPreset[] = mcpPresets,
+    catalogSource: readonly McpPreset[] | (() => Promise<McpCatalogSnapshot>) = [],
     private readonly afterProjection: () => Promise<void> = async () => {},
     private readonly experts?: ExpertMcpPort,
   ) {
     this.removal = new McpServiceRemoval(store)
     this.catalogOperations = new McpCatalogOperations(
       store,
-      presets,
+      mcpCatalogLoader(catalogSource),
       {
         assertAdmin: actor => this.assertAdmin(actor),
         mutate: (actor, update) => this.mutate(actor, update, false),
@@ -67,6 +61,7 @@ export class McpServices implements MemberMcpPort {
       },
       runtime,
     )
+    this.list = this.catalogOperations.list.bind(this.catalogOperations)
     this.catalog = this.catalogOperations.catalog.bind(this.catalogOperations)
     this.catalogUpdatePreview = this.catalogOperations.catalogUpdatePreview.bind(this.catalogOperations)
     this.beginCatalogUpdate = this.catalogOperations.beginCatalogUpdate.bind(this.catalogOperations)
@@ -104,10 +99,6 @@ export class McpServices implements MemberMcpPort {
     return () => {
       if (snapshot() !== initial) throw new BusinessRuleError('forbidden', 'MCP authorization changed during admission.', 'mcp-service-unavailable')
     }
-  }
-  async list(actor: CommunityAccountActor): Promise<readonly CommunityMcpSettings[]> {
-    await this.assertAdmin(actor)
-    return Promise.all((await this.store.read()).services.map(service => this.settings(service)))
   }
   observe(listener: () => void): () => void {
     this.observers.add(listener)
@@ -404,15 +395,6 @@ export class McpServices implements MemberMcpPort {
     const service = (await this.store.read()).services.find(row => row.name === name)
     if (!service?.run || !this.runtime) throw new BusinessRuleError('conflict', 'Prepare the MCP runtime before testing.', 'mcp-runtime-not-ready')
     this.runtime.restart(name)
-  }
-  private async settings(service: McpService): Promise<CommunityMcpSettings> {
-    const preparation = this.runtime?.readView ? await this.runtime.readView(service) : this.runtime?.view(service)
-    const available = this.presets.find(row => row.entry.id === service.catalog?.id)?.entry.version
-    return {
-      ...mcpSettings(service),
-      ...(available && (service.configurationRequired || available !== service.catalog?.version) ? { availableCatalogVersion: available } : {}),
-      ...(preparation ? { preparation: { ...preparation, log: String(redactMcpValue(preparation.log, mcpSecrets(service))) } } : {}),
-    }
   }
   prepare(): Promise<void> {
     return this.enqueue(async () => {

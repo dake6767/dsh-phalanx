@@ -56,17 +56,24 @@ Use these before writing new markup.
   Put shared dependencies inside the install plan and keep backend options under their slot heading.
   Show repository, package, or service documentation links and catalog facts directly in the Source section.
   Align source links with the other fact values in the same column.
-  In the install plan, put the muted version immediately after the item name.
+  In the install plan, put a muted, verified software or dependency version after the item name when available.
 - Installed catalog service backends stay editable under Access settings for plugins and Platform execution for skills.
   In Platform execution, use sibling sections for status, service backends, execution rules, preparation when present, and trial execution.
   Show catalog-managed commands as read-only text and secret credentials by saved status. Keep the editable controls for manual skill definitions.
-- Catalog card metadata stays on one line as “source · version”. Put the full value in details when the card truncates it.
+- Keep internal entry versions out of cards, details, install and update confirmation, on-screen task logs, and adopted library sources across all three galleries. Show trusted software and runtime dependency versions. When a skill or MCP entry has no single software version, show the actual configuration or dependency changes.
+- Label the installed library version and the online catalog target independently. Show an unknown installed version when the library has no version. Show an unknown target when the online catalog cannot establish it.
+- Catalog card metadata stays on one line. Skill and MCP cards show the source. Plugin cards show the
+  source and labeled package versions, with the installed library version separate from the catalog target.
+  Put the full values in the details when the card truncates them. The Source section uses short labels
+  and separate rows for the plugin package and pinned runtime dependencies. Let names and commits wrap.
 - Bordered section with optional action: [`admin-ui/src/CommunityGrantSection.tsx`](src/CommunityGrantSection.tsx).
 - Publication: [`admin-ui/src/CommunityPublicationSection.tsx`](src/CommunityPublicationSection.tsx)
   presents the first detail section and shared list status for plugins, skills, packs
   and MCP services. Each resource owns its impact confirmation and mutation. Publication
   and availability remain separate; MCP required-service policy uses a separate Use rules section.
   Keep the status and action in the heading row. Put the current consequence on one line and any disabled reason next to the action.
+- The skill, plugin and MCP galleries share a labeled search field and single-tag selector. Show tags available in the current gallery, including **All entries** and **Unclassified**. Hide the selector when the gallery has no assigned tags, and restore **All entries** if a selected tag disappears. Offer **Clear filters** when the current combination has no matches. Keep controls keyboard accessible and stack them on narrow screens.
+- Use existing catalog error banners for unreachable or rejected sources. Show a distinct empty state when a verified catalog supplies no entries for the current gallery. Show the unavailable target status beside the saved MCP service.
 - MCP display fields share `McpDisplayFields`; localized catalog defaults remain separate from administrator overrides. Cards use the display title and retain a secondary technical identifier. (user-confirmed)
 - Grants: [`admin-ui/src/CommunityGrantList.tsx`](src/CommunityGrantList.tsx), a granted list plus an "Add" picker.
 - Dependency choice: [`admin-ui/src/CommunityDependencyPicker.tsx`](src/CommunityDependencyPicker.tsx), title-only checkboxes.

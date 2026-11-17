@@ -8,7 +8,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "https://github.com/dake6767/dsh-phalanx.git",
-      "revision": "1cd0643c963f944616780fdc0edf18461b7c71ec"
+      "revision": "a3a9c7d33c8f3c4dabbecbcb43be49de7dedeac1"
     }
   },
   "components": [
@@ -49,18 +49,13 @@
       "sources": [
         {
           "path": "src/composition/community-application.ts",
-          "line": 68,
-          "end_line": 108
-        },
-        {
-          "path": "src/inbound/community-admin-route.ts",
-          "line": 31,
-          "end_line": 47
+          "line": 84,
+          "end_line": 109
         },
         {
           "path": "src/inbound/http-entry.ts",
-          "line": 78,
-          "end_line": 99
+          "line": 245,
+          "end_line": 277
         }
       ]
     },
@@ -80,8 +75,8 @@
       "sources": [
         {
           "path": "src/dsh/container.ts",
-          "line": 138,
-          "end_line": 153
+          "line": 191,
+          "end_line": 204
         },
         {
           "path": "src/dsh/community-platform-plugin.ts",
@@ -93,8 +88,8 @@
     {
       "id": "platformData",
       "type": "database",
-      "label": "Platform data root",
-      "sublabel": "Accounts, provider keys, state",
+      "label": "Platform PostgreSQL",
+      "sublabel": "Accounts and encrypted keys",
       "pos": [
         350,
         290
@@ -106,13 +101,13 @@
       "sources": [
         {
           "path": "src/composition/community-application.ts",
-          "line": 69,
-          "end_line": 80
+          "line": 88,
+          "end_line": 105
         },
         {
-          "path": "src/adapters/shared-model-store.ts",
-          "line": 61,
-          "end_line": 67
+          "path": "src/adapters/postgres-shared-model-store.ts",
+          "line": 118,
+          "end_line": 129
         }
       ]
     },
@@ -132,13 +127,13 @@
       "sources": [
         {
           "path": "src/adapters/community-user-spaces.ts",
-          "line": 11,
-          "end_line": 31
+          "line": 27,
+          "end_line": 43
         },
         {
           "path": "src/dsh/container.ts",
-          "line": 144,
-          "end_line": 147
+          "line": 191,
+          "end_line": 204
         }
       ]
     },
@@ -157,14 +152,14 @@
       ],
       "sources": [
         {
-          "path": "src/composition/community-application.ts",
-          "line": 86,
-          "end_line": 98
+          "path": "src/inbound/community-model-gateway.ts",
+          "line": 28,
+          "end_line": 52
         },
         {
           "path": "src/adapters/community-model-upstream.ts",
           "line": 19,
-          "end_line": 29
+          "end_line": 35
         }
       ]
     },
@@ -185,7 +180,7 @@
         {
           "path": "src/adapters/community-model-upstream.ts",
           "line": 19,
-          "end_line": 29
+          "end_line": 35
         }
       ]
     }
@@ -209,7 +204,7 @@
       "id": "platform-state",
       "from": "platform",
       "to": "platformData",
-      "label": "Private state"
+      "label": "Account and service state"
     },
     {
       "id": "space-files",
@@ -247,14 +242,14 @@
       "title": "Separate persistent data",
       "items": [
         "Each member mounts only their own home and workspace.",
-        "Provider keys stay in platform storage and outgoing gateway requests."
+        "PostgreSQL stores encrypted provider keys. The gateway attaches keys to upstream requests."
       ]
     },
     {
       "dot": "amber",
       "title": "Member freedom",
       "items": [
-        "Members retain terminals, native plugins and unrelated settings.",
+        "Group settings control manual terminals and adding native plugins.",
         "User code can reach external models; the gateway is for shared supply."
       ]
     }

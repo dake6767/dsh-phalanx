@@ -8,13 +8,30 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
 import type { CommunityMcpSettings, CommunityMcpRemovalImpact } from '../../src/domain/admin-contract'
-import { communityMcp, communityMcpRemovalImpact, retryCommunityMcp, updateCommunityMcp } from './community-api'
+import { CommunityApiRequestError, communityMcp, communityMcpRemovalImpact, retryCommunityMcp, updateCommunityMcp } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
 import McpImport from './CommunityMcpImport'
 import McpEditor from './CommunityMcpEditor'
 import CommunityIcon from './CommunityIcon'
 import CommunityMessage from './CommunityMessage'
+
+function withKnownCatalogTarget(row: CommunityMcpSettings, previous: CommunityMcpSettings | undefined): CommunityMcpSettings {
+  if (
+    !row.catalog ||
+    !previous?.catalog ||
+    previous.generation !== row.generation ||
+    previous.catalog.id !== row.catalog.id ||
+    previous.catalog.version !== row.catalog.version ||
+    previous.catalog.contentHash !== row.catalog.contentHash
+  )
+    return row
+  return {
+    ...row,
+    ...(previous.availableCatalogVersion ? { availableCatalogVersion: previous.availableCatalogVersion } : {}),
+    ...(previous.catalogTargetUnavailable ? { catalogTargetUnavailable: true } : {}),
+  }
+}
 
 export default function CommunityMcpPage() {
   const { t, locale, errorText } = usePlatformLanguage()
@@ -23,42 +40,60 @@ export default function CommunityMcpPage() {
   const [updating, setUpdating] = useState<CommunityMcpSettings>()
   const [removing, setRemoving] = useState<CommunityMcpRemovalImpact>()
   const [error, setError] = useState<unknown>()
+  const [loadError, setLoadError] = useState<unknown>()
   const [notice, setNotice] = useState<'MCP service saved.' | 'MCP service removed.'>()
   const [importing, setImporting] = useState(false)
   const [busy, setBusy] = useState(false)
   const pending = useRef(false)
   const [libraryTab, setLibraryTab] = useState('services')
-  const testing = rows?.some(
-    row =>
-      row.catalog?.status === 'testing' ||
-      row.catalog?.status === 'preparing' ||
-      row.catalogUpdate?.status === 'preparing' ||
-      row.catalogUpdate?.status === 'testing',
-  )
+  const [revision, setRevision] = useState(0)
+  const currentLoad = useRef<AbortController | undefined>(undefined)
+  const invalidate = () => {
+    currentLoad.current?.abort()
+    setRevision(value => value + 1)
+  }
+  const acceptLocalRows = (next: readonly CommunityMcpSettings[]) => {
+    invalidate()
+    setRows(current => {
+      const previous = new Map(current?.map(row => [row.name, row]))
+      return next.map(row => withKnownCatalogTarget(row, previous.get(row.name)))
+    })
+  }
+  const acceptLocalRow = (next: CommunityMcpSettings) => {
+    invalidate()
+    setRows(current => current?.map(row => (row.name === next.name ? withKnownCatalogTarget(next, row) : row)))
+  }
   useEffect(() => {
-    if (!testing) return
     const controller = new AbortController()
-    const timer = setInterval(() => {
-      void communityMcp(controller.signal)
-        .then(setRows)
-        .catch(failure => {
-          if (!controller.signal.aborted) setError(failure)
-        })
-    }, 1500)
-    return () => {
-      clearInterval(timer)
-      controller.abort()
+    currentLoad.current = controller
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let retry = revision > 0
+    const refresh = async () => {
+      try {
+        const next = await communityMcp(controller.signal)
+        if (controller.signal.aborted) return
+        setRows(next)
+        setLoadError(undefined)
+        retry = next.some(
+          row =>
+            row.catalog?.status === 'testing' ||
+            row.catalog?.status === 'preparing' ||
+            row.catalogUpdate?.status === 'preparing' ||
+            row.catalogUpdate?.status === 'testing',
+        )
+      } catch (failure) {
+        if (controller.signal.aborted) return
+        setLoadError(failure)
+        if (failure instanceof CommunityApiRequestError && failure.status < 500 && failure.status !== 429) return
+      }
+      if (retry) timer = setTimeout(() => void refresh(), 1500)
     }
-  }, [testing])
-  useEffect(() => {
-    const controller = new AbortController()
-    void communityMcp(controller.signal)
-      .then(setRows)
-      .catch(failure => {
-        if (!controller.signal.aborted) setError(failure)
-      })
-    return () => controller.abort()
-  }, [])
+    void refresh()
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+    }
+  }, [revision])
   const reviewRemoval = async (name: string) => {
     if (pending.current) return
     pending.current = true
@@ -79,7 +114,7 @@ export default function CommunityMcpPage() {
     setBusy(true)
     setError(undefined)
     try {
-      setRows(await updateCommunityMcp({ action: 'remove', name: removing.name, revision: removing.revision }))
+      acceptLocalRows(await updateCommunityMcp({ action: 'remove', name: removing.name, revision: removing.revision }))
       setRemoving(undefined)
       setNotice('MCP service removed.')
     } catch (failure) {
@@ -107,7 +142,9 @@ export default function CommunityMcpPage() {
           </Button>
         </div>
       </section>
-      {error !== undefined && !removing ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
+      {(error !== undefined || loadError !== undefined) && !removing ? (
+        <CommunityMessage role="alert" status="danger" title={errorText(error ?? loadError)} />
+      ) : null}
       {notice ? <CommunityMessage role="status" status="success" title={t(notice)} /> : null}
       <Tabs className="skill-library-tabs library-workspace-tabs" selectedKey={libraryTab} onSelectionChange={key => setLibraryTab(String(key))}>
         <Tabs.ListContainer>
@@ -153,6 +190,7 @@ export default function CommunityMcpPage() {
                     </Card.Header>
                     {row.catalog || row.catalogUpdate ? (
                       <Card.Content>
+                        {row.catalogTargetUnavailable ? <p role="status">{t('MCP catalog entry unavailable')}</p> : null}
                         {row.catalog ? (
                           <p role="status">
                             {t(
@@ -213,7 +251,7 @@ export default function CommunityMcpPage() {
                           size="sm"
                           variant="secondary"
                           onPress={() => {
-                            void retryCommunityMcp(row.name).then(setRows).catch(setError)
+                            void retryCommunityMcp(row.name).then(acceptLocalRows).catch(setError)
                           }}
                         >
                           {t('Retry import')}
@@ -246,7 +284,7 @@ export default function CommunityMcpPage() {
           <CommunityMcpCatalog
             rows={rows}
             onImported={next => {
-              setRows(next)
+              acceptLocalRows(next)
               setLibraryTab('services')
             }}
           />
@@ -257,28 +295,28 @@ export default function CommunityMcpPage() {
           service={updating}
           onClose={() => setUpdating(undefined)}
           onStarted={next => {
-            setRows(next)
+            acceptLocalRows(next)
             setUpdating(undefined)
           }}
         />
       ) : null}
       {importing ? (
         <McpImport
-          onRefreshed={next => setRows(rows => rows?.map(row => (row.name === next.name ? next : row)))}
+          onRefreshed={acceptLocalRow}
           onClose={() => setImporting(false)}
           onSaved={next => {
-            setRows(next)
+            acceptLocalRows(next)
             setNotice('MCP service saved.')
           }}
         />
       ) : null}
       {editing ? (
         <McpEditor
-          onRefreshed={next => setRows(rows => rows?.map(row => (row.name === next.name ? next : row)))}
+          onRefreshed={acceptLocalRow}
           value={editing}
           onClose={() => setEditing(undefined)}
           onSaved={next => {
-            setRows(next)
+            acceptLocalRows(next)
             setNotice('MCP service saved.')
           }}
         />

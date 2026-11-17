@@ -1,3 +1,4 @@
+import { useCatalogFilters } from './CommunityCatalogFilters'
 import CommunitySuiteInstallDialog from './CommunitySuiteInstallDialog'
 import CommunitySuiteCredentials from './CommunitySuiteCredentials'
 import CommunityInstalledServiceSettings from './CommunityInstalledServiceSettings'
@@ -8,7 +9,8 @@ import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
 import { Chip } from '@heroui/react/chip'
 import CommunityIcon from './CommunityIcon'
-import type { CommunitySuiteCatalogEntryView, CommunitySuiteCatalogView, CommunitySuiteInstallView } from '../../src/domain/admin-contract'
+import { suiteInstallOrigin } from '../../src/domain/suite-install'
+import type { CommunityPluginView, CommunitySuiteCatalogEntryView, CommunitySuiteCatalogView, CommunitySuiteInstallView } from '../../src/domain/admin-contract'
 import { communitySuites } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityMessage from './CommunityMessage'
@@ -33,7 +35,27 @@ const entryError = (entry: CommunitySuiteCatalogEntryView): PlatformMessageKey |
   return entry.available ? undefined : 'Unavailable on this architecture'
 }
 
-export default function CommunitySuitesPage({ category = 'suite', onLibraryChanged }: { category?: 'suite' | 'plugin'; onLibraryChanged?: () => void }) {
+// Installation records retain the original log. Hide entry versions only in platform-written task lines.
+function catalogTaskLog({ id, log }: CommunitySuiteInstallView): string {
+  return log
+    .split('\n')
+    .map(line => {
+      if (line.startsWith(`Installing ${id} `)) return line.replace(/^(Installing \S+) \S+(?=(?: for \S+)?…$)/u, '$1')
+      if (line.startsWith(`Updating ${id} `)) return line.replace(/^(Updating \S+) \S+ → \S+…$/u, '$1…')
+      return line.replace(/^Updated to \S+\.$/u, 'Update complete.')
+    })
+    .join('\n')
+}
+
+export default function CommunitySuitesPage({
+  category = 'suite',
+  plugins,
+  onLibraryChanged,
+}: {
+  category?: 'suite' | 'plugin'
+  plugins?: readonly CommunityPluginView[]
+  onLibraryChanged?: () => void
+}) {
   const { t, locale, errorText } = usePlatformLanguage()
   const [view, setView] = useState<CommunitySuiteCatalogView>()
   const [uninstalling, setUninstalling] = useState<CommunitySuiteCatalogEntryView>()
@@ -81,8 +103,13 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
     }
   }, [revision, onLibraryChanged])
   const entries = view?.entries ?? []
-  const visible = entries.filter(entry => entry.category === category)
-  const details = entries.find(entry => entry.id === selectedEntry?.id) ?? selectedEntry
+  const { visible, controls, empty } = useCatalogFilters(
+    entries.filter(entry => entry.category === category),
+    category,
+    view?.galleryTags,
+  )
+  const liveDetails = entries.find(entry => entry.id === selectedEntry?.id)
+  const details = liveDetails ?? selectedEntry
   const installationOf = (entry: CommunitySuiteCatalogEntryView): CommunitySuiteInstallView | undefined => view?.installations.find(row => row.id === entry.id)
   const selectedInstallation = details ? installationOf(details) : undefined
   const installedBusy = Object.values(drafts).some(draft => draft.busy)
@@ -99,6 +126,17 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
       busy: true,
     }
   }
+  const installedPackage = (id: string) => plugins?.find(plugin => plugin.suiteOrigin === suiteInstallOrigin(id))
+  const installedPackageLabel = (id: string) => {
+    const version = installedPackage(id)?.currentVersion
+    return version ? t('Installed library version {version}', { version }) : t('Installed version unknown')
+  }
+  const targetPackageLabel = (entry: CommunitySuiteCatalogEntryView | undefined, installed: boolean) =>
+    entry?.plugin && view?.source.status === 'ok'
+      ? t(installed || !entry.available ? 'Catalog target version {version}' : 'Available version {version}', { version: entry.plugin.version })
+      : t('Catalog target version unknown')
+  const selectedPackage = details ? installedPackage(details.id) : undefined
+  const hasInstalledPackage = selectedInstallation && selectedInstallation.status !== 'failed' && selectedInstallation.status !== 'installing'
   const selectedStatus = details ? statusOf(details) : undefined
   const titleOf = (id: string): string => entries.find(row => row.id === id)?.title[locale] ?? id
   // Installation records stay usable when the catalog is unreachable or a whole document was rejected.
@@ -161,22 +199,31 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
             <p>{t('Review what each entry installs before you install it.')}</p>
           </div>
         </div>
+        {controls}
         {view === undefined ? (
           <p className="table-empty" role="status">
             {t('Loading…')}
           </p>
         ) : visible.length === 0 ? (
-          <Card className="plugin-library-empty" variant="transparent">
-            <Card.Header>
-              <Card.Title>{t('The catalog is empty.')}</Card.Title>
-              <Card.Description>{t('The catalog returned no entries for this platform.')}</Card.Description>
-            </Card.Header>
-          </Card>
+          (empty ?? (
+            <Card className="plugin-library-empty" variant="transparent">
+              <Card.Header>
+                <Card.Title>{t('The catalog is empty.')}</Card.Title>
+                <Card.Description>{t('The catalog returned no entries for this platform.')}</Card.Description>
+              </Card.Header>
+            </Card>
+          ))
         ) : (
           <div className="plugin-card-grid library-compact-grid">
             {visible.map(entry => {
               const installation = installationOf(entry),
                 status = statusOf(entry)
+              const installed = installation?.status === 'installed' || installation?.status === 'updating' || installation?.status === 'uninstalling'
+              const meta = [category === 'plugin' ? t('Platform catalog') : entry.source[locale]]
+              if (category === 'plugin') {
+                if (installed) meta.push(installedPackageLabel(entry.id))
+                if (!installed || entry.updateAvailable || !entry.plugin) meta.push(targetPackageLabel(entry, installed))
+              }
               return (
                 <Card key={entry.id} className="plugin-library-card catalog-entry-card">
                   <Card.Header>
@@ -184,8 +231,8 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
                       <Card.Title>{entry.title[locale]}</Card.Title>
                       <CommunityIcon name="chevron" size={14} />
                     </div>
-                    <p className="plugin-summary-meta catalog-card-meta" title={`${entry.source[locale]} · v${entry.version}`}>
-                      {entry.source[locale]} · v{entry.version}
+                    <p className="plugin-summary-meta catalog-card-meta" title={meta.join(' · ')}>
+                      {meta.join(' · ')}
                     </p>
                     {entry.description[locale].trim() !== entry.title[locale].trim() ? <Card.Description>{entry.description[locale]}</Card.Description> : null}
                   </Card.Header>
@@ -247,11 +294,18 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
             {outsideCatalog.map(row => (
               <li key={row.id} className="plugin-library-card">
                 <div>
-                  <strong>{row.id}</strong> · {row.version} ·{' '}
+                  <strong>{row.id}</strong> ·{' '}
                   <span role="status">
                     {t(row.status === 'failed' ? 'Installation failed. You can retry.' : row.status === 'installed' ? 'Installed' : 'Installing')}
                   </span>
                 </div>
+                {category === 'plugin' ? (
+                  <p>
+                    {[row.status === 'failed' || row.status === 'installing' ? undefined : installedPackageLabel(row.id), t('Catalog target version unknown')]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                ) : null}
                 <ul>
                   {row.entries.map(entry => (
                     <li key={entry.kind + ':' + entry.name}>
@@ -355,33 +409,57 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
                 {entryError(details) && !selectedInstallation ? <p className="plugin-card-error">{t(entryError(details)!)}</p> : null}
                 {details.unavailableDetail ? <p className="plugin-card-error">{details.unavailableDetail}</p> : null}
                 <dl className="catalog-entry-facts">
-                  <div>
-                    <dt>{details.sourceLinks?.length ? details.source[locale] : t('Source')}</dt>
-                    <dd className="catalog-source">
-                      {details.sourceLinks?.length
-                        ? details.sourceLinks.map(({ label, href }) => (
-                            <a key={href} href={href} target="_blank" rel="noreferrer">
-                              {label}
-                            </a>
-                          ))
-                        : details.source[locale]}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('Catalog version')}</dt>
-                    <dd>
-                      {selectedInstallation?.version ?? details.version}
-                      {details.updateAvailable ? ` → ${details.version}` : ''}
-                    </dd>
-                  </div>
-                  {details.plugin ? (
+                  {category !== 'plugin' || !liveDetails?.plugin ? (
                     <div>
-                      <dt>{t('Package')}</dt>
-                      <dd>
-                        {details.plugin.packageName}@{details.plugin.version}
+                      <dt>{t('Source')}</dt>
+                      <dd className="catalog-source">
+                        {details.sourceLinks?.length
+                          ? details.sourceLinks.map(({ label, href }) => (
+                              <a key={href} href={href} target="_blank" rel="noreferrer">
+                                {label}
+                              </a>
+                            ))
+                          : details.source[locale]}
                       </dd>
                     </div>
                   ) : null}
+                  {category === 'plugin' && hasInstalledPackage ? (
+                    <div>
+                      <dt>{t('Installed library package')}</dt>
+                      <dd>
+                        {selectedPackage ? <span>{selectedPackage.packageName}</span> : null}
+                        <span>{installedPackageLabel(details.id)}</span>
+                      </dd>
+                    </div>
+                  ) : null}
+                  {category === 'plugin' ? (
+                    <div>
+                      <dt>{t(hasInstalledPackage ? 'Catalog target package' : 'Package')}</dt>
+                      <dd className="catalog-source">
+                        {liveDetails?.sourceLinks?.map(({ label, href }) => (
+                          <a key={href} href={href} target="_blank" rel="noreferrer">
+                            {label}
+                          </a>
+                        ))}
+                        {liveDetails?.plugin && !liveDetails.sourceLinks?.some(link => link.label === liveDetails.plugin?.packageName) ? (
+                          <span>{liveDetails.plugin.packageName}</span>
+                        ) : null}
+                        <span>{targetPackageLabel(liveDetails, Boolean(hasInstalledPackage))}</span>
+                      </dd>
+                    </div>
+                  ) : null}
+                  {liveDetails?.dependencySources?.map(source => (
+                    <div key={source.name + ':' + source.href}>
+                      <dt>{t('Runtime dependencies')}</dt>
+                      <dd className="catalog-source">
+                        <span>{source.name}</span>
+                        <a href={source.href} target="_blank" rel="noreferrer">
+                          {source.repository}
+                        </a>
+                        <code>{source.commit}</code>
+                      </dd>
+                    </div>
+                  ))}
                   {details.packName ? (
                     <div>
                       <dt>{t('Skill pack')}</dt>
@@ -429,7 +507,7 @@ export default function CommunitySuitesPage({ category = 'suite', onLibraryChang
                 {selectedInstallation?.log ? (
                   <details className="mcp-preparation-log">
                     <summary>{t('Task log')}</summary>
-                    <pre className="plugin-preparation-log">{selectedInstallation.log}</pre>
+                    <pre className="plugin-preparation-log">{catalogTaskLog(selectedInstallation)}</pre>
                   </details>
                 ) : null}
               </section>

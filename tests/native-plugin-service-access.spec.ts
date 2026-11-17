@@ -300,7 +300,7 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
     })
     socket.write(request('fast-pipeline'))
     await fast
-    expect(registry.hasUser(member.username)).toBe(true)
+    expect(registry.hasActiveConnection(member.username)).toBe(true)
     await registry.closeUser(member.username)
     await closed
     await upstreamClosed

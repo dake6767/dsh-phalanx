@@ -40,7 +40,13 @@ export default function CommunityMcpUpdate({
     setBusy(true)
     setError(undefined)
     try {
-      const rows = await applyCommunityMcpUpdate({ name: service.name, version: preview.version, requestId, ...(credential ? { credential } : {}) })
+      const rows = await applyCommunityMcpUpdate({
+        name: service.name,
+        version: preview.version,
+        requestId,
+        ...(preview.contentHash ? { contentHash: preview.contentHash } : {}),
+        ...(credential ? { credential } : {}),
+      })
       setCredential('')
       onStarted(rows)
     } catch (failure) {
@@ -69,8 +75,8 @@ export default function CommunityMcpUpdate({
       }
     >
       <p>{service.name}</p>
-      <p>{t('The current service remains available until the new catalog version passes preparation and connection testing.')}</p>
-      <p>{t('Your name, credentials, access settings and member choices are preserved.')}</p>
+      <p>{t('The current service remains available while the platform prepares and tests the update.')}</p>
+      <p>{t('Your name, access settings and member choices are preserved.')}</p>
       {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
       {!preview ? (
         <p role="status">{t('Loading…')}</p>
@@ -83,13 +89,13 @@ export default function CommunityMcpUpdate({
             void submit()
           }}
         >
-          <p>{t('Catalog update {before} → {after}', { before: preview.currentVersion, after: preview.version })}</p>
+          <p>{t('An update is available for this service.')}</p>
           {preview.changes.map(change => (
             <section className="page-stack" key={change.field}>
               <h3>{t(labels[change.field as keyof typeof labels])}</h3>
-              <p>{t('Current catalog version')}</p>
+              <p>{t('Current configuration')}</p>
               <pre className="plugin-preparation-log">{change.before}</pre>
-              <p>{t('New catalog version')}</p>
+              <p>{t('Updated configuration')}</p>
               <pre className="plugin-preparation-log">{change.after}</pre>
             </section>
           ))}

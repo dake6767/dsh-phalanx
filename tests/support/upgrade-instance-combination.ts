@@ -29,7 +29,7 @@ const shell = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
 const service = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx)'
 
 /** Real installed-host checks shared by formal T2 and both T4 upgrade transports. */
-export function installedInstanceAcceptance({ origin, admin, member, remote }: Host) {
+export function installedInstanceAcceptance({ origin, admin, member: initialMember, remote }: Host) {
   const endpoint = origin + '/admin/api/instance-resources'
   const get = async <T>(suffix = ''): Promise<T> => {
     const response = await admin.request.get(endpoint + suffix)
@@ -162,14 +162,33 @@ os.replace(temporary,p)`)
       return importedKernel
     },
     async verifyCombination(entry: string, sessionId: string, memberStorageKey: string) {
+      let member = initialMember
+      const browser = member.context().browser()
+      if (!browser) throw Error('The installed combination requires an isolated browser context')
       const bookmark = origin + entry + '?view=workspace#saved'
       // Scope the two-second timer to reclamation so it does not reclaim the next cold entry.
       const reclaim = async () => {
         await post({ action: 'save-defaults', revision: (await settings()).revision, limits: (await settings()).defaults, idleSeconds: 2 })
         await member.goto(origin + '/recovery')
-        await expect.poll(async () => (await state()).instanceKey, { timeout: 120000 }).toBeNull()
+        const context = member.context()
+        const storageState = await context.storageState()
+        // Leaving a page can leave its HTTP connections pooled in Chromium. Close the actual client before measuring idle.
+        await context.close()
+        try {
+          await expect.poll(async () => (await state()).instanceKey, { timeout: 120000 }).toBeNull()
+        } catch (error) {
+          const [current, defaults, containers] = await Promise.allSettled([state(), settings(), carriers()])
+          console.log('Installed idle reclamation timeout', {
+            ...(defaults.status === 'fulfilled' ? { idleSeconds: defaults.value.idleSeconds } : {}),
+            ...(current.status === 'fulfilled' ? { instancePresent: current.value.instanceKey !== null, resident: current.value.resident } : {}),
+            ...(containers.status === 'fulfilled' ? { carrierCount: containers.value.length } : {}),
+          })
+          throw error
+        }
         expect(await carriers()).toHaveLength(0)
         await post({ action: 'save-defaults', revision: (await settings()).revision, limits: (await settings()).defaults, idleSeconds: 0 })
+        member = await (await browser.newContext({ locale: 'en', storageState })).newPage()
+        member.setDefaultTimeout(120000)
       }
       await reclaim()
       await member.context().clearCookies()

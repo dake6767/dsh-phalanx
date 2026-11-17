@@ -10,6 +10,10 @@ on:
         description: Exact HEAD of the matching candidate/<version> branch
         required: true
         type: string
+      signed_catalog:
+        description: Verified catalog release tag and SHA-256 (<tag>@<sha256>) for the scheduled upgrade scenario
+        type: string
+        default: ''
       force_rebuild:
         description: Build a fresh image even when this input hash already exists
         type: boolean
@@ -59,6 +63,7 @@ jobs:
     with:
       source_commit: ${{ needs.trust.outputs.commit }}
       verify_ubuntu_2604: ${{ inputs.verify_ubuntu_2604 }}
+      signed_catalog: ${{ inputs.signed_catalog }}
       force_rebuild: ${{ inputs.force_rebuild }}
       reuse_rehearsal: ${{ inputs.reuse_rehearsal }}
       reuse_baseline_run: ${{ inputs.reuse_baseline_run }}

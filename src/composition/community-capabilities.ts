@@ -59,6 +59,7 @@ export function createCommunityCapabilities(input: {
   usageStore: PostgresUsageRecords
   modelStore: PostgresSharedModelStore
   mcpStore: ReturnType<typeof createMcpStorage>
+  mcpCatalog: () => Promise<import('../domain/mcp-catalog.js').McpCatalogSnapshot>
   clock: Clock
   runtime: () => CommunityRuntimePort
   pluginStore: () => PostgresPluginLibraryStore
@@ -183,7 +184,7 @@ export function createCommunityCapabilities(input: {
     mcpStore,
     new FileMcpProjection(config.runtime),
     mcpPreparation,
-    options.mcpPresets,
+    options.mcpPresets ?? input.mcpCatalog,
     () => skills.recover(),
     experts,
   )

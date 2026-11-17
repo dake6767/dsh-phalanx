@@ -48,10 +48,12 @@ export interface CommunityMcpTool {
 export interface CommunityMcpCatalogSource {
   readonly id: string
   readonly version: string
+  readonly contentHash?: string
   readonly status: 'preparing' | 'testing' | 'ready' | 'failed'
 }
 export interface CommunityMcpCatalogEntry {
   readonly id: string
+  readonly contentHash?: string
   readonly version: string
   readonly title: Readonly<Record<'en' | 'zh-CN', string>>
   readonly description: Readonly<Record<'en' | 'zh-CN', string>>
@@ -60,7 +62,14 @@ export interface CommunityMcpCatalogEntry {
   readonly documentation: string
   readonly imported: number
 }
+export interface CommunityMcpCatalogView {
+  readonly entries: readonly CommunityMcpCatalogEntry[]
+  readonly source: import('./admin-contract.js').CommunitySuiteCatalogSourceView
+  readonly galleryTags?: import('./suite-catalog-tags.js').CatalogGalleryTags
+}
 export interface CommunityMcpCatalogInput {
+  readonly version?: string
+  readonly contentHash?: string
   readonly display?: Pick<CommunityMcpDisplay, 'name' | 'description'>
   readonly presetId: string
   readonly name: string
@@ -68,12 +77,14 @@ export interface CommunityMcpCatalogInput {
   readonly requestId: string
 }
 export interface CommunityMcpCatalogUpdateInput {
+  readonly contentHash?: string
   readonly name: string
   readonly version: string
   readonly requestId: string
   readonly credential?: string
 }
 export interface CommunityMcpCatalogUpdatePreview {
+  readonly contentHash?: string
   readonly currentVersion: string
   readonly version: string
   readonly credentialRequired: boolean
@@ -91,6 +102,7 @@ export interface CommunityMcpSettings extends Omit<CommunityMcpService, 'run'> {
   readonly credential: CommunityMcpSecretStatus
   readonly credentials: Readonly<Record<string, CommunityMcpSecretStatus>>
   readonly availableCatalogVersion?: string
+  readonly catalogTargetUnavailable?: true
   readonly catalogUpdate?: { readonly version: string; readonly status: 'preparing' | 'testing' | 'failed' | 'applied' }
 
   readonly catalog?: CommunityMcpCatalogSource

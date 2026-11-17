@@ -324,3 +324,6 @@ html:has(.admin-shell) .provider-options .provider-choice.button[aria-pressed="t
 .page-stack > :is(p, ul) { margin-block: 0; }
 .platform-file-field { display: grid; gap: 6px; min-width: 0; }
 .platform-file-field .input { min-width: 0; }
+
+.catalog-gallery-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 0 18px 14px; }
+@media (min-width: 601px) { .catalog-gallery-filters:has(> :nth-child(2)) { grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem); } }

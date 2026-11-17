@@ -149,7 +149,7 @@ export function createCommunityEntryHandlers(input: {
   instanceResources: InstanceResources
   market: PluginMarket
   runtimeDependencies: RuntimeDependencies
-  suites: ReturnType<typeof createSuiteApplication>
+  suites: ReturnType<typeof createSuiteApplication>['suites']
   downloads: DownloadSources
   executionOperations: ExecutionOperations
   upstreams: PluginUpstreamAdministration

@@ -4,7 +4,7 @@ import type { SessionConnection, SessionRegistryPort } from '../ports/session-re
 export class MemorySessionRegistry implements SessionRegistryPort {
   private readonly connections = new Set<SessionConnection>()
   private readonly userConnections = new Map<string, Set<SessionConnection>>()
-  private readonly connectionUsers = new Map<SessionConnection, string>()
+  private readonly connectionUsers = new Map<SessionConnection, { userId: string; activity: 'active' | 'passive' }>()
   private readonly cookies = new Map<string, string>()
   private readonly idleTimes = new Map<string, number>()
 
@@ -16,25 +16,28 @@ export class MemorySessionRegistry implements SessionRegistryPort {
     })
   }
 
-  track(userId: string, connection: SessionConnection): void {
+  track(userId: string, connection: SessionConnection, activity: 'active' | 'passive' = 'active'): void {
     this.untrack(connection)
     const owned = this.userConnections.get(userId) ?? new Set<SessionConnection>()
     owned.add(connection)
     this.userConnections.set(userId, owned)
-    this.connectionUsers.set(connection, userId)
+    this.connectionUsers.set(connection, { userId, activity })
   }
 
   untrack(connection: SessionConnection): void {
-    const previousUser = this.connectionUsers.get(connection)
-    if (previousUser === undefined) return
+    const previous = this.connectionUsers.get(connection)
+    if (previous === undefined) return
     this.connectionUsers.delete(connection)
-    const owned = this.userConnections.get(previousUser)
+    const owned = this.userConnections.get(previous.userId)
     owned?.delete(connection)
-    if (owned?.size === 0) this.userConnections.delete(previousUser)
+    if (owned?.size === 0) this.userConnections.delete(previous.userId)
   }
 
-  hasUser(userId: string): boolean {
-    return (this.userConnections.get(userId)?.size ?? 0) > 0
+  hasActiveConnection(userId: string): boolean {
+    for (const connection of this.userConnections.get(userId) ?? []) {
+      if (this.connectionUsers.get(connection)?.activity === 'active') return true
+    }
+    return false
   }
 
   async closeUser(userId: string): Promise<void> {

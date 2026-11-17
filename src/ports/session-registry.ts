@@ -8,9 +8,9 @@ export interface SessionConnection {
 /** Ephemeral session facts shared by entry handlers and reclamation. */
 export interface SessionRegistryPort {
   registerConnection(connection: SessionConnection, trackUsers: boolean): void
-  track(userId: string, connection: SessionConnection): void
+  track(userId: string, connection: SessionConnection, activity?: 'active' | 'passive'): void
   untrack(connection: SessionConnection): void
-  hasUser(userId: string): boolean
+  hasActiveConnection(userId: string): boolean
   closeUser(userId: string): Promise<void>
   closeAll(): void
   rememberRuntimeCookie(userId: string, cookie: string): void

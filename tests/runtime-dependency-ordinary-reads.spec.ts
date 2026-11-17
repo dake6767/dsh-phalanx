@@ -1,16 +1,19 @@
 import { expect, it, vi } from 'vitest'
-import type { McpState } from '../src/domain/mcp-service.js'
+import type { McpPreset } from '../src/domain/mcp-catalog.js'
+import { mcpDependency } from '../src/domain/mcp-dependency.js'
+import type { McpService, McpState } from '../src/domain/mcp-service.js'
 import { PlatformDatabaseError } from '../src/domain/platform-database.js'
-import type { RuntimeDependency } from '../src/domain/runtime-dependency.js'
+import { runtimeDependencyInput, type RuntimeDependency } from '../src/domain/runtime-dependency.js'
 import { RuntimeDependencies } from '../src/use-cases/runtime-dependencies.js'
 import { McpRuntimeDependencies } from '../src/use-cases/mcp-runtime-dependencies.js'
 import { McpServices } from '../src/use-cases/mcp-services.js'
 import { asyncMcpFacts } from './fixtures/async-mcp-facts.js'
 import { SkillLibrary } from '../src/use-cases/skill-library.js'
 import { asyncSkillFacts } from './fixtures/async-skill-facts.js'
+import { mcpPresets } from './fixtures/legacy-mcp-catalog.js'
 import { runtimeVersion } from './fixtures/runtime-version.js'
 
-function fixture() {
+function fixture(catalog: readonly McpPreset[] = []) {
   const account = {
     username: 'admin',
     spaceId: 'admin',
@@ -103,6 +106,7 @@ function fixture() {
     state,
     { synchronize: async () => {} },
     runtime,
+    catalog,
   )
   return {
     account,
@@ -118,6 +122,9 @@ function fixture() {
     runtime,
     allowView() {
       unavailable = false
+    },
+    loadService(service: McpService) {
+      businessState = { ...businessState, services: [service] }
     },
     hasService(name: string) {
       return businessState.services.some(row => row.name === name)
@@ -289,4 +296,31 @@ it('propagates unknown projection failures without retrying or rolling back comm
   ).rejects.toBe(failure)
   expect(f.hasService('p-binding')).toBe(true)
   await f.services.stop()
+})
+
+const actor = { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }
+
+it('keeps the initial signed 12306 equivalent to its persisted catalog-owned preparation', async () => {
+  const legacy = mcpPresets.find(row => row.entry.id === '12306')!
+  const preset = { ...legacy, entry: { ...legacy.entry, version: '1.0.0', contentHash: 'hash' } }
+  const f = fixture([preset])
+  const service: McpService = {
+    ...legacy.configuration,
+    name: 'p-retained-12306',
+    generation: 3,
+    catalog: { id: '12306', version: '1', status: 'ready' },
+  }
+  const { prepareCommand, ...run } = service.run!
+  expect(prepareCommand).toBeTruthy()
+  const dependency = runtimeDependencyInput(mcpDependency(service))
+  f.rows.push({ ...dependency, stage: 'ready', source: 'mcp-catalog', updatedAt: 0, log: '', checks: [] })
+  f.loadService({ ...service, dependencyName: dependency.name, run: { ...run, runtimeDependencies: [dependency.name] } })
+  const request = { name: service.name, version: preset.entry.version, contentHash: 'hash', requestId: 'fixture-equivalent-12306' }
+  expect((await f.services.list(actor))[0]?.availableCatalogVersion).toBeUndefined()
+  await expect(f.services.catalogUpdatePreview(actor, service.name)).rejects.toMatchObject({ code: 'mcp-test-stale' })
+  await expect(f.services.beginCatalogUpdate(actor, request)).rejects.toMatchObject({ code: 'mcp-test-stale' })
+  f.rows[1] = { ...f.rows[1]!, prepareCommand: 'changed-content' }
+  expect((await f.services.list(actor))[0]?.availableCatalogVersion).toBe('1.0.0')
+  f.rows[1] = { ...f.rows[1]!, prepareCommand: dependency.prepareCommand, source: 'manual' }
+  expect((await f.services.list(actor))[0]?.availableCatalogVersion).toBe('1.0.0')
 })

@@ -26,22 +26,25 @@ the same check is required in CI independently of the fast-check cache. The
 mechanical version guard covers the current minor release series; review other
 version narration against this map as well.
 
-| Document | Reader | Owns | Excludes |
-| --- | --- | --- | --- |
-| [README](README.md) / [中文](README.zh-CN.md) | Evaluators, deployers | Purpose, four core benefits, architecture overview, quick install, navigation, community/license statement | Version narration, operating/recovery steps, backup paths |
-| [Installation](docs/install.md) / [中文](docs/install.zh-CN.md) | Deployers, administrators | Installation, storage, services, HTTPS, updates/recovery, environment reset, skills and personal skill keys, diagnostics | Historical behavior, upgrade chains |
-| [Skill execution](docs/skill-execution.md) / [中文](docs/skill-execution.zh-CN.md) | Administrators | Skill execution configuration, preparation, credentials, trial runs, limits and errors | General installation, version history |
-| [Plugin and MCP access](docs/plugin-access.md) / [中文](docs/plugin-access.zh-CN.md) | Administrators | Plugin upstreams and MCP services, run locations, platform credentials, access configuration, connection examples and boundaries | Installer/service operations, historical upgrade instructions |
-| [Architecture](docs/architecture.md) | Contributors, agents | Layers, seam owners, ten laws, runtime guarantees, current key decisions, update transaction | Schema history, superseded alternatives |
-| [Contributing](CONTRIBUTING.md) | Contributors, maintainers | Development, real DSH verification, general CI/candidate/promotion contract | Per-version chapters |
-| AGENTS.md | Agents | Engineering rules and this documentation map | Product operating instructions |
-| [Admin UI design](admin-ui/DESIGN.md) | Contributors, agents changing UI | Visual direction, tokens' roles, layout, reusable components, sample pages, UI don'ts for the admin app and entry pages | Product behavior, engineering rules |
-| `releases/notes/` and `releases/acceptance/` | Users, release maintainers | Version changes, one-time upgrade steps, executed acceptance evidence | General reference duplicated from the owners above |
+| Document | Reader | Owns |
+| --- | --- | --- |
+| [README](README.md) / [中文](README.zh-CN.md) | Evaluators | Purpose, highlights, architecture overview, quick install and navigation |
+| [Installation](docs/install.md) / [中文](docs/install.zh-CN.md) | Deployers | Host requirements, first installation and initialization |
+| [Deployment operations](docs/operations.md) / [中文](docs/operations.zh-CN.md) | Operators | Storage, HTTPS, updates, service diagnostics, backup and recovery |
+| [Administrator guide](docs/admin-guide.md) / [中文](docs/admin-guide.zh-CN.md) | Administrators | Models, groups, member instances, libraries, catalogs and publication |
+| [Member guide](docs/member-guide.md) / [中文](docs/member-guide.zh-CN.md) | Members | Sign-in, DSH workspace, platform apps, plugin settings and environment recovery |
+| [Plugin and MCP access](docs/plugin-access.md) / [中文](docs/plugin-access.zh-CN.md) | Administrators | Plugin upstreams, shared service bindings, MCP configuration and credentials |
+| [Skill execution](docs/skill-execution.md) / [中文](docs/skill-execution.zh-CN.md) | Administrators | Skill execution, dependencies, credential bindings and test runs |
+| [Architecture](docs/architecture.md) | Contributors, agents | Ownership, engineering laws, data boundaries and system update transaction |
+| [Contributing](CONTRIBUTING.md) | Contributors, maintainers | Development, DSH verification, Linux acceptance, candidate and release workflow |
+| [Admin UI design](admin-ui/DESIGN.md) | Admin UI contributors | Admin and entry page components, layout, responsive states and themes |
+| [Native DSH UI design](docs/dsh-ui/DESIGN.md) | DSH integration contributors | DSH slots, primitives, theme tokens and platform app center |
+| `releases/notes/` and `releases/acceptance/` | Users, release maintainers | Version changes, one-time upgrade steps and completed acceptance evidence |
 
 If new content does not fit an existing owner, propose the document change to the
-user before creating another document. Keep public architectural constraints in
-Architecture; decisions are recorded in private planning, not new public ADRs.
-Keep the installation filenames and `recoverable-system-updates` anchor stable:
-installed versions link to that main-branch help location. Preserve historical
+user before creating another document. Record public engineering constraints
+in Architecture.
+Keep the installation filenames and `recoverable-system-updates` anchor stable.
+Installed versions link to this entry point for operations guidance. Preserve historical
 acceptance records. Diagram sources and generated theme variants belong together
 under `docs/diagrams/`.

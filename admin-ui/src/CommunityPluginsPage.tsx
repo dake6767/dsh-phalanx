@@ -295,7 +295,7 @@ export default function CommunityPluginsPage() {
           </Tabs.Panel>
         ) : null}
         <Tabs.Panel id="catalog">
-          <CommunitySuitesPage category="plugin" onLibraryChanged={refresh} />
+          <CommunitySuitesPage category="plugin" plugins={plugins} onLibraryChanged={refresh} />
         </Tabs.Panel>
       </Tabs>
       {uploading ? (

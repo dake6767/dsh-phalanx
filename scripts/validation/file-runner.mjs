@@ -1,6 +1,6 @@
 // Each file owns a port range, process group and labelled containers. Diagnostics precede cleanup.
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, openSync, closeSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, openSync, closeSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { join, resolve, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -91,9 +91,9 @@ export async function runFile({ file, index, directory, extra = [], command, tim
   const runtime = env.DSH_PHALANX_CONTAINER_RUNTIME ?? 'podman'
   const resolvedRuntime = containerChecks ? inspect('which', [runtime]).output.trim() : ''
   const bin = join(directory, 'bin'),
-    temporary = join(directory, 'tmp')
+    temporary = env.DSH_PHALANX_T2_SCRATCH_ROOT ? mkdtempSync(join(resolve(env.DSH_PHALANX_T2_SCRATCH_ROOT), `${index}-`)) : join(directory, 'tmp')
   mkdirSync(bin)
-  mkdirSync(temporary)
+  if (!env.DSH_PHALANX_T2_SCRATCH_ROOT) mkdirSync(temporary)
   if (resolvedRuntime) {
     // PATH also covers tests which deliberately invoke podman without the runtime variable.
     // The host-only per-file directory is absent from the container namespace.

@@ -114,7 +114,8 @@ it('offers an update after a platform upgrade, previews the differences and swit
     await page.getByRole('tab', { name: 'Skill packs', exact: true }).click()
     await page.getByRole('button', { name: 'View skill pack chat', exact: true }).click({ position: { x: 12, y: 12 } })
     const packEditor = page.getByRole('dialog', { name: 'Chat suite' })
-    expect(await packEditor.getByLabel('Pack name', { exact: true }).getAttribute('readonly')).not.toBeNull()
+    await packEditor.getByText('From catalog Chat suite · Name chat', { exact: true }).waitFor()
+    expect(await packEditor.getByLabel('Pack name', { exact: true }).count()).toBe(0)
     expect(await packEditor.getByLabel('Orchestration instructions (optional)', { exact: true }).getAttribute('readonly')).not.toBeNull()
     expect(await packEditor.getByRole('button', { name: /^(Add skills|Move |Remove skill chat-)/u }).count()).toBe(0)
     await packEditor.getByLabel('Pack display name', { exact: true }).fill('Local chat')
@@ -145,15 +146,19 @@ it('offers an update after a platform upgrade, previews the differences and swit
     await card.getByText('Update available', { exact: true }).waitFor()
     await card.getByRole('button', { name: 'Update', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Chat suite' })
-    await dialog.getByText('Version 1.0.0 → 2.0.0', { exact: true }).waitFor()
     await dialog.getByText('Skills added: chat-read', { exact: true }).waitFor()
     await dialog.getByText('Skills updated: chat-send', { exact: true }).waitFor()
+    expect(await dialog.getByText(/1\.0\.0 → 2\.0\.0/u).count()).toBe(0)
     await dialog.getByText('Skill pack chat: adds chat-read; removes —', { exact: true }).waitFor()
     await dialog.getByText('New credentials: CHAT_REGION. Delegated execution stays off until they are saved.', { exact: true }).waitFor()
     await dialog.getByRole('button', { name: 'Confirm update', exact: true }).click()
     await dialog.waitFor({ state: 'hidden' })
     await card.getByRole('button', { name: 'View catalog entry Chat suite', exact: true }).click()
     await dialog.getByText('Missing credentials', { exact: true }).waitFor({ timeout: 60000 })
+    await dialog.getByText('Task log', { exact: true }).click()
+    const log = await dialog.locator('.plugin-preparation-log').innerText()
+    expect(log).toContain('Update complete.')
+    expect(log).not.toMatch(/1\.0\.0 → 2\.0\.0|Updated to 2\.0\.0/u)
     const after = ((await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json()) as CommunityRuntimeDependencyView[]).find(
       row => row.name === 'chat-tools',
     )!
@@ -166,7 +171,7 @@ it('offers an update after a platform upgrade, previews the differences and swit
     expect(packs.packs.find(row => row.name === 'chat')).toMatchObject({
       displayName: 'Local chat',
       description: 'Local chat description',
-      skills: ['chat-send', 'chat-read'],
+      skills: ['chat-read', 'chat-send'],
       published: true,
     })
     await dialog.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()

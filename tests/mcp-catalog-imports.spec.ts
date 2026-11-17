@@ -1,3 +1,7 @@
+import type { McpCatalogSnapshot, McpPreset } from '../src/domain/mcp-catalog.js'
+import { signedMcpEntries } from './fixtures/mcp-catalog-online.js'
+import { compileMcpCatalogDeclaration } from '../src/domain/mcp-catalog-declaration.js'
+import { mcpPresets } from './fixtures/legacy-mcp-catalog.js'
 import { asyncMcpFacts } from './fixtures/async-mcp-facts.js'
 import { mcpWriteInput } from '../src/domain/mcp-service.js'
 import { expect, it, vi } from 'vitest'
@@ -33,14 +37,15 @@ function fixture(synchronize: () => Promise<void> = async () => {}, runtime?: im
       state = structuredClone(next)
     },
   }
-  const create = () =>
+  const create = (presets: readonly McpPreset[] | (() => Promise<McpCatalogSnapshot>) = mcpPresets) =>
     new McpServices(
       { get: async name => accounts.find(row => row.username === name), list: async () => accounts, listGroups: async () => groups },
       asyncMcpFacts(store),
       { synchronize },
       runtime,
+      presets,
     )
-  return { service: create(), create, actor: { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }, accounts }
+  return { service: create(), create, actor: { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }, accounts, stored: store.read }
 }
 const input = { presetId: 'amap', name: 'p-map', credential: 'fixture-map-key', requestId: 'test-import-request-0001' }
 it('imports a private preset once across refresh and restart, allows explicit copies and keeps deleted requests retired', async () => {
@@ -62,7 +67,7 @@ it('imports a private preset once across refresh and restart, allows explicit co
   expect(await restarted.effective('member')).toEqual([])
   await expect(restarted.publish(actor, 'p-map', true)).rejects.toThrow()
   await restarted.importCatalog(actor, { ...input, name: 'p-map-copy', requestId: 'test-import-request-0002' })
-  expect((await restarted.catalog(actor))[0]).toMatchObject({ id: 'amap', imported: 2 })
+  expect((await restarted.catalog(actor)).entries[0]).toMatchObject({ id: 'amap', imported: 2 })
   await restarted.remove(actor, 'p-map')
   await expect(restarted.importCatalog(actor, input)).rejects.toThrow()
   expect((await restarted.list(actor)).map(row => row.name)).toEqual(['p-map-copy'])
@@ -496,4 +501,82 @@ it('continues an already committed import when its initial projection cannot rea
   } finally {
     await imports.stop()
   }
+})
+
+it('keeps a saved v0.1.36 service independent of the signed catalog and pins new confirmation to its bytes', async () => {
+  const { service, create, actor, stored } = fixture()
+  await service.importCatalog(actor, input)
+  await service.recordTest(actor, input.name, (await service.diagnostic(actor.username, input.name)).generation, [{ name: 'maps_weather', inputSchema: {} }])
+  await service.grant(actor, 'members', [input.name])
+  const before = stored()
+  const [declared] = signedMcpEntries()
+  if (declared?.kind !== 'mcp') throw new Error('Invalid fixture')
+  const preset = compileMcpCatalogDeclaration(declared, { ...declared })!
+  const upgraded = create([preset])
+  const [same] = await upgraded.list(actor)
+  expect(same).toMatchObject({ catalog: { id: 'amap', version: '1', status: 'ready' }, credentialConfigured: true })
+  expect(same?.availableCatalogVersion).toBeUndefined()
+  expect(stored()).toEqual(before)
+  const pinned = { ...input, name: 'p-copy', version: preset.entry.version, requestId: 'signed-mcp-catalog-copy' }
+  await expect(upgraded.importCatalog(actor, { ...pinned, contentHash: 'c'.repeat(64) })).rejects.toMatchObject({ code: 'mcp-test-stale' })
+  expect(stored()).toEqual(before)
+  await upgraded.importCatalog(actor, { ...pinned, contentHash: preset.entry.contentHash })
+  expect((await upgraded.list(actor))[1]?.catalog).toMatchObject({ contentHash: preset.entry.contentHash, version: '1.0.0' })
+  const offline = create([])
+  expect((await offline.list(actor))[0]).toMatchObject({ catalogTargetUnavailable: true })
+  expect(await offline.effective('member')).toMatchObject([{ name: input.name, credential: input.credential }])
+  await expect(offline.importCatalog(actor, { ...pinned, requestId: 'signed-mcp-offline-copy' })).rejects.toMatchObject({ code: 'mcp-catalog-unavailable' })
+})
+
+it('rejects same-version drift for both a new import and updates from an older installed copy', async () => {
+  const { service, actor, create } = fixture()
+  await service.importCatalog(actor, input)
+  await service.recordTest(actor, input.name, (await service.diagnostic(actor.username, input.name)).generation, [])
+  const legacy = mcpPresets.find(row => row.entry.id === input.presetId)!
+  const version = '2.0.0',
+    hash = 'a'.repeat(64),
+    drift = 'b'.repeat(64)
+  const presets = [{ ...legacy, entry: { ...legacy.entry, version, contentHash: hash } }]
+  const upgraded = create(presets)
+  const copy = { ...input, name: 'p-version-two', version, requestId: 'catalog-version-two-copy', contentHash: hash }
+  await upgraded.importCatalog(actor, copy)
+  await upgraded.recordTest(actor, copy.name, (await upgraded.diagnostic(actor.username, copy.name)).generation, [])
+  presets[0] = { ...presets[0]!, entry: { ...presets[0]!.entry, contentHash: drift } }
+  expect((await upgraded.catalog(actor)).entries).toEqual([])
+  expect((await upgraded.list(actor)).map(row => row.catalogTargetUnavailable)).toEqual([true, true])
+  await expect(upgraded.catalogUpdatePreview(actor, input.name)).rejects.toMatchObject({ code: 'mcp-catalog-unavailable' })
+  await expect(
+    upgraded.beginCatalogUpdate(actor, { name: input.name, version, contentHash: drift, requestId: 'catalog-version-drift-update' }),
+  ).rejects.toMatchObject({ code: 'mcp-catalog-unavailable' })
+  await expect(
+    upgraded.importCatalog(actor, { ...copy, name: 'p-drift', contentHash: drift, requestId: 'catalog-version-drift-import' }),
+  ).rejects.toMatchObject({ code: 'mcp-catalog-unavailable' })
+})
+
+it('leaves local management free during a catalog request and rechecks the actor at write admission', async () => {
+  const { service, actor, create, accounts, stored } = fixture()
+  await service.importCatalog(actor, input)
+  let entered!: () => void, release!: () => void
+  const downloadStarted = new Promise<void>(resolve => {
+    entered = resolve
+  })
+  const resume = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const paused = create(async () => {
+    entered()
+    await resume
+    return { presets: mcpPresets, source: { status: 'ok', address: 'https://example.test/catalog' } }
+  })
+  const pending = paused.importCatalog(actor, { ...input, name: 'p-late', requestId: 'mcp-catalog-late-request' })
+  await downloadStarted
+  try {
+    expect(await paused.list(actor, false)).toMatchObject([{ name: input.name }])
+    await paused.remove(actor, input.name)
+    accounts[0]!.sessionEpoch++
+  } finally {
+    release()
+  }
+  await expect(pending).rejects.toThrow()
+  expect(stored().services).toEqual([])
 })

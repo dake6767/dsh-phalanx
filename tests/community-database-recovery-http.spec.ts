@@ -1,3 +1,4 @@
+import { request } from 'node:http'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { mkdtemp, rm, rename, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,6 +8,29 @@ import { expect, it } from 'vitest'
 import { createSupervisedCommunityApplication } from '../src/composition/community-supervised-application.js'
 import { withTestDatabase } from './support/community-application.js'
 import { FilePlatformDatabaseConfig } from '../src/adapters/platform-database-config.js'
+
+// Each probe checks a fresh connection after switching into database recovery.
+async function freshRequest(url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const req = request(url, { agent: false, method: options.method, headers: options.headers }, response => {
+      response.setEncoding('utf8')
+      let body = ''
+      response.on('data', chunk => {
+        body += chunk
+      })
+      response.once('end', () => {
+        const headers = new Headers()
+        for (const [name, value] of Object.entries(response.headers)) {
+          for (const header of typeof value === 'string' ? [value] : (value ?? [])) headers.append(name, header)
+        }
+        resolve(new Response(body, { status: response.statusCode ?? 500, headers }))
+      })
+      response.once('error', reject)
+    })
+    req.once('error', reject)
+    req.end(options.body)
+  })
+}
 
 it('keeps fresh platform and admin navigation readable on offline startup and rebuilds after the same database recovers', async () => {
   const root = await mkdtemp(join(tmpdir(), 'database-recovery-http-'))
@@ -41,12 +65,12 @@ it('keeps fresh platform and admin navigation readable on offline startup and re
   )
   const unavailable = async (origin: string) => {
     for (const path of ['/', '/login', '/admin/settings']) {
-      const response = await fetch(origin + path, { headers: { 'accept-language': 'zh-CN' }, redirect: 'manual' })
+      const response = await freshRequest(origin + path, { headers: { 'accept-language': 'zh-CN' } })
       expect(response.status).toBe(503)
       expect(response.headers.get('cache-control')).toBe('no-store')
       expect(await response.text()).toContain('平台数据库暂时不可用')
     }
-    expect((await fetch(origin + '/login', { method: 'POST', body: 'username=admin' })).status).toBe(503)
+    expect((await freshRequest(origin + '/login', { method: 'POST', body: 'username=admin' })).status).toBe(503)
   }
   try {
     await control.query(`ALTER DATABASE "${connection.database}" ALLOW_CONNECTIONS false`)
@@ -87,7 +111,7 @@ it('keeps fresh platform and admin navigation readable on offline startup and re
     expect((await fetch(origin + '/admin/api/session', { headers: { cookie: memberCookie } })).status).toBe(403)
     await control.query(`ALTER DATABASE "${connection.database}" ALLOW_CONNECTIONS false`)
     await control.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=$1', [connection.database])
-    await expect.poll(async () => (await fetch(origin + '/login', { redirect: 'manual' })).status).toBe(503)
+    await expect.poll(async () => (await freshRequest(origin + '/login')).status).toBe(503)
     await unavailable(origin)
     await expect.poll(() => typeof retry).toBe('function')
     await control.query(`ALTER DATABASE "${connection.database}" ALLOW_CONNECTIONS true`)

@@ -279,7 +279,7 @@ it('requires an explicit phrase and recovers a lost master without deleting acco
     app = createCommunityApplication(config)
     const recold = await app.start()
     expect(await (await fetch(recold + '/admin/api/mcp', { headers: { cookie: renewed } })).json()).toMatchObject([
-      { name: 'p-service', catalog: { version: '1', status: 'ready' }, credential: { configured: true }, testStatus: 'passed' },
+      { name: 'p-service', catalog: { version: '1.0.0', status: 'ready' }, credential: { configured: true }, testStatus: 'passed' },
     ])
   } finally {
     await app.stop()

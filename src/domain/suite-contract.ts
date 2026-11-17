@@ -41,6 +41,7 @@ export interface CommunitySuiteCatalogEntryView {
   readonly description: Readonly<Record<'en' | 'zh-CN', string>>
   readonly source: Readonly<Record<'en' | 'zh-CN', string>>
   readonly sourceLinks?: readonly { readonly label: string; readonly href: string }[]
+  readonly dependencySources?: readonly (import('./suite-catalog.js').SuiteCatalogRepositoryPin & { readonly name: string })[]
   readonly identity?: Readonly<Record<'en' | 'zh-CN', string>>
   readonly skills?: readonly string[]
   readonly packName?: string
@@ -93,6 +94,7 @@ export interface CommunitySuiteInstallView {
   readonly replaced?: readonly CommunitySuiteInstallEntry[]
 }
 export interface CommunitySuiteCatalogView {
+  readonly galleryTags?: import('./suite-catalog-tags.js').CatalogGalleryTags
   readonly entries: readonly CommunitySuiteCatalogEntryView[]
   readonly installations: readonly CommunitySuiteInstallView[]
   /** Online source state for the page banner; installation records stay usable when it fails. */
@@ -179,8 +181,10 @@ export interface CommunitySuiteUpdatePreview {
   readonly dependencyChanges?: readonly { readonly name: string; readonly from: string; readonly to: string; readonly changed: boolean }[]
   readonly plugin?: {
     readonly packageName: string
-    readonly from: string
+    readonly from?: string
     readonly to: string
+    readonly artifactChanged?: boolean
+    readonly configurationChanged?: boolean
     readonly modified: boolean
     readonly access: {
       readonly entriesChanged: boolean

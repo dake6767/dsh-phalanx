@@ -1,3 +1,5 @@
+import { compileMcpCatalogDeclaration, type VerifiedMcpPreset } from './mcp-catalog-declaration.js'
+import { readCatalogGalleryTags, type CatalogGalleryTags } from './suite-catalog-tags.js'
 import { executionShortOption } from './execution-command-line.js'
 import { pythonPackagePins } from './python-library.js'
 import {
@@ -14,7 +16,7 @@ import {
 import { verifySuiteCatalogSignature, type TrustedSuiteCatalogKey } from './suite-catalog-signature.js'
 import { validateSuiteCatalogAdapters, type ValidatedSuiteCatalogAdapter } from './suite-catalog-adapters.js'
 import { suiteEntryViolations, suiteResourceBindingViolations } from './suite-catalog-checks.js'
-import type { SuiteCatalogEntry, SuiteCatalogExecutionItem, SuiteCatalogItem } from './suite-catalog.js'
+import type { SuiteCatalogEntry, SuiteCatalogExecutionItem, SuiteCatalogItem, SuiteCatalogRepositoryPin } from './suite-catalog.js'
 import type { SuiteCatalogRuntimeDependencyItem as SuiteCatalogDocumentRuntimeItem } from './suite-catalog-document.js'
 import { suitePrepareCheckCommand, suitePrepareCommands } from './suite-prepare-commands.js'
 import { compareSemver, parseSemver, parseSemverRange, satisfiesSemverRange } from './semver.js'
@@ -61,6 +63,8 @@ export type SuiteCatalogRead =
       readonly status: 'ok'
       readonly publishedAt: string
       readonly entries: readonly ReadSuiteCatalogEntry[]
+      readonly galleryTags?: CatalogGalleryTags
+      readonly mcp?: readonly VerifiedMcpPreset[]
       readonly rejected: readonly RejectedSuiteCatalogEntry[]
       readonly skipped: readonly SkippedSuiteCatalogEntry[]
     }
@@ -87,10 +91,10 @@ export function readSuiteCatalog(bytes: Uint8Array, options: ReadSuiteCatalogOpt
 
 /** Publication boundary: checks unsigned data; never used by the online trust boundary. */
 export function checkUnsignedSuiteCatalog(raw: Record<string, unknown>, platformVersion: string): SuiteCatalogRead {
-  return readCheckedSuiteCatalog({ ...raw, signature: { keyId: 'unsigned-check', signature: 'unsigned-check' } }, platformVersion)
+  return readCheckedSuiteCatalog({ ...raw, signature: { keyId: 'unsigned-check', signature: 'unsigned-check' } }, platformVersion, true)
 }
 
-function readCheckedSuiteCatalog(raw: Record<string, unknown>, platformVersion: string): SuiteCatalogRead {
+function readCheckedSuiteCatalog(raw: Record<string, unknown>, platformVersion: string, publishing = false): SuiteCatalogRead {
   if (['locked', ...itemExtensionFields].some(key => Object.hasOwn(raw, key)))
     return { status: 'rejected', reason: 'invalid-document', detail: misplacedExtension }
   const normalized = normalizeSuiteCatalogDocument(raw)
@@ -100,12 +104,31 @@ function readCheckedSuiteCatalog(raw: Record<string, unknown>, platformVersion: 
       reason: normalized.rejection === 'unsupported-format' ? 'unsupported-format' : 'invalid-document',
       ...(normalized.detail ? { detail: normalized.detail } : {}),
     }
+  const galleryTags = readCatalogGalleryTags(raw.galleryTags, normalized.document.entries)
+  if (publishing && Object.hasOwn(raw, 'galleryTags') && !galleryTags)
+    return { status: 'rejected', reason: 'invalid-document', detail: 'Invalid gallery tag metadata.' }
   const rawEntries = raw.entries as readonly unknown[]
   const entries: ReadSuiteCatalogEntry[] = [],
     rejected: RejectedSuiteCatalogEntry[] = [],
-    skipped: SkippedSuiteCatalogEntry[] = []
+    skipped: SkippedSuiteCatalogEntry[] = [],
+    mcp: VerifiedMcpPreset[] = []
   normalized.document.entries.forEach((entry, index) => {
-    // Reserved kinds are skipped before any compatibility rule; the signature and structure were already verified.
+    if (entry.kind === 'mcp' && (publishing || compareSemver(parseSemver(platformVersion)!, parseSemver('0.1.37')!) >= 0)) {
+      const rawMcp = rawEntries[index] as Record<string, unknown>
+      const identity = { id: entry.id, version: entry.version }
+      if (suiteCatalogContentHash(rawMcp) !== entry.contentHash) rejected.push({ ...identity, reason: 'content-hash-mismatch' })
+      else if (!requiresCatalogExtensionPlatform(entry.engines.platform, '0.1.37'))
+        rejected.push({ ...identity, reason: 'invalid-entry', detail: 'MCP entries require engines.platform >=0.1.37.' })
+      else if (!satisfiesSemverRange(platformVersion, entry.engines.platform))
+        rejected.push({ ...identity, reason: 'needs-platform-upgrade', detail: entry.engines.platform })
+      else {
+        const preset = compileMcpCatalogDeclaration(entry, rawMcp)
+        if (preset) mcp.push(preset)
+        else rejected.push({ ...identity, reason: 'invalid-adapter-params', detail: 'Invalid MCP declaration.' })
+      }
+      return
+    }
+    // Reserved kinds were verified as part of the document and have no projection.
     if (entry.kind !== 'suite' && entry.kind !== 'dependency' && entry.kind !== 'plugin') {
       skipped.push({ id: entry.id, kind: entry.kind })
       return
@@ -133,7 +156,15 @@ function readCheckedSuiteCatalog(raw: Record<string, unknown>, platformVersion: 
     rejected.push({ id: row.entry.id, version: row.entry.version, reason: unavailable.unavailableReason, detail })
     return { ...row, ...unavailable, entry: { ...row.entry, ...unavailable } }
   })
-  return { status: 'ok', publishedAt: normalized.document.publishedAt, entries: checked, rejected, skipped }
+  return {
+    status: 'ok',
+    publishedAt: normalized.document.publishedAt,
+    entries: checked,
+    rejected,
+    skipped,
+    ...(galleryTags ? { galleryTags } : {}),
+    ...(mcp.length ? { mcp } : {}),
+  }
 }
 
 /**
@@ -319,12 +350,31 @@ function localized(value: SuiteCatalogLocalized): Readonly<Record<'en' | 'zh-CN'
   return { en: value.en, 'zh-CN': value['zh-CN'] }
 }
 
+function resourceRepositories(item: SuiteCatalogDocumentRuntimeItem): readonly SuiteCatalogRepositoryPin[] {
+  const pins = new Map<string, SuiteCatalogRepositoryPin>()
+  for (const download of item.downloads) {
+    if (download.source !== 'github-assets' || !download.url) continue
+    const urls = typeof download.url === 'string' ? [download.url] : Object.values(download.url)
+    for (const url of urls) {
+      const match = /^https:\/\/github\.com\/([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+)\/raw\/([a-f0-9]{40})\//u.exec(url)
+      if (!match) continue
+      const repository = match[1]!,
+        commit = match[2]!
+      const href = `https://github.com/${repository}/tree/${commit}`
+      pins.set(href, { repository, commit, href })
+    }
+  }
+  return [...pins.values()]
+}
+
 function convertItem(item: SuiteCatalogDocumentItem, adapters: readonly ValidatedSuiteCatalogAdapter[]): SuiteCatalogItem {
   if (item.kind === 'runtime-dependency') {
     const check = suitePrepareCheckCommand(item)
+    const repositories = resourceRepositories(item)
     return {
       kind: 'runtime-dependency',
       name: item.name,
+      ...(repositories.length ? { sourceRepositories: repositories } : {}),
       ...(item.type === 'python-library'
         ? { type: item.type, packages: pythonPackagePins(item.downloads.flatMap(download => download.packages ?? []))! }
         : item.type === 'resource'

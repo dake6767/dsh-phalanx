@@ -4,7 +4,7 @@
 
 dsh-phalanx is a self-hosted, multi-user DSH platform for small teams: run DeepSeek Harness (DSH) on one server and give every member an independent user space.
 
-Teams do not need to deploy DSH for each person or distribute shared model keys. The deployer installs the platform, administrators create accounts and configure shared model providers, and members sign in to work in their own spaces.
+The deployer installs the platform on one host. Administrators create accounts and configure shared model providers. Members sign in to work in their own spaces and use the enabled models.
 
 ## Four highlights
 
@@ -36,7 +36,7 @@ Shared model requests travel from the user instance to the platform's model gate
 
 The [image recipe](containers/dsh/Containerfile) starts from a digest-pinned Node.js/Debian base, fetches the official DSH commit specified in [runtime-versions.json](runtime-versions.json), installs frozen dependencies and compiles DSH in a build stage. It then copies the built workspace and production dependencies into the runtime image. DSH source remains unchanged; integration uses its official CLI, configuration and plugins.
 
-The image contains no accounts, model keys or member files. PostgreSQL stores platform facts and encrypted credentials; a separately protected master key decrypts them. Local artifacts and generated projections are separate from each member's persistent files. Rebuilding an instance keeps those files and reconstructs platform projections. See [storage and backup](docs/install.md#storage-layout) for the five storage layers and their recovery requirements. See [Contributing](CONTRIBUTING.md#build-the-dsh-instance-image) to build and import the image and verify container behavior.
+The image contains no accounts, model keys or member files. PostgreSQL stores platform facts and encrypted credentials; a separately protected master key decrypts them. Local artifacts and generated projections are separate from each member's persistent files. Rebuilding an instance keeps those files and reconstructs platform projections. See [storage and backup](docs/operations.md#storage-layout) for the five storage layers and their recovery requirements. See [Contributing](CONTRIBUTING.md#build-the-dsh-instance-image) to build and import the image and verify container behavior.
 
 Administrators manage compatible in-place updates from System update, with phase
 progress, diagnostics and automatic platform recovery. Candidate deployments can
@@ -69,7 +69,10 @@ The deployer configures HTTPS, DNS and cloud security groups. See the installati
 
 | What you need | Guide |
 | --- | --- |
-| Installation, storage, HTTPS, service management and recovery | [Installation guide](docs/install.md) · [简体中文](docs/install.zh-CN.md) |
+| Install on a new host and open DSH as the first member | [Installation guide](docs/install.md) · [简体中文](docs/install.zh-CN.md) |
+| Back up, upgrade, move or recover a deployment | [Operations](docs/operations.md) · [简体中文](docs/operations.zh-CN.md) |
+| Manage accounts, models, platform features and resource distribution | [Administrator guide](docs/admin-guide.md) · [简体中文](docs/admin-guide.zh-CN.md) |
+| Use DSH, Platform App Center, files and instance recovery | [Member guide](docs/member-guide.md) · [简体中文](docs/member-guide.zh-CN.md) |
 | Layers, seam ownership, runtime guarantees and design tradeoffs | [Architecture](docs/architecture.md) |
 | Local development, image builds, real DSH tests and the release process | [Contributing](CONTRIBUTING.md) |
 | Changes and acceptance records for each release | [Releases](https://github.com/dake6767/dsh-phalanx/releases) |

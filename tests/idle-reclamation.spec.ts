@@ -21,7 +21,7 @@ function fixture(idleSeconds: number | (() => number | Promise<number>) = 1) {
     track: () => {},
     untrack: () => {},
     closeAll: () => {},
-    hasUser: () => connected,
+    hasActiveConnection: () => connected,
     closeUser: async () => {
       events.push('disconnect')
       connected = false

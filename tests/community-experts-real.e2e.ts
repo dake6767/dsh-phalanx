@@ -236,7 +236,13 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
       installation: suites.installations.find((row: { id: string }) => row.id === 'minimax'),
     })
     expect(suites.installations.find((row: { id: string }) => row.id === 'minimax')).toMatchObject({ status: 'installed', version: '2.0.0' })
-    await api('mcp/catalog', { action: 'import', input: { presetId: 'amap', name: 'p-amap', credential: amap, requestId: randomUUID() } })
+    const mcpCatalog = await (await admin.request.get(origin + '/admin/api/mcp/catalog')).json()
+    const amapTarget = mcpCatalog.entries.find((entry: { id: string }) => entry.id === 'amap')
+    expect(amapTarget?.contentHash).toMatch(/^[a-f0-9]{64}$/u)
+    await api('mcp/catalog', {
+      action: 'import',
+      input: { presetId: 'amap', version: amapTarget.version, contentHash: amapTarget.contentHash, name: 'p-amap', credential: amap, requestId: randomUUID() },
+    })
     await expect
       .poll(async () => (await api('mcp')).find((row: { name: string }) => row.name === 'p-amap')?.catalog?.status, { timeout: 660000, interval: 2000 })
       .toMatch(/^(ready|failed)$/u)

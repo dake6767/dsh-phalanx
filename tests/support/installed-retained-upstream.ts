@@ -10,7 +10,8 @@ export async function createRetainedUpgradeUpstream(input: {
   catalogBytes: Uint8Array
   progress: Awaited<ReturnType<typeof acceptanceProgress>>
 }) {
-  const { address, catalogBytes, progress } = input
+  const { address, progress } = input
+  let catalogBytes = input.catalogBytes
   const calls: Record<string, { failed: boolean; valid: boolean; tools: string[] }> = {}
   const pluginCalls: Record<string, { failed: boolean; valid: boolean }> = {}
   const expertReplies: Record<string, boolean> = {}
@@ -82,5 +83,15 @@ export async function createRetainedUpgradeUpstream(input: {
   await once(fixture, 'listening')
   await progress.step('fixture', async () => ({ port: (fixture.address() as { port: number }).port }))
   const upstream = `http://${address}:${(fixture.address() as { port: number }).port}`
-  return { fixture, upstream, calls, pluginCalls, expertReplies, state }
+  return {
+    fixture,
+    upstream,
+    calls,
+    pluginCalls,
+    expertReplies,
+    state,
+    serveCatalog(bytes: Uint8Array) {
+      catalogBytes = bytes
+    },
+  }
 }

@@ -102,6 +102,7 @@ export interface McpRuntimePort {
   validateReferences?(service: McpService['run'], previous?: McpService['run']): Promise<void>
   configure?(service: McpService): Promise<McpService>
   promote?(candidate: McpService, previous: McpService): McpService
+  readCatalogDependency?(name: string): Promise<import('../domain/runtime-dependency.js').RuntimeDependencyDefinition | undefined>
   ready(service: McpService): McpPreparedRuntime | undefined
   /** Ordinary management reads use current rows; synchronous view is reserved for fences. */
   readView?(service: McpService): Promise<ReturnType<McpRuntimePort['view']>>

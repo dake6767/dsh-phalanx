@@ -66,6 +66,9 @@ export class McpRuntimeDependencies implements McpRuntimePort {
       ? { ...candidate, dependencyPromotion: { from: candidate.dependencyName, to: previous.dependencyName ?? candidate.dependencyName } }
       : candidate
   }
+  readCatalogDependency(name: string) {
+    return this.dependencies.readMcpCatalogDefinition(name)
+  }
   ready(service: McpService) {
     if (service.configurationRequired) return undefined
     if (!service.run || service.run.prepareCommand !== undefined) return undefined

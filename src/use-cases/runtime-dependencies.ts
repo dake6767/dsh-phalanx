@@ -96,6 +96,10 @@ export class RuntimeDependencies {
       return { stage: row.stage, updatedAt: row.updatedAt, log: row.log, current: row.current }
     })
   }
+  async readMcpCatalogDefinition(name: string) {
+    const row = (await this.store.list()).find(item => item.name === name && item.source === 'mcp-catalog' && !item.candidate)
+    return row ? runtimeDefinition(row) : undefined
+  }
   state(name: string) {
     const row = this.requireView(name)
     return { stage: row.stage, updatedAt: row.updatedAt, log: row.log }

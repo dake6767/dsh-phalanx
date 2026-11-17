@@ -3,6 +3,7 @@ import { expect } from 'vitest'
 import type {
   CommunityAccountsPageData,
   CommunityNativeFeatureGroup,
+  CommunityMcpSettings,
   CommunityRuntimeDependencyView,
   CommunitySkillView,
   CommunitySkillPackLibrary,
@@ -11,6 +12,7 @@ import type {
 import type { UsageModelView } from '../../src/domain/usage-record.js'
 import { runCommunityTerminal, signInCommunity } from '../fixtures/community-native-browser.js'
 import { refreshAppCenter, setAppCenterVisibility } from './app-center-visibility.js'
+import { retainedMcpSettings } from './installed-retained-mcp-catalog.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
 import { retainedPluginSnapshot, retainedCatalogSnapshot, retainedContributionSnapshot, retainedOfficialCatalog } from './installed-retained-contributions.js'
 import { installedMemberHome, installedShellArgument } from './installed-storage-layout.js'
@@ -56,6 +58,7 @@ export async function assertRetainedUpgradeAfter(input: {
   redact: (text: string) => string
   remote: (command: string, timeout?: number, acceptedExitCodes?: number[]) => Promise<string>
   candidate: string
+  externalMcpCatalog: boolean
   versions: { dsh: { revision: string } }
   release: Awaited<ReturnType<typeof installedReleaseFixture>>
   memberEntry: string
@@ -75,7 +78,7 @@ export async function assertRetainedUpgradeAfter(input: {
   beforePaused: PausedUpgradeState
   expertReplies: Record<string, boolean>
   beforeAccounts: unknown
-  beforeLibrary: unknown
+  beforeLibrary: readonly CommunityMcpSettings[]
   beforeSelection: unknown
   beforeGrants: { implicit?: boolean } & Record<string, unknown>
   history: () => Promise<{ execution: CommunityUsageRecords; mcp: CommunityUsageRecords; models: UsageModelView }>
@@ -98,6 +101,7 @@ export async function assertRetainedUpgradeAfter(input: {
     redact,
     remote,
     candidate,
+    externalMcpCatalog,
     versions,
     release,
     memberEntry,
@@ -196,7 +200,7 @@ export async function assertRetainedUpgradeAfter(input: {
     }),
   }
   expect(retainedAccounts).toEqual(beforeAccounts)
-  expect(await get('mcp')).toEqual(beforeLibrary)
+  expect((await get('mcp')).map(retainedMcpSettings)).toEqual(beforeLibrary.map(retainedMcpSettings))
   expect(await get(`groups/${groupId}/mcp`)).toEqual(beforeGrants)
   expect(await (await member.request.get(origin + '/market/api/mcp')).json()).toEqual(beforeSelection)
   expect(await remote('sudo cat ' + installedShellArgument((await installedMemberHome(remote, memberStorageKey)) + '/upgrade-owned.txt'))).toBe(
@@ -276,7 +280,9 @@ export async function assertRetainedUpgradeAfter(input: {
 
   expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
   expect(upstreamState.exposed).toBe(false)
-  expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
+  const mcpCatalog = await get('mcp/catalog')
+  if (externalMcpCatalog) expect(mcpCatalog).toMatchObject({ source: { status: 'ok' }, entries: [] })
+  else expect(mcpCatalog.map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
   return {
     retainedSession,
     appCenterGroupVisibilityPreserved: true,

@@ -253,6 +253,27 @@ it('updates the package and template while preserving an administrator edit', as
   expect((await f.rows.get('@fixture/editor'))?.version).toBe('3.0.0')
   expect((await f.accessStore.get('@fixture/editor'))?.environment[0]?.value).toBe('custom')
 })
+it('describes same-version configuration and artifact changes using installed package facts', async () => {
+  const f = await setup()
+  await f.suites.install(f.actor, request)
+  await f.settled('installed')
+  const target = (plugin: SuiteCatalogPluginItem) => [{ ...preset('9.0.0'), items: [plugin] }]
+  f.upgrade(target({ ...item(), access: { environment: [], entriesYaml: '' } }))
+  expect((await f.suites.updatePreview(f.actor, request.id)).plugin).toMatchObject({
+    from: '1.0.0',
+    to: '1.0.0',
+    artifactChanged: false,
+    configurationChanged: true,
+  })
+  f.upgrade(target({ ...item(), integrity: 'sha512-' + Buffer.alloc(64, 2).toString('base64') }))
+  expect((await f.suites.updatePreview(f.actor, request.id)).plugin).toMatchObject({
+    from: '1.0.0',
+    to: '1.0.0',
+    artifactChanged: true,
+    configurationChanged: false,
+  })
+})
+
 it('detaches a plugin so ordinary edits and uninstall leave it in place', async () => {
   const f = await setup()
   await f.suites.install(f.actor, request)

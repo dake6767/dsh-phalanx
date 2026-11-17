@@ -71,6 +71,7 @@ it.skipIf(!runtimeSettings.containerImage)(
     const transport = new NodePluginUpstreamTransport('idle')
     let fail = false,
       hold = false,
+      subscription: AbortSignal | undefined,
       release!: () => void,
       entered!: () => void
     const gate = new Promise<void>(resolve => {
@@ -102,6 +103,7 @@ it.skipIf(!runtimeSettings.containerImage)(
             try {
               const response = await transport.send(input)
               event.status = response.status
+              if (event.name === 'p-fixture' && event.method === 'GET' && response.ok) subscription = input.signal
               return response
             } catch (error) {
               event.error = error instanceof Error ? error.name + ': ' + error.message : 'transport-failed'
@@ -227,7 +229,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       await admin.getByRole('link', { name: 'MCP library', exact: true }).click()
       const start = async () => {
         await admin.getByRole('button', { name: 'Review catalog update', exact: true }).click()
-        await admin.getByText('Catalog update 1 → 2', { exact: true }).waitFor()
+        await admin.getByText('An update is available for this service.', { exact: true }).waitFor()
         const [accepted] = await Promise.all([
           admin.waitForResponse(response => response.url() === origin + '/admin/api/mcp/catalog/update' && response.request().method() === 'POST'),
           admin.getByRole('button', { name: 'Validate and update', exact: true }).click(),
@@ -278,6 +280,17 @@ it.skipIf(!runtimeSettings.containerImage)(
       await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
       await member.getByRole('tab', { name: 'MCP services', exact: true }).click()
       expect(await toggle.getAttribute('aria-checked')).toBe('true')
+
+      // Native DSH opens this shared MCP stream from the carrier, independently of Chromium.
+      await expect.poll(() => subscription?.aborted).toBe(false)
+      const resources = await (await admin.request.get(origin + '/admin/api/instance-resources')).json()
+      const instanceKey = async () => (await (await admin.request.get(origin + '/admin/api/instance-resources?username=alice')).json()).instanceKey
+      expect(await instanceKey()).toMatch(/^[a-f0-9-]+$/u)
+      expect(
+        (await post('instance-resources', { action: 'save-defaults', revision: resources.revision, limits: resources.defaults, idleSeconds: 2 })).status(),
+      ).toBe(200)
+      await context.close()
+      await expect.poll(instanceKey, { timeout: 30000 }).toBeNull()
       passed = true
     } finally {
       release()

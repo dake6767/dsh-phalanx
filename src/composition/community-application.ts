@@ -146,6 +146,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       memberPluginAccess: () => memberPluginAccess,
       recordsReady: () => lifecycle.recordsReady(),
       canDiscardArtifacts,
+      mcpCatalog: () => loadMcpCatalog(),
     })
     const pluginLibrary = createCommunityPlugins({
       database,
@@ -181,8 +182,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       new FileContributionPluginFiles(join(dataRoot, 'plugins')),
     )
     const credential = new CommunityBootstrapCredential(dataRoot, databaseBootstrap.complete.bind(databaseBootstrap))
-    const catalogAddress = options.suiteCatalog?.address ?? config.suiteCatalog?.address
-    const suites = createSuiteApplication({
+    const { suites, loadMcpCatalog } = createSuiteApplication({
       database,
       accounts,
       downloads,
@@ -191,8 +191,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       compatibilityTarget: pluginCompatibilityTarget(),
       architecture: process.arch === 'x64' ? 'amd64' : 'arm64',
       catalog: {
-        ...(catalogAddress !== undefined ? { address: catalogAddress } : {}),
-        ...(options.suiteCatalog?.trustedKeys ? { trustedKeys: options.suiteCatalog.trustedKeys } : {}),
+        ...config.suiteCatalog,
+        ...options.suiteCatalog,
       },
       dependencies: runtimeDependencies,
       skills,

@@ -57,6 +57,7 @@ export type CommunityErrorCode =
   | 'contribution-invalid'
   | 'contribution-limit'
   | 'contribution-unavailable'
+  | 'mcp-catalog-unavailable'
   | 'mcp-catalog-locked'
   | 'mcp-import-retired'
   | 'mcp-name-conflict'

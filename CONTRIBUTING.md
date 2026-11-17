@@ -518,6 +518,20 @@ matching branch with its snapshot SHA:
 gh workflow run candidate.yml --repo dake6767/dsh-phalanx --ref candidate/<version> -f commit=<snapshot-sha>
 ```
 
+When a formal upgrade scenario requires a signed catalog, publish it against
+the public candidate snapshot first. Verify the immutable catalog release
+asset and pass its identity when dispatching Candidate:
+
+```bash
+gh workflow run candidate.yml --repo dake6767/dsh-phalanx --ref candidate/<version> \
+  -f commit=<snapshot-sha> -f signed_catalog=<catalog-tag>@<catalog-json-sha256>
+```
+
+Manual `linux-t2.yml` dispatch uses the same `signed_catalog` input. A manual formal
+upgrade test uses `DSH_PHALANX_UPGRADE_SIGNED_CATALOG` with the same value.
+The optional T4 installed-system upgrade can use that environment variable
+to include the signed MCP migration checks.
+
 Ubuntu 26.04 host verification is optional and defaults to disabled. Select
 `verify_ubuntu_2604=true` on Candidate to install the same verified amd64 bundle
 on a native `ubuntu-26.04` runner and execute the existing installed-entry case,
@@ -768,26 +782,44 @@ candidate remains available for acceptance and later formal-release cleanup.
 
 ### Catalog publication checks
 
-The suite gallery reads signed online data. Catalog maintainers run the same
-structural, content hash, download-source, adapter, platform compatibility,
-dependency and command-conflict checks before signing:
+The skill, plugin and MCP galleries read one signed online catalog. Before
+signing, catalog maintainers run platform checks for document structure, entry
+content hashes, adapters, compatibility, dependency references and gallery tags:
 
 ```bash
 node --import tsx scripts/check-suite-catalog.ts catalog.json <platform-version>
 ```
 
 Run this from a platform checkout with its frozen dependencies installed. The
-input uses the catalog document format with `format`, `publishedAt` and `entries`;
-`signature` may be absent because this command checks data before signing. Online
-loading always requires a trusted Ed25519 signature. Entries using platform
-adapters must declare a minimum compatible platform version. Keep concrete entries in the
-catalog repository; platform tests use signed HTTP fixtures, never a shipped
-catalog snapshot.
+input uses the catalog document format with `format`, `publishedAt`, `entries`
+and optional `galleryTags`. This command checks data before signing. Online
+loading requires a trusted Ed25519 signature. Each adapter entry declares its
+compatible platform range. Tag-only changes stay outside per-entry hashes.
+Maintain concrete entries and tags in the catalog repository.
 
-Catalog CI can run the existing suite equivalence tests against its actual
-publication by setting `DSH_PHALANX_CATALOG_TEST_FILE` to the absolute unsigned
-catalog path. This option exists only in test fixtures; production always uses
-the signature-verifying online reader and compiled trusted public keys.
+Catalog CI runs suite equivalence tests against its actual output. For the
+initial MCP migration, run the migration-specific test from the platform
+checkout with its frozen dependencies installed.
+
+```sh
+DSH_PHALANX_CATALOG_TEST_FILE=/absolute/path/to/catalog.unsigned.json \
+  corepack pnpm exec vitest run tests/mcp-catalog-equivalence.spec.ts --maxWorkers=1
+```
+
+Production uses the online reader with its compiled trust keys. See
+[Signed catalogs](docs/architecture.md#signed-catalogs) for reader behavior.
+
+When a catalog adds a new adapter, first make the public platform candidate
+available. Pin that commit and version in the catalog repository, verify the
+actual declarations in its pull request and record acceptance. After merging
+the catalog pull request, manually dispatch the **Catalog** workflow on the
+catalog repository's `main` branch. Record the catalog release and source
+commit. Verify the published `catalog.json` against `catalog.sha256`, then use
+the candidate's trusted reader to verify the signature, the expected entries
+and their platform compatibility. Complete this verification before running
+installed-candidate checks that depend on the online catalog. Preserve signed
+release history when withdrawing an entry and publish the corrected catalog
+through the same workflow.
 
 ### Manual performance measurements
 

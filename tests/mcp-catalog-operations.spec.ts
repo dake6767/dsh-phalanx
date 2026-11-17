@@ -73,14 +73,14 @@ function fixture(runtime?: import('../src/ports/mcp-services.js').McpRuntimePort
 }
 const input = { presetId: 'amap', name: 'p-map', credential: 'fixture-key', requestId: 'import-update-fixture-01' }
 const update = { name: 'p-map', version: '2', requestId: 'catalog-update-request-01' }
-async function ready(f: ReturnType<typeof fixture>) {
-  await f.service.importCatalog(f.actor, input)
+async function ready(f: ReturnType<typeof fixture>, importInput = input) {
+  await f.service.importCatalog(f.actor, importInput)
   await f.service.recordTest(f.actor, input.name, (await f.service.diagnostic('admin', input.name)).generation, [{ name: 'weather', inputSchema: {} }])
   await f.service.grant(f.actor, 'members', [input.name])
   f.presets[0] = {
     ...f.presets[0]!,
     entry: { ...f.presets[0]!.entry, version: '2' },
-    configuration: { ...f.presets[0]!.configuration, url: 'https://new.example.test' },
+    configuration: { ...f.presets[0]!.configuration, url: 'https://old.example.test/v2' },
   }
 }
 it('keeps the adopted remote service until candidate validation passes, then preserves current management state', async () => {
@@ -92,7 +92,7 @@ it('keeps the adopted remote service until candidate validation passes, then pre
   const candidate = await f.service.beginCatalogUpdate(f.actor, update)
   expect((await f.service.effective('member'))[0]?.url).toBe('https://old.example.test')
   expect(await f.service.beginCatalogUpdate(f.actor, update)).toEqual(candidate)
-  expect((await f.service.diagnostic('admin', candidate.name)).url).toBe('https://new.example.test')
+  expect((await f.service.diagnostic('admin', candidate.name)).url).toBe('https://old.example.test/v2')
   expect((await f.service.effective('member')).some(row => row.name === candidate.name)).toBe(false)
   await f.service.publish(f.actor, input.name, true)
   await f.service.toggle(f.member, input.name, false)
@@ -109,7 +109,7 @@ it('keeps the adopted remote service until candidate validation passes, then pre
   })
   expect(await f.service.effective('member')).toEqual([])
   await f.service.toggle(f.member, input.name, true)
-  expect((await f.service.effective('member'))[0]).toMatchObject({ url: 'https://new.example.test', credential: 'fixture-key' })
+  expect((await f.service.effective('member'))[0]).toMatchObject({ url: 'https://old.example.test/v2', credential: 'fixture-key' })
 })
 it.each(['failure', 'restart', 'rotation', 'deletion', 'revocation'] as const)('never applies an obsolete candidate after %s', async change => {
   const f = fixture()
@@ -154,7 +154,7 @@ it('automatically probes an update once, records failure for retry, and keeps th
   fail = false
   await jobs.update(f.actor, { ...update, requestId: 'catalog-update-retry-02' })
   await jobs.drain()
-  expect((await f.service.effective('member'))[0]?.url).toBe('https://new.example.test')
+  expect((await f.service.effective('member'))[0]?.url).toBe('https://old.example.test/v2')
   expect(calls).toBe(2)
   await jobs.stop()
 })
@@ -179,11 +179,13 @@ it('keeps adopted preparation owners disjoint from later manual service names', 
     changed: async () => {},
     restart() {},
   })
+  const { credentialLabel, ...entry } = f.presets[0]!.entry
+  void credentialLabel
   f.presets[0] = {
-    ...f.presets[0]!,
+    entry: { ...entry, location: 'shared' },
     configuration: { description: 'Fixture', url: '', run: { location: 'shared', command: 'node', args: [], env: [], prepareCommand: 'fixture' } },
   }
-  await ready(f)
+  await ready(f, { ...input, credential: '' })
   const candidate = await f.service.beginCatalogUpdate(f.actor, update)
   await f.service.testCatalogUpdate(f.actor, candidate.name)
   await f.service.finishCatalogUpdate(f.actor, candidate.name, [])
@@ -198,16 +200,18 @@ it('removes obsolete credential mappings exactly as the validated candidate did'
   await ready(f)
   f.presets[0] = {
     ...f.presets[0]!,
-    configuration: { description: 'Header service', url: 'https://new.example.test', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] },
+    configuration: { description: 'Header service', url: 'https://old.example.test/v2', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] },
   }
-  const candidate = await f.service.beginCatalogUpdate(f.actor, update)
+  expect((await f.service.catalogUpdatePreview(f.actor, input.name)).credentialRequired).toBe(true)
+  await expect(f.service.beginCatalogUpdate(f.actor, update)).rejects.toMatchObject({ code: 'mcp-service-invalid' })
+  const candidate = await f.service.beginCatalogUpdate(f.actor, { ...update, credential: 'replacement-key' })
   expect((await f.service.diagnostic('admin', candidate.name)).query ?? []).toEqual([])
   await f.service.testCatalogUpdate(f.actor, candidate.name)
   await f.service.finishCatalogUpdate(f.actor, candidate.name, [])
   expect(await f.service.diagnostic('admin', input.name)).toMatchObject({
     query: [],
     headers: [{ name: 'Authorization', value: 'Bearer {credential}' }],
-    credential: 'fixture-key',
+    credential: 'replacement-key',
   })
 })
 
@@ -295,4 +299,16 @@ it('freezes bilingual catalog display defaults and preserves current field overr
   expect(updated.display).not.toHaveProperty('description')
   await f.service.save(f.actor, { ...mcpWriteInput(updated), display: { description: '' } })
   expect(mcpDisplayText((await f.service.list(f.actor))[0]!, 'en')).toEqual({ name: '我的工具', description: '' })
+})
+
+it('never reuses the old key when a catalog update points at another HTTPS origin', async () => {
+  const f = fixture()
+  await ready(f)
+  f.presets[0] = { ...f.presets[0]!, configuration: { ...f.presets[0]!.configuration, url: 'https://another.example.test/mcp' } }
+  expect((await f.service.catalogUpdatePreview(f.actor, input.name)).credentialRequired).toBe(true)
+  await expect(f.service.beginCatalogUpdate(f.actor, update)).rejects.toMatchObject({ code: 'mcp-service-invalid' })
+  expect((await f.service.list(f.actor))[0]?.catalogUpdate).toBeUndefined()
+  const operation = await f.service.beginCatalogUpdate(f.actor, { ...update, credential: 'new-receiver-key' })
+  expect(await f.service.diagnostic('admin', operation.name)).toMatchObject({ url: 'https://another.example.test/mcp', credential: 'new-receiver-key' })
+  expect(await f.service.diagnostic('admin', input.name)).toMatchObject({ url: 'https://old.example.test', credential: 'fixture-key' })
 })

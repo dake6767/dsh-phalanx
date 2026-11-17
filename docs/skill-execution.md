@@ -1,6 +1,6 @@
 # Configure platform execution for a skill
 
-[简体中文](skill-execution.zh-CN.md) · [Skill library](install.md#skills)
+[简体中文](skill-execution.zh-CN.md) · [Skill library](admin-guide.md#skills)
 
 Platform execution lets an authorized member invoke an administrator-configured command with platform credentials. Credentials remain in platform storage and enter only the execution process. Ordinary skill scripts still run with member permissions unless explicitly delegated.
 
@@ -112,7 +112,7 @@ it is not bundled or cached. The default address is
 `https://github.com/dake6767/dsh-phalanx-catalog/releases/latest/download/catalog.json`,
 accessed through the configured **GitHub asset prefix** in **Download sources**.
 To use another service or mirror, set `DSH_PHALANX_SUITE_CATALOG_ADDRESS` in the
-[protected service environment](install.md#service-management-and-recovery),
+[protected service environment](operations.md#service-management-and-recovery),
 then restart the platform. Supply an HTTP(S) document URL without credentials,
 a query or a fragment. A custom URL is used as given, without adding the prefix;
 changing the address does not change the trusted signing keys.
@@ -131,7 +131,7 @@ Installation runs as a background task with progress and logs. Dependencies and 
 
 ### Updates, detaching and uninstalling
 
-A platform upgrade does not update installed catalog entries. **Update available** appears when the online catalog has a newer version. Choose **Update** to preview dependency changes, skills added/updated/removed, skill-pack membership, delegated commands and credential variables. A shared dependency's preview also names the entries using it. New dependencies are prepared and checked before switching; the most recent successful old dependency version is retained. Saved credentials, grants, publication and member selections are preserved for surviving entries. Added skills join the entry pack and follow its grants; removed skills are withdrawn. A newly required credential keeps execution off until saved. A failed update restores the previous version. If recovery or final cleanup cannot finish, the log records the pending step; restart the platform to retry it before another entry task.
+A platform upgrade does not update installed catalog entries. **Update available** appears when the online catalog supplies an update. The indicator covers configuration and runtime dependency changes, including updates where the software version stays the same. Choose **Update** to preview dependency changes, skills added/updated/removed, skill-pack membership, delegated commands and credential variables. A shared dependency's preview also names the entries using it. New dependencies are prepared and checked before switching; the most recent successful old dependency version is retained. Saved credentials, grants, publication and member selections are preserved for surviving entries. Added skills join the entry pack and follow its grants; removed skills are withdrawn. A newly required credential keeps execution off until saved. A failed update restores the previous version. If recovery or final cleanup cannot finish, the log records the pending step; restart the platform to retry it before another entry task.
 
 Catalog-owned library entries are read-only and show **From “X”**. **Detach from “X”** makes an entry an ordinary editable entry, preserving its grants, publication and references. It stops following entry updates and stays when the entry is uninstalled. Detaching a skill also detaches its delegated execution configuration.
 

@@ -1,9 +1,10 @@
+import { useCatalogFilters } from './CommunityCatalogFilters'
 import { McpDisplayFields } from './CommunityMcpFields'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
 import { Chip } from '@heroui/react/chip'
-import type { CommunityMcpCatalogEntry, CommunityMcpSettings, CommunityMcpCatalogInput } from '../../src/domain/admin-contract'
+import type { CommunityMcpCatalogEntry, CommunityMcpSettings, CommunityMcpCatalogInput, CommunityMcpCatalogView } from '../../src/domain/admin-contract'
 import { communityMcpCatalog, importCommunityMcp } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
@@ -23,51 +24,77 @@ export default function CommunityMcpCatalog({
   onImported: (rows: readonly CommunityMcpSettings[]) => void
 }) {
   const { t, locale, errorText } = usePlatformLanguage()
-  const [entries, setEntries] = useState<readonly CommunityMcpCatalogEntry[]>(),
+  const [view, setView] = useState<CommunityMcpCatalogView>(),
     [error, setError] = useState<unknown>(),
     [selected, setSelected] = useState<CommunityMcpCatalogEntry>()
   const [revision, setRevision] = useState(0)
   useEffect(() => {
     const controller = new AbortController()
     void communityMcpCatalog(controller.signal)
-      .then(setEntries)
+      .then(next => {
+        if (!controller.signal.aborted) setView(next)
+      })
       .catch(failure => {
         if (!controller.signal.aborted) setError(failure)
       })
     return () => controller.abort()
   }, [revision])
+  const { visible, controls, empty } = useCatalogFilters(view?.entries ?? [], 'mcp', view?.galleryTags)
+  const unavailable = view && view.source.status !== 'ok'
+  const reload = () => {
+    setError(undefined)
+    setRevision(value => value + 1)
+  }
   return (
     <section className="panel plugin-library-panel" aria-label={t('MCP catalog')}>
       <div className="panel-top panel-filter-header">
         <div>
           <div className="panel-title-row">
             <h2>{t('MCP catalog')}</h2>
-            <span className="panel-item-count">{entries?.length ?? '—'}</span>
+            <span className="panel-item-count">{view ? visible.length : '—'}</span>
           </div>
           <p>{t('Platform-maintained MCP services. Enter the required inputs to prepare and test a service.')}</p>
         </div>
+        {view?.source.status === 'ok' && !error ? (
+          <Button variant="tertiary" size="sm" onPress={reload}>
+            {t('Reload the MCP catalog')}
+          </Button>
+        ) : null}
       </div>
+      {controls}
+      {unavailable ? (
+        <CommunityMessage
+          role="alert"
+          status="warning"
+          title={t(view.source.status === 'rejected' ? 'The catalog was rejected' : 'The catalog service is unreachable')}
+        >
+          <p>{t('Installed MCP services keep their saved settings.')}</p>
+          <Button variant="secondary" onPress={reload}>
+            {t('Reload the MCP catalog')}
+          </Button>
+        </CommunityMessage>
+      ) : null}
       {error ? (
         <>
           <CommunityMessage role="alert" status="danger" title={errorText(error)} />
-          <Button
-            variant="secondary"
-            onPress={() => {
-              setError(undefined)
-              setRevision(value => value + 1)
-            }}
-          >
+          <Button variant="secondary" onPress={reload}>
             {t('Reload MCP services')}
           </Button>
         </>
       ) : null}
-      {!entries ? (
+      {error || unavailable ? null : !view ? (
         <p role="status" className="table-empty">
           {t('Loading…')}
         </p>
+      ) : !visible.length ? (
+        (empty ?? (
+          <p role="status" className="table-empty">
+            {t('The catalog is empty.')}
+          </p>
+        ))
       ) : (
         <div className="plugin-card-grid library-compact-grid">
-          {entries.map(entry => {
+          {visible.map(entry => {
             const count = rows?.filter(row => row.catalog?.id === entry.id).length ?? entry.imported
             return (
               <Card key={entry.id} className="plugin-library-card mcp-catalog-card">
@@ -76,8 +103,8 @@ export default function CommunityMcpCatalog({
                     <Card.Title>{entry.title[locale]}</Card.Title>
                     <CommunityIcon name="chevron" size={14} />
                   </div>
-                  <p className="plugin-summary-meta catalog-card-meta" title={`${t('Platform catalog')} · v${entry.version}`}>
-                    {t('Platform catalog')} · v{entry.version}
+                  <p className="plugin-summary-meta catalog-card-meta" title={t('Platform catalog')}>
+                    {t('Platform catalog')}
                   </p>
                   {entry.description[locale].trim() !== entry.title[locale].trim() ? <Card.Description>{entry.description[locale]}</Card.Description> : null}
                 </Card.Header>
@@ -158,7 +185,14 @@ function CatalogImport({
     setBusy(true)
     setError(undefined)
     try {
-      const rows = await importCommunityMcp({ name, credential, presetId: entry.id, requestId, ...(display ? { display } : {}) })
+      const rows = await importCommunityMcp({
+        name,
+        credential,
+        presetId: entry.id,
+        requestId,
+        ...(entry.contentHash ? { version: entry.version, contentHash: entry.contentHash } : {}),
+        ...(display ? { display } : {}),
+      })
       setCredential('')
       onImported(rows)
     } catch (failure) {
@@ -225,7 +259,6 @@ function CatalogImport({
               <div className="grant-row-main">
                 <p className="grant-row-title catalog-plan-title">
                   <span>{t('MCP service')} ·</span> <strong>{name}</strong>
-                  <span> · {t('Catalog version {version}', { version: entry.version })}</span>
                 </p>
               </div>
             </li>

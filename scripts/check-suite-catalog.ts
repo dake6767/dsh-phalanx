@@ -25,7 +25,9 @@ try {
     }
   }
   if (violations.length) throw new Error(violations.join('\n'))
-  console.log(`Catalog valid: ${result.entries.length} entries; ${result.skipped.length} reserved kinds skipped.`)
+  console.log(
+    `Catalog valid: ${result.entries.length + (result.mcp?.length ?? 0)} entries; ${result.mcp?.length ?? 0} MCP; ${result.skipped.length} reserved kinds skipped.`,
+  )
 } catch (error) {
   console.error(error instanceof Error ? error.message : 'Catalog check failed.')
   process.exitCode = 1

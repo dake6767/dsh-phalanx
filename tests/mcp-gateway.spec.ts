@@ -6,6 +6,7 @@ import { once } from 'node:events'
 import { afterEach, expect, it } from 'vitest'
 import { createMcpGateway } from '../src/inbound/mcp-gateway.js'
 import { NodePluginUpstreamTransport } from '../src/adapters/plugin-upstream-transport.js'
+import { MemorySessionRegistry } from '../src/adapters/memory-session-registry.js'
 import { CommunityModelAuthorization } from '../src/use-cases/community-model-authorization.js'
 const servers: Server[] = []
 afterEach(async () => {
@@ -314,6 +315,56 @@ it('allows a silent shared response past the remote transport deadline without w
   expect(sharedResponse!.destroyed).toBe(false)
   sharedResponse!.end('data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"completed"}]}}\n\n')
   expect(await shared).toContain('completed')
+})
+
+it('keeps a shared MCP subscription closable without treating it as an active tool call', async () => {
+  let finishCall!: () => void
+  const upstream = await listen(
+    createServer((request, response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      if (request.method === 'GET') {
+        response.write(': keepalive\n\n')
+        return
+      }
+      response.write(': call started\n\n')
+      finishCall = () => response.end('data: {"jsonrpc":"2.0","id":1,"result":{}}\n\n')
+    }),
+  )
+  const connections = new MemorySessionRegistry()
+  const service = {
+    name: 'p-shared',
+    generation: 1,
+    description: '',
+    url: '',
+    run: { location: 'shared' as const, command: 'fixture', args: [], env: [], prepareCommand: '' },
+  }
+  const handle = createMcpGateway({
+    wire: new McpHttpWire(),
+    authorization: modelAuthority(async () => 'member'),
+    services: mcpPolicy({ effective: async () => [service] }),
+    transport: new NodePluginUpstreamTransport('idle'),
+    shared: { connect: async () => ({ name: service.name, baseUrl: upstream, credential: '', headers: [] }) },
+    connections,
+  })
+  const origin = await listen(createServer((request, response) => void handle(request, response)))
+  const url = origin + '/mcp/p-shared'
+  const headers = { authorization: 'Bearer member', 'content-type': 'application/json' }
+  const subscription = await fetch(url, { headers })
+  const reader = subscription.body!.getReader()
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain('keepalive')
+  expect(connections.hasActiveConnection('member')).toBe(false)
+
+  const call = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search' } }),
+  })
+  expect(connections.hasActiveConnection('member')).toBe(true)
+  finishCall()
+  expect(await call.text()).toContain('"result":{}')
+  expect(connections.hasActiveConnection('member')).toBe(false)
+  await connections.closeUser('member')
+  await expect(reader.read()).rejects.toThrow()
 })
 
 it('rechecks streaming MCP grants and closes before forwarding a revoked record', async () => {

@@ -33,7 +33,7 @@ export async function mcpAdminRoute(
     const value = (await readCommunityJson(request, 32 * 1024)) as import('../domain/admin-contract.js').CommunityMcpCatalogUpdateInput
     if (!imports) throw new CommunityRequestError(400, 'Invalid MCP update', 'mcp-service-invalid')
     await imports.update(actor, value)
-    sendCommunityJson(response, 202, await services.list(actor))
+    sendCommunityJson(response, 202, await services.list(actor, false))
     return true
   }
   const catalog = url.pathname === '/admin/api/mcp/catalog'
@@ -56,7 +56,7 @@ export async function mcpAdminRoute(
     if (value.action === 'import' && value.input) await imports.import(actor, value.input)
     else if (value.action === 'retry' && typeof value.name === 'string') await imports.retry(actor, value.name)
     else throw new CommunityRequestError(400, 'Invalid MCP import', 'mcp-service-invalid')
-    sendCommunityJson(response, 202, await services.list(actor))
+    sendCommunityJson(response, 202, await services.list(actor, false))
     return true
   }
   if (url.pathname !== '/admin/api/mcp' && !testing && !group) return false
@@ -114,6 +114,6 @@ export async function mcpAdminRoute(
   else if (!group && value.action === 'remove' && typeof value.name === 'string' && (value.revision === undefined || typeof value.revision === 'string'))
     await services.remove(actor, value.name, value.revision)
   else throw new CommunityRequestError(400, 'Invalid MCP request', 'mcp-service-invalid')
-  sendCommunityJson(response, 200, await services.list(actor))
+  sendCommunityJson(response, 200, await services.list(actor, false))
   return true
 }

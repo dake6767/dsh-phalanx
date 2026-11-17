@@ -35,7 +35,7 @@ export function createSuiteApplication(input: {
   readonly plugins: PluginLibrary
   readonly access: PluginAccessAdministration
   readonly changed: () => Promise<void>
-}): SuiteCatalog {
+}) {
   const storage = createSuiteStorage(input.database)
   const gallery = new SuiteCatalogGallery({
     ...(input.catalog.address ? { configuredAddress: input.catalog.address } : {}),
@@ -46,7 +46,7 @@ export function createSuiteApplication(input: {
     fetcher: new HttpSuiteCatalogFetch(),
     log: line => console.warn(line),
   })
-  return new SuiteCatalog(
+  const suites = new SuiteCatalog(
     input.accounts,
     gallery,
     storage,
@@ -59,4 +59,5 @@ export function createSuiteApplication(input: {
     new SuitePlugins(input.plugins, input.access),
     { syntax: new YamlPluginAccessSyntax(), compatibilityTarget: input.compatibilityTarget, changed: input.changed },
   )
+  return { suites, loadMcpCatalog: () => gallery.mcpCatalog() }
 }

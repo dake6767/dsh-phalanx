@@ -364,7 +364,7 @@ export default function McpEditor({
                 ) : (
                   <>
                     <div className="plugin-section-heading">
-                      <p>{t('Catalog version {version}', { version: settings.catalog.version })}</p>
+                      <p>{t('Platform catalog')}</p>
                       <Chip size="sm" variant="soft">
                         {t(draft.run?.location === 'shared' ? 'Shared run' : draft.run?.location === 'member' ? 'Member container run' : 'Remote service')}
                       </Chip>

@@ -1,4 +1,9 @@
 export const en = {
+  'An update is available for this service.': 'An update is available for this service.',
+  'Current configuration': 'Current configuration',
+  'Updated configuration': 'Updated configuration',
+  'The current service remains available while the platform prepares and tests the update.':
+    'The current service remains available while the platform prepares and tests the update.',
   'Display name': 'Display name',
   'Function description': 'Function description',
   'Service identifier': 'Service identifier',
@@ -6,7 +11,7 @@ export const en = {
   'Validate and update': 'Validate and update',
   'The current service remains available until the new catalog version passes preparation and connection testing.':
     'The current service remains available until the new catalog version passes preparation and connection testing.',
-  'Your name, credentials, access settings and member choices are preserved.': 'Your name, credentials, access settings and member choices are preserved.',
+  'Your name, access settings and member choices are preserved.': 'Your name, access settings and member choices are preserved.',
   'Catalog update {before} \u2192 {after}': 'Catalog update {before} \u2192 {after}',
   'Current catalog version': 'Current catalog version',
   'New catalog version': 'New catalog version',
@@ -134,6 +139,10 @@ export const en = {
   'MCP service removed.': 'MCP service removed.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  'An update is available for this service.': '此服务有更新。',
+  'Current configuration': '当前配置',
+  'Updated configuration': '更新后的配置',
+  'The current service remains available while the platform prepares and tests the update.': '平台准备并验证更新期间，当前服务仍可使用。',
   'Display name': '展示名称',
   'Function description': '功能说明',
   'Service identifier': '服务标识',
@@ -141,7 +150,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Validate and update': '验证并更新',
   'The current service remains available until the new catalog version passes preparation and connection testing.':
     '新版广场服务准备并通过连接测试后才会切换，期间原服务继续可用。',
-  'Your name, credentials, access settings and member choices are preserved.': '保留服务名、凭据、授权设置和成员启停选择。',
+  'Your name, access settings and member choices are preserved.': '保留服务名、授权设置和成员启停选择。',
   'Catalog update {before} \u2192 {after}': '广场更新 {before} → {after}',
   'Current catalog version': '当前广场版本',
   'New catalog version': '新版广场服务',

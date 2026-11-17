@@ -134,7 +134,9 @@ it('serves both shipped market presets to two installed DSH members and recovers
     const groupIds = { alice: groups.find(row => row.isDefault)!.id, bob: groups.find(row => row.name === 'Self selected')!.id }
     for (const username of ['alice', 'bob'] as const)
       expect((await post('accounts', { username, password: 'password', email: '', groupId: groupIds[username] })).status()).toBe(201)
-    expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
+    const catalog = await get('mcp/catalog')
+    expect(catalog.source.status).toBe('ok')
+    expect(catalog.entries.map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
     for (const [title, name] of [
       ['Amap', 'p-amap'],
       ['12306', 'p-12306'],

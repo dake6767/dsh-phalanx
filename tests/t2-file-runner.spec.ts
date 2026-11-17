@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, writeFile, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, readlink, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
@@ -91,6 +91,33 @@ if args[0]=='create' and os.environ.get('TMPDIR')!='/tmp':sys.exit(65)
       .map(line => JSON.parse(line))
     expect(calls.find(row => row.args[0] === 'create')?.tmp).toBe('/tmp')
     expect(calls.find(row => row.args[0] === 'inspect')?.tmp).toBe(join(root, 'run/tmp'))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('keeps private hosted scratch out of the evidence tree even when the file fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hosted-file-scratch-'))
+  try {
+    const scratch = join(root, 'scratch')
+    await mkdir(scratch)
+    const child = 'const fs=require("node:fs");fs.symlinkSync("fixture",process.env.TMPDIR+"/live");console.log(process.env.TMPDIR);process.exit(1)'
+    const module = new URL(`file://${resolve('scripts/validation/file-runner.mjs')}`).href
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import {runFile} from ${JSON.stringify(module)};console.log(JSON.stringify(await runFile({file:'hosting',index:105,directory:${JSON.stringify(join(root, 'evidence'))},containerChecks:false,command:[process.execPath,'-e',${JSON.stringify(child)}]}))); `,
+      ],
+      { encoding: 'utf8', timeout: 10000, env: { ...process.env, DSH_PHALANX_T2_SCRATCH_ROOT: scratch } },
+    )
+    expect(result.status, result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout.trim())).toMatchObject({ status: 'failed', cleanup: { passed: true } })
+    const temporary = (await readFile(join(root, 'evidence/output.log'), 'utf8')).trim()
+    expect(temporary.startsWith(scratch + '/')).toBe(true)
+    expect(await readlink(join(temporary, 'live'))).toBe('fixture')
+    expect(await readdir(join(root, 'evidence'))).not.toContain('tmp')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

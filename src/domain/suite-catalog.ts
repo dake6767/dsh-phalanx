@@ -8,10 +8,17 @@ import { runtimeDependencyInput } from './runtime-dependency.js'
 export type SuiteCatalogArchitecture = 'amd64' | 'arm64'
 export type SuiteCatalogItemKind = 'runtime-dependency' | 'skill' | 'skill-pack' | 'execution' | 'plugin'
 
+export interface SuiteCatalogRepositoryPin {
+  readonly repository: string
+  readonly commit: string
+  readonly href: string
+}
+
 /** One installable unit. Every kind implements the same plan/prepare/commit/rollback/uninstall operations. */
 export interface SuiteCatalogRuntimeDependencyItem {
   readonly kind: 'runtime-dependency'
   readonly type?: 'python-library' | 'resource'
+  readonly sourceRepositories?: readonly SuiteCatalogRepositoryPin[]
   readonly packages?: readonly string[]
   readonly name: string
   readonly prepareCommands: Readonly<Partial<Record<SuiteCatalogArchitecture, string>>>

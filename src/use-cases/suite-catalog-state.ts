@@ -101,6 +101,9 @@ export async function suiteCatalogView(
         const plugin = suite?.items.find((item): item is SuiteCatalogPluginItem => item.kind === 'plugin')
         // Rejected entries may be projected before their archive extensions have been read.
         const sourceLinks = entry.unavailableReason ? [] : catalogSourceLinks(entry)
+        const dependencySources = entry.unavailableReason
+          ? []
+          : entry.items.flatMap(item => (item.kind === 'runtime-dependency' ? (item.sourceRepositories ?? []).map(pin => ({ name: item.name, ...pin })) : []))
         const services: CommunityCatalogServiceDefinition[] = entry.items.flatMap(item =>
           (item.kind === 'execution' || item.kind === 'plugin') && item.serviceSlots?.length
             ? [
@@ -123,6 +126,7 @@ export async function suiteCatalogView(
           description: entry.description,
           source: entry.source,
           ...(sourceLinks.length ? { sourceLinks } : {}),
+          ...(dependencySources.length ? { dependencySources } : {}),
           version: entry.version,
           commands: [...new Set(entry.items.flatMap(item => (item.kind === 'runtime-dependency' ? item.commands : [])))],
           available: Object.keys(reason).length === 0,

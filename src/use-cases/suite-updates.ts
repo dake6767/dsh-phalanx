@@ -166,14 +166,16 @@ export class SuiteUpdates {
         ])
       : undefined
     if (!row || !item || context.record.detached?.some(next => next.kind === 'plugin')) return undefined
+    const installed = row.current?.packageName === item.packageName ? row.current : undefined
     const settings = await this.plugins?.suitePluginAccess(origin),
       current = settings ?? { environment: [], entriesYaml: '' }
     const next = item.access.environment,
       old = current.environment
     return {
       packageName: item.packageName,
-      from: row.version,
+      ...(installed ? { from: installed.version, artifactChanged: installed.integrity !== item.integrity } : {}),
       to: item.version,
+      ...(row.suiteAppliedAccess ? { configurationChanged: row.suiteAppliedAccess !== pluginAccessIdentity(item.access) } : {}),
       modified: row.suiteAppliedAccess !== pluginAccessIdentity(current),
       access: {
         entriesChanged: item.access.entriesYaml !== current.entriesYaml,

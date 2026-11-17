@@ -442,7 +442,7 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
         </g>
         <g data-graph-role="automatic-crossover" style="--step:2">
           <path data-graph-role="automatic-crossover-underlay" d="M 470 170 L 470 290" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="platform" data-edge-to="platformData" data-edge-label="Private state" data-edge-key="2" data-edge-id="platform-state" data-composition-points="470,170;470,290" data-composition-crossover="halo" data-composition-independent="true" d="M 470 170 L 470 290" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-edge-from="platform" data-edge-to="platformData" data-edge-label="Account and service state" data-edge-key="2" data-edge-id="platform-state" data-composition-points="470,170;470,290" data-composition-crossover="halo" data-composition-independent="true" d="M 470 170 L 470 290" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:3">
           <path data-graph-role="automatic-crossover-underlay" d="M 950 170 L 950 290" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
@@ -494,16 +494,16 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
         <text x="950" y="144" class="t-muted" font-size="9" text-anchor="middle">DSH + protected platform plugin</text>
         </g>
 
-        <g id="node-platformData" data-node-id="platformData" data-node-label="Platform data root" tabindex="0" role="button" aria-label="Focus Platform data root, Accounts, provider keys, state, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="Accounts, provider keys, state" data-node-context="Architecture component">
-          <title>Platform data root · Accounts, provider keys, state · Architecture component</title>
+        <g id="node-platformData" data-node-id="platformData" data-node-label="Platform PostgreSQL" tabindex="0" role="button" aria-label="Focus Platform PostgreSQL, Accounts and encrypted keys, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="Accounts and encrypted keys" data-node-context="Architecture component">
+          <title>Platform PostgreSQL · Accounts and encrypted keys · Architecture component</title>
           <rect x="350" y="290" width="240" height="70" rx="6" class="c-mask"/>
           <rect x="350" y="290" width="240" height="70" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(356 296) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" x="470" y="323" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Platform data root</text>
-        <text x="470" y="339" class="t-muted" font-size="9" text-anchor="middle">Accounts, provider keys, state</text>
+          <text data-node-label="" x="470" y="323" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Platform PostgreSQL</text>
+        <text x="470" y="339" class="t-muted" font-size="9" text-anchor="middle">Accounts and encrypted keys</text>
         </g>
 
         <g id="node-userData" data-node-id="userData" data-node-label="User data root" tabindex="0" role="button" aria-label="Focus User data root, Private home + workspace per space, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="Private home + workspace per space" data-node-context="Architecture component">
@@ -551,9 +551,9 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
           <rect x="637.8" y="110" width="144.4" height="14" rx="3" class="c-mask"/>
           <text x="710" y="120" class="t-edge-emphasis" font-size="8" text-anchor="middle">/app/&lt;spaceId&gt;/ · owner only</text>
         </g>
-        <g data-edge-from="platform" data-edge-to="platformData" data-edge-label="Private state" data-edge-key="2" data-edge-id="platform-state">
-          <rect x="391.6" y="223" width="72.4" height="14" rx="3" class="c-mask"/>
-          <text x="427.8" y="233" class="t-edge-default" font-size="8" text-anchor="middle">Private state</text>
+        <g data-edge-from="platform" data-edge-to="platformData" data-edge-label="Account and service state" data-edge-key="2" data-edge-id="platform-state">
+          <rect x="334" y="223" width="130" height="14" rx="3" class="c-mask"/>
+          <text x="399" y="233" class="t-edge-default" font-size="8" text-anchor="middle">Account and service state</text>
         </g>
         <g data-edge-from="member" data-edge-to="userData" data-edge-label="Own mounts" data-edge-key="3" data-edge-id="space-files">
           <rect x="886" y="223" width="58" height="14" rx="3" class="c-mask"/>
@@ -564,7 +564,7 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
           <text x="1020.5999999999999" y="433" class="t-edge-default" font-size="8" text-anchor="middle">Shared model + space token</text>
         </g>
         <g data-edge-from="gateway" data-edge-to="providers" data-edge-label="Protocol request + provider key" data-edge-key="5" data-edge-id="upstream">
-          <rect x="629.65" y="510" width="160.7" height="14" rx="3" class="c-mask"/>
+          <rect x="630.6" y="510" width="158.79999999999998" height="14" rx="3" class="c-mask"/>
           <text x="710" y="520" class="t-edge-security" font-size="8" text-anchor="middle">Protocol request + provider key</text>
         </g>
 
