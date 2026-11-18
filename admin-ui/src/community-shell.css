@@ -326,4 +326,14 @@ html:has(.admin-shell) .provider-options .provider-choice.button[aria-pressed="t
 .platform-file-field .input { min-width: 0; }
 
 .catalog-gallery-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 0 18px 14px; }
-@media (min-width: 601px) { .catalog-gallery-filters:has(> :nth-child(2)) { grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem); } }
+.catalog-tag-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.catalog-tag-buttons > .button {
+  height: auto;
+  min-height: 32px;
+  max-width: 100%;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

@@ -1,6 +1,8 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { PLATFORM_SCHEMA_VERSION } from '../src/adapters/platform-schema.js'
 import { retainedArtifactCarriers } from './fixtures/retained-artifacts.js'
+import { createHash } from 'node:crypto'
+import { resolvePublishedPort } from '../src/adapters/runtime-process.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { testDatabaseConfigFile } from './support/community-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
@@ -12,6 +14,7 @@ import { chromium, type Browser } from 'playwright'
 import { startPlatformCli } from './support/platform-cli.js'
 import { afterEach, expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import { startNativeHistoryInventory } from './fixtures/native-history-inventory.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
@@ -21,6 +24,7 @@ import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 
 let root: string | undefined, cli: Awaited<ReturnType<typeof startPlatformCli>> | undefined
 let browser: Browser | undefined, model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
+let inventory: Awaited<ReturnType<typeof startNativeHistoryInventory>> | undefined
 afterEach(async test => {
   const failures: unknown[] = []
   try {
@@ -34,6 +38,7 @@ afterEach(async test => {
     () => cli?.stop(),
     () => (root === undefined ? undefined : new CommunityRuntimeDriver(runtimeSection(root, 'http://example.test', runtimeSettings)).rebuild()),
     () => model?.close(),
+    () => inventory?.close(),
   ]) {
     try {
       await action()
@@ -46,6 +51,7 @@ afterEach(async test => {
   cli = undefined
   browser = undefined
   model = undefined
+  inventory = undefined
   if (failures.length) throw new AggregateError(failures, 'Installed candidate cleanup failed; fixture data retained')
 })
 
@@ -97,7 +103,11 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
     identitiesPreserved: true,
   })
   model = await startCommunityModel()
+  inventory = await startNativeHistoryInventory()
+  const historyGate = inventory
   const environment = {
+    NODE_OPTIONS: `--import=${JSON.stringify(resolve('tests/fixtures/native-history-inventory-preload.mjs'))}`,
+    PHALANX_TEST_INVENTORY_GATE: historyGate.origin,
     DSH_PHALANX_MAINTENANCE_FILE: join(root, 'maintenance'),
     DSH_PHALANX_HOST: '127.0.0.1',
     DSH_PHALANX_PORT: '0',
@@ -168,16 +178,59 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   ).toBe(201)
   const context = await newValidationContext(browser),
     member = await context.newPage()
+  const owner = createHash('sha256').update(root).digest('hex')
+  const runtime = runtimeSection(root, model.origin, runtimeSettings)
+  if (!('container' in runtime)) throw new Error('Candidate carrier is unavailable')
+  const container = runtime.container
+  const carrier = async () => {
+    const id = (
+      await execFileText(container.runtime, [
+        'ps',
+        '--filter',
+        `label=dsh-phalanx.community-root=${owner}`,
+        '--filter',
+        'label=dsh-phalanx.user=member',
+        '--format',
+        '{{.ID}}',
+      ])
+    ).trim()
+    expect(id).toMatch(/^[a-f0-9]+$/u)
+    return { id, port: await resolvePublishedPort(container, id) }
+  }
   await signInCommunity(member, origin, 'member', 'member-password')
+  const originalInstance = await carrier()
   await selectCommunityWorkspace(context, member, origin, instanceWorkspacePath('', true), true)
-  await runCommunityTerminal(member, "printf 'CANDIDATE_%s' 'TERMINAL_READY'", 'CANDIDATE_TERMINAL_READY')
+  // Cancellation marks this instance's original deadline. Keep its retry's response held too.
+  await expect.poll(() => historyGate.cancelled(originalInstance.port), { timeout: 60_000 }).toBeGreaterThan(0)
+  const inventoryPending = () => historyGate.pending(originalInstance.port)
+  await expect.poll(inventoryPending, { timeout: 60_000 }).toBeGreaterThan(0)
   const composer = member.locator('[data-composer-input]')
   await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.')
   await composer.press('Enter')
   await member.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 60_000 })
+  await expect.poll(inventoryPending, { timeout: 60_000 }).toBeGreaterThan(0)
   model.release()
   await member.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).first().waitFor({ timeout: 60_000 })
   expect(await member.content()).not.toContain('community-provider-fixture-key')
+
+  expect(inventoryPending()).toBeGreaterThan(0)
+  expect(await carrier()).toEqual(originalInstance)
+  historyGate.release()
+  await runCommunityTerminal(member, "printf 'CANDIDATE_%s' 'TERMINAL_READY'", 'CANDIDATE_TERMINAL_READY')
+
+  await expect.poll(inventoryPending).toBe(0)
+  historyGate.hold()
+  const restarted = await context.request.post(origin + '/recovery/restart', {
+    headers: { origin },
+    data: { confirmed: true },
+  })
+  expect(restarted.ok(), await restarted.text()).toBe(true)
+  await member.goto(origin + '/enter')
+  await member.locator('#root').waitFor()
+  const replacement = await carrier()
+  expect(replacement.id).not.toBe(originalInstance.id)
+  await expect.poll(() => historyGate.pending(replacement.port), { timeout: 60_000 }).toBeGreaterThan(0)
+  historyGate.release()
 
   await browser.close()
   browser = undefined

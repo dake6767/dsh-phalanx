@@ -37,6 +37,7 @@ export function communityContainerPassthroughEnvironment(input: Readonly<Record<
 /** Container CLI facts used only for ownership checks and removal. */
 export interface ManagedContainerRecord {
   readonly name: string
+  readonly id?: string
   readonly running: boolean
   readonly labels: Readonly<Record<string, string>>
 }
@@ -104,7 +105,7 @@ export function parseManagedContainers(output: string): ManagedContainerRecord[]
   const records: ManagedContainerRecord[] = []
   for (const entry of entries) {
     if (typeof entry !== 'object' || entry === null) throw new Error('managed container listing contained an invalid row')
-    const candidate = entry as { Names?: unknown; Name?: unknown; State?: unknown; Labels?: unknown }
+    const candidate = entry as { Names?: unknown; Name?: unknown; Id?: unknown; ID?: unknown; State?: unknown; Labels?: unknown }
     const names = [...(Array.isArray(candidate.Names) ? candidate.Names : [candidate.Names]), candidate.Name]
     const name = names.find((value): value is string => typeof value === 'string' && value.length > 0)
     if (name === undefined) throw new Error('managed container listing contained a row without a name')
@@ -114,7 +115,8 @@ export function parseManagedContainers(output: string): ManagedContainerRecord[]
         if (typeof value === 'string') labels[key] = value
       }
     }
-    records.push({ name, running: candidate.State === 'running', labels })
+    const id = candidate.Id ?? candidate.ID
+    records.push({ name, ...(typeof id === 'string' ? { id } : {}), running: candidate.State === 'running', labels })
   }
   return records
 }
@@ -128,6 +130,7 @@ export function buildCommunityContainerLaunchCommand(input: {
   readonly spaceId: string
   readonly hostname: string
   readonly runtimeHome: string
+  readonly profileWriterHome?: string
   readonly workspace: string
   readonly publicAuthority: string
   readonly publicUrl?: string
@@ -185,6 +188,7 @@ export function buildCommunityContainerLaunchCommand(input: {
       `dsh-phalanx.user=${input.userId}`,
       '--label',
       `dsh-phalanx.space=${input.spaceId}`,
+      ...(input.profileWriterHome ? ['--label', `${PROFILE_WRITER_HOME_LABEL}=${input.profileWriterHome}`] : []),
       '--security-opt',
       'unmask=/proc/*',
       '--userns=keep-id',
@@ -227,3 +231,4 @@ export function buildCommunityContainerLaunchCommand(input: {
     ],
   }
 }
+import { PROFILE_WRITER_HOME_LABEL } from './container-write-lock.js'

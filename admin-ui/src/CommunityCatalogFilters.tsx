@@ -4,7 +4,6 @@ import type { CatalogGalleryTags } from '../../src/domain/suite-catalog-tags'
 import type { SuiteCatalogLocalized } from '../../src/domain/suite-catalog-document'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityField from './CommunityField'
-import CommunitySelect from './CommunitySelect'
 
 const all = ':all'
 const unclassified = ':unclassified'
@@ -19,8 +18,9 @@ export function useCatalogFilters<T extends { id: string; title: SuiteCatalogLoc
   const [selection, setSelection] = useState(all)
   const entryIds = new Set(entries.map(entry => entry.id))
   const assignments = new Map(metadata?.assignments.filter(row => row.kind === kind && entryIds.has(row.id)).map(row => [row.id, row.tags]))
-  const activeTags = new Set([...assignments.values()].flat())
-  const options = metadata?.tags.filter(tag => activeTags.has(tag.id)) ?? []
+  const activeTags = new Set(entries.flatMap(entry => assignments.get(entry.id) ?? []))
+  const definitions = new Map(metadata?.tags.map(tag => [tag.id, tag]))
+  const options = [...activeTags].flatMap(id => definitions.get(id) ?? [])
   const tag = activeTags.has(selection) || (options.length && selection === unclassified) ? selection : all
   if (tag !== selection) setSelection(tag)
   const search = query.trim().toLocaleLowerCase(locale)
@@ -39,16 +39,17 @@ export function useCatalogFilters<T extends { id: string; title: SuiteCatalogLoc
       <div className="catalog-gallery-filters">
         <CommunityField label={t('Search catalog')} value={query} onChange={setQuery} />
         {options.length ? (
-          <CommunitySelect
-            label={t('Filter by tag')}
-            value={tag}
-            onChange={setSelection}
-            options={[
+          <div role="group" aria-label={t('Filter by tag')} className="catalog-tag-buttons">
+            {[
               { id: all, label: t('All entries') },
-              { id: unclassified, label: t('Unclassified') },
               ...options.map(option => ({ id: option.id, label: option.label[locale] })),
-            ]}
-          />
+              { id: unclassified, label: t('Unclassified') },
+            ].map(({ id, label }) => (
+              <Button key={id} size="sm" variant={id === tag ? 'primary' : 'outline'} aria-pressed={id === tag} onPress={() => setSelection(id)}>
+                {label}
+              </Button>
+            ))}
+          </div>
         ) : null}
       </div>
     ) : null,

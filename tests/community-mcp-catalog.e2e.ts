@@ -43,8 +43,8 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     includeTravel = true
   const tags = {
     tags: [
-      { id: 'maps', label: { en: 'Maps', 'zh-CN': '地图' } },
       { id: 'travel', label: { en: 'Travel', 'zh-CN': '出行' } },
+      { id: 'maps', label: { en: 'Maps', 'zh-CN': '地图' } },
       { id: 'collaboration', label: { en: 'Collaboration', 'zh-CN': '协作' } },
       { id: 'editing', label: { en: 'Editing', 'zh-CN': '编辑' } },
     ],
@@ -158,9 +158,11 @@ it('imports a preset through the skill-pack style market, persists failure, retr
       const loaded = await reply
       expect(loaded.status()).toBe(200)
       expect(await loaded.json()).toMatchObject({ source: { status: 'ok' }, galleryTags: tags })
-      await page.getByRole('button', { name: 'Filter by tag' }).click()
-      expect(await page.getByRole('option', { name: gallery.excluded }).count()).toBe(0)
-      await page.getByRole('option', { name: gallery.label }).click()
+      const galleryFilters = page.getByRole('group', { name: 'Filter by tag', exact: true })
+      await galleryFilters.getByRole('button', { name: 'All entries', pressed: true }).waitFor()
+      expect(await galleryFilters.getByRole('button', { name: gallery.excluded, exact: true }).count()).toBe(0)
+      await galleryFilters.getByRole('button', { name: gallery.label, exact: true }).click()
+      expect(await galleryFilters.getByRole('button', { pressed: true }).allTextContents()).toEqual([gallery.label])
       const hit = page.getByRole('button', { name: `View catalog entry ${gallery.name}`, exact: true })
       await hit.waitFor()
       await page.getByLabel('Search catalog').fill('unmatched fixture')
@@ -172,29 +174,34 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     await page.getByRole('tab', { name: 'MCP catalog', exact: true }).click()
     const preset = page.getByRole('button', { name: 'View MCP service Amap', exact: true })
     const trains = page.getByRole('button', { name: 'View MCP service 12306', exact: true })
-    const tag = page.getByRole('button', { name: 'Filter by tag' })
-    await tag.focus()
+    const mcpCatalog = page.getByRole('region', { name: 'MCP catalog', exact: true })
+    const tagsGroup = mcpCatalog.getByRole('group', { name: 'Filter by tag', exact: true })
+    const tag = (name: string) => tagsGroup.getByRole('button', { name, exact: true })
+    const search = page.getByLabel('Search catalog')
+    await tag('Travel').focus()
+    expect(await tagsGroup.getByRole('button').allTextContents()).toEqual(['All entries', 'Maps', 'Travel', 'Unclassified'])
     await page.keyboard.press('Enter')
-    await page.getByRole('option', { name: 'Travel' }).waitFor()
-    await page.keyboard.press('End')
-    await page.keyboard.press('Enter')
-    await tag.getByText('Travel', { exact: true }).waitFor()
+    expect(await tagsGroup.getByRole('button', { pressed: true }).allTextContents()).toEqual(['Travel'])
     await preset.waitFor()
     expect(await trains.count()).toBe(0)
-    await page.getByLabel('Search catalog').fill('train')
+    await search.fill('train')
     await page.getByText('No matching catalog entries.').waitFor()
-    await page.getByRole('button', { name: 'Clear filters' }).click()
+    expect(await mcpCatalog.locator('.panel-item-count').textContent()).toBe('0')
+    await tag('All entries').click()
     await trains.waitFor()
-    await tag.click()
-    await page.getByRole('option', { name: 'Unclassified' }).click()
+    expect(await search.inputValue()).toBe('train')
+    expect(await mcpCatalog.locator('.panel-item-count').textContent()).toBe('1')
+    await tag('Unclassified').click()
     await trains.waitFor()
     expect(await preset.count()).toBe(0)
-    await tag.click()
-    await page.getByRole('option', { name: 'Travel' }).click()
-    await tag.getByText('Travel', { exact: true }).waitFor()
+    expect(await search.inputValue()).toBe('train')
+    await tag('Travel').click()
+    await search.fill('')
+    await preset.waitFor()
+    expect(await tagsGroup.getByRole('button', { pressed: true }).allTextContents()).toEqual(['Travel'])
     includeTravel = false
     await page.getByRole('button', { name: 'Reload the MCP catalog' }).click()
-    await tag.getByText('All entries', { exact: true }).waitFor()
+    await tagsGroup.getByRole('button', { name: 'All entries', pressed: true }).waitFor()
     await trains.waitFor()
     await preset.waitFor()
     await preset.focus()
@@ -315,7 +322,7 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
       await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-catalog-en.png'), fullPage: true })
     await page.context().addCookies([{ name: 'dsh-phalanx.lang', value: 'zh-CN', url: origin }])
-    await page.setViewportSize({ width: 390, height: 844 })
+    await page.setViewportSize({ width: 375, height: 844 })
     for (const colorScheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme })
       await page.reload()
@@ -326,10 +333,11 @@ it('imports a preset through the skill-pack style market, persists failure, retr
       expect(await filters.evaluate(node => node.scrollWidth <= node.clientWidth && getComputedStyle(node).gridTemplateColumns.split(' ').length === 1)).toBe(
         true,
       )
-      await filters.getByRole('button', { name: '按标签筛选' }).click()
-      await page.getByRole('option', { name: '地图', exact: true }).waitFor()
-      expect(await page.getByRole('option', { name: '出行', exact: true }).count()).toBe(0)
-      await page.keyboard.press('Escape')
+      const group = filters.getByRole('group', { name: '按标签筛选', exact: true })
+      await group.getByRole('button', { name: '全部', pressed: true }).waitFor()
+      await group.getByRole('button', { name: '地图', exact: true }).click()
+      expect(await group.getByRole('button', { name: '出行', exact: true }).count()).toBe(0)
+      expect(await group.evaluate(node => getComputedStyle(node).flexWrap)).toBe('wrap')
     }
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
       await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-catalog-zh.png'), fullPage: true })
@@ -337,7 +345,7 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     await page.reload()
     await page.getByRole('tab', { name: 'MCP 广场', exact: true }).click()
     await page.getByRole('button', { name: '查看 MCP 服务 高德地图', exact: true }).waitFor()
-    expect(await page.getByRole('button', { name: '按标签筛选' }).count()).toBe(0)
+    expect(await page.getByRole('group', { name: '按标签筛选' }).count()).toBe(0)
     catalogOnline = false
     await page.reload()
     await page.getByRole('tab', { name: 'MCP 广场', exact: true }).click()

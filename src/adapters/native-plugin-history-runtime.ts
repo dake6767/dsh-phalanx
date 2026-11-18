@@ -9,11 +9,17 @@ export class NativePluginHistoryRuntimeAdapter implements NativePluginHistoryRun
     private readonly runtime: () => CommunityRuntimePort,
     private readonly publicOrigin: () => URL,
   ) {}
-  current(username: string) {
+  current(username: string, includeDraining = false) {
     const status = this.runtime().status(username)
-    return status.state === 'ready' ? status.instance : undefined
+    return status.state === 'ready' || (includeDraining && status.state === 'draining') ? status.instance : undefined
   }
   async inspect(instance: CommunityUserInstance, signal: AbortSignal) {
-    return nativeOptionalBundles(await dshPluginRpc(instance, this.publicOrigin(), DSH_BUNDLE_LIST, {}, AbortSignal.any([signal, AbortSignal.timeout(10000)])))
+    const deadline = AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+    try {
+      return nativeOptionalBundles(await dshPluginRpc(instance, this.publicOrigin(), DSH_BUNDLE_LIST, {}, deadline))
+    } catch (error) {
+      deadline.throwIfAborted()
+      throw error
+    }
   }
 }

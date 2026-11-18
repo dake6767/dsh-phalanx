@@ -331,10 +331,22 @@ class UpgradeHost:
                             raise InstallError('Unexpected file in private PostgreSQL tool directory')
                     shutil.rmtree(path)
         source=job['source']; uid=source['uid']
-        self.host.user(uid,['systemctl','--user','stop','dsh-phalanx.service'])
+        handed_off=False
+        profile_handoff=source.get('manifest',{}).get('targetVersion')=='0.1.37'
+        if profile_handoff and job.get('phase')=='stopping' and job.get('prepared'):
+            target=Path(job['prepared']['target'])
+            handoff=target/'dist/composition/legacy-profile-lock-handoff.js'
+            values=source['values']
+            config=values.get('DSH_PHALANX_DATABASE_CONFIG_FILE')
+            if handoff.is_file() and config:
+                result=self.host.user(uid,[str(target/'node/bin/node'),str(handoff),values['DSH_PHALANX_DATA_ROOT'],config,
+                    values.get('DSH_PHALANX_USER_DATA_ROOT',''),values.get('DSH_PHALANX_USER_DATA_MOUNT','')],check=False)
+                handed_off=result.returncode==0
+                if not handed_off:self.host.tell('Legacy member profile lock handoff unavailable; keeping unverified locks')
+        if not handed_off:self.host.user(uid,['systemctl','--user','stop','dsh-phalanx.service'])
         ownership=hashlib.sha256(str(Path(source['values']['DSH_PHALANX_DATA_ROOT']).resolve()).encode()).hexdigest()
         filters=['--filter','label=dsh-phalanx.community=1','--filter','label=dsh-phalanx.community-root='+ownership]
-        command=['podman','ps','--all',*filters,'--format','json']
+        command=['podman','ps','--all','--no-trunc',*filters,'--format','json']
         rows=json.loads(self.host.user(uid,command).stdout)
         for row in rows:
             labels=row.get('Labels',{})
@@ -342,7 +354,11 @@ class UpgradeHost:
                 raise InstallError('Owned container listing has inconsistent labels')
             identity=row.get('Id',row.get('ID'))
             if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):raise InstallError('Invalid owned container identity')
-            self.host.user(uid,['podman','rm','--force','--ignore','--time','0',identity])
+            if profile_handoff:
+                if len(identity)!=64:raise InstallError('Invalid full member container identity')
+                self.host.user(uid,['podman','stop','--time','10','--ignore',identity])
+                self.host.user(uid,['podman','rm','--ignore',identity])
+            else:self.host.user(uid,['podman','rm','--force','--ignore','--time','0',identity])
         if json.loads(self.host.user(uid,command).stdout):raise InstallError('Owned user instances remain; backup and switch refused')
         if page is not None:
             intent=page.intent()

@@ -1,6 +1,7 @@
 from release_asset_support import stable_assets
 """Public installation/upgrade commands and the shared transaction port."""
 import contextlib
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -9,9 +10,11 @@ import copy
 import sqlite3
 import subprocess
 import runpy
+from types import SimpleNamespace
 from unittest.mock import patch
 import unittest
 from installer_contract_support import installer, InstallationMachine
+from installer_upgrade_host import UpgradeHost
 
 CONTRACT = {'protocol':1,'source':{'min':'0.1.1','maxExclusive':'0.2.0'},
             'accounts':{'sourceMin':4,'sourceMax':4,'target':4},'environmentEpoch':1}
@@ -43,6 +46,38 @@ class TransactionPort:
     def safe(self,message):return message
 
 class SharedUpgrade(unittest.TestCase):
+    def test_legacy_profile_handoff_precedes_container_removal_and_falls_back_to_service_stop(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target=Path(temporary)
+            helper=target/'dist/composition/legacy-profile-lock-handoff.js'
+            helper.parent.mkdir(parents=True)
+            helper.touch()
+            config='/etc/dsh-phalanx/owned-database.json'
+            data='/var/lib/dsh-phalanx/data'
+            job={'action':'apply','phase':'stopping','prepared':{'target':str(target)},'source':{
+                'uid':1001,'manifest':{'targetVersion':'0.1.37'},
+                'values':{'DSH_PHALANX_DATA_ROOT':data,'DSH_PHALANX_DATABASE_CONFIG_FILE':config}}}
+            for status in (0,1):
+                with self.subTest(status=status):
+                    calls=[]
+                    identity='a'*64
+                    rows=[{'Id':identity,'Labels':{'dsh-phalanx.community':'1',
+                        'dsh-phalanx.community-root':hashlib.sha256(str(Path(data).resolve()).encode()).hexdigest()}}]
+                    def user(uid,arguments,**kwargs):
+                        self.assertEqual(uid,1001)
+                        calls.append(arguments)
+                        result=status if arguments[0]==str(target/'node/bin/node') else 0
+                        if arguments[:2]==['podman','rm']:rows.clear()
+                        return subprocess.CompletedProcess(arguments,result,stdout=json.dumps(rows) if arguments[:2]==['podman','ps'] else '')
+                    port=UpgradeHost.__new__(UpgradeHost)
+                    port.close_admission=lambda _:calls.append(['close-admission'])
+                    port.host=SimpleNamespace(user=user,tell=lambda _:None)
+                    port.stop(job)
+                    self.assertEqual(calls[:2],[['close-admission'],[str(target/'node/bin/node'),str(helper),data,config,'','']])
+                    self.assertEqual(calls[2][0],'systemctl' if status else 'podman')
+                    self.assertEqual(calls[-3:-1],[['podman','stop','--time','10','--ignore',identity],['podman','rm','--ignore',identity]])
+                    self.assertEqual(calls[-1][:2],['podman','ps'])
+
     def test_previous_executor_inventory_remains_readable_after_questions_are_added(self):
         import hashlib
         from installer_executor_install import executor_package

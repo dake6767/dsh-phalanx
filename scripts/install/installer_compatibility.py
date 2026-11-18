@@ -36,7 +36,7 @@ def positive(value):
 
 # Capability version: raise only when older executors cannot perform the transaction.
 # Ordinary target releases do not increase this version.
-READER_VERSION = '0.1.27'
+READER_VERSION = '0.1.38'
 
 class ReaderUpdateRequired(InstallError):
     def __init__(self,version):

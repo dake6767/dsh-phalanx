@@ -167,7 +167,7 @@ Restart running instances to apply changes to native terminal, plugin or preset 
 
 ## Skill, plugin and MCP catalogs
 
-Open the catalog tab in the corresponding library. The skill, plugin and MCP catalogs use the same signed catalog source. Search within the open catalog by name, description or entry ID. Where entries have tags, choose one in **Filter by tag** to narrow the search. **All entries** includes unclassified entries, and **Unclassified** shows just those entries. **Clear filters** resets the search and tag selection. The tag selector appears when the catalog has tagged entries.
+Open the catalog tab in the corresponding library. The skill, plugin and MCP catalogs use the same signed catalog source. Search the current catalog by name, description or entry ID. If the catalog has tagged entries, choose one of the tag buttons below the search field. Changing the tag keeps the search text, and editing the search keeps the selected tag. **All entries** clears the tag filter and includes unclassified entries. **Unclassified** shows only entries without tags. **Clear filters** resets both the search and the selected tag.
 
 MCP catalog imports and updates use a verified target. The details show the remote service or shared runner and any credential you need to supply. If a target is unavailable, use **Reload the MCP catalog** to check again. Installed MCP services keep their settings, credentials and access. You can still manage and test them from **MCP services** in the MCP library. Updates require administrator confirmation.
 

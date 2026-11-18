@@ -5,6 +5,8 @@ import {
   assertLargeUpgradeJournal,
   assertUpgradeCapacity,
   bootstrapInstalledUpgrade,
+  expectFormalExecutorCheck,
+  installedExecutorTransition,
   checkBootstrappedUpdater,
   seedLargeUpgradeInventory,
 } from './installed-upgrade-bootstrap.js'
@@ -100,11 +102,8 @@ export async function runInstalledUpgrade({
   const catalogInput = process.env.DSH_PHALANX_UPGRADE_SIGNED_CATALOG
   const signedCatalog =
     baselineVersion === '0.1.36' && targetVersion === '0.1.37' && (!realReply || catalogInput) ? signedUpgradeCatalog(catalogInput) : undefined
-  const policyTransition = baselineVersion === '0.1.23' && targetVersion === '0.1.24'
-  const executorInventoryTransition = baselineVersion === '0.1.33' && targetVersion === '0.1.34'
-  const executorJournalTransition = baselineVersion === '0.1.34' && targetVersion === '0.1.35'
-  const bootstrapRequired =
-    policyTransition || executorInventoryTransition || executorJournalTransition || (baselineVersion === '0.1.26' && targetVersion === '0.1.27')
+  const executorTransition = installedExecutorTransition(baselineVersion, targetVersion)
+  const { policyTransition, executorJournalTransition, verifyServingDuringBootstrap, bootstrapRequired } = executorTransition
   const databaseRollback = compareVersions(baselineVersion, '0.1.26') >= 0 && compareVersions(targetVersion, '0.1.27') >= 0
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as {
     commit: string
@@ -194,7 +193,7 @@ export async function runInstalledUpgrade({
   // API requests have their own deadline; an emulated execution container can cold-start beyond 30 seconds.
   const executionTrialTimeout = realReply ? 300000 : 30000
   const instances = installedInstanceAcceptance({ origin, remote, admin, member })
-  let upgrade: unknown, insufficient: unknown
+  let upgrade: unknown, insufficient: unknown, scenarioFailure: Error | undefined
   let observer: Awaited<ReturnType<typeof installedUpgradeObserver>> | undefined
   try {
     await progress.step('baseline', async () => {
@@ -417,8 +416,7 @@ export async function runInstalledUpgrade({
       const check = await post('system-update', { action: 'check' })
       expect(check.status()).toBe(200)
       const result = await check.json()
-      if (policyTransition) expect(result.check).toMatchObject({ status: 'failed', reason: 'Unsupported release compatibility protocol' })
-      else expect(result.check).toMatchObject({ status: 'available', version: 'v' + targetVersion })
+      expectFormalExecutorCheck(result.check, targetVersion, executorTransition)
       expect((await remote(pidCommand)).trim()).toBe(expectedPid)
       return { check: result.check, unmodifiedFormalExecutor: true, expectedPolicyTransitionRefusal: policyTransition }
     })
@@ -428,8 +426,7 @@ export async function runInstalledUpgrade({
           run: () => remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade bootstrap --output json`, 300000),
           platformPid: async () => (await remote(pidCommand)).trim(),
           expectedPid,
-          platformStatus:
-            executorInventoryTransition || executorJournalTransition ? async () => (await admin.request.get(origin + '/readyz')).status() : undefined,
+          platformStatus: verifyServingDuringBootstrap ? async () => (await admin.request.get(origin + '/readyz')).status() : undefined,
           candidate,
           requests: release.requests,
         }),
@@ -784,7 +781,7 @@ export async function runInstalledUpgrade({
     passed = true
     return { memberStorageKey }
   } catch (error) {
-    throw new Error(redact(error instanceof Error ? (error.stack ?? String(error)) : String(error)))
+    throw (scenarioFailure = new Error(redact(error instanceof Error ? (error.stack ?? String(error)) : String(error))))
   } finally {
     try {
       await cleanupOwned(
@@ -795,7 +792,10 @@ export async function runInstalledUpgrade({
           fixture.closeAllConnections()
           await new Promise<void>(resolve => fixture.close(() => resolve()))
         },
-      )
+      ).catch(error => {
+        if (!scenarioFailure) throw error
+        scenarioFailure.cause = new Error(redact(String(error instanceof AggregateError ? error.errors[0] : error)))
+      })
     } finally {
       if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
         await writeFile(

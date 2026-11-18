@@ -454,3 +454,36 @@ it('keeps ready containers off the public entry until launch settings complete',
   expect(await entry.status(account.username)).toEqual({ state: 'ready', instance })
   expect(entry.currentInstance(account.username, instance)).toBe(true)
 })
+
+it.each([true, false])('retries a failed launch exchange only if checking confirms the old carrier is gone (%s)', async gone => {
+  const replacement = { ...instance, processId: 5000, origin: 'http://127.0.0.1:5000' }
+  let active = instance
+  const exchanges: number[] = []
+  const entry = new CommunityEntry(
+    { getState: async () => account, authenticate: async () => account },
+    {
+      ...runtime,
+      ensure: async () => active,
+      status: () => ({ state: 'ready', instance: active }),
+      check: async carrier => {
+        expect(carrier).toBe(instance)
+        if (gone) active = replacement
+      },
+    },
+    {
+      exchangeLaunchToken: async carrier => {
+        exchanges.push(carrier.processId)
+        if (carrier === instance) throw new Error('Fixture failed launch exchange')
+        return ['fixture_session=replacement']
+      },
+    },
+  )
+  const origin = new URL('http://127.0.0.1:3080')
+  if (gone) {
+    await expect(entry.openSpace(account, origin)).resolves.toEqual(['fixture_session=replacement'])
+    expect(exchanges).toEqual([instance.processId, replacement.processId])
+  } else {
+    await expect(entry.openSpace(account, origin)).rejects.toMatchObject({ reason: 'startup-unavailable' })
+    expect(exchanges).toEqual([instance.processId])
+  }
+})

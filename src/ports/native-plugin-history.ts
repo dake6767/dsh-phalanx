@@ -23,11 +23,12 @@ export interface NativePluginHistoryPersistence {
   }>
 }
 export interface NativePluginHistoryRuntime {
-  current(username: string): CommunityUserInstance | undefined
+  current(username: string, includeDraining?: boolean): CommunityUserInstance | undefined
   inspect(instance: CommunityUserInstance, signal: AbortSignal): Promise<readonly NativeOptionalBundle[]>
 }
 export interface MemberNativePluginHistory {
   initialize(member: NativeFeatureMember, instance: CommunityUserInstance, signal: AbortSignal): Promise<readonly string[]>
+  drainWrites(instance: CommunityUserInstance): Promise<void>
   request(member: NativeFeatureMember, generation: string, mode: 'read' | 'refresh', signal: AbortSignal): Promise<readonly string[]>
   archiveReserved(member: NativeFeatureMember, generation: string, integrity: string, signal: AbortSignal): Promise<boolean>
 }

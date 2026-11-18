@@ -11,6 +11,13 @@ import type { CommunityGroupRecord } from '../domain/community-group.js'
 import { assertCommunityGroupRole, assertGroupDeletion, assertOrdinaryGroup, requiredCommunityGroup, validatedGroupName } from '../domain/community-group.js'
 import { AdvisoryLock, transactionLock } from './advisory-locks.js'
 
+export async function readCommunityUserSpace(sql: PlatformSql, username: string): Promise<CommunityUserSpaceRecord | undefined> {
+  const [row] = await sql.query<Pick<AccountRow, 'space_id' | 'storage_key'>>('SELECT space_id, storage_key FROM dsh_phalanx.accounts WHERE username=$1', [
+    username.toLowerCase(),
+  ])
+  return row && { spaceId: row.space_id, storageKey: row.storage_key }
+}
+
 /** Community identity persistence through the shared platform PostgreSQL owner. */
 export class PostgresCommunityAccountStore implements CommunityAccountStorePort, CommunityUserSpaceReaderPort {
   private readonly dummyHash = hashPassword(randomBytes(32).toString('base64url'))
@@ -218,8 +225,7 @@ export class PostgresCommunityAccountStore implements CommunityAccountStorePort,
     })
   }
   async getSpace(username: string): Promise<CommunityUserSpaceRecord | undefined> {
-    const row = await this.row(this.database, username)
-    return row ? { spaceId: row.space_id, storageKey: row.storage_key } : undefined
+    return readCommunityUserSpace(this.database, username)
   }
   private async assertAvailable(sql: PlatformSql, username: string, email: string): Promise<void> {
     if (await this.row(sql, username)) throw new BusinessRuleError('conflict', 'Username is already in use', 'username-in-use')

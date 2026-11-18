@@ -213,6 +213,7 @@ export class CommunityEntry {
       try {
         cookies = await this.session.exchangeLaunchToken(instance, origin)
       } catch (error) {
+        await this.runtime.check?.(instance).catch(() => {})
         if (!(await this.current(account.username, instance))) continue
         throw new CommunityRuntimeUnavailableError('startup-unavailable', 'DSH login could not be completed. Use the platform recovery page.', { cause: error })
       }

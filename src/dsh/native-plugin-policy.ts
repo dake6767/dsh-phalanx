@@ -74,12 +74,16 @@ export function apply(ctx) {
     if (!url || !token) throw new Error('Native plugin history is unavailable');
     const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json','x-api-key':token},
       body:JSON.stringify({generation:configuration.generation,...input}),signal});
-    if (!response.ok) throw new Error('Native plugin history is unavailable');
+    if (!response.ok) {
+      if (input.mode==='read' && response.status===409 && (await response.json()).code==='native-plugin-history-unavailable') return;
+      throw new Error('Native plugin history is unavailable');
+    }
     return await response.json();
   };
   const history=async(mode,signal)=>{
     if (!configuration.history) return [];
     const value=await historyRequest({mode},signal);
+    if (value===undefined) return;
     if (!Array.isArray(value.names) || !value.names.every(name=>typeof name==='string')) throw new Error('Native plugin history is unavailable');
     return value.names;
   };
@@ -195,17 +199,19 @@ export function apply(ctx) {
           if (endpoint===${JSON.stringify(DSH_BUNDLE_ENABLE)} && args.enabled===true && !configuration.allowInstall) {
             const bundles=await invoke(${JSON.stringify(DSH_BUNDLE_LIST)},{},request.signal);
             const bundle=bundles.find(row=>row.name===args.name);
-            if (bundle?.official===true && bundle.optional===true && !bundle.enabled && !bundle.installed
-              && !(await history('read',request.signal)).includes(bundle.name)) return groupDenied();
+            if (bundle?.official===true && bundle.optional===true && !bundle.enabled && !bundle.installed) {
+              const names=await history('read',request.signal);
+              if (names===undefined) return deny('native-plugin-history-unavailable',nativeFeatureChinese(ctx,request)
+                ? '原生插件历史正在同步，请稍后重试。' : 'Native plugin history is syncing. Try again shortly.');
+              if (!names.includes(bundle.name)) return groupDenied();
+            }
           }
           const value=privateInstall && signed
             ? await installWithNativeCache(nativeArgs=>invoke(endpoint,nativeArgs,request.signal),args,request.signal)
             : await invoke(endpoint,args,request.signal);
           if ((privateInstall || (endpoint===${JSON.stringify(DSH_BUNDLE_ENABLE)} && args.enabled===true))
             && ['applied','restart-required'].includes(value?.application)) {
-            const refresh=history('refresh',request.signal);
-            if (signed) await refresh.catch(()=>{});
-            else await refresh;
+            await history('refresh',request.signal).catch(()=>{});
           }
           return reply({ok:true,value:endpoint===${JSON.stringify(DSH_BUNDLE_LIST)} ? value.filter(bundle=>bundle.name!==customMarketBundle) : value});
         };

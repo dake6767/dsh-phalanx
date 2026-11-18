@@ -557,7 +557,7 @@
           "target": 15
         },
         "environmentEpoch": 1,
-        "minimumReader": "0.1.29",
+        "minimumReader": "0.1.99",
         "upgradeFloor": "0.1.26",
         "breakpoints": [],
         "schemas": [
@@ -598,7 +598,7 @@
     "schemas": null,
     "expected": {
       "outcomeCode": "update.reader-update-required",
-      "requiredVersion": "0.1.29"
+      "requiredVersion": "0.1.99"
     }
   },
   {

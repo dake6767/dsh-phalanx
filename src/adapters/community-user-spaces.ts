@@ -20,23 +20,31 @@ export class FileCommunityUserSpaces implements CommunityUserSpaceStoragePort {
     await this.guard.assertAvailable()
   }
 
+  async existingHome(username: string, spaceId: string): Promise<string | undefined> {
+    await this.assertAvailable()
+    const space = await this.spaces.getSpace(username)
+    if (space?.spaceId !== spaceId) return
+    const directories = this.directories(space.storageKey)
+    for (const path of directories) assertOwnedDirectory(path)
+    return directories.at(-1)
+  }
+
+  private directories(storageKey: string): string[] {
+    if (!/^(?:[a-z0-9][a-z0-9_-]{0,63}|_spaces\/[a-f0-9]{32})$/u.test(storageKey)) throw new Error('Invalid user space directory mapping')
+    const paths = [this.root]
+    for (const segment of storageKey.split('/')) paths.push(join(paths.at(-1)!, segment))
+    paths.push(join(paths.at(-1)!, 'home'))
+    return paths
+  }
+
   async prepare(username: string) {
     await this.assertAvailable()
     const space = await this.spaces.getSpace(username)
     if (space === undefined) throw new Error('User space was not found')
-    if (!/^(?:[a-z0-9][a-z0-9_-]{0,63}|_spaces\/[a-f0-9]{32})$/u.test(space.storageKey)) throw new Error('Invalid user space directory mapping')
-    const root = join(this.root, space.storageKey)
-    const home = join(root, 'home')
-    const workspace = join(root, 'workspace')
-    await mkdir(this.root, { recursive: true, mode: 0o700 })
-    assertOwnedDirectory(this.root)
-    let parent = this.root
-    for (const segment of space.storageKey.split('/')) {
-      parent = join(parent, segment)
-      await mkdir(parent, { recursive: true, mode: 0o700 })
-      assertOwnedDirectory(parent)
-    }
-    for (const path of [home, workspace]) {
+    const paths = this.directories(space.storageKey)
+    const home = paths.at(-1)!
+    const workspace = join(paths.at(-2)!, 'workspace')
+    for (const path of [...paths, workspace]) {
       await mkdir(path, { recursive: true, mode: 0o700 })
       assertOwnedDirectory(path)
     }

@@ -28,10 +28,10 @@ class CompatibilityReader(unittest.TestCase):
         self.assertIsNone(compatible(source,target,15))
 
     def test_minimum_reader_is_checked_before_unknown_contract_content(self):
-        target=target_manifest();target['compatibility']['minimumReader']='0.1.29'
+        target=target_manifest();target['compatibility']['minimumReader']='0.1.99'
         target['compatibility']['protocol']=999
         with self.assertRaises(ReaderUpdateRequired) as refused:validate_contract(target)
-        self.assertEqual(refused.exception.required_version,'0.1.29')
+        self.assertEqual(refused.exception.required_version,'0.1.99')
 
     def test_registered_schema_ranges_allow_independent_recorded_versions(self):
         target=target_manifest();target['compatibility']['protocol']=3
@@ -72,9 +72,9 @@ class CompatibilityReader(unittest.TestCase):
                 with self.assertRaises(compatibility.InstallError):validate_contract(target)
 
     def test_check_reports_reader_update_as_a_structured_conclusion(self):
-        target=target_manifest();target['compatibility']['minimumReader']='0.1.29'
+        target=target_manifest();target['compatibility']['minimumReader']='0.1.99'
         self.assertEqual(compatibility.upgrade_outcome(manifest('0.1.26'),target,None),
-                         {'outcomeCode':'update.reader-update-required','requiredVersion':'0.1.29'})
+                         {'outcomeCode':'update.reader-update-required','requiredVersion':'0.1.99'})
 
     def test_release_tooling_uses_the_shared_installer_samples(self):
         import subprocess
@@ -92,6 +92,13 @@ class CompatibilityReader(unittest.TestCase):
                          'a362f88ad93a150c9155e1e24f75d67f517ceda205a9a2b9c15c7177ee201933')
         old=runpy.run_path(str(Path(__file__).with_name('compatibility-v026.py')))
         old['validate_contract'](target)
+
+    def test_current_release_requires_the_handoff_capability_before_stopping(self):
+        from release_policy_support import release_policy
+        target=manifest('0.1.38');target.update(release_policy())
+        with self.assertRaises(ReaderUpdateRequired) as refused:compatibility.require_reader(target,'0.1.27')
+        self.assertEqual(refused.exception.required_version,'0.1.38')
+        self.assertTrue(compatibility.require_reader(target))
 
     def test_stable_version_listing_uses_release_assets_without_api_access(self):
         import json

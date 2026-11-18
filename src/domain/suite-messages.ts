@@ -286,7 +286,7 @@ export const zhCN = {
   '{count} entries': '{count} 个条目',
   'Review what each entry installs before you install it.': '安装前查看每个条目会安装的内容。',
   'Filter by category': '按类别筛选',
-  'All entries': '全部条目',
+  'All entries': '全部',
   'Catalog entries': '广场条目',
   'No entries match this filter.': '没有符合筛选条件的条目。',
   'The catalog is empty.': '广场为空。',

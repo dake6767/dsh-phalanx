@@ -7,7 +7,8 @@ it('refuses member installs and never-enabled optional bundles while preserving 
   const routes = new Map<string, (request: Request) => Promise<Response>>()
   const calls: string[] = []
   const module = await import(
-    'data:text/javascript;base64,' + Buffer.from(nativePluginPolicyModule({ subject: 'member', generation: 'launch', allowInstall: false })).toString('base64')
+    'data:text/javascript;base64,' +
+      Buffer.from(nativePluginPolicyModule({ subject: 'member', generation: 'launch', allowInstall: false, history: true })).toString('base64')
   )
   expect(Object.keys(module).sort()).toEqual(['apply', 'inject', 'name'])
   module.apply({
@@ -39,11 +40,31 @@ it('refuses member installs and never-enabled optional bundles while preserving 
     )
     return response.json()
   }
+  let names: string[] | undefined
+  vi.stubEnv(NATIVE_PLUGIN_HISTORY_ENV, 'http://native.example/history')
+  vi.stubEnv('DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN', 'member-fixture-token')
+  const history = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options) => {
+    if (JSON.parse(String(options?.body)).mode === 'read' && names === undefined)
+      return Response.json({ code: 'native-plugin-history-unavailable' }, { status: 409 })
+    return Response.json({ names: names ?? [] }, { status: names === undefined ? 500 : 200 })
+  })
+  onTestFinished(() => {
+    history.mockRestore()
+    vi.unstubAllEnvs()
+  })
   expect(await call('installBundle', { spec: 'fixture-package' })).toMatchObject({
     result: { ok: false, error: { code: 'remote-access/denied', message: '平台已禁用自行添加插件，请联系管理员' } },
   })
-  expect(await call('setBundleEnabled', { name: 'never', enabled: true })).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
+  expect(await call('setBundleEnabled', { name: 'never', enabled: true })).toMatchObject({
+    result: { ok: false, error: { message: '原生插件历史正在同步，请稍后重试。', details: { reason: 'native-plugin-history-unavailable' } } },
+  })
   expect(await call('setBundleEnabled', { name: 'existing', enabled: true })).toMatchObject({ result: { ok: true } })
+  names = []
+  expect(await call('setBundleEnabled', { name: 'never', enabled: true })).toMatchObject({
+    result: { ok: false, error: { details: { reason: 'group-native-feature' } } },
+  })
+  names = ['never']
+  expect(await call('setBundleEnabled', { name: 'never', enabled: true })).toMatchObject({ result: { ok: true } })
   expect(await call('setBundleEnabled', { name: 'never', enabled: false })).toMatchObject({ result: { ok: true } })
   const inventory = (await call('listBundles', {})).result.value
   expect(inventory).toHaveLength(2)

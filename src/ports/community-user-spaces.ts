@@ -10,5 +10,6 @@ export interface CommunityUserSpaceReaderPort {
 
 export interface CommunityUserSpaceStoragePort {
   assertAvailable(): Promise<void>
+  existingHome?(username: string, spaceId: string): Promise<string | undefined>
   prepare(username: string): Promise<{ readonly home: string; readonly workspace: string; readonly spaceId: string }>
 }

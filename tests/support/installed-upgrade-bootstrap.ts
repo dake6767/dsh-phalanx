@@ -5,6 +5,27 @@ import { installedShellArgument } from './installed-storage-layout.js'
 const inventoryDirectory = 'plugins/staging/formal-upgrade-inventory'
 const inventoryCount = 1800
 
+export function installedExecutorTransition(baseline: string, target: string) {
+  const policyTransition = baseline === '0.1.23' && target === '0.1.24'
+  const executorJournalTransition = baseline === '0.1.34' && target === '0.1.35'
+  const readerTransition = baseline === '0.1.37' && target === '0.1.38'
+  const verifyServingDuringBootstrap = executorJournalTransition || (baseline === '0.1.33' && target === '0.1.34') || readerTransition
+  return {
+    policyTransition,
+    executorJournalTransition,
+    readerTransition,
+    verifyServingDuringBootstrap,
+    bootstrapRequired: policyTransition || verifyServingDuringBootstrap || (baseline === '0.1.26' && target === '0.1.27'),
+  }
+}
+
+export function expectFormalExecutorCheck(check: unknown, targetVersion: string, transition: ReturnType<typeof installedExecutorTransition>) {
+  if (transition.policyTransition) expect(check).toMatchObject({ status: 'failed', reason: 'Unsupported release compatibility protocol' })
+  else if (transition.readerTransition)
+    expect(check).toMatchObject({ status: 'incompatible', outcomeCode: 'update.reader-update-required', requiredVersion: targetVersion })
+  else expect(check).toMatchObject({ status: 'available', version: 'v' + targetVersion })
+}
+
 export async function seedLargeUpgradeInventory(remote: (command: string) => Promise<string>) {
   const program = [
     'from pathlib import Path',

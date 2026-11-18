@@ -138,7 +138,7 @@ class DatabaseUpgrade(unittest.TestCase):
             self.assertEqual([(row['version'],row['outcomeCode']) for row in result['versions']],
                              [('v0.1.27','update.available'),('v0.1.28','update.breakpoint-required')])
             self.assertEqual(result['versions'][0]['manifestSha256'],'c'*64)
-            latest['compatibility']['minimumReader']='0.1.29'
+            latest['compatibility']['minimumReader']='0.1.99'
             refused=service.check()['check']
             self.assertEqual(refused['outcomeCode'],'update.reader-update-required')
             self.assertEqual([(row['version'],row['outcomeCode']) for row in refused['versions']],

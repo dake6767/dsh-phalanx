@@ -75,7 +75,7 @@
     "tests/usage-skills-container.e2e.ts",
     "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 100,
+  "regularCases": 102,
   "smoke": [
     "tests/installed-candidate.e2e.ts",
     "tests/community-user-storage.e2e.ts",
@@ -172,7 +172,7 @@
     "tests/usage-web-tools-container.e2e.ts": 1,
     "tests/community-launch-visibility.e2e.ts": 1,
     "tests/installed-deployment-lifecycle.e2e.ts": 1,
-    "tests/community-member-instance-control.e2e.ts": 1
+    "tests/community-member-instance-control.e2e.ts": 3
   },
   "hiddenCases": [
     {

@@ -8,6 +8,7 @@ import type { ExecutionRunnerPort } from '../ports/platform-execution.js'
 import { ContainerExecutionProcess } from './execution-container-process.js'
 import { platformSystemPath } from './platform-process-host.js'
 import { FilePythonLibraryEnvironments } from './python-library-environment.js'
+import { runIndependentProfileWriter } from './profile-writer-admission.js'
 
 export const executionSkillMount = '/dsh-phalanx/execution-skill'
 const skillMount = executionSkillMount,
@@ -78,44 +79,46 @@ export class ContainerExecutionRunner implements ExecutionRunnerPort {
       }
     }
     const dependencies = input.dependencies ?? []
-    return this.pythonEnvironments.withEnvironment(dependencies, Boolean(this.runtime.container), python =>
-      this.process.run(
-        {
-          mounts: [
-            ...mounts,
-            ...(python ? [python] : []),
-            { host: source, mounted: skillMount, readOnly: true },
-            ...dependencies.map(row => ({ host: row.directory, mounted: row.mountedPath, readOnly: true })),
-          ],
-          cwd: resolve(input.cwd),
-          command,
-          argv,
-          ...(pythonScript ? { pythonScript } : {}),
-          stdin: input.stdin,
-          environment: {
-            ...input.environment,
-            ...(dependencies.some(row => !row.python)
-              ? {
-                  NODE_PATH: dependencies
-                    .filter(row => !row.python)
-                    .map(row => join(row.mountedPath, 'node_modules'))
-                    .join(':'),
-                }
-              : {}),
-            HOME: '/tmp/phalanx-home',
-            PYTHONNOUSERSITE: '1',
-            PATH: platformSystemPath([
-              ...(python ? [python.mounted] : []),
-              ...dependencies.filter(row => !row.python).flatMap(row => row.pathDirectories.map(path => `${row.mountedPath}/${path}`)),
-              `${skillMount}/bin`,
-              skillMount,
-            ]),
-            TMPDIR: '/tmp',
+    return this.pythonEnvironments.withEnvironment(dependencies, Boolean(this.runtime.container), python => {
+      const run = () =>
+        this.process.run(
+          {
+            mounts: [
+              ...mounts,
+              ...(python ? [python] : []),
+              { host: source, mounted: skillMount, readOnly: true },
+              ...dependencies.map(row => ({ host: row.directory, mounted: row.mountedPath, readOnly: true })),
+            ],
+            cwd: resolve(input.cwd),
+            command,
+            argv,
+            ...(pythonScript ? { pythonScript } : {}),
+            stdin: input.stdin,
+            environment: {
+              ...input.environment,
+              ...(dependencies.some(row => !row.python)
+                ? {
+                    NODE_PATH: dependencies
+                      .filter(row => !row.python)
+                      .map(row => join(row.mountedPath, 'node_modules'))
+                      .join(':'),
+                  }
+                : {}),
+              HOME: '/tmp/phalanx-home',
+              PYTHONNOUSERSITE: '1',
+              PATH: platformSystemPath([
+                ...(python ? [python.mounted] : []),
+                ...dependencies.filter(row => !row.python).flatMap(row => row.pathDirectories.map(path => `${row.mountedPath}/${path}`)),
+                `${skillMount}/bin`,
+                skillMount,
+              ]),
+              TMPDIR: '/tmp',
+            },
           },
-        },
-        emit,
-        signal,
-      ),
-    )
+          emit,
+          signal,
+        )
+      return this.runtime.container ? runIndependentProfileWriter(space.home, run) : run()
+    })
   }
 }

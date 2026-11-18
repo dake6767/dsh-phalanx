@@ -1,5 +1,5 @@
 // Validation: T2 formal upgrade job; real credentials: none; formal previous release installed by the workflow, fixture models only. Never selected by the regular T2 batch.
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
@@ -11,6 +11,35 @@ import { runInstalledUpgrade } from './support/installed-upgrade-scenario.js'
 import { installedExternalDatabaseFixture } from './support/installed-maintenance-observer.js'
 import { installedMemberHome, installedShellArgument, installedUserDataRoot } from './support/installed-storage-layout.js'
 import { instanceWorkspacePath } from './support/real-dsh-runtime.js'
+
+async function recordFailedUpgrade(evidence: string) {
+  const root = '/var/lib/dsh-phalanx-updater'
+  const operation = (await readFile(join(root, 'current'), 'utf8')).trim()
+  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(operation)) throw Error('Invalid installed upgrade operation identity')
+  const state = JSON.parse(await readFile(join(root, operation, 'operation.json'), 'utf8'))
+  if (state.id !== operation) throw Error('Installed upgrade operation changed during diagnostics')
+  const facts = Object.fromEntries(
+    ['phase', 'phaseCode', 'failurePhase', 'errorCode', 'recoveryErrorCode', 'stopErrorCode'].flatMap(key =>
+      typeof state[key] === 'string' && /^[a-z][a-z.-]{0,64}$/u.test(state[key]) ? [[key, state[key]]] : [],
+    ),
+  )
+  const log = state.diagnostic
+  const events: { elapsed: number; status: string; action?: string }[] = []
+  if (typeof log === 'string' && /^[0-9]{8}T[0-9]{6}-[a-f0-9]{8}\.jsonl$/u.test(log)) {
+    for (const line of (await readFile(join('/var/log/dsh-phalanx', log), 'utf8')).trimEnd().split('\n').slice(-30)) {
+      let row
+      try {
+        row = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (typeof row.elapsed !== 'number' || !['running', 'failed', 'complete', 'detail', 'started', 'succeeded'].includes(row.status)) continue
+      const action = typeof row.action === 'string' && /^(?:Running [a-z0-9_.-]+|Fetching instance image|Loading instance image)$/u.test(row.action)
+      events.push({ elapsed: row.elapsed, status: row.status, ...(action ? { action: row.action } : {}) })
+    }
+  }
+  await writeFile(join(evidence, 'formal-upgrade-failure-state.json'), JSON.stringify({ operation, ...facts, events }) + '\n', { mode: 0o600 })
+}
 
 it('upgrades the installed formal previous release to this build and preserves administrator and member data', async () => {
   const bundle = process.env.DSH_PHALANX_FORMAL_UPGRADE_BUNDLE,
@@ -54,6 +83,7 @@ it('upgrades the installed formal previous release to this build and preserves a
     database = { bootstrap: fixture.bootstrap, identity: { kind: 'external', configurationSha256: fixture.configurationSha256, containerId } }
   }
   const origin = 'http://127.0.0.1:18080'
+  const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
   const { memberStorageKey } = await runInstalledUpgrade({
     origin,
     address: '127.0.0.1',
@@ -65,6 +95,15 @@ it('upgrades the installed formal previous release to this build and preserves a
     tag,
     realReply: false,
     ...(database ? { database } : {}),
+  }).catch(async error => {
+    if (evidence) {
+      try {
+        await recordFailedUpgrade(evidence)
+      } catch (diagnosticError) {
+        console.warn('Could not collect the failed installed upgrade state', diagnosticError instanceof Error ? diagnosticError.name : 'Error')
+      }
+    }
+    throw error
   })
   const deployment = JSON.parse(await remote('sudo -n dsh-phalanx status --language en --output json'))
   expect(deployment).toMatchObject({ state: 'running' })
@@ -133,7 +172,6 @@ it('upgrades the installed formal previous release to this build and preserves a
   } finally {
     await browser.close()
   }
-  const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
   if (evidence) {
     await writeFile(
       join(evidence, 'formal-upgrade-deployment.json'),

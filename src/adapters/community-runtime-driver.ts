@@ -18,7 +18,7 @@ import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { communitySpacePath } from '../domain/community-space.js'
 import { instanceResourcesApplied, type InstanceResourceLimits } from '../domain/instance-resources.js'
 import { webServiceArgs } from '../dsh/cli.js'
-import { buildCommunityContainerLaunchCommand, communityContainerPassthroughEnvironment } from '../dsh/container.js'
+import { communityContainerPassthroughEnvironment } from '../dsh/container.js'
 import { applyContainerResources } from './apply-container-resources.js'
 import { memberSkillsMount, memberSkillsProvider } from '../dsh/member-skills.js'
 import { DSH_CONTAINER_HOME } from '../dsh/profile-layout.js'
@@ -59,11 +59,12 @@ import { StartupTiming } from './startup-timing.js'
 
 type InspectionResult = Required<Pick<CommunityUserInstance, 'managedFailures' | 'expertFailures'>>
 interface ProcessHandle {
+  readonly home: string
   readonly child: ChildProcess
   readonly exited: Promise<void>
   readonly inspect: (signal: AbortSignal) => Promise<InspectionResult>
   readonly fallback: InspectionResult
-  credentialsClosed?: true
+  readonly closed: AbortController
 }
 
 /** Owns host I/O and only containers labelled for this exact protected data root. */
@@ -101,7 +102,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
-    this.containers = new OwnedCommunityContainers(config.container, this.ownership)
+    this.containers = new OwnedCommunityContainers(config.container, this.ownership, config.shutdownTimeoutMs, spaces?.existingHome?.bind(spaces))
   }
   rebuild(): Promise<readonly string[]> {
     return this.containers.rebuild(this.hostnames)
@@ -118,6 +119,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     if (this.spaces === undefined) throw new Error('User space storage is required to start an instance')
     const timing = new StartupTiming(progress)
     const { home, workspace, spaceId } = await this.spaces.prepare(userId)
+    await this.containers.assertProfileWriterAvailable(home)
     this.memberModels?.ensure(spaceId)
     const memberModels = this.memberModels?.mount(spaceId)
     const selection = this.nativeFeatures ? await this.nativeFeatures.policy.resolve({ username: userId, spaceId }) : { disabledIds: [] }
@@ -320,11 +322,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         )
       } else {
         requestedResources = containerInput!.resourceLimits
-        const plan = buildCommunityContainerLaunchCommand({ ...containerInput!, memberNativeFeatures })
-        name = plan.containerName
-        await execFileText(plan.command, plan.args, {
-          env: { ...containerClientEnvironment(), ...plan.passthroughEnvironment },
-          timeout: this.startupTimeoutMs,
+        name = await this.containers.launchMember(home, { ...containerInput!, memberNativeFeatures }, this.startupTimeoutMs, containerName => {
+          name = containerName
         })
         signal.throwIfAborted()
         child = spawn(container.runtime, ['logs', '--follow', name], { env: containerClientEnvironment(), stdio: ['ignore', 'pipe', 'pipe'] })
@@ -369,11 +368,6 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         (method, args, deadline) => dshPluginRpc(instance, publicOrigin, method, args, deadline),
         AbortSignal.any([signal, AbortSignal.timeout(this.startupTimeoutMs)]),
       )
-      await this.nativeFeatures?.history?.initialize(
-        { username: userId, spaceId },
-        instance,
-        AbortSignal.any([signal, AbortSignal.timeout(this.startupTimeoutMs)]),
-      )
       if (requestedResources && (!instance.resourceLimits || !instanceResourcesApplied(instance.resourceLimits, requestedResources)))
         throw new CommunityRuntimeUnavailableError('startup-unavailable', 'Member resource limits could not be confirmed')
       const managedFailures = managedPlugins?.failures.filter(name => plugins.some(row => row.packageName === name)) ?? []
@@ -409,14 +403,17 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         expertFailures: [...expertFailures, ...(memberExperts?.expected ?? []).map(row => ({ id: row.id, entries: ['preset'] }))],
       }
       signal.throwIfAborted()
-      this.processes.set(instance, { child, exited, inspect, fallback })
+      const closed = new AbortController()
+      // In container mode the child only follows logs; container retirement owns cancellation.
+      if (name === undefined) void exited.finally(() => closed.abort()).catch(() => {})
+      this.processes.set(instance, { home, child, exited, inspect, fallback, closed })
       timing.finish()
       return instance
     } catch (error) {
       timing.finish()
       let cleanupFailure: unknown
       try {
-        if (name !== undefined) await this.containers.remove(name)
+        if (name !== undefined) await this.containers.remove(name, { userId, spaceId, home })
       } catch (failure) {
         cleanupFailure = failure
       }
@@ -431,7 +428,10 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   }
   inspect(instance: CommunityUserInstance): void {
     const handle = this.processes.get(instance)
-    if (handle) void this.inspection.start(instance, handle.inspect, handle.fallback)
+    if (!handle) return
+    void this.inspection.start(instance, handle.inspect, handle.fallback)
+    if (instance.spaceId)
+      void this.nativeFeatures?.history?.initialize({ username: instance.userId, spaceId: instance.spaceId }, instance, handle.closed.signal).catch(() => {})
   }
   credentials(instance: CommunityUserInstance) {
     const container = this.config.container,
@@ -439,9 +439,9 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     if (!container || !name) throw new CommunityRuntimeUnavailableError('credentials-unavailable', 'The private credential service is unavailable')
     return new ContainerMemberCredentials(container.runtime, async () => {
       const handle = this.processes.get(instance)
-      if (!handle || handle.credentialsClosed) throw new Error('Member instance is no longer registered')
+      if (!handle || handle.closed.signal.aborted) throw new Error('Member instance is no longer registered')
       await this.containers.assertCarrier(instance, 5_000)
-      if (handle.credentialsClosed) throw new Error('Member instance is stopping')
+      if (handle.closed.signal.aborted) throw new Error('Member instance is stopping')
       return name
     })
   }
@@ -476,17 +476,17 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const handle = this.processes.get(instance)
     return handle !== undefined && handle.child.exitCode === null && handle.child.signalCode === null
   }
+  private async endInspection(instance: CommunityUserInstance): Promise<void> {
+    this.processes.get(instance)?.closed.abort()
+    await Promise.all([this.inspection.stop(instance), this.nativeFeatures?.history?.drainWrites(instance)])
+  }
   async stop(instance: CommunityUserInstance): Promise<void> {
-    const handle = this.processes.get(instance)
-    if (handle) handle.credentialsClosed = true
-    await this.inspection.stop(instance)
-    if (instance.containerName !== undefined) await this.containers.remove(instance.containerName)
+    await this.endInspection(instance)
+    if (instance.containerName !== undefined) await this.containers.remove(instance.containerName, { ...instance, home: this.processes.get(instance)?.home })
     await this.releaseProcess(instance, false)
   }
   async detach(instance: CommunityUserInstance): Promise<void> {
-    const handle = this.processes.get(instance)
-    if (handle) handle.credentialsClosed = true
-    await this.inspection.stop(instance)
+    await this.endInspection(instance)
     await this.releaseProcess(instance, instance.containerName !== undefined)
   }
   private async releaseProcess(instance: CommunityUserInstance, detach: boolean): Promise<void> {

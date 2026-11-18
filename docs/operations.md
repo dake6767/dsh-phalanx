@@ -145,8 +145,10 @@ Follow [consistent backup and migration](#consistent-backup-and-whole-host-migra
 rebuilds owned containers and keeps native profiles/files and the member container
 hostname. Existing owned containers provide their hostname during an upgrade;
 keep the private platform data root when backing up or moving the installation.
-Application profiles already blocked by stale locks require the application's
-own recovery procedure; the platform does not remove locks from member files.
+The platform recovers a DSH web profile write lock when it can verify that
+the owning instance has exited and the lock still belongs to that instance.
+It preserves locks whose ownership or status is uncertain. Use the application's
+recovery procedure for other kinds of locks.
 Account deletion also
 preserves files. See the deployment uninstall procedure above for local data removal.
 

@@ -110,6 +110,7 @@ async function unlocked() {
 
 async function launch(command, args) {
   const children = []
+  let app
   const lifetime = new globalThis.AbortController()
   let exitOnStop = 143
   let ownsRunDirectory = false
@@ -145,8 +146,7 @@ async function launch(command, args) {
     keyring.child.stdin.end(key)
     await ready(unlocked, deadline)
     deadline.throwIfAborted()
-    const app = childProcess(command, args, { ...process.env, XDG_RUNTIME_DIR: run, DBUS_SESSION_BUS_ADDRESS: address, GNOME_KEYRING_CONTROL: run }, 'inherit')
-    children.push(app)
+    app = childProcess(command, args, { ...process.env, XDG_RUNTIME_DIR: run, DBUS_SESSION_BUS_ADDRESS: address, GNOME_KEYRING_CONTROL: run }, 'inherit')
     const interrupted = new Promise(resolve => lifetime.signal.addEventListener('abort', () => resolve(exitOnStop), { once: true }))
     const code = await Promise.race([app.exited.then(code => (code === failureExit ? 1 : code)), interrupted])
     return code
@@ -156,6 +156,13 @@ async function launch(command, args) {
     console.error('Member credential service could not be prepared.')
     return failureExit
   } finally {
+    if (app) {
+      app.child.kill('SIGTERM')
+      // DSH's CLI allows its mounted plugin tree five seconds to dispose.
+      await Promise.race([app.exited, sleep(6_000, undefined, { ref: false })])
+      if (app.child.exitCode === null && app.child.signalCode === null) app.child.kill('SIGKILL')
+      await app.exited
+    }
     for (const { child } of children.reverse()) child.kill('SIGTERM')
     const cleanup = Promise.all(children.map(({ exited }) => exited))
     await Promise.race([cleanup, sleep(1_000, undefined, { ref: false })])
