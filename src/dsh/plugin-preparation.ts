@@ -2,10 +2,12 @@ import { managedPluginPatch } from './managed-plugin-patch.js'
 import { registryDependenciesAllowed } from '../domain/plugin-library.js'
 import { containerWebCommand } from './cli.js'
 import { excludedContributionFile, scanContributionCredentials } from '../domain/contribution-checks.js'
+import { mergePluginConfig } from './managed-plugin-access.js'
 
 /** Official CLI and profile seam for isolated plugin preparation. */
 export const pluginPreparationHome = '/prepare/home'
 export const pluginPreparationProfile = `${pluginPreparationHome}/.dsh/profiles/web`
+export const pluginDefaultCheckFiles = 'native-defaults'
 export function pluginAddCommand(): string[] {
   return [...containerWebCommand().slice(0, 2), 'plugin', '--profile', 'web', 'add', '/prepare/original.tgz', '--ignore-scripts']
 }
@@ -132,7 +134,8 @@ if (process.argv[2] === 'upload') {
   await cp(join(profile, 'cordis.patch.yml'), join(checkProfile, 'cordis.patch.yml'));
   await symlink('/artifact/node_modules', join(checkProfile, 'node_modules'));
   const identity = JSON.parse(await readFile('/prepare/identity.json', 'utf8'));
-  await writeFile(join(prepared, 'manifest.json'), JSON.stringify({ ...input, ...identity,
+  const { installDefaults, ...artifactInput } = input;
+  await writeFile(join(prepared, 'manifest.json'), JSON.stringify({ ...artifactInput, ...identity,
     title: typeof manifest.displayName === 'string' ? manifest.displayName.slice(0, 256) : manifest.name,
     description: typeof manifest.description === 'string' ? manifest.description.slice(0, 4096) : '',
     dependencies: manifest.dependencies ?? {}, optionalDependencies: manifest.optionalDependencies ?? {}, peerDependencies: manifest.peerDependencies ?? {}, bundlePatch, runtimePeers: peers }));
@@ -164,6 +167,41 @@ if (process.argv[2] === 'upload') {
   for (let i = 0; i < compiled.entries.length; i++) await writeFile(join(prepared, prefix + '-entries-' + i + '.json'), JSON.stringify(compiled.entries[i]));
   for (const patch of compiled.overlays) for (const row of patch.insert ?? []) row.config.path = '/artifact/' + row.config.path;
   await writeFile(join(prepared, 'managed.patch.json'), JSON.stringify(compiled.overlays));
+  if (installDefaults) {
+    const mergePluginConfig = ${mergePluginConfig.toString()};
+    const checkedEntries = structuredClone(compiled.entries);
+    const checkedOverlays = structuredClone(compiled.overlays);
+    const packageDirectory = await realpath(packageRoot);
+    const requested = new Map(Object.entries(installDefaults));
+    const targetIds = [];
+    const visit = async rows => {
+      for (const row of rows) {
+        if (row.group) {
+          await visit(row.config);
+          continue;
+        }
+        const id = row.id.slice(prefix.length + 1);
+        if (!requested.has(id)) continue;
+        if (!row.name.startsWith('/artifact/node_modules/')) fail('plugin-precheck-failed');
+        const modulePath = await realpath(join(profile, row.name.slice('/artifact/'.length)));
+        if (!modulePath.startsWith(packageDirectory + '/')) fail('plugin-precheck-failed');
+        row.config = mergePluginConfig(row.config, requested.get(id));
+        targetIds.push(row.id);
+        requested.delete(id);
+      }
+    };
+    for (const rows of checkedEntries) await visit(rows);
+    if (requested.size) fail('plugin-precheck-failed');
+    // Nested entries may resolve providers relative to their include file.
+    const checkDirectory = join(prepared, '${pluginDefaultCheckFiles}');
+    await mkdir(checkDirectory);
+    for (let i = 0; i < checkedEntries.length; i++)
+      await writeFile(join(checkDirectory, prefix + '-entries-' + i + '.json'), JSON.stringify(checkedEntries[i]));
+    for (const patch of checkedOverlays) for (const row of patch.insert ?? [])
+      row.config.path = row.config.path.replace('/artifact/', '/artifact/${pluginDefaultCheckFiles}/');
+    await writeFile(join(checkDirectory, 'check.json'), JSON.stringify(checkedOverlays));
+    await writeFile(join(checkDirectory, 'targets.json'), JSON.stringify(targetIds));
+  }
   // Preserve original bytes for diagnostics and later runtime preparation.
   await writeFile(join(prepared, 'bundle.patch.yml'), bundlePatch);
 }

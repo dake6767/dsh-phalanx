@@ -43,7 +43,7 @@ export async function applyPluginContributionFacts(
   // Both ordinary upstream edits and this unit acquire parent then header before reading the plan's settings.
   await rows.pluginUpstreams.lock(plugin.packageName)
   const access = new PluginAccessAdministration(rows.accounts, rows.plugins, rows.pluginAccess, rows.pluginUpstreams, syntax),
-    upstreams = new PluginUpstreamAdministration(rows.accounts, rows.plugins, rows.pluginUpstreams, access),
+    upstreams = new PluginUpstreamAdministration(rows.accounts, rows.plugins, rows.pluginUpstreams, access, rows.pluginAccess),
     administration = new PluginContributionAdministration(access, upstreams, syntax),
     configurationWarnings = await administration.apply(contribution, setup),
     receipt = { id: contribution.id, revision: contribution.revision }

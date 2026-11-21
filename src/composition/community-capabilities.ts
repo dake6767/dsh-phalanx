@@ -164,6 +164,7 @@ export function createCommunityCapabilities(input: {
     clock,
     {
       list: runtimeStorage.references.list.bind(runtimeStorage.references),
+      browserConsumers: runtimeStorage.references.browserConsumers.bind(runtimeStorage.references),
       retained: async () => [...(await dependencyProjection.retained()), ...sharedProcess.retainedArtifacts()],
     },
     () => mcp.recover(),

@@ -1,8 +1,10 @@
 import type { CommunityUserInstance } from './community-runtime.js'
 import type { NativeFeatureMember } from './native-features.js'
-import type { PluginInstallationsPort } from './plugin-installations.js'
+import type { MemberBrowserInventoryPort, PluginInstallationsPort } from './plugin-installations.js'
 import type { PlatformUnitOfWorkPort } from './platform-unit-of-work.js'
 import type { SpaceMembers } from './space-actors.js'
+
+export type NativeBrowserInventory = ReadonlyMap<string, { readonly version?: string; readonly integrity?: string | null }>
 
 /** Official optional bundle facts observed by the platform, never member-submitted names. */
 export interface NativeOptionalBundle {
@@ -19,12 +21,19 @@ export interface NativePluginHistoryPersistence {
   readonly work: PlatformUnitOfWorkPort<{
     readonly actors: SpaceMembers
     readonly history: NativePluginHistoryRows
-    readonly deliveries: Pick<PluginInstallationsPort, 'get'>
+    readonly deliveries: Pick<PluginInstallationsPort, 'get'> & Partial<MemberBrowserInventoryPort>
   }>
 }
 export interface NativePluginHistoryRuntime {
   current(username: string, includeDraining?: boolean): CommunityUserInstance | undefined
   inspect(instance: CommunityUserInstance, signal: AbortSignal): Promise<readonly NativeOptionalBundle[]>
+  inspectInventory?(
+    instance: CommunityUserInstance,
+    signal: AbortSignal,
+  ): Promise<{
+    readonly optional: readonly NativeOptionalBundle[]
+    readonly installed?: NativeBrowserInventory
+  }>
 }
 export interface MemberNativePluginHistory {
   initialize(member: NativeFeatureMember, instance: CommunityUserInstance, signal: AbortSignal): Promise<readonly string[]>

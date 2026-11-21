@@ -1,10 +1,13 @@
 import { pluginCatalogRevision } from '../src/domain/plugin-library.js'
 import { expect, it } from 'vitest'
 import { YamlPluginAccessSyntax } from '../src/adapters/plugin-access-syntax.js'
+import { MemberPluginUpstreams } from '../src/use-cases/member-plugin-upstreams.js'
 import { createSuiteStorage } from '../src/composition/suite-storage.js'
 import { SuiteTransactions } from '../src/use-cases/suite-transactions.js'
-import { assertCatalogPluginBindings } from '../src/use-cases/suite-plugin-facts.js'
+import { assertCatalogPluginBindings, writeSuitePlugin } from '../src/use-cases/suite-plugin-facts.js'
 import type { SuiteCatalogPluginItem } from '../src/domain/suite-catalog.js'
+import type { CatalogPluginServiceSlot } from '../src/domain/suite-service-slots.js'
+import { suiteInstallOrigin } from '../src/domain/suite-install.js'
 import { postgresSuiteService, suiteVersion } from './fixtures/postgres-suite-service.js'
 
 const plugin = (version: 1 | 2) => {
@@ -34,6 +37,103 @@ const plugin = (version: 1 | 2) => {
   }
 }
 
+it.each([true, false])('reserves the native upstream at adoption and retains its scope after removal (previous row: %s)', async ready => {
+  const f = await postgresSuiteService()
+  const storage = createSuiteStorage(f.database)
+  const original = plugin(1)
+  const name = original.item.packageName
+  const identity = { id: 'fixture-plugin', version: '1.0.0' }
+  const origin = suiteInstallOrigin(identity.id)
+  const label = { en: 'Image', 'zh-CN': '图片' }
+  const slot: CatalogPluginServiceSlot = {
+    id: 'image',
+    label,
+    binding: {
+      kind: 'json-settings',
+      deferredUpstream: true,
+      file: 'image-upstream.json',
+      upstream: 'image-provider',
+      fields: [
+        { path: ['endpoint'], source: 'gateway-url' },
+        { path: ['token'], source: 'service-token' },
+        { path: ['model'], source: 'model' },
+      ],
+    },
+    backends: [
+      {
+        id: 'openai',
+        label,
+        protocol: 'openai-image',
+        mode: 'openai',
+        fields: [{ name: 'model', type: 'text', required: true }],
+        upstream: { model: 'model' },
+      },
+    ],
+  }
+  const provider = {
+    name: 'image-provider',
+    baseUrl: 'https://example.test/v1',
+    model: 'fixture-model',
+    credential: 'fixture-secret',
+    headers: [{ name: 'Authorization', value: 'Bearer {credential}' }],
+  }
+  const ordinary = { ...provider, name: 'other' }
+  const pending = {
+    name: provider.name,
+    baseUrl: '',
+    credential: '',
+    headers: provider.headers,
+    testRequest: { method: 'GET', path: '/models' },
+  }
+  const syntax = new YamlPluginAccessSyntax()
+  try {
+    await storage.work.run(async rows => {
+      await rows.plugins.save({
+        packageName: name,
+        version: original.item.version,
+        source: { kind: 'npm' },
+        stage: 'available',
+        current: original.prepared,
+        published: true,
+      })
+      if (ready) await rows.pluginUpstreams.save(name, [provider, ordinary])
+    })
+    const stale = await storage.work.run(async rows => await rows.pluginUpstreams.revision!(name))
+    const stalePlugin = await storage.work.run(async rows => (await rows.plugins.list())[0]!.revision)
+    await storage.work.run(async rows => {
+      const row = (await rows.plugins.list())[0]!
+      const item = { ...original.item, serviceSlots: [slot] }
+      await writeSuitePlugin(rows, origin, { ...original, item }, [], 'install', {
+        syntax,
+        serviceIdentity: identity,
+        takeover: { row, revision: pluginCatalogRevision(row, 'none') },
+      })
+    })
+    await expect(storage.work.run(rows => rows.pluginUpstreams.save(name, [provider], undefined, stale))).rejects.toMatchObject({
+      code: 'platform-configuration-conflict',
+    })
+    const latest = await storage.work.run(async rows => await rows.pluginUpstreams.revision!(name))
+    await expect(storage.work.run(rows => rows.pluginUpstreams.save(name, [], undefined, latest, stalePlugin))).rejects.toMatchObject({
+      code: 'platform-configuration-conflict',
+    })
+    await storage.work.run(async rows => {
+      await writeSuitePlugin(rows, origin, original, [], 'update', { syntax, serviceIdentity: { ...identity, version: '1.0.1' } })
+      expect(await rows.pluginAccess.installedServices?.(name)).toBeUndefined()
+      expect(await rows.pluginUpstreams.list(name)).toEqual([{ ...(ready ? provider : pending), nativeServiceOnly: true }, ...(ready ? [ordinary] : [])])
+      const members = new MemberPluginUpstreams(
+        { list: rows.pluginUpstreams.list.bind(rows.pluginUpstreams), authorizationRevision: () => 'fixture' },
+        {
+          installedServices: rows.pluginAccess.installedServices!.bind(rows.pluginAccess),
+        },
+      )
+      expect(await members.list(name)).toEqual(ready ? [ordinary] : [])
+      expect((await rows.plugins.list())[0]?.published).toBe(true)
+    })
+  } finally {
+    await f.close()
+  }
+})
+
 it('requires native package cache pins to cover the original dependency names and ranges', () => {
   const { item, prepared } = plugin(1)
   const pins = [
@@ -52,10 +152,42 @@ it('requires native package cache pins to cover the original dependency names an
   expect(() => check([{ ...pins[0]!, version: '3.0.0' }, pins[1]!])).toThrow('package cache pins')
 })
 
+it('requires the selected Playwright browser to match the exact member package pin', () => {
+  const { item, prepared } = plugin(1)
+  const browser = {
+    kind: 'playwright-browser' as const,
+    dependency: 'chromium-1248',
+    version: '1.0.0',
+    contentHash: 'a'.repeat(64),
+    path: 'assets',
+    playwrightVersion: '1.64.1',
+    chromiumBuild: '1248',
+    directories: ['chromium_headless_shell-1248'],
+  }
+  const cache = {
+    kind: 'native-package-cache' as const,
+    dependency: 'cache',
+    version: '1.0.0',
+    contentHash: 'b'.repeat(64),
+    path: 'cache',
+    packages: [{ packageName: 'playwright', version: '1.64.1' }],
+  }
+  const check = (range: string, configuredCache = false) =>
+    assertCatalogPluginBindings(
+      { ...item, resourceBindings: configuredCache ? [browser, cache] : [browser] },
+      { ...prepared, dependencies: { playwright: range } },
+    )
+  expect(() => check('1.64.1')).not.toThrow()
+  expect(() => check('^1.64.0', true)).not.toThrow()
+  expect(() => check('^1.64.0')).toThrow('Playwright')
+  expect(() => check('1.65.1')).toThrow('Playwright')
+  expect(() => assertCatalogPluginBindings({ ...item, resourceBindings: [browser] }, prepared)).toThrow('Playwright')
+})
+
 it('commits prepared plugin bytes, protected template settings and catalog receipt together without a recovery checkpoint', async () => {
   const f = await postgresSuiteService(),
     storage = createSuiteStorage(f.database),
-    unit = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, new YamlPluginAccessSyntax())
+    unit = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, { syntax: new YamlPluginAccessSyntax() })
   try {
     const plan = plugin(1),
       entry = { ...suiteVersion(1), category: 'plugin' as const, id: 'fixture-plugin', items: [plan.item] },
@@ -131,7 +263,7 @@ it('commits prepared plugin bytes, protected template settings and catalog recei
 it('preserves a newer administrator plugin template and its revision during catalog update', async () => {
   const f = await postgresSuiteService(),
     storage = createSuiteStorage(f.database),
-    unit = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, new YamlPluginAccessSyntax())
+    unit = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, { syntax: new YamlPluginAccessSyntax() })
   try {
     const plan = plugin(1),
       entry = { ...suiteVersion(1), category: 'plugin' as const, id: 'fixture-plugin', items: [plan.item] },
@@ -183,7 +315,7 @@ it('preserves a newer administrator plugin template and its revision during cata
 it('does not reattach a detached plugin while recording the next catalog version', async () => {
   const f = await postgresSuiteService(),
     storage = createSuiteStorage(f.database),
-    unit = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, new YamlPluginAccessSyntax())
+    unit = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, { syntax: new YamlPluginAccessSyntax() })
   try {
     const plan = plugin(1),
       entry = { ...suiteVersion(1), category: 'plugin' as const, id: 'fixture-plugin', items: [plan.item] },
@@ -238,7 +370,7 @@ it('does not reattach a detached plugin while recording the next catalog version
 it('records a confirmed manual plugin takeover while retaining publication and contributor credit', async () => {
   const f = await postgresSuiteService(),
     storage = createSuiteStorage(f.database),
-    unit = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, new YamlPluginAccessSyntax())
+    unit = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, { syntax: new YamlPluginAccessSyntax() })
   try {
     const old = plugin(1),
       next = plugin(2),
@@ -302,7 +434,7 @@ it('records a confirmed manual plugin takeover while retaining publication and c
 it('rechecks the locked shared artifact before committing a prepared plugin', async () => {
   const f = await postgresSuiteService()
   const storage = createSuiteStorage(f.database)
-  const transactions = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, new YamlPluginAccessSyntax())
+  const transactions = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, { syntax: new YamlPluginAccessSyntax() })
   try {
     const dependency = 'shared-assets'
     const original = plugin(1)
@@ -356,4 +488,58 @@ it('rechecks the locked shared artifact before committing a prepared plugin', as
   } finally {
     await f.close()
   }
+})
+
+it('rejects an unavailable or already supplied browser build before writing a signed plugin', async () => {
+  const original = plugin(1)
+  const firstPin = { dependency: 'old-cache', version: '1.0.0', contentHash: 'a'.repeat(64), path: 'assets' }
+  const nextPin = { ...firstPin, dependency: 'new-cache', contentHash: 'b'.repeat(64) }
+  const binding = {
+    ...nextPin,
+    kind: 'playwright-browser' as const,
+    playwrightVersion: '1.64.1',
+    chromiumBuild: '1248',
+    directories: ['chromium_headless_shell-1248'],
+  }
+  const plan = {
+    ...original,
+    item: { ...original.item, catalogDependencies: [nextPin.dependency], resourceBindings: [binding] },
+    prepared: { ...original.prepared, dependencies: { playwright: '1.64.1' } },
+  }
+  let installedBindings: object[] = []
+  let memberBindings: object[] = []
+  const list = new Map<string, readonly string[]>([
+    ['/old/assets', ['chromium-1248']],
+    ['/new/assets', []],
+  ])
+  const browserDirectories = async (directory: string) => list.get(directory) ?? []
+  const rows = {
+    plugins: { list: async () => (installedBindings.length ? [{ packageName: 'existing-editor', suiteResourceBindings: installedBindings }] : []) },
+    pluginAccess: { get: async () => undefined },
+    pluginUpstreams: {
+      list: async () => {
+        throw Error('Competing browser reached plugin template validation')
+      },
+    },
+    runtimeReferences: { retainedBrowserBindings: async () => memberBindings },
+    runtime: {
+      list: async () => [
+        { name: 'new-cache', current: { directory: '/new' } },
+        { name: 'old-cache', current: { directory: '/old' } },
+      ],
+    },
+  } as unknown as Parameters<typeof writeSuitePlugin>[0]
+  const write = (item: SuiteCatalogPluginItem = plan.item) =>
+    writeSuitePlugin(rows, 'suite:fixture-plugin', { ...plan, item }, ['new-cache'], 'install', { syntax: new YamlPluginAccessSyntax(), browserDirectories })
+  await expect(write()).rejects.toThrow('Prepared Playwright browser build is unavailable')
+  list.set('/new/assets', binding.directories)
+  installedBindings = [{ ...firstPin, kind: 'environment', name: 'PLAYWRIGHT_BROWSERS_PATH', runtimeDependency: 'old-cache' }]
+  await expect(write()).rejects.toThrow('Playwright browser build already has a locked resource')
+  installedBindings = [{ ...binding, ...firstPin, runtimeDependency: 'old-cache' }]
+  await expect(write()).rejects.toThrow('Playwright browser build already has a locked resource')
+  const legacy = { ...nextPin, kind: 'environment' as const, name: 'PLAYWRIGHT_BROWSERS_PATH' }
+  await expect(write({ ...plan.item, resourceBindings: [legacy] })).rejects.toThrow('Playwright browser build already has a locked resource')
+  memberBindings = installedBindings
+  installedBindings = []
+  await expect(write()).rejects.toThrow('Playwright browser build already has a locked resource')
 })

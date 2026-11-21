@@ -14,9 +14,14 @@ export interface RuntimeDependencyCheck {
   readonly passed: boolean
   readonly detail?: string
 }
-export interface RuntimeDependencyReference {
+export interface RuntimeDependencyOwnerReference {
   readonly kind: 'skill' | 'execution' | 'mcp' | 'plugin'
   readonly name: string
+}
+export type RuntimeDependencyReference = RuntimeDependencyOwnerReference | { readonly kind: 'member-plugin'; readonly name: string }
+export interface PreparedBrowserBuild {
+  readonly build: string
+  readonly bytes: number
 }
 export interface RuntimeDependencyVersion {
   readonly id: string
@@ -27,6 +32,7 @@ export interface RuntimeDependencyVersion {
   readonly commands: readonly string[]
   readonly commandPaths: Readonly<Record<string, string>>
   readonly bytes: number
+  readonly browserBuilds?: readonly PreparedBrowserBuild[]
   readonly isolated: boolean
   readonly checks: readonly RuntimeDependencyCheck[]
   readonly log: string

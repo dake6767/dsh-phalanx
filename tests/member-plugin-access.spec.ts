@@ -368,6 +368,32 @@ it('projects a locked catalog resource only for an exact member delivery and ret
     contentHash: 'a'.repeat(64),
     commands: ['ffmpeg'],
   }
+  const browser = {
+    kind: 'playwright-browser' as const,
+    dependency: resource.dependency,
+    runtimeDependency: resource.runtimeDependency,
+    path: 'browser',
+    version: resource.version,
+    contentHash: resource.contentHash,
+    playwrightVersion: '1.64.1',
+    chromiumBuild: '1248',
+    directories: ['chromium_headless_shell-1248'],
+  }
+  const version = {
+    id: 'fixture',
+    identity: 'fixture',
+    directory: '/host/fixture',
+    mountedPath: '/dependency/fixture',
+    pathDirectories: [],
+    commands: [],
+    commandPaths: {},
+    bytes: 1,
+    isolated: true,
+    checks: [],
+    log: '',
+  }
+  let recoverable: import('../src/ports/plugin-installations.js').RecoverableMemberBrowser[] = []
+  const transferred: { delivery?: import('../src/ports/plugin-installations.js').RecoverableMemberBrowser } = {}
   let delivery: import('../src/ports/plugin-installations.js').PluginInstallation = {
     packageName: 'adapted',
     source: 'selected',
@@ -382,12 +408,18 @@ it('projects a locked catalog resource only for an exact member delivery and ret
     published: true,
     suiteOrigin: 'catalog',
     runtimeDependencies: ['locked-bin'],
-    suiteResourceBindings: [resource],
+    suiteResourceBindings: [resource, browser],
   }
   const access = new MemberPluginAccess(
     { effective: async () => [], localSelection: async () => [] },
     { get: () => undefined, list: () => ({}), save: async () => {}, remove: async () => {} },
-    { accounts: { get: async () => account }, records: { get: async () => [delivery] } },
+    {
+      accounts: { get: async () => account },
+      records: {
+        get: async () => [delivery],
+        nativeResourceSnapshot: async () => ({ delivered: [transferred.delivery ?? delivery], recovering: recoverable }),
+      },
+    },
     { library: { list: async () => [row] }, ready: () => [], runtimeRevision: 'rev' },
   )
   expect(await access.dependencyNames('member', ['adapted'])).toEqual([])
@@ -395,9 +427,24 @@ it('projects a locked catalog resource only for an exact member delivery and ret
   expect(await access.nativeDependencyPlans('member', facts)).toEqual({})
   delivery = { ...delivery, resourceOrigin: 'catalog' }
   const nativeResources = await access.nativeDependencyPlans('member', facts)
-  expect(nativeResources).toMatchObject({ adapted: { dependencies: ['locked-bin'], resources: [resource] } })
+  expect(nativeResources).toMatchObject({ adapted: { dependencies: ['locked-bin'], resources: [resource, browser] } })
   expect(await access.nativeDependencyPlans('member', {})).toEqual({})
   expect(await access.nativeDependencyPlans('member', { adapted: { ...facts.adapted, integrity: 'self-installed' } })).toEqual({})
+  const resolved = await access.resolve(
+    [],
+    { url: 'http://localhost', token: 'fixture' },
+    { username: 'member', installed: ['adapted'], nativeResources, dependencyVersions: { 'locked-bin': version } },
+  )
+  expect(resolved.playwrightBrowsers).toEqual([
+    {
+      directory: '/host/fixture/browser',
+      mountedDirectory: '/dependency/fixture/browser',
+      packageName: 'adapted',
+      chromiumBuild: '1248',
+      directories: ['chromium_headless_shell-1248'],
+    },
+  ])
+  expect(resolved.snapshot).toContain('native:browser:adapted:["1248","/dependency/fixture/browser",["chromium_headless_shell-1248"]]')
   row = { ...row, runtimeDependencies: ['changed'], suiteResourceBindings: [{ ...resource, runtimeDependency: 'changed' }] }
   expect(
     await access.resolve(
@@ -411,6 +458,38 @@ it('projects a locked catalog resource only for an exact member delivery and ret
       },
     ),
   ).toEqual({ environment: {}, entries: {}, snapshot: [], nativeFailures: ['adapted'] })
+  delivery = { ...delivery, browserBindings: [browser] }
+  const retainedResources = await access.nativeDependencyPlans('member', facts)
+  expect(retainedResources).toMatchObject({ adapted: { dependencies: ['locked-bin'], resources: [browser], retainedBrowser: true } })
+  const retained = await access.resolve(
+    [],
+    { url: 'http://localhost', token: 'fixture' },
+    { username: 'member', installed: ['adapted'], nativeResources: retainedResources, dependencyVersions: { 'locked-bin': version } },
+  )
+  expect(retained.playwrightBrowsers).toEqual(resolved.playwrightBrowsers)
+  expect(retained.environment).toEqual({})
   delivery = { ...delivery, version: '0.9.0' }
   expect(await access.nativeDependencyPlans('member', facts)).toEqual({})
+  recoverable = [
+    { packageName: plugin.packageName, version: plugin.version, integrity: plugin.integrity, resourceOrigin: 'catalog', browserBindings: [browser] },
+  ]
+  const recovered = await access.nativeDependencyPlans('member', facts)
+  expect(recovered).toEqual(retainedResources)
+  expect(await access.nativeDependencyPlans('member', { adapted: { ...facts.adapted, integrity: 'unrelated' } })).toEqual({})
+  transferred.delivery = recoverable[0]!
+  recoverable = []
+  expect(
+    (
+      await access.resolve(
+        [],
+        { url: 'http://localhost', token: 'fixture' },
+        {
+          username: 'member',
+          installed: ['adapted'],
+          nativeResources: recovered,
+          dependencyVersions: { 'locked-bin': version },
+        },
+      )
+    ).playwrightBrowsers,
+  ).toEqual(resolved.playwrightBrowsers)
 })

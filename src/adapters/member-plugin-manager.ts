@@ -2,6 +2,7 @@ import { DSH_BUNDLE_LIST, DSH_BUNDLE_REMOVE } from '../dsh/plugin-manager-protoc
 import type {
   NativePluginInstallTransport,
   NativePluginCache,
+  NativePluginDefaultDelivery,
   MemberNativePluginManagerPort,
   NativePluginApplication,
   NativePluginInstallPhase,
@@ -31,6 +32,7 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
       enabled?: boolean
       removable?: boolean
       error?: unknown
+      installDefaultsPending?: string
     }>
     if (!Array.isArray(rows)) throw this.failure()
     return rows.flatMap(row => {
@@ -41,6 +43,11 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
               packageName: row.name,
               ...(typeof row.version === 'string' ? { version: row.version } : {}),
               ...(archiveIntegrity ? { retainedArchive: true as const } : {}),
+              ...(archiveIntegrity &&
+              typeof row.installDefaultsPending === 'string' &&
+              (row.installDefaultsPending === 'discarding' || /^[a-f0-9]{64}$/u.test(row.installDefaultsPending))
+                ? { installDefaultsPending: row.installDefaultsPending }
+                : {}),
               ...(archiveIntegrity && row.removable === true && !row.error && typeof row.enabled === 'boolean'
                 ? { archiveIntegrity, enabled: row.enabled }
                 : {}),
@@ -65,6 +72,7 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
       readonly registry: string
       readonly requestId: string
       readonly identity?: PluginIdentity
+      readonly installDefaults?: NativePluginDefaultDelivery
       readonly progress?: (phase: NativePluginInstallPhase) => void
     },
     signal: AbortSignal,
@@ -79,6 +87,7 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
         registry: options.registry,
         requestId: options.requestId,
         replacement: { ...replacement, authorizationUrl: archive.authorizationUrl },
+        ...(options.installDefaults ? { installDefaults: options.installDefaults } : {}),
         ...(cache ? { cache } : {}),
       }
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -104,6 +113,7 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
       readonly registry: string
       readonly requestId: string
       readonly identity?: PluginIdentity
+      readonly installDefaults?: NativePluginDefaultDelivery
       readonly progress?: (phase: NativePluginInstallPhase) => void
     },
     signal: AbortSignal,
@@ -113,7 +123,13 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
     let result: unknown
     try {
       const install = async (cache?: NativePluginCache) => {
-        const input = { spec: path, registry: options.registry, requestId: options.requestId, ...(cache ? { cache } : {}) }
+        const input = {
+          spec: path,
+          registry: options.registry,
+          requestId: options.requestId,
+          ...(options.installDefaults ? { installDefaults: options.installDefaults } : {}),
+          ...(cache ? { cache } : {}),
+        }
         for (let attempt = 0; attempt < 2; attempt++) {
           signal.throwIfAborted()
           try {

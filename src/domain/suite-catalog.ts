@@ -77,6 +77,7 @@ export interface SuiteCatalogPluginItem {
   readonly version: string
   readonly integrity: string
   readonly archive?: SuiteCatalogPluginArchive
+  readonly installDefaults?: import('./native-install-defaults.js').NativeInstallDefaults
   readonly serviceSlots?: readonly CatalogPluginServiceSlot[]
   readonly resourceBindings?: readonly CatalogResourceBinding[]
   readonly runtimeDependencies: readonly string[]

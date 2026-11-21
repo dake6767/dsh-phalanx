@@ -4,6 +4,11 @@ import type { CatalogJsonServiceBinding, CatalogPluginServiceBinding } from '../
 import type { NativeJsonFieldHistory } from './plugin-installations.js'
 import type { MemberPluginManagerPort } from './plugin-market.js'
 
+export interface NativePluginDefaultDelivery extends PluginIdentity {
+  readonly integrity: string
+  readonly entries: import('../domain/native-install-defaults.js').NativeInstallDefaults
+}
+
 export type NativePluginInstallPhase = 'downloading' | 'installing'
 export type NativePluginApplication = 'applied' | 'restart-required'
 export interface NativePluginReplacement {
@@ -20,6 +25,7 @@ export interface MemberNativePluginManagerPort extends MemberPluginManagerPort {
       readonly registry: string
       readonly requestId: string
       readonly identity?: PluginIdentity
+      readonly installDefaults?: NativePluginDefaultDelivery
       readonly progress?: (phase: NativePluginInstallPhase) => void
     },
     signal: AbortSignal,
@@ -33,6 +39,7 @@ export interface MemberNativePluginManagerPort extends MemberPluginManagerPort {
       readonly registry: string
       readonly requestId: string
       readonly identity?: PluginIdentity
+      readonly installDefaults?: NativePluginDefaultDelivery
       readonly progress?: (phase: NativePluginInstallPhase) => void
     },
     signal: AbortSignal,
@@ -55,6 +62,7 @@ export interface NativePluginInstallTransport {
       readonly spec: string
       readonly registry: string
       readonly requestId: string
+      readonly installDefaults?: NativePluginDefaultDelivery
       readonly cache?: NativePluginCache
       readonly replacement?: NativePluginReplacement & { readonly authorizationUrl: string }
     },

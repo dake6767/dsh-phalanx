@@ -1,10 +1,13 @@
 import { parseDocument } from 'yaml'
-import { pluginAccessObject, type PluginEntryConfig } from '../domain/plugin-access.js'
+import { type PluginEntryConfig } from '../domain/plugin-access.js'
 import { managedPluginPatch } from './managed-plugin-patch.js'
+
+export { literalPluginAccess } from '../domain/plugin-config-data.js'
 
 /** The official patch identities and lazy-value marker belong to this seam. */
 export function mergePluginConfig(base: unknown, patch: unknown): unknown {
-  if (!pluginAccessObject(base) || !pluginAccessObject(patch) || '__jsExpr' in base || '__jsExpr' in patch) return patch
+  const pluginObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
+  if (!pluginObject(base) || !pluginObject(patch) || '__jsExpr' in base || '__jsExpr' in patch) return patch
   return Object.fromEntries(
     [...new Set([...Object.keys(base), ...Object.keys(patch)])].map(key => [
       key,
@@ -13,16 +16,6 @@ export function mergePluginConfig(base: unknown, patch: unknown): unknown {
   )
 }
 
-export function literalPluginAccess(value: unknown): boolean {
-  return (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'boolean' ||
-    (typeof value === 'number' && Number.isFinite(value)) ||
-    (Array.isArray(value) && value.every(literalPluginAccess)) ||
-    (pluginAccessObject(value) && Object.keys(value).every(key => key !== '__jsExpr') && Object.values(value).every(literalPluginAccess))
-  )
-}
 export function managedAccessEntryIds(source: string): readonly string[] {
   const document = parseDocument(source, { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: (value: string) => ({ __jsExpr: value }) }] })
   if (document.errors.length) throw Error('Invalid prepared patch')

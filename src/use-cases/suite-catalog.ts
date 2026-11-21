@@ -1,6 +1,7 @@
 import { legacyCatalogExecutionVariables } from '../domain/execution-service-environment.js'
 import { SuiteCatalogQueries } from './suite-catalog-queries.js'
 import { SuiteChanges } from './suite-changes.js'
+import type { SuitePluginWiring } from './suite-plugin-facts.js'
 import { SuiteTransactions } from './suite-transactions.js'
 import { SuiteRetirement } from './suite-retirement.js'
 import { SuiteTaskRecords } from './suite-task-records.js'
@@ -31,7 +32,6 @@ import { suiteExecutionOwner, suiteInstallOrigin } from '../domain/suite-install
 import type { CatalogInstallRecord } from '../domain/catalog-install.js'
 import type { CatalogInstallRows, CatalogRequestRows, CatalogInstallRow, CatalogRequestRow } from '../ports/catalog-records.js'
 import type { SuiteUnitOfWork } from '../ports/suite-unit-of-work.js'
-import type { PluginAccessSyntaxPort } from '../ports/plugin-access.js'
 import type { ExpertReferencesPort } from '../ports/experts.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { Clock } from '../ports/clock.js'
@@ -88,7 +88,7 @@ export class SuiteCatalog {
     private readonly packs: SkillPackSuitePort & SkillPackSuiteUpdatePort,
     private readonly execution?: ExecutionSuitePort & ExecutionSuiteUpdatePort,
     private readonly plugins?: CatalogPlugins,
-    private readonly policy: { readonly syntax?: PluginAccessSyntaxPort; readonly compatibilityTarget?: string; readonly changed?: () => Promise<void> } = {},
+    private readonly policy: SuitePluginWiring & { readonly changed?: () => Promise<void> } = {},
   ) {
     this.queries = new SuiteCatalogQueries(
       gallery,
@@ -103,7 +103,7 @@ export class SuiteCatalog {
       () => [...this.replacementClaims.values()].flat(),
     )
     this.changes = new SuiteChanges(
-      new SuiteTransactions(storage.work, dependencies, clock, policy.syntax, policy.compatibilityTarget),
+      new SuiteTransactions(storage.work, dependencies, clock, policy),
       dependencies,
       skills,
       architecture,
@@ -319,11 +319,12 @@ export class SuiteCatalog {
           references: blocked.map(row => `${row.kind}: ${row.name}`).join(', '),
         })
       if (request.removeDependencies?.some(dependency => !record.dependencies?.includes(dependency))) throw invalidRequest()
-      const kept = preview.dependencies.filter(row => row.references.length && request.removeDependencies?.includes(row.id))
+      const kept = preview.dependencies.filter(row => row.references.length && !row.browserBuilds?.length && request.removeDependencies?.includes(row.id))
       if (kept.length)
         throw new BusinessRuleError('conflict', 'Suite entries are still referenced.', 'runtime-dependency-referenced', {
           references: kept.flatMap(row => row.references.map(reference => `${reference.kind}: ${reference.name}`)).join(', '),
         })
+      const removeDependencies = (request.removeDependencies ?? []).filter(id => !preview.dependencies.some(row => row.id === id && row.references.length))
       this.assertOpen()
       const task = await this.begin(accepted, installed, 'uninstalling', 'Uninstalling…')
       this.claim(task.record)
@@ -335,7 +336,7 @@ export class SuiteCatalog {
         }
         // Explicit shared removals follow the primary removal and recheck their current consumers.
         if (!(await this.storage.installs.get(id)))
-          for (const dependency of request.removeDependencies ?? []) {
+          for (const dependency of removeDependencies) {
             const current = await this.storage.installs.get(dependency)
             if (current) await this.retirement.remove(accepted, current).catch(() => console.warn('Shared catalog dependency removal deferred.'))
           }

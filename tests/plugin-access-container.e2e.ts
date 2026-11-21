@@ -242,8 +242,8 @@ it.skipIf(!runtimeSettings.containerImage)(
 )
 
 const packageName = 'qiaomu-cover-design-dsh'
-const packageVersion = '0.1.5'
-const integrity = 'sha512-d3GQLq3Db0s+BwuHZO8lu/Q+7XQoKGfKnKcMoaJc9cVGdLaidxaXtYpFXWGsohOftOPeWpNLMedxbD+l9Nu8IA=='
+const packageVersion = '0.1.7'
+const integrity = 'sha512-qMd7QAdYpDFYax0iGGmQ5OxTXF/KaTV+6fH9QhRgkYK/J4lK9j3/OFkXdSZubY+TRLF0JamZRLRCE8gXI8OpoA=='
 const label = { en: 'Gateway fixture', 'zh-CN': '网关夹具' }
 const imageUrl = 'https://127.0.0.1:49993/result.png'
 const image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVQIW2NgAAIAAAUAAWMrDaUAAAAASUVORK5CYII='

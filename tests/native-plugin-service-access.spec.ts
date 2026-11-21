@@ -72,6 +72,23 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
     createServer(async (request, response) => {
       const chunks = []
       for await (const chunk of request) chunks.push(chunk)
+      if (request.url === '/v1/images/edits') {
+        const multipart = await new Response(new Uint8Array(Buffer.concat(chunks)), {
+          headers: { 'content-type': String(request.headers['content-type']) },
+        }).formData()
+        const image = multipart.get('image[]') as File
+        requests.push({
+          path: request.url,
+          key: request.headers.authorization,
+          cookie: request.headers.cookie,
+          model: multipart.get('model'),
+          prompt: multipart.get('prompt'),
+          image: [...new Uint8Array(await image.arrayBuffer())],
+        })
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify({ data: [{ b64_json: 'AAE=' }] }))
+        return
+      }
       const body = JSON.parse(Buffer.concat(chunks).toString())
       requests.push({ path: request.url, key: request.headers.authorization, body, cookie: request.headers.cookie })
       if (body.prompt === 'hold') {
@@ -164,6 +181,7 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
     revision = 1
   let gateway = ''
   let imageProviderKey = 'fixture-image-key'
+  let imageModel = ''
   const access = new NativePluginServiceAccess({
     accounts: {
       ...accountState(username => (username === member.username ? member : undefined)),
@@ -192,7 +210,15 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
       }),
     },
     upstreams: {
-      list: async () => [{ name: 'image-provider', baseUrl: upstream + '/v1', headers: [], credential: imageProviderKey }],
+      list: async () => [
+        {
+          name: 'image-provider',
+          baseUrl: upstream + '/v1',
+          headers: [],
+          credential: imageProviderKey,
+          ...(imageModel ? { model: imageModel } : {}),
+        },
+      ],
     },
     runtime: { status: () => ({ state: 'ready', instance }) },
     manager: {
@@ -389,4 +415,54 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
   revision++
   expect((await imageRequest()).status).toBe(200)
   expect(requests.at(-1)).toMatchObject({ key: 'Bearer rotated-image-key' })
+
+  const edit = (grant: typeof image, model: string, editForm?: (form: FormData) => void) => {
+    const form = new FormData()
+    form.set('model', model)
+    form.set('prompt', 'Change the color')
+    form.append('image[]', new Blob([new Uint8Array([0, 255, 65, 13, 10])], { type: 'image/png' }), 'input.png')
+    editForm?.(form)
+    return fetch(grant.url + '/images/edits', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + grant.token, cookie: 'member=private' },
+      body: form,
+    })
+  }
+  expect((await edit(image, 'seedream-fixture')).status).toBe(404)
+  const slot = slots[0]!
+  if (slot.binding.kind !== 'json-settings') throw Error('Expected JSON binding')
+  slots = [{ ...slot, binding: { ...slot.binding, deferredUpstream: true } }]
+  revision++
+  const requestCount = requests.length
+  expect((await imageRequest()).status).toBe(503)
+  expect((await access.bindingAvailability(member, instance, packageName))?.enabled).toEqual([])
+  imageModel = 'configured-image'
+  revision++
+  const managed = await access.issue(member, instance, packageName, 'image', 'openai', AbortSignal.timeout(5000))
+  expect(managed).toMatchObject({ model: imageModel })
+  expect(managed.token).not.toBe(imageProviderKey)
+  expect((await access.bindingAvailability(member, instance, packageName))?.enabled).toEqual(['image'])
+  expect((await edit(managed, 'unapproved-model')).status).toBe(400)
+  expect((await edit(managed, imageModel, form => form.append('model', 'unapproved-model'))).status).toBe(400)
+  expect((await edit(managed, imageModel, form => form.set('stream', 'true'))).status).toBe(400)
+  expect((await edit({ ...managed, url: managed.url.replace('/member/', '/other/') }, imageModel)).status).toBe(401)
+  expect(requests).toHaveLength(requestCount)
+  const edited = await edit(managed, imageModel)
+  expect(edited.status).toBe(200)
+  expect(await edited.json()).toEqual({ data: [{ b64_json: 'AAE=' }] })
+  expect(requests.at(-1)).toEqual({
+    path: '/v1/images/edits',
+    key: 'Bearer rotated-image-key',
+    cookie: undefined,
+    model: imageModel,
+    prompt: 'Change the color',
+    image: [0, 255, 65, 13, 10],
+  })
+  version = '1.2.0'
+  revision++
+  expect(await access.issue(member, instance, packageName, 'image', 'openai', AbortSignal.timeout(5000))).toEqual(managed)
+  expect((await edit(managed, 'unapproved-model')).status).toBe(400)
+  slots = [{ ...slot, binding: { ...slot.binding, deferredUpstream: true, file: 'changed.json' } }]
+  revision++
+  expect((await edit(managed, imageModel)).status).toBe(403)
 })

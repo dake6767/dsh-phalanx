@@ -54,8 +54,13 @@ export default function CommunityPluginsPage() {
     if (dependencyCloseGuard.current) dependencyCloseGuard.current(access)
     else access()
   }
-  const closeDetails = () => guarded(() => setSelected(undefined))
+  const closeDetails = () =>
+    guarded(() => {
+      setSelected(undefined)
+      setInitialUpstream(undefined)
+    })
   const [selected, setSelected] = useState<string>()
+  const [initialUpstream, setInitialUpstream] = useState<string>()
   const [detailTab, setDetailTab] = useState('basic')
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState<unknown>()
@@ -295,7 +300,17 @@ export default function CommunityPluginsPage() {
           </Tabs.Panel>
         ) : null}
         <Tabs.Panel id="catalog">
-          <CommunitySuitesPage category="plugin" plugins={plugins} onLibraryChanged={refresh} />
+          <CommunitySuitesPage
+            category="plugin"
+            plugins={plugins}
+            onLibraryChanged={refresh}
+            onConfigureUpstream={(packageName, name) => {
+              showLibraryTab('plugins')
+              setDetailTab('access')
+              setSelected(packageName)
+              setInitialUpstream(name)
+            }}
+          />
         </Tabs.Panel>
       </Tabs>
       {uploading ? (
@@ -408,7 +423,7 @@ export default function CommunityPluginsPage() {
                     onDraft={onServiceDraft}
                   />
                 ) : null}
-                <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName} onChanged={refresh} />
+                <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName} initialUpstream={initialUpstream} onChanged={refresh} />
                 <CommunityPluginAccess
                   key={detail.packageName + '-access'}
                   packageName={detail.packageName}

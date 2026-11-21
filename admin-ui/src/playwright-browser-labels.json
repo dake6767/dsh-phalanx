@@ -1,0 +1,10 @@
+{
+  "en": {
+    "build": "Chromium {build}",
+    "total": "Chromium builds · {count}"
+  },
+  "zh-CN": {
+    "build": "Chromium {build}",
+    "total": "Chromium 构建 · {count}"
+  }
+}

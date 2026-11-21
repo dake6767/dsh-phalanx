@@ -1,6 +1,8 @@
 import { BusinessRuleError } from '../domain/business-error.js'
-import type { RuntimeDependencyReference } from '../domain/runtime-dependency.js'
-import type { RuntimeDependencyReferencesPort } from '../ports/runtime-dependencies.js'
+import { isPlaywrightResource, type InstalledNativeResourceBinding } from '../domain/plugin-preinstall.js'
+import type { RuntimeDependencyOwnerReference, RuntimeDependencyReference } from '../domain/runtime-dependency.js'
+import { PLAYWRIGHT_NPM_PACKAGE } from '../domain/suite-resource-bindings.js'
+import type { BrowserDependencyConsumer, RuntimeDependencyReferencesPort } from '../ports/runtime-dependencies.js'
 import type { PlatformSql } from './platform-database.js'
 import { repositorySql, repositoryTransaction, type RowRepositoryConnection } from './postgres-row-repository.js'
 
@@ -24,10 +26,59 @@ export class PostgresRuntimeReferences implements RuntimeDependencyReferencesPor
   async list(name: string): Promise<readonly RuntimeDependencyReference[]> {
     const query = Object.entries(tables)
       .map(([kind, table]) => `SELECT '${kind}' AS kind,owner_id AS name FROM dsh_phalanx.${table} WHERE dependency=$1`)
+      .concat("SELECT 'member-plugin' AS kind,package_name AS name FROM dsh_phalanx.member_browser_dependencies WHERE dependency=$1")
+      .concat("SELECT 'member-plugin' AS kind,package_name AS name FROM dsh_phalanx.member_browser_reservations WHERE dependency=$1")
       .join(' UNION ')
     return repositorySql(this.connection).query<RuntimeDependencyReference>(`${query} ORDER BY kind,name`, [name])
   }
-  async names(owner: RuntimeDependencyReference, scope = 'current'): Promise<readonly string[]> {
+  async browserConsumers(name: string): Promise<readonly BrowserDependencyConsumer[]> {
+    const rows = await repositorySql(this.connection).query<{
+      name: string
+      bindings: InstalledNativeResourceBinding[]
+      member: boolean
+      playwright_version: string | null
+    }>(
+      `SELECT COALESCE(NULLIF(l.current->>'title',''),l.package_name) AS name,
+         COALESCE(l.configuration->'suiteResourceBindings','[]'::jsonb) AS bindings, false AS member, NULL::text AS playwright_version
+       FROM dsh_phalanx.plugin_library l
+       INNER JOIN dsh_phalanx.plugin_runtime_dependencies r ON r.owner_id=l.package_name AND r.owner_scope='current'
+       WHERE r.dependency=$1
+       UNION ALL
+       SELECT m.title, m.bindings, true, m.playwright_version FROM dsh_phalanx.member_browser_dependencies m
+       WHERE m.dependency=$1
+       UNION ALL
+       SELECT m.title, m.bindings, false, m.playwright_version FROM dsh_phalanx.member_browser_reservations m
+       WHERE m.dependency=$1`,
+      [name],
+    )
+    return rows.flatMap(row => {
+      const bindings = Array.isArray(row.bindings) ? row.bindings : []
+      const playwright =
+        row.playwright_version ??
+        bindings.find(binding => binding.kind === 'native-package-cache')?.packages.find(item => item.packageName === PLAYWRIGHT_NPM_PACKAGE)?.version
+      const browser = bindings.filter(binding => binding.runtimeDependency === name && isPlaywrightResource(binding))
+      const typed = new Map(
+        browser.flatMap(binding => (binding.kind === 'playwright-browser' ? [[binding.chromiumBuild, binding.playwrightVersion] as const] : [])),
+      )
+      if (typed.size)
+        return [...typed].map(([build, playwrightVersion]) => ({ name: row.name, build, playwrightVersion, ...(row.member ? { memberCopies: 1 } : {}) }))
+      return [
+        {
+          name: row.name,
+          ...(row.member ? { memberCopies: 1 } : {}),
+          ...(playwright ? { playwrightVersion: playwright } : {}),
+        },
+      ]
+    })
+  }
+  async retainedBrowserBindings(): Promise<readonly InstalledNativeResourceBinding[]> {
+    const rows = await repositorySql(this.connection).query<{ binding: InstalledNativeResourceBinding }>(
+      `SELECT jsonb_array_elements(bindings) AS binding FROM dsh_phalanx.member_browser_dependencies
+       UNION SELECT jsonb_array_elements(bindings) AS binding FROM dsh_phalanx.member_browser_reservations`,
+    )
+    return rows.flatMap(({ binding }) => (isPlaywrightResource(binding) ? [binding] : []))
+  }
+  async names(owner: RuntimeDependencyOwnerReference, scope = 'current'): Promise<readonly string[]> {
     return (
       await repositorySql(this.connection).query<{ dependency: string }>(
         `SELECT dependency FROM dsh_phalanx.${tables[owner.kind]} WHERE owner_id=$1 AND owner_scope=$2 ORDER BY position`,
@@ -35,7 +86,7 @@ export class PostgresRuntimeReferences implements RuntimeDependencyReferencesPor
       )
     ).map(row => row.dependency)
   }
-  async replace(owner: RuntimeDependencyReference, names: readonly string[], scope = 'current'): Promise<void> {
+  async replace(owner: RuntimeDependencyOwnerReference, names: readonly string[], scope = 'current'): Promise<void> {
     const table = tables[owner.kind]
     await repositoryTransaction(this.connection, async sql => {
       await this.lockOwner(sql, owner, true)
@@ -55,13 +106,13 @@ export class PostgresRuntimeReferences implements RuntimeDependencyReferencesPor
         )
     })
   }
-  async removeOwner(owner: RuntimeDependencyReference): Promise<void> {
+  async removeOwner(owner: RuntimeDependencyOwnerReference): Promise<void> {
     await repositoryTransaction(this.connection, async sql => {
       await this.lockOwner(sql, owner, false)
       await sql.query(`DELETE FROM dsh_phalanx.${tables[owner.kind]} WHERE owner_id=$1`, [owner.name])
     })
   }
-  private async lockOwner(sql: PlatformSql, owner: RuntimeDependencyReference, required: boolean): Promise<void> {
+  private async lockOwner(sql: PlatformSql, owner: RuntimeDependencyOwnerReference, required: boolean): Promise<void> {
     const [table, column] = parents[owner.kind]
     const rows = await sql.query(`SELECT ${column} FROM dsh_phalanx.${table} WHERE ${column}=$1 FOR UPDATE`, [owner.name])
     if (required && !rows.length) throw new BusinessRuleError('missing', 'Runtime dependency owner is unavailable.', 'runtime-dependency-unavailable')

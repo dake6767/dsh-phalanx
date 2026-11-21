@@ -79,6 +79,7 @@ const keys = [
   'Restart instance',
   'Installed version',
   'Installation status unavailable',
+  'Installation interrupted. Uninstall before installing the current version.',
   'Content update available',
   'Update plugin',
   'Updating plugin…',

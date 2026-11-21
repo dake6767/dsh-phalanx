@@ -1,4 +1,5 @@
 import type { PlatformDatabase } from '../adapters/platform-database.js'
+import { preparedBrowserDirectories } from '../adapters/member-playwright-browsers.js'
 import { HttpSuiteCatalogFetch } from '../adapters/suite-catalog-fetch.js'
 import { YamlPluginAccessSyntax } from '../adapters/plugin-access-syntax.js'
 import { officialSuiteCatalogKeys } from '../domain/suite-catalog-keys.js'
@@ -57,7 +58,12 @@ export function createSuiteApplication(input: {
     input.packs,
     input.execution,
     new SuitePlugins(input.plugins, input.access),
-    { syntax: new YamlPluginAccessSyntax(), compatibilityTarget: input.compatibilityTarget, changed: input.changed },
+    {
+      syntax: new YamlPluginAccessSyntax(),
+      compatibilityTarget: input.compatibilityTarget,
+      changed: input.changed,
+      browserDirectories: preparedBrowserDirectories,
+    },
   )
   return { suites, loadMcpCatalog: () => gallery.mcpCatalog() }
 }

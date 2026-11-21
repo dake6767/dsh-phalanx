@@ -1,6 +1,7 @@
 import { containerWebCommand, webServiceArgs } from './cli.js'
 import { DSH_READY_PATTERN, DSH_INACTIVE_ENTRY_PATTERN } from './readiness.js'
 import { DSH_RPC_PREFIX, rpcRequestBody } from './session-protocol.js'
+import { pluginDefaultCheckFiles } from './plugin-preparation.js'
 
 export const DSH_PLUGIN_LIST = 'pluginManager/listPlugins'
 
@@ -11,6 +12,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 const input = JSON.parse(await readFile('/control/input.json', 'utf8'));
 const entryIds = new Set(JSON.parse(await readFile('/artifact/precheck-entries.json', 'utf8')));
 const command = ${JSON.stringify(webServiceArgs(containerWebCommand(), ['/artifact/managed.patch.json', '/control/service-observer.json'], 4180, '127.0.0.1:4180'))};
+const defaults = process.argv[2] === 'install-defaults'
+  ? JSON.parse(await readFile('/artifact/${pluginDefaultCheckFiles}/targets.json', 'utf8')) : [];
+if (defaults.length) command[command.indexOf('/artifact/managed.patch.json')] = '/artifact/${pluginDefaultCheckFiles}/check.json';
 const child = spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
 const closed = new Promise(resolve => child.once('close', resolve));
 let output = ''; let started = false;
@@ -38,6 +42,10 @@ const completed = new Promise((resolve, reject) => {
         || row.moduleName?.includes('/node_modules/' + input.packageName + '/')
         || (typeof row.entryId === 'string' && entryIds.has(row.entryId.split(':').at(-1))));
       if (!rows.length || rows.some(row => row.fiberPhase !== 'active')) throw Error('Plugin did not activate');
+      for (const id of defaults) {
+        const matched = result.result.value.filter(row => row.entryId?.split(':').at(-1) === id);
+        if (matched.length !== 1 || matched[0].fiberPhase !== 'active') throw Error('Native default target did not activate');
+      }
       const inventory = await fetch(new URL('/phalanx-precheck-services', url), { headers: { cookie, origin: url.origin } });
       const services = await inventory.json();
       if (!inventory.ok || !Array.isArray(services) || services.some(name => typeof name !== 'string' || !name || name.length > 256)) throw Error('Plugin service inventory unavailable');

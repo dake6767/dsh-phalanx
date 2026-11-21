@@ -10,7 +10,7 @@ import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { PluginPreparationError, type PluginCandidate, type PreparedPlugin, type PluginPreparationFailureCode } from '../domain/plugin-library.js'
 import type { PluginPreparerPort } from '../ports/plugin-library.js'
 import type { CommunityPluginStage } from '../domain/admin-contract.js'
-import { pluginAddCommand, pluginArtifactPreparation, pluginPreparationHome } from '../dsh/plugin-preparation.js'
+import { pluginAddCommand, pluginArtifactPreparation, pluginDefaultCheckFiles, pluginPreparationHome } from '../dsh/plugin-preparation.js'
 import { rootlessContainerUser } from '../dsh/container.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
 import { outboundProxyEnvironment, preparationProxyBootstrap } from './outbound-proxy.js'
@@ -92,6 +92,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
           version: input.version,
           runtimeRevision,
           ...(this.contribution ? { contribution: true } : {}),
+          ...(input.installDefaults ? { installDefaults: input.installDefaults } : {}),
           ...(input.retainedIntegrity || input.upload ? { uploadIntegrity: input.retainedIntegrity ?? input.upload!.integrity } : {}),
         }),
         { mode: 0o600 },
@@ -213,6 +214,10 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       const services: unknown = JSON.parse(await readFile(join(work, 'checkhome/service-inventory.json'), 'utf8'))
       if (!Array.isArray(services) || services.some(name => typeof name !== 'string' || !name || name.length > 256))
         throw new PluginPreparationError('plugin-precheck-failed')
+      if (input.installDefaults) {
+        await run(['node', '/control/precheck.mjs', 'install-defaults'], false, true)
+        await rm(join(work, 'prepared', runtimeRevision, pluginDefaultCheckFiles), { recursive: true })
+      }
       signal.throwIfAborted()
       const metadata = JSON.parse(await readFile(join(work, 'prepared', runtimeRevision, 'manifest.json'), 'utf8')) as Omit<PreparedPlugin, 'artifact'>
       const hash = createHash('sha512')
@@ -252,7 +257,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
         if (existing.integrity !== metadata.integrity || existing.version !== input.version || existing.packageName !== input.packageName)
           throw new PluginPreparationError('plugin-integrity-invalid')
       }
-      return { ...metadata, services, artifact, preparationId }
+      return { ...metadata, services, artifact, preparationId, ...(input.installDefaults ? { installDefaults: input.installDefaults } : {}) }
     } catch (error) {
       if (error instanceof PluginPreparationError || error instanceof ContributionCheckError) throw error
       // Child output is not exposed: it can include arbitrary plugin text and private paths.

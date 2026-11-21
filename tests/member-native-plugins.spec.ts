@@ -4,9 +4,10 @@ import { NativePluginDownloads } from '../src/use-cases/native-plugin-downloads.
 import { SignedPluginDownloadTokens } from '../src/adapters/plugin-download-tokens.js'
 import type { MemberNativePluginManagerPort } from '../src/ports/member-native-plugins.js'
 
-it('installs retained bytes with this call’s registry and removes the native copy independently of the shelf', async () => {
+it.each([false, true])('installs retained bytes and removes the native copy independently of the shelf (defaults: %s)', async withDefaults => {
   const actor = { username: 'alice', spaceId: 'alice-space', sessionEpoch: 1 }
   const account = { ...actor, admin: false, disabled: false, groupId: 'ordinary', email: '', createdAt: 0, updatedAt: 0 }
+  const installDefaults = { main: { hint: 'sample' } }
   const plugin = {
     packageName: 'sample',
     version: '1.0.0',
@@ -17,6 +18,7 @@ it('installs retained bytes with this call’s registry and removes the native c
     description: '',
     bundlePatch: '[]',
     dependencies: {},
+    ...(withDefaults ? { installDefaults } : {}),
   }
   let onShelf = true,
     installed = false
@@ -37,6 +39,9 @@ it('installs retained bytes with this call’s registry and removes the native c
         registry: 'https://registry.npmmirror.com',
         requestId: 'install-1',
         identity: { packageName: plugin.packageName, version: plugin.version },
+        ...(withDefaults
+          ? { installDefaults: { packageName: plugin.packageName, version: plugin.version, integrity: plugin.integrity, entries: installDefaults } }
+          : {}),
       })
       installed = true
       return 'restart-required'

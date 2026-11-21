@@ -80,11 +80,12 @@ async function copyArchive(source, target) {
   try { await readRegularFile(source, ${PLUGIN_UPLOAD_MAX_BYTES}, chunk => destination.writeFile(chunk)); }
   finally { await destination.close(); }
 }
-const readPatch = () => readOptionalProfileFile(patchPath);
+const readPatch = (file = patchPath) => readOptionalProfileFile(file);
 const samePatch = (before, after) => before === undefined ? after === undefined : after !== undefined && before.equals(after);
 const yamlParser = () => import(${JSON.stringify(platformPluginContainerPath + '/yaml/dist/index.js')});
+const profilePatchTags = [{ tag: 'tag:yaml.org,2002:js', resolve: value => value }];
 function patchDocument(yaml, bytes) {
-  const document = yaml.parseDocument(bytes?.toString('utf8') ?? '[]', { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: value => value }] });
+  const document = yaml.parseDocument(bytes?.toString('utf8') ?? '[]', { customTags: profilePatchTags });
   if (document.errors.length || !yaml.isSeq(document.contents)) throw new NativeRecoveryFailure('settings-invalid');
   return document;
 }
@@ -117,12 +118,12 @@ function hasCrossReference(yaml, patches) {
   });
   return referenced;
 }
-async function restoreBundleSettings(original, rows) {
-  if (samePatch(original, await readPatch())) return;
+async function restoreBundleSettings(original, rows, file = patchPath) {
+  if (samePatch(original, await readPatch(file))) return;
   const require = createRequire(process.argv[1]);
   const { withFileLock, writeFileAtomic } = await loadDshProfileWriter(require, pathToFileURL);
   await withFileLock(join(profileDirectory, ${JSON.stringify(DSH_PROFILE_MANIFEST)}), async () => {
-    const latest = await readPatch();
+    const latest = await readPatch(file);
     if (samePatch(original, latest)) return;
     const yaml = await yamlParser();
     const before = patchDocument(yaml, original);
@@ -135,18 +136,18 @@ async function restoreBundleSettings(original, rows) {
     if (hasAliasedPatchTarget(yaml, before, after) || hasCrossReference(yaml, [...desired, ...current])) throw new NativeRecoveryFailure('settings-alias-conflict');
     if (selectedPatchText(before, owned) === selectedPatchText(after, owned)) return;
     if (unrelatedSame) {
-      if (original === undefined) await rm(patchPath, { force: true });
-      else await writeFileAtomic(patchPath, original, { mode: 0o600 });
+      if (original === undefined) await rm(file, { force: true });
+      else await writeFileAtomic(file, original, { mode: 0o600 });
       return;
     }
     const index = after.contents.items.findIndex(owned);
     after.contents.items = after.contents.items.filter(unrelated);
     after.contents.items.splice(index < 0 ? after.contents.items.length : index, 0, ...desired);
-    await writeFileAtomic(patchPath, String(after), { mode: 0o600 });
+    await writeFileAtomic(file, String(after), { mode: 0o600 });
   }, { waitMs: 5000 });
 }
-async function bundleSettingsMatch(original, rows) {
-  const latest = await readPatch();
+async function bundleSettingsMatch(original, rows, file = patchPath) {
+  const latest = await readPatch(file);
   if (samePatch(original, latest)) return true;
   const yaml = await yamlParser();
   const select = patch => ownsPatch(yaml, rows, patch);
@@ -155,7 +156,7 @@ async function bundleSettingsMatch(original, rows) {
   if (hasAliasedPatchTarget(yaml, before, after) || hasCrossReference(yaml, [...before.contents.items.filter(select), ...after.contents.items.filter(select)])) return false;
   return selectedPatchText(before, select) === selectedPatchText(after, select);
 }
-async function replaceNativeBundle(invoke, args) {
+async function replaceNativeBundle(invoke, args, profileContext) {
   const { packageName, previous, next, authorizationUrl } = args.replacement;
   const oldPath = archivePath(previous.integrity), newPath = archivePath(next.integrity);
   const { registry, requestId } = args.options ?? {};
@@ -163,6 +164,9 @@ async function replaceNativeBundle(invoke, args) {
   if (!oldPath || !newPath || newPath !== args.spec || newPath === oldPath ||
     typeof packageName !== 'string' || typeof previous.enabled !== 'boolean' ||
     typeof previous.version !== 'string' || typeof next.version !== 'string' || typeof authorizationUrl !== 'string')
+    return fail('changed', 'invalid-update');
+  const delivery = args.installDefaults;
+  if (delivery !== undefined && !defaultDeliveryMatches(delivery, newPath, { packageName, ...next }))
     return fail('changed', 'invalid-update');
   // A disconnected observer does not cancel a profile mutation or its compensating work.
   const signal = new AbortController().signal;
@@ -181,19 +185,20 @@ async function replaceNativeBundle(invoke, args) {
   });
   // DSH normalizes relative bundle modules against the stable profile dependency path.
   // When a new bundle changes the row/module identity, refuse to silently drop its saved overrides.
-  const settingsCompatible = async (before, after, original) => {
-    if (original === undefined || !before.rows?.length) return true;
+  const settingsCompatible = async (beforeRows, afterRows, original) => {
+    if (original === undefined || !beforeRows.length) return true;
     const yaml = await yamlParser();
     const document = patchDocument(yaml, original);
-    const retained = old => after.rows?.some(row => row.rowId === old.rowId && row.moduleName === old.moduleName);
-    if (hasAliasedPatchTarget(yaml, document)) return before.rows.every(retained);
+    const retained = old => afterRows.some(row => row.rowId === old.rowId && row.moduleName === old.moduleName);
+    if (hasAliasedPatchTarget(yaml, document)) return beforeRows.every(retained);
     return document.contents.items.every(patch => {
       if (!yaml.isMap(patch) || patch.has('insert')) return true;
-      const old = before.rows.find(row => row.rowId === patch.get('id') && (!patch.has('name') || row.moduleName === patch.get('name')));
+      const old = beforeRows.find(row => row.rowId === patch.get('id') && (!patch.has('name') || row.moduleName === patch.get('name')));
       return !old || retained(old);
     });
   };
-  let recovery, originalPatch, before;
+  const includeHome = nativeDefaultContextMatches(profileContext);
+  let recovery, originalSettings, before, beforeRows, inspectDeclarations;
   const clean = () => recovery ? rm(recovery, { recursive: true, force: true }).catch(() => {}) : undefined;
   try {
     if (!(await installedArchive(oldPath, previous.integrity)) || !(await verify(newPath, next.integrity)))
@@ -204,12 +209,17 @@ async function replaceNativeBundle(invoke, args) {
     const savedArchive = join(recovery, 'previous.tgz');
     await copyArchive(oldPath, savedArchive);
     if (!(await verify(savedArchive, previous.integrity))) throw new NativeRecoveryFailure('archive-unverified');
-    originalPatch = await readPatch();
+    originalSettings = await readInstallSettings(includeHome);
+    inspectDeclarations = delivery !== undefined || originalSettings.some(layer => layer.file === homePatchPath && layer.original !== undefined);
+    beforeRows = inspectDeclarations ? nativeSettingsRows(before.rows ?? [], await nativeDefaultBundle(packageName, profileContext)) : before.rows ?? [];
     for (const name of ${JSON.stringify([DSH_PROFILE_MANIFEST, DSH_PROFILE_LOCK])}) {
       const data = await readOptionalProfileFile(join(profileDirectory, name));
       if (data !== undefined) await writeFile(join(recovery, name), data, { flag: 'wx', mode: 0o600 });
     }
-    if (originalPatch !== undefined) await writeFile(join(recovery, patchName), originalPatch, { flag: 'wx', mode: 0o600 });
+    for (const layer of originalSettings) {
+      const name = layer.file === patchPath ? patchName : 'home-' + patchName;
+      if (layer.original !== undefined) await writeFile(join(recovery, name), layer.original, { flag: 'wx', mode: 0o600 });
+    }
     await writeFile(join(recovery, 'update.json'), JSON.stringify({ requestId, packageName, previous, next, oldPath }), { flag: 'wx', mode: 0o600 });
   } catch (error) {
     await clean();
@@ -219,7 +229,7 @@ async function replaceNativeBundle(invoke, args) {
   let occupied;
   try {
     if (!(await installedArchive(oldPath, previous.integrity)) || !(await verify(newPath, next.integrity)) ||
-      !(await bundleSettingsMatch(originalPatch, before.rows ?? []))) throw new NativeRecoveryFailure('copy-changed');
+      !(await defaultSettingsMatch(originalSettings, beforeRows))) throw new NativeRecoveryFailure('copy-changed');
     const confirmation = await fetch(authorizationUrl, { method: 'HEAD', redirect: 'error', signal: AbortSignal.timeout(20000) });
     const rows = await inventory();
     const actual = owned(rows);
@@ -232,6 +242,7 @@ async function replaceNativeBundle(invoke, args) {
   const recoveryName = recovery.slice(archiveDirectory.length + 1);
   const record = (result, reason) => writeFile(join(recovery, 'result.json'), JSON.stringify({ result, reason }), { mode: 0o600 }).catch(() => {});
   let targetRows = [];
+  const defaultWrites = [];
   let targetAttempted = false;
   let restartRequired = false;
   const noteApplication = result => {
@@ -253,12 +264,17 @@ async function replaceNativeBundle(invoke, args) {
         if (matches(target, newPath, next.version) && !target.enabled && !target.error && await installedArchive(newPath, next.integrity)) {
           targetRows = target.rows ?? [];
           reason = 'settings-incompatible';
-          if (await bundleSettingsMatch(originalPatch, before.rows ?? []) && await settingsCompatible(before, target, originalPatch)) {
+          const definition = inspectDeclarations ? await nativeDefaultBundle(packageName, profileContext) : undefined;
+          if (definition) targetRows = nativeSettingsRows(targetRows, definition);
+          const compatible = await Promise.all(originalSettings.map(layer => settingsCompatible(beforeRows, targetRows, layer.original)));
+          if (compatible.every(Boolean) && await defaultSettingsMatch(originalSettings, beforeRows)) {
+            reason = 'install-defaults-apply-failed';
+            if (delivery !== undefined) await writeInstallDefaults(delivery, profileContext, defaultWrites, definition);
             reason = 'activation-failed';
             const selection = previous.enabled ? await select(true) : result;
             if (noteApplication(selection)) {
               reason = 'target-not-confirmed';
-              if (sameState(await current(), newPath, next.version) && await bundleSettingsMatch(originalPatch, [...(before.rows ?? []), ...targetRows]) && await installedArchive(newPath, next.integrity)) {
+              if (sameState(await current(), newPath, next.version) && await defaultSettingsMatch(originalSettings, [...beforeRows, ...targetRows], defaultWrites) && await installedArchive(newPath, next.integrity)) {
                 await clean();
                 return { application: restartRequired ? 'restart-required' : 'applied' };
               }
@@ -295,8 +311,8 @@ async function replaceNativeBundle(invoke, args) {
       if (!(await verify(restoredArchive, previous.integrity))) throw new NativeRecoveryFailure('previous-archive-unverified');
       await rename(restoredArchive, oldPath);
     }
-    const settingsRows = [...(before.rows ?? []), ...targetRows];
-    await restoreBundleSettings(originalPatch, settingsRows);
+    const settingsRows = [...beforeRows, ...targetRows];
+    await restoreDefaultSettings(originalSettings, settingsRows);
     if (!actual) {
       if (!(await verify(oldPath, previous.integrity))) throw new NativeRecoveryFailure('previous-archive-unverified');
       const restored = await install(oldPath, undefined, false);
@@ -309,7 +325,7 @@ async function replaceNativeBundle(invoke, args) {
     if (actual.enabled !== previous.enabled && !noteApplication(await select(previous.enabled)))
       throw new NativeRecoveryFailure('previous-selection-failed');
     if (!sameState(await current(), oldPath, previous.version) || !(await installedArchive(oldPath, previous.integrity))) throw new NativeRecoveryFailure('previous-copy-not-confirmed');
-    if (!(await bundleSettingsMatch(originalPatch, settingsRows))) throw new NativeRecoveryFailure('settings-changed');
+    if (!(await defaultSettingsMatch(originalSettings, settingsRows))) throw new NativeRecoveryFailure('settings-changed');
     if (unexpectedRemains) throw new NativeRecoveryFailure('unexpected-copy');
     await clean();
     return { ...fail('restored', reason), ...(restartRequired ? { restartRequired: true } : {}) };

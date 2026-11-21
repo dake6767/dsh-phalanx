@@ -107,6 +107,37 @@ test('records a failed check-command when its process times out', async () => {
     checks: expect.arrayContaining([{ kind: 'check-command', passed: false, detail: expect.any(String) }]),
   })
 })
+test('measures each Chromium build once across the checked browser cache directories', async () => {
+  const preparer = await fixture(true)
+  const version = await preparer.prepare(
+    {
+      name: 'browser-cache',
+      type: 'resource',
+      pathDirectories: [],
+      prepareCommand: [
+        'mkdir -p assets/chromium-1248/chrome-linux assets/chromium_headless_shell-1248/shell assets/chromium-1217/chrome-linux assets/chromium-1234',
+        'printf chrome > assets/chromium-1248/chrome-linux/chrome',
+        'printf shell > assets/chromium_headless_shell-1248/shell/chrome-headless-shell',
+        'printf old > assets/chromium-1217/chrome-linux/chrome',
+        'printf unrelated > assets/chromium-1234/notes',
+        'chmod +x assets/chromium-1248/chrome-linux/chrome assets/chromium_headless_shell-1248/shell/chrome-headless-shell assets/chromium-1217/chrome-linux/chrome',
+        'ln -s chromium-1248 assets/chromium-9999',
+      ].join('; '),
+    },
+    async () => {},
+    new AbortController().signal,
+  )
+  try {
+    expect(version).toMatchObject({
+      browserBuilds: [
+        { build: '1217', bytes: 3 },
+        { build: '1248', bytes: 11 },
+      ],
+    })
+  } finally {
+    await preparer.collect([])
+  }
+})
 test('credential and cwd acceptance assertions fail if the process boundary regresses', async () => {
   for (const corruption of ['credential', 'cwd']) {
     const root = await mkdtemp(join(await realpath(tmpdir()), 'runtime-dependency-negative-'))

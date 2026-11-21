@@ -66,18 +66,18 @@ export function communityAccountActionInput(value: unknown): CommunityAccountAct
 }
 
 export async function readCommunityForm(request: IncomingMessage): Promise<URLSearchParams> {
-  return new URLSearchParams(await read(request, 'application/x-www-form-urlencoded'))
+  return new URLSearchParams((await readCommunityBytes(request, 'application/x-www-form-urlencoded')).toString('utf8'))
 }
 export async function readCommunityJson(request: IncomingMessage, limit = 16 * 1024, signal?: AbortSignal): Promise<unknown> {
-  const text = await read(request, 'application/json', limit, signal)
+  const bytes = await readCommunityBytes(request, 'application/json', limit, signal)
   try {
-    return JSON.parse(text) as unknown
+    return JSON.parse(bytes.toString('utf8')) as unknown
   } catch {
     throw new CommunityRequestError(400, 'Invalid JSON request', 'json-invalid')
   }
 }
 
-function read(request: IncomingMessage, type: string, limit = 16 * 1024, signal?: AbortSignal): Promise<string> {
+export function readCommunityBytes(request: IncomingMessage, type: string, limit = 16 * 1024, signal?: AbortSignal): Promise<Buffer> {
   if (request.headers['content-type']?.split(';')[0]?.trim().toLowerCase() !== type) {
     throw new CommunityRequestError(415, 'Unsupported Media Type', 'media-type-unsupported')
   }
@@ -101,10 +101,10 @@ function read(request: IncomingMessage, type: string, limit = 16 * 1024, signal?
           chunks.length = 0
           reject(new CommunityRequestError(413, 'Request body is too large', 'request-too-large'))
         }
-      } else chunks.push(chunk)
+      } else if (!oversized) chunks.push(chunk)
     })
     request.once('end', () => {
-      if (!oversized) resolve(Buffer.concat(chunks).toString('utf8'))
+      if (!oversized) resolve(Buffer.concat(chunks))
     })
     request.once('error', reject)
     request.once('aborted', () => {

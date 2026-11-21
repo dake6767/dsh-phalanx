@@ -2,6 +2,49 @@ import { expect, it, onTestFinished, vi } from 'vitest'
 import type { NativeOptionalBundle, NativePluginHistoryRuntime } from '../src/ports/native-plugin-history.js'
 import { NativePluginHistory } from '../src/use-cases/native-plugin-history.js'
 
+it('releases only observed missing or replaced browser deliveries from the active native generation', async () => {
+  const instance = {
+    userId: 'member',
+    spaceId: 'space',
+    resourceKey: 'launch',
+    origin: 'http://native.example',
+    launchUrl: 'http://native.example/launch',
+    processId: 1,
+  }
+  const release = vi.fn(async () => {})
+  const history = new NativePluginHistory(
+    {
+      work: {
+        run: async operation =>
+          operation({
+            actors: { lockMember: async () => {} },
+            history: { read: async () => [], remember: async () => [] },
+            deliveries: {
+              get: async () => [],
+              browserDeliveries: async () =>
+                ['kept', 'removed', 'replaced', 'unknown'].map(packageName => ({ packageName, version: '1.0.0', integrity: 'signed', revision: packageName })),
+              releaseMissingBrowserDeliveries: release,
+            },
+          }),
+      },
+    },
+    {
+      current: () => instance,
+      inspect: async () => [],
+      inspectInventory: async () => ({
+        optional: [],
+        installed: new Map([
+          ['kept', { version: '1.0.0', integrity: 'signed' }],
+          ['replaced', { version: '1.0.0', integrity: null }],
+          ['unknown', {}],
+        ]),
+      }),
+    },
+  )
+  await history.request({ username: 'member', spaceId: 'space' }, 'launch', 'refresh', new AbortController().signal)
+  expect(release).toHaveBeenCalledExactlyOnceWith('space', ['removed', 'replaced'], 'launch')
+})
+
 it('starts an old member baseline from enabled or installed official optional bundles, then retains observed successful enables', async () => {
   let saved: string[] | undefined
   let bundles = [

@@ -19,7 +19,7 @@ ARG CURL_VERSION=7.88.1-10+deb12u15
 # The pinned upstream revision: declared here so both stages share one default
 # (an ARG re-declared without a value inherits this one).
 ARG DSH_REPO=https://github.com/deepseek-ai/deepseek-harness.git
-ARG DSH_REV=38a6a5c965aa99ab525161efb7cc5cf1fe62fced
+ARG DSH_REV=9c2670d3bce5275e0d1610272958121af87787bb
 ARG DSH_PNPM=11.28.5
 ARG NPM_REGISTRY=https://registry.npmjs.org
 
@@ -120,7 +120,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       'libglib2.0-bin=2.74.6-2+deb12u9' \
       'libsecret-tools=0.20.5-3' \
   && rm -rf /var/lib/apt/lists/*
-COPY member-credentials.mjs /usr/local/lib/dsh-phalanx/member-credentials.mjs
+# Keep the directory traversable by the runtime user when COPY sets the file mode.
+RUN install -d -m 0755 /usr/local/lib/dsh-phalanx
+COPY --chmod=0644 member-credentials.mjs /usr/local/lib/dsh-phalanx/member-credentials.mjs
 
 LABEL dsh.revision="$DSH_REV"
 LABEL dsh.base.image="$NODE_IMAGE"
@@ -133,6 +135,7 @@ USER node
 WORKDIR /home/node
 
 # Exercise the runtime user outside the DSH workspace, with no network fallback.
+RUN --network=none node --check /usr/local/lib/dsh-phalanx/member-credentials.mjs
 RUN --network=none test "$(COREPACK_ENABLE_NETWORK=0 pnpm --version)" = "$DSH_PNPM"
 RUN --network=none node --input-type=module -e "await import('/opt/dsh/packages/web/web/lib/typert.host.js')"
 RUN --network=none node --input-type=module -e "\

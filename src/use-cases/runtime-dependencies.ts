@@ -16,6 +16,7 @@ import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { RuntimeDependencyPreparerPort, RuntimeDependencyReferencesPort, RuntimeDependencyStoragePort } from '../ports/runtime-dependencies.js'
 import { RuntimeDependencyManaged } from './runtime-dependency-managed.js'
 import { RuntimeDependencyPreparation } from './runtime-dependency-preparation.js'
+import type { CommunityBrowserBuild } from '../domain/runtime-dependency-contract.js'
 
 /** Sole writer of dependency definitions, preparation progress and usable version selection. */
 export class RuntimeDependencies {
@@ -108,6 +109,12 @@ export class RuntimeDependencies {
 
   async dependencyReferences(name: string): Promise<readonly RuntimeDependencyReference[]> {
     return await this.references.list(name)
+  }
+  async browserResource(name: string): Promise<{ readonly builds: readonly CommunityBrowserBuild[]; readonly bytes: number } | undefined> {
+    const row = (await this.store.list()).find(row => row.name === name && !row.candidate)
+    if (!row?.current) return
+    const builds = await this.describeBrowsers(row)
+    return builds.length ? { builds, bytes: row.current.bytes } : undefined
   }
   async list(actor: CommunityAccountActor): Promise<readonly CommunityRuntimeDependencyView[]> {
     await this.assertAdmin(actor)
@@ -239,6 +246,7 @@ export class RuntimeDependencies {
   }
   private async project(row: RuntimeDependency): Promise<CommunityRuntimeDependencyView> {
     const definition = runtimeDefinition(row)
+    const [references, browserBuilds] = await Promise.all([this.references.list(row.name), this.describeBrowsers(row)])
     return {
       ...definition,
       source: row.source,
@@ -249,8 +257,24 @@ export class RuntimeDependencies {
       checks: row.checks,
       ...(row.failureCode && !row.retryPending ? { failureCode: row.failureCode } : {}),
       ...(row.current ? { current: { id: row.current.id, bytes: row.current.bytes, commands: row.current.commands, isolated: row.current.isolated } } : {}),
-      references: await this.references.list(row.name),
+      references,
+      ...(browserBuilds.length ? { browserBuilds } : {}),
     }
+  }
+  private async describeBrowsers(row: RuntimeDependency): Promise<readonly CommunityBrowserBuild[]> {
+    if (row.source !== 'suite-catalog' || row.type !== 'resource' || !row.current?.isolated) return []
+    const builds = row.current.browserBuilds ?? (await this.preparer.browserBuilds?.(row.current)) ?? []
+    if (!builds.length) return []
+    const consumers = (await this.references.browserConsumers?.(row.name)) ?? []
+    return builds.map(build => {
+      const references = consumers.filter(reference => reference.build === undefined || reference.build === build.build)
+      return {
+        ...build,
+        playwrightVersions: [...new Set(references.flatMap(reference => (reference.playwrightVersion ? [reference.playwrightVersion] : [])))].sort(),
+        plugins: [...new Set(references.map(reference => reference.name))].sort(),
+        memberCopies: references.reduce((count, reference) => count + (reference.memberCopies ?? 0), 0),
+      }
+    })
   }
   private async assertAdmin(actor: CommunityAccountActor): Promise<void> {
     const account = await this.accounts.get(actor.username)

@@ -1,8 +1,10 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { combineAcquisitionSources } from '../domain/acquisition-sources.js'
-import { PluginUpstreamAccessError, type PluginUpstream } from '../domain/plugin-upstream.js'
+import { imageUpstreamReady, managedImageUpstreamHeaders, PluginUpstreamAccessError, type PluginUpstream } from '../domain/plugin-upstream.js'
 import type { CommunityAccountActor, CommunityAccountRecord } from '../domain/community-account.js'
-import type { CatalogPluginServiceSlot } from '../domain/suite-service-slots.js'
+import { usesDeferredPluginUpstream, type CatalogPluginServiceSlot } from '../domain/suite-service-slots.js'
+import { isPlaywrightResource } from '../domain/plugin-preinstall.js'
+import { canonicalJson } from '../domain/suite-catalog-document.js'
 import type { CommunityAccountReaderPort, CommunityAccountRegistration } from '../ports/community-accounts.js'
 import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
 import type { PluginGroupConfigurationPort } from '../ports/managed-plugins.js'
@@ -23,6 +25,7 @@ interface ServiceGrant {
   readonly groupId: string
   readonly protocol: NativePluginServiceProtocol
   readonly model: string
+  readonly multipartEdits: boolean
   readonly upstream: PluginUpstream
 }
 
@@ -69,6 +72,7 @@ export class NativePluginServiceAccess {
       integrity: plugin.current.integrity,
       ...(serviceOrigin ? { serviceOrigin } : {}),
       ...(resourceOrigin ? { resourceOrigin } : {}),
+      ...(plugin.suiteResourceBindings?.some(isPlaywrightResource) ? { browser: true } : {}),
     }
   }
 
@@ -169,15 +173,18 @@ export class NativePluginServiceAccess {
       return undefined
     try {
       const { services } = await this.qualifiedDelivery(packageName, account, instance)
+      const upstreams = services.configuration.slots.some(usesDeferredPluginUpstream) ? await this.deps.upstreams?.list(packageName) : undefined
       return {
         revision: services.revision,
         enabled: services.configuration.slots
-          .filter(slot =>
-            slot.backends.some(backend => {
+          .filter(slot => {
+            const { binding } = slot
+            if (binding.kind === 'json-settings' && binding.deferredUpstream) return imageUpstreamReady(upstreams?.find(row => row.name === binding.upstream))
+            return slot.backends.some(backend => {
               const setting = services.configuration.settings.find(row => row.slot === slot.id && row.backend === backend.id)
               return setting?.enabled && backend.fields.every(field => !field.required || Boolean(setting.values[field.name]))
-            }),
-          )
+            })
+          })
           .map(slot => slot.id),
       }
     } catch (error) {
@@ -220,17 +227,21 @@ export class NativePluginServiceAccess {
     const { plugin, prepared, services } = await this.qualifiedDelivery(packageName, account, instance)
     const slot = services.configuration.slots.find(row => row.id === scope.slot)
     const backend = slot?.backends.find(row => row.id === scope.backend)
+    if (!slot || !backend) throw unavailable()
+    const deferred = usesDeferredPluginUpstream(slot)
     const settings = services.configuration.settings.find(row => row.slot === scope.slot && row.backend === scope.backend)
-    if (!slot || !backend || !settings?.enabled || backend.fields.some(field => field.required && !settings.values[field.name])) throw unavailable()
+    if (!deferred && (!settings?.enabled || backend.fields.some(field => field.required && !settings.values[field.name]))) throw unavailable()
     const { endpoint, key, model } = backend.upstream
     const upstreamName = slot.binding.kind === 'json-settings' ? slot.binding.upstream : undefined
     const upstream = upstreamName ? (await this.deps.upstreams?.list(packageName))?.find(row => row.name === upstreamName) : undefined
-    const baseUrl = upstreamName ? upstream?.baseUrl : endpoint && settings.values[endpoint]
-    const credential = upstreamName ? upstream?.credential : key && settings.values[key]
+    const configuredModel = deferred ? (imageUpstreamReady(upstream) ? upstream.model : undefined) : settings?.values[model]
+    const baseUrl = upstreamName ? upstream?.baseUrl : endpoint && settings?.values[endpoint]
+    const credential = upstreamName ? upstream?.credential : key && settings?.values[key]
     const base = baseUrl ? URL.parse(baseUrl) : null
     if (
       !base ||
       !credential ||
+      !configuredModel ||
       upstream?.secretUnavailable ||
       !['http:', 'https:'].includes(base.protocol) ||
       base.username ||
@@ -249,15 +260,17 @@ export class NativePluginServiceAccess {
       !(await this.deps.manager.verifyArchive(instance, packageName, prepared.integrity, checkSignal))
     )
       throw denied()
+    const authorization = deferred
+      ? canonicalJson([plugin.suiteOrigin, prepared.integrity, slot.binding, backend.protocol])
+      : JSON.stringify([plugin.suiteOrigin, prepared.integrity, services.configuration.identity])
     return {
-      binding: createHash('sha256')
-        .update(JSON.stringify([plugin.suiteOrigin, prepared.integrity, services.configuration.identity]))
-        .digest('base64url'),
+      binding: createHash('sha256').update(authorization).digest('base64url'),
       username: account.username,
       groupId: account.groupId,
-      model: settings.values[model]!,
+      model: configuredModel,
+      multipartEdits: deferred,
       protocol: backend.protocol,
-      upstream: { name: scope.backend, baseUrl: base.href, credential, headers: [{ name: 'authorization', value: 'Bearer {credential}' }] },
+      upstream: { name: scope.backend, baseUrl: base.href, credential, headers: managedImageUpstreamHeaders },
     }
   }
 }

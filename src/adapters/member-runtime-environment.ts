@@ -6,7 +6,7 @@ import { egressEnvironment } from '../domain/egress-environment.js'
 import { modelCatalogJson } from '../domain/model-catalog.js'
 import { managedModelsCatalog, managedModelsConfig, managedModelsContainerPath, managedModelsDirectory, managedModelsWatcher } from '../dsh/shared-models.js'
 import { SKILL_USAGE_ENDPOINT_ENV, SKILL_USAGE_PATH, SKILL_USAGE_PROVIDERS_ENV } from '../dsh/skill-usage.js'
-import { WEB_TOOLS_MEMBER_TOKEN_ENV } from '../dsh/web-tools.js'
+import { WEB_SEARCH_PROVIDER_ENV, WEB_TOOLS_MEMBER_TOKEN_ENV } from '../dsh/web-tools.js'
 
 /** One environment owner keeps gateway credentials out of launch argv and member artifacts. */
 export function memberRuntimeEnvironment(
@@ -34,6 +34,7 @@ export function memberRuntimeEnvironment(
     [SKILL_USAGE_ENDPOINT_ENV]: new URL(SKILL_USAGE_PATH, access.url).href,
     [SKILL_USAGE_PROVIDERS_ENV]: JSON.stringify(skillProviders),
     DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token,
+    [WEB_SEARCH_PROVIDER_ENV]: 'deepseek-search-api',
   }
   delete environment[WEB_TOOLS_MEMBER_TOKEN_ENV]
   if (access.platformSearchEnabled) environment[WEB_TOOLS_MEMBER_TOKEN_ENV] = access.token

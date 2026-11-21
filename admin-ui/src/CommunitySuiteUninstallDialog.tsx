@@ -7,6 +7,7 @@ import { communitySuiteUninstallPreview, uninstallCommunitySuite } from './commu
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
 import CommunityMessage from './CommunityMessage'
+import { browserBuildName, dependencySize } from './CommunityPlaywrightBrowsers'
 import { suiteKindLabels as kindLabels } from './community-suite-labels'
 
 export default function CommunitySuiteUninstallDialog({
@@ -23,6 +24,8 @@ export default function CommunitySuiteUninstallDialog({
   onSubmitted: () => void
 }) {
   const { t, locale, errorText } = usePlatformLanguage()
+  const describeReference = (reference: { kind: string; name: string }) =>
+    reference.kind === 'member-plugin' ? `${t('Member plugin copy')} · ${reference.name}` : referenceText(reference)
   const [preview, setPreview] = useState<CommunitySuiteUninstallPreview>()
   const [removeDependencies, setRemoveDependencies] = useState<readonly string[]>([])
   const [error, setError] = useState<unknown>()
@@ -119,7 +122,7 @@ export default function CommunitySuiteUninstallDialog({
                 {preview.blocked.flatMap(item =>
                   item.references.map(reference => (
                     <li key={item.name + ':' + reference.kind + ':' + reference.name}>
-                      {referenceText(reference)} → {item.name}
+                      {describeReference(reference)} → {item.name}
                     </li>
                   )),
                 )}
@@ -129,12 +132,13 @@ export default function CommunitySuiteUninstallDialog({
           {preview.dependencies.length ? (
             <div className="page-stack">
               <p>{t('Shared runtime dependencies')}</p>
-              {preview.dependencies.map(row =>
-                row.references.length ? (
+              {preview.dependencies.map(row => {
+                const name = row.browserBuilds?.map(build => browserBuildName(locale, build)).join(', ') || titleOf(row.id)
+                return row.references.length ? (
                   <p key={row.id}>
                     {t('{name} stays installed because it is still used by: {references}', {
-                      name: titleOf(row.id),
-                      references: row.references.map(referenceText).join(', '),
+                      name,
+                      references: row.references.map(describeReference).join(', '),
                     })}
                   </p>
                 ) : (
@@ -148,11 +152,13 @@ export default function CommunitySuiteUninstallDialog({
                       <Checkbox.Control>
                         <Checkbox.Indicator />
                       </Checkbox.Control>
-                      {t('Also remove {name}; nothing else uses it', { name: titleOf(row.id) })}
+                      {row.reclaimableBytes === undefined
+                        ? t('Also remove {name}; nothing else uses it', { name })
+                        : t('{name} · Reclaim {size}', { name, size: dependencySize(row.reclaimableBytes) })}
                     </Checkbox.Content>
                   </Checkbox>
-                ),
-              )}
+                )
+              })}
             </div>
           ) : null}
           <p>{t('Uninstalling removes the entries and their prepared files.')}</p>

@@ -19,6 +19,13 @@ export interface CommunityPythonLibraryDependencyInput {
 }
 export type CommunityRuntimeDependencyInput =
   CommunityCommandRuntimeDependencyInput | CommunityResourceRuntimeDependencyInput | CommunityPythonLibraryDependencyInput
+export interface CommunityBrowserBuild {
+  readonly build: string
+  readonly bytes: number
+  readonly playwrightVersions: readonly string[]
+  readonly plugins: readonly string[]
+  readonly memberCopies: number
+}
 export type CommunityRuntimeDependencyView = import('./runtime-dependency.js').RuntimeDependencyDefinition & {
   readonly source: import('./runtime-dependency.js').RuntimeDependencySource
   readonly stage: import('./runtime-dependency.js').RuntimeDependency['stage']
@@ -29,6 +36,7 @@ export type CommunityRuntimeDependencyView = import('./runtime-dependency.js').R
   readonly failureCode?: import('./runtime-dependency.js').RuntimeDependencyFailureCode
   readonly current?: { readonly id: string; readonly bytes: number; readonly commands: readonly string[]; readonly isolated: boolean }
   readonly references: readonly import('./runtime-dependency.js').RuntimeDependencyReference[]
+  readonly browserBuilds?: readonly CommunityBrowserBuild[]
 }
 
 export type CommunityRuntimeDependencyAction =

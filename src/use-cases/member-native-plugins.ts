@@ -3,10 +3,21 @@ import { CommunityAuthenticationError, type CommunityAccountActor } from '../dom
 import type { DownloadSourceValues } from '../domain/download-source.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
-import type { MemberNativePluginManagerPort, NativePluginInstallPhase, NativePluginReplacement } from '../ports/member-native-plugins.js'
+import type {
+  MemberNativePluginManagerPort,
+  NativePluginDefaultDelivery,
+  NativePluginInstallPhase,
+  NativePluginReplacement,
+} from '../ports/member-native-plugins.js'
 import type { NativePluginDownloads } from './native-plugin-downloads.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
+import { matchesPendingInstallDefaults } from '../domain/native-install-defaults.js'
 import { PluginPreinstallCancelled } from '../domain/plugin-preinstall.js'
+
+function defaultDelivery(plugin: PreparedPlugin): { installDefaults?: NativePluginDefaultDelivery } {
+  const { packageName, version, integrity, installDefaults } = plugin
+  return installDefaults ? { installDefaults: { packageName, version, integrity, entries: installDefaults } } : {}
+}
 
 /** Native copies belong to members; installation never replaces an existing same-name copy. */
 export class MemberNativePlugins {
@@ -24,8 +35,9 @@ export class MemberNativePlugins {
     signal: AbortSignal,
     requestId: string,
     progress?: (phase: NativePluginInstallPhase) => void,
+    beforeInstall?: (plugin: PreparedPlugin) => Promise<void>,
   ) {
-    return (await this.deliver(actor, packageName, instance, origin, signal, requestId, progress))!
+    return (await this.deliver(actor, packageName, instance, origin, signal, requestId, progress, undefined, beforeInstall))!
   }
   async preinstall(
     actor: CommunityAccountActor,
@@ -36,8 +48,9 @@ export class MemberNativePlugins {
     requestId: string,
     current: () => Promise<boolean>,
     progress?: (phase: NativePluginInstallPhase) => void,
+    beforeInstall?: (plugin: PreparedPlugin) => Promise<void>,
   ) {
-    return await this.deliver(actor, plugin.packageName, instance, origin, signal, requestId, progress, { plugin, current })
+    return await this.deliver(actor, plugin.packageName, instance, origin, signal, requestId, progress, { plugin, current }, beforeInstall)
   }
   async hasDelivery(plugin: PreparedPlugin, instance: CommunityUserInstance, origin: URL, signal: AbortSignal): Promise<boolean> {
     const row = (await this.manager.list(instance, origin, signal)).find(row => row.packageName === plugin.packageName)
@@ -45,6 +58,7 @@ export class MemberNativePlugins {
       row?.version === plugin.version &&
       row.archiveIntegrity === plugin.integrity &&
       row.retainedArchive === true &&
+      row.installDefaultsPending === undefined &&
       (await this.manager.verifyArchive?.(instance, plugin.packageName, plugin.integrity, signal)) === true
     )
   }
@@ -57,6 +71,7 @@ export class MemberNativePlugins {
     requestId: string,
     progress?: (phase: NativePluginInstallPhase) => void,
     preinstall?: { readonly plugin: PreparedPlugin; readonly current: () => Promise<boolean> },
+    beforeInstall?: (plugin: PreparedPlugin) => Promise<void>,
   ) {
     const assertCurrent = async () => {
       signal.throwIfAborted()
@@ -74,12 +89,20 @@ export class MemberNativePlugins {
       throw new PluginPreinstallCancelled()
     const installed = await this.manager.list(instance, origin, signal)
     await assertCurrent()
-    if (installed.some(row => row.packageName === packageName)) {
-      if (preinstall) return undefined
+    const existing = installed.find(row => row.packageName === packageName)
+    if (existing && !matchesPendingInstallDefaults(before, existing)) {
+      if (preinstall && !existing.installDefaultsPending) return undefined
       throw this.unavailable()
     }
     const archive = await this.downloads.issue(actor, packageName)
-    if (archive.plugin.integrity !== before.integrity || archive.plugin.artifact !== before.artifact) throw this.unavailable()
+    if (
+      archive.plugin.integrity !== before.integrity ||
+      archive.plugin.artifact !== before.artifact ||
+      archive.plugin.preparationId !== before.preparationId ||
+      (existing && !matchesPendingInstallDefaults(archive.plugin, existing))
+    )
+      throw this.unavailable()
+    await beforeInstall?.(archive.plugin)
     const application = await this.manager.install(
       instance,
       origin,
@@ -88,6 +111,7 @@ export class MemberNativePlugins {
         registry: (await this.sources.current()).npm,
         requestId,
         identity: { packageName, version: archive.plugin.version },
+        ...defaultDelivery(archive.plugin),
         ...(progress ? { progress } : {}),
       },
       signal,
@@ -121,7 +145,7 @@ export class MemberNativePlugins {
         origin,
         { url: archive.url, integrity: archive.plugin.integrity, authorizationUrl: archive.authorizationUrl },
         replacement,
-        { registry: (await this.sources.current()).npm, requestId, progress },
+        { registry: (await this.sources.current()).npm, requestId, progress, ...defaultDelivery(archive.plugin) },
         signal,
       )
     } finally {

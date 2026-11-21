@@ -1,6 +1,7 @@
 import { legacyCatalogExecutionVariables } from '../domain/execution-service-environment.js'
 import { assertGithubRepository } from '../domain/plugin-library.js'
 import { compareSuiteVersions } from '../domain/suite-install.js'
+import { deferredPluginUpstreams, usesDeferredPluginUpstream } from '../domain/suite-service-slots.js'
 import type { SuiteUnavailableReason } from './suite-availability.js'
 import type { CommunitySuiteInstallView, CommunitySuiteCatalogView } from '../domain/admin-contract.js'
 import type { CommunityCatalogServiceDefinition } from '../domain/suite-contract.js'
@@ -104,21 +105,23 @@ export async function suiteCatalogView(
         const dependencySources = entry.unavailableReason
           ? []
           : entry.items.flatMap(item => (item.kind === 'runtime-dependency' ? (item.sourceRepositories ?? []).map(pin => ({ name: item.name, ...pin })) : []))
-        const services: CommunityCatalogServiceDefinition[] = entry.items.flatMap(item =>
-          (item.kind === 'execution' || item.kind === 'plugin') && item.serviceSlots?.length
-            ? [
-                {
-                  kind: item.kind,
-                  name: item.kind === 'execution' ? item.skill : item.packageName,
-                  slots: item.serviceSlots.map(({ id, label, backends }) => ({
-                    id,
-                    label,
-                    backends: backends.map(({ id, label, fields }) => ({ id, label, fields })),
-                  })),
-                },
-              ]
-            : [],
-        )
+        const services: CommunityCatalogServiceDefinition[] = entry.items.flatMap(item => {
+          if (item.kind !== 'execution' && item.kind !== 'plugin') return []
+          const slots = item.serviceSlots?.filter(slot => !usesDeferredPluginUpstream(slot))
+          if (!slots?.length) return []
+          return [
+            {
+              kind: item.kind,
+              name: item.kind === 'execution' ? item.skill : item.packageName,
+              slots: slots.map(({ id, label, backends }) => ({
+                id,
+                label,
+                backends: backends.map(({ id, label, fields }) => ({ id, label, fields })),
+              })),
+            },
+          ]
+        })
+        const deferredUpstreams = deferredPluginUpstreams(plugin?.serviceSlots)
         return {
           id: entry.id,
           category: entry.category,
@@ -136,7 +139,16 @@ export async function suiteCatalogView(
           ...(entry.contentHash ? { contentHash: entry.contentHash } : {}),
           ...(services.length ? { services } : {}),
           ...(packName !== undefined ? { packName } : {}),
-          ...(plugin ? { plugin: { packageName: plugin.packageName, version: plugin.version, integrity: plugin.integrity } } : {}),
+          ...(plugin
+            ? {
+                plugin: {
+                  packageName: plugin.packageName,
+                  version: plugin.version,
+                  integrity: plugin.integrity,
+                  ...(deferredUpstreams.length ? { deferredUpstreams } : {}),
+                },
+              }
+            : {}),
           ...(suite?.dependencies.length ? { dependencies: suite.dependencies } : {}),
           ...(suite?.serviceAddresses?.length ? { serviceAddresses: suite.serviceAddresses } : {}),
           ...(executionItems(entry).length

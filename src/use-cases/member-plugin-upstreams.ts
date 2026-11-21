@@ -15,6 +15,6 @@ export class MemberPluginUpstreams {
   async list(packageName: string) {
     const [upstreams, services] = await Promise.all([this.upstreams.list(packageName), this.access.installedServices(packageName)])
     const reserved = new Set(services?.configuration.slots.flatMap(({ binding }) => (binding.kind === 'json-settings' ? [binding.upstream] : [])))
-    return upstreams.filter(row => !reserved.has(row.name))
+    return upstreams.filter(row => !row.nativeServiceOnly && !reserved.has(row.name))
   }
 }

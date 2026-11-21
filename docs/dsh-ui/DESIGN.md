@@ -18,7 +18,7 @@
 ## 主题与语义角色
 
 变量由固定 DSH 版本的 ui-theme 提供，原生控件由 ui-primitives 消费。
-在固定的 DSH dsh-v0.2.2-rc.3 中，公开的 UI primitives 读取宿主 token，布局插件通过 `body[data-ds-dark-theme]` 应用深色主题。精确 revision 以 `runtime-versions.json` 为准。升级时复核公开 token、组件导出和插槽契约。
+公开的 UI primitives 读取宿主 token，布局插件通过 `body[data-ds-dark-theme]` 应用深色主题。DSH revision 以 `runtime-versions.json` 为准。升级时复核公开 token、组件导出和插槽契约。
 
 | DSH token | 用途 | 来源 |
 | --- | --- | --- |

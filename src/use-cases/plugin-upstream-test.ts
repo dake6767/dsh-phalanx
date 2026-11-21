@@ -15,9 +15,10 @@ export class PluginUpstreamTest {
     private readonly clock: Clock,
   ) {}
   async execute(actor: CommunityAccountActor, packageName: string, name: string): Promise<CommunityPluginUpstreamTestResult> {
-    await this.administration.list(actor, packageName)
+    const row = (await this.administration.list(actor, packageName)).find(row => row.name === name)
     const upstream = (await this.store.list(packageName)).find(row => row.name === name)
-    if (!upstream) throw new BusinessRuleError('invalid', 'Save a test request and credential first', 'plugin-upstream-test-required')
+    if (!upstream || row?.managedImage?.ready === false)
+      throw new BusinessRuleError('invalid', 'Save a test request and credential first', 'plugin-upstream-test-required')
     return this.run(upstream)
   }
   async preview(actor: CommunityAccountActor, packageName: string, input: CommunityPluginUpstreamInput): Promise<CommunityPluginUpstreamTestResult> {

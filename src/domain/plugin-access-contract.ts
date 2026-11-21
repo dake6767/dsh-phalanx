@@ -15,11 +15,13 @@ export interface CommunityPluginUpstreamInput {
   readonly testRequest?: CommunityPluginUpstreamTestRequest | null
   readonly name: string
   readonly baseUrl: string
+  readonly model?: string
   /** Omit or leave blank to retain. Never returned by a read endpoint. */
   readonly credential?: string
   readonly headers: readonly { readonly name: string; readonly value: string }[]
 }
 export interface CommunityPluginUpstreamView extends Omit<CommunityPluginUpstreamInput, 'credential' | 'headers' | 'testRequest'> {
+  readonly managedImage?: { readonly ready: boolean }
   readonly testRequest?: CommunityPluginUpstreamTestRequest | { readonly method: string; readonly configured: true }
   readonly credential: { readonly configured: boolean; readonly last4: string }
   readonly headers: readonly { readonly name: string; readonly configured: boolean; readonly last4: string }[]

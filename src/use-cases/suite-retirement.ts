@@ -137,7 +137,7 @@ export class SuiteRetirement {
           await rows.packs.store.save(manual, row.rowRevision)
         }
         for (const row of before.plugins.filter(row => includes('plugin', row.packageName))) {
-          const { suiteOrigin, suiteAppliedAccess, suiteResourceEnvironment, suiteResourceBindings, ...manual } = row
+          const { suiteOrigin, suiteAppliedAccess, suiteResourceEnvironment, suiteResourceBindings, installDefaults, current, ...manual } = row
           void suiteOrigin
           void suiteAppliedAccess
           void suiteResourceEnvironment
@@ -145,7 +145,12 @@ export class SuiteRetirement {
           const services = await rows.pluginAccess.installedServices?.(row.packageName)
           if (services)
             await rows.pluginAccess.saveInstalledServices?.(row.packageName, origin, disableInstalledServiceBackends(services.configuration), services.revision)
-          await rows.plugins.save(manual)
+          void installDefaults
+          if (current) {
+            const { installDefaults: defaults, ...prepared } = current
+            void defaults
+            await rows.plugins.save({ ...manual, current: prepared })
+          } else await rows.plugins.save({ ...manual, current: null })
         }
         for (const row of before.execution.filter(row =>
           targets.some(target => target.kind === 'execution' && row.owner === suiteExecutionOwner(target.name)),

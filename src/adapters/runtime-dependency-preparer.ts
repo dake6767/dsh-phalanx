@@ -10,6 +10,7 @@ import { FileExecutionArtifacts } from './execution-artifacts.js'
 import type { ContainerExecutionProcess } from './execution-container-process.js'
 import { outboundProxyEnvironment, redactProxyOutput } from './outbound-proxy.js'
 import { platformSystemPath } from './platform-process-host.js'
+import { preparedPlaywrightBuilds } from './playwright-browser-inventory.js'
 
 import { runtimeDependencyMount } from './runtime-preparation-mounts.js'
 export { runtimeDependencyMount } from './runtime-preparation-mounts.js'
@@ -40,6 +41,15 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
   }
   collect(retained: readonly string[]): Promise<void> {
     return this.process.canDiscardArtifacts ? this.artifacts.collect(retained) : Promise.resolve()
+  }
+  async browserBuilds(version: RuntimeDependencyVersion) {
+    return (
+      version.browserBuilds ??
+      (await preparedPlaywrightBuilds(version.directory).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        return []
+      }))
+    )
   }
   async prepare(
     input: RuntimeDependencyDefinition,
@@ -192,6 +202,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       }
       signal.throwIfAborted()
       const identity = this.identity(input)
+      const browserBuilds = input.type === 'resource' && this.isolated ? await preparedPlaywrightBuilds(stage.directory) : undefined
       await this.artifacts.publish(stage, id, identity, log(), { copyableFiles: input.type === 'resource' && this.isolated })
       published = true
       return {
@@ -203,6 +214,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
         commands: result.commands,
         commandPaths: result.commandPaths,
         bytes: result.bytes,
+        ...(browserBuilds === undefined ? {} : { browserBuilds }),
         isolated: this.isolated,
         checks,
         log: log(),

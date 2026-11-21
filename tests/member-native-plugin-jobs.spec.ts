@@ -6,7 +6,7 @@ import { NativePluginDownloads } from '../src/use-cases/native-plugin-downloads.
 import type { PluginInstallation } from '../src/ports/plugin-installations.js'
 import type { CommunityUserInstance } from '../src/ports/community-runtime.js'
 
-const preinstallFixture = ({ failReceipt = false }: { failReceipt?: boolean } = {}) => {
+const preinstallFixture = ({ failReceipt = false, browser = false }: { failReceipt?: boolean; browser?: boolean } = {}) => {
   const account = {
       username: 'alice',
       spaceId: 'space-a',
@@ -67,6 +67,7 @@ const preinstallFixture = ({ failReceipt = false }: { failReceipt?: boolean } = 
   )
   const history: PluginInstallation[] = [],
     instance: CommunityUserInstance = { userId: 'alice', processId: 1, origin: 'http://localhost', launchUrl: 'http://localhost' }
+  const browserEvents: string[] = []
   const jobs = new MemberNativePluginJobs(
     accounts,
     {
@@ -85,7 +86,31 @@ const preinstallFixture = ({ failReceipt = false }: { failReceipt?: boolean } = 
         history.push(row)
       },
     },
-    failReceipt ? { describeDelivery: async () => ({ version: plugin.version, integrity: plugin.integrity, resourceOrigin: 'suite:fixture' }) } : undefined,
+    failReceipt || browser
+      ? {
+          describeDelivery: async () => ({
+            version: plugin.version,
+            integrity: plugin.integrity,
+            resourceOrigin: 'suite:fixture',
+            ...(browser ? { browser } : {}),
+          }),
+        }
+      : undefined,
+    undefined,
+    browser
+      ? {
+          reserveBrowserDelivery: async () => {
+            browserEvents.push('reserve')
+            return 'reservation'
+          },
+          releaseBrowserDelivery: async () => {
+            browserEvents.push('release')
+          },
+          deferBrowserDelivery: async () => {
+            browserEvents.push('defer')
+          },
+        }
+      : undefined,
   )
   return {
     plugin,
@@ -93,6 +118,7 @@ const preinstallFixture = ({ failReceipt = false }: { failReceipt?: boolean } = 
     jobs,
     instance,
     history,
+    browserEvents,
     installs: () => installs,
     started,
     finish: () => {
@@ -105,6 +131,18 @@ const preinstallFixture = ({ failReceipt = false }: { failReceipt?: boolean } = 
     origin: new URL('http://localhost'),
   }
 }
+
+it('preserves a browser reservation when preinstall admission changes after the native operation', async () => {
+  const fixture = preinstallFixture({ browser: true })
+  let current = true
+  const result = fixture.jobs.preinstall(fixture.actor, fixture.plugin, fixture.instance, fixture.origin, async () => current)
+  await fixture.started
+  current = false
+  fixture.finish()
+  expect(await result).toBe('cancelled')
+  expect(fixture.history).toEqual([])
+  expect(fixture.browserEvents).toEqual(['reserve', 'defer'])
+})
 
 it('delivers preinstalls on the captured ready carrier and records restart-required as successful preinstallation', async () => {
   const f = preinstallFixture()

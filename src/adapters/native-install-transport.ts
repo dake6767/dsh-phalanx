@@ -30,6 +30,7 @@ export class SignedNativeInstallTransport implements NativePluginInstallTranspor
       {
         spec: input.spec,
         options: { registry: input.registry, requestId: input.requestId },
+        ...(input.installDefaults ? { installDefaults: input.installDefaults } : {}),
         ...(input.replacement ? { replacement: input.replacement } : {}),
         ...(input.cache ? { cache: input.cache } : {}),
       },

@@ -14,6 +14,7 @@ import CommunityGrantSection from './CommunityGrantSection'
 import CommunityMessage from './CommunityMessage'
 import CommunitySelect from './CommunitySelect'
 import CommunityRuntimeDependencyForm, { DependencyCommandField } from './CommunityRuntimeDependencyForm'
+import CommunityPlaywrightBrowsers, { dependencySize as size } from './CommunityPlaywrightBrowsers'
 
 const stages = { preparing: 'Preparing dependency', validating: 'Validating dependency', ready: 'Ready', failed: 'Preparation failed' } as const
 const sources = { manual: 'Manual', 'mcp-catalog': 'MCP catalog', 'suite-catalog': 'From catalog' } as const
@@ -26,9 +27,6 @@ const failures = {
   'check-failed': 'Check command failed',
   interrupted: 'Preparation interrupted',
 } as const
-function size(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / 1024 / 1024).toFixed(1)} MiB`
-}
 export default function CommunityRuntimeDependencies() {
   const { t, locale, errorText } = usePlatformLanguage()
   const [items, setItems] = useState<readonly CommunityRuntimeDependencyView[]>(),
@@ -104,7 +102,13 @@ export default function CommunityRuntimeDependencies() {
     suites?.installations.find(row => row.category === 'dependency' && row.entries.some(entry => entry.kind === 'runtime-dependency' && entry.name === name))
   const titleOf = (id: string) => suites?.entries.find(entry => entry.id === id)?.title[locale] ?? id
   const detail = items?.find(row => row.name === selected),
-    visible = items?.filter(row => filter === 'all' || row.stage === filter) ?? []
+    visible = items?.filter(row => filter === 'all' || row.stage === filter) ?? [],
+    browsers = visible.filter(row => row.browserBuilds?.length),
+    separate = visible.filter(row => !row.browserBuilds?.length)
+  const openDependency = (name: string) => {
+    setTab('preparation')
+    setSelected(name)
+  }
   const change = async (action: 'prepare' | 'remove') => {
     if (!detail || pending.current) return
     pending.current = true
@@ -151,7 +155,7 @@ export default function CommunityRuntimeDependencies() {
           <div>
             <div className="panel-title-row">
               <h2>{t('All runtime dependencies')}</h2>
-              <span className="panel-item-count">{t('{count} dependencies', { count: items ? visible.length : '—' })}</span>
+              <span className="panel-item-count">{t('{count} dependencies', { count: items ? separate.length + Number(!!browsers.length) : '—' })}</span>
             </div>
             <p>{t('Review preparation, storage and resource references.')}</p>
           </div>
@@ -177,7 +181,8 @@ export default function CommunityRuntimeDependencies() {
           </Card>
         ) : (
           <div className="plugin-card-grid library-compact-grid">
-            {visible.map(row => (
+            {browsers.length ? <CommunityPlaywrightBrowsers dependencies={browsers} onOpenDependency={openDependency} /> : null}
+            {separate.map(row => (
               <Card key={row.name} className="plugin-library-card">
                 <Card.Header>
                   <div className="library-card-heading">
@@ -202,10 +207,7 @@ export default function CommunityRuntimeDependencies() {
                   size="sm"
                   aria-label={t('View dependency {name}', { name: row.name })}
                   className="plugin-details-action"
-                  onPress={() => {
-                    setTab('preparation')
-                    setSelected(row.name)
-                  }}
+                  onPress={() => openDependency(row.name)}
                 />
               </Card>
             ))}
@@ -347,9 +349,15 @@ export default function CommunityRuntimeDependencies() {
                           </div>
                           <p>
                             {t(
-                              ({ skill: 'Skill', execution: 'Platform execution', mcp: 'MCP service', plugin: 'Plugin' } as Record<string, PlatformMessageKey>)[
-                                reference.kind
-                              ]!,
+                              (
+                                {
+                                  skill: 'Skill',
+                                  execution: 'Platform execution',
+                                  mcp: 'MCP service',
+                                  plugin: 'Plugin',
+                                  'member-plugin': 'Member plugin copy',
+                                } as Record<string, PlatformMessageKey>
+                              )[reference.kind]!,
                             )}
                           </p>
                         </div>

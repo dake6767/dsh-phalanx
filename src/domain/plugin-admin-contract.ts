@@ -87,6 +87,7 @@ export interface CommunityMarketPluginView {
   readonly sharedCredential?: true
   readonly installedVersion?: string
   readonly retryReceipt?: true
+  readonly incompleteInstallation?: true
   readonly update?: CommunityPluginUpdateChoice
   readonly job?: CommunityNativePluginJob
 }

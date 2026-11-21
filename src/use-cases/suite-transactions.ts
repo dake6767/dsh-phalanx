@@ -14,8 +14,7 @@ import type { Clock } from '../ports/clock.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
 import { ExecutionAdministration } from './execution-administration.js'
 import { writeSuiteSkills } from './suite-skill-facts.js'
-import { writeSuitePlugin, type PreparedSuitePlugin } from './suite-plugin-facts.js'
-import type { PluginAccessSyntaxPort } from '../ports/plugin-access.js'
+import { writeSuitePlugin, type PreparedSuitePlugin, type SuitePluginWiring } from './suite-plugin-facts.js'
 import type { SuiteReplacementPlan } from './suite-entry-kinds.js'
 
 export interface PreparedSuiteUpdate {
@@ -37,8 +36,7 @@ export class SuiteTransactions {
     private readonly work: SuiteUnitOfWork,
     private readonly dependencies: Pick<RuntimeDependencies, 'transaction'>,
     private readonly clock: Clock,
-    private readonly pluginSyntax?: PluginAccessSyntaxPort,
-    private readonly compatibilityTarget?: string,
+    private readonly pluginWiring: SuitePluginWiring = {},
   ) {}
   async update(actor: CommunityAccountActor, input: PreparedSuiteUpdate): Promise<void> {
     const plan = structuredClone(input)
@@ -133,7 +131,6 @@ export class SuiteTransactions {
         if (entry.category === 'plugin' && !pluginDetached) {
           if (
             !plan.plugin ||
-            !this.pluginSyntax ||
             !isDeepStrictEqual(
               plan.plugin.item,
               entry.items.find(item => item.kind === 'plugin'),
@@ -144,9 +141,9 @@ export class SuiteTransactions {
             ...plan.plugin.item.runtimeDependencies.map(name => dependencyNames.get(name) ?? name),
             ...plan.plugin.item.catalogDependencies.map(catalogDependencyName),
           ]
-          const plugin = await writeSuitePlugin(rows, origin, plan.plugin, dependencies, 'update', this.pluginSyntax, {
+          const plugin = await writeSuitePlugin(rows, origin, plan.plugin, dependencies, 'update', {
             serviceIdentity: installedCatalogIdentity(entry),
-            ...(this.compatibilityTarget ? { compatibilityTarget: this.compatibilityTarget } : {}),
+            ...this.pluginWiring,
           })
           const retained = entry.items.flatMap(item => (item.kind === 'runtime-dependency' ? [dependencyNames.get(item.name) ?? item.name] : []))
           await scope.mutations.removeManaged(origin, retained)
@@ -358,7 +355,6 @@ export class SuiteTransactions {
           if (entry.category === 'plugin') {
             if (
               !unit.plugin ||
-              !this.pluginSyntax ||
               !isDeepStrictEqual(
                 unit.plugin.item,
                 entry.items.find(item => item.kind === 'plugin'),
@@ -370,9 +366,9 @@ export class SuiteTransactions {
               ...unit.plugin.item.catalogDependencies.map(dependencyName),
             ]
             const takeover = unit.replacement?.plugins?.find(row => row.row.packageName === unit.plugin!.item.packageName)
-            await writeSuitePlugin(rows, origin, unit.plugin, dependencies, 'install', this.pluginSyntax, {
+            await writeSuitePlugin(rows, origin, unit.plugin, dependencies, 'install', {
               serviceIdentity: installedCatalogIdentity(entry),
-              ...(this.compatibilityTarget ? { compatibilityTarget: this.compatibilityTarget } : {}),
+              ...this.pluginWiring,
               ...(takeover ? { takeover } : {}),
             })
           }

@@ -1,6 +1,11 @@
 import { canonicalJson } from './suite-catalog-document.js'
 import { BusinessRuleError } from './business-error.js'
-import type { CatalogExecutionServiceSlot, CatalogPluginServiceSlot, CatalogServiceBackend } from './suite-service-slots.js'
+import {
+  usesDeferredPluginUpstream,
+  type CatalogExecutionServiceSlot,
+  type CatalogPluginServiceSlot,
+  type CatalogServiceBackend,
+} from './suite-service-slots.js'
 
 export type InstalledServiceOwner = { readonly kind: 'execution' | 'plugin'; readonly name: string }
 export type InstalledServiceSlot = CatalogExecutionServiceSlot | CatalogPluginServiceSlot
@@ -127,7 +132,7 @@ export function configureServiceBackend<Slot extends InstalledServiceSlot>(state
   }
   const slot = state.slots.find(row => row.id === change.slot),
     backend = slot?.backends.find(row => row.id === change.backend)
-  if (!slot || !backend) throw invalid()
+  if (!slot || !backend || usesDeferredPluginUpstream(slot)) throw invalid()
   const before = state.settings.find(row => row.slot === slot.id && row.backend === backend.id)
   const values: Record<string, string> = Object.assign(Object.create(null), before?.values)
   let enabled = before?.enabled === true && serviceBackendComplete(backend, values)
@@ -211,30 +216,32 @@ export function installedServiceView(state: InstalledServices, personalJsonField
             .map(([name]) => name),
         }
       : {}),
-    slots: state.slots.map(slot => ({
-      id: slot.id,
-      label: slot.label,
-      ...('binding' in slot && slot.binding.kind === 'json-settings'
-        ? {
-            jsonSettings: { upstream: slot.binding.upstream, personal: jsonSettingsPersonal(slot.binding, personalJsonFields) },
+    slots: state.slots
+      .filter(slot => !usesDeferredPluginUpstream(slot))
+      .map(slot => ({
+        id: slot.id,
+        label: slot.label,
+        ...('binding' in slot && slot.binding.kind === 'json-settings'
+          ? {
+              jsonSettings: { upstream: slot.binding.upstream, personal: jsonSettingsPersonal(slot.binding, personalJsonFields) },
+            }
+          : {}),
+        backends: slot.backends.map(backend => {
+          const settings = state.settings.find(row => row.slot === slot.id && row.backend === backend.id)
+          const values = settings?.values ?? {}
+          return {
+            id: backend.id,
+            label: backend.label,
+            enabled: settings?.enabled === true && serviceBackendComplete(backend, values),
+            complete: serviceBackendComplete(backend, values),
+            fields: backend.fields.map(field => ({
+              ...field,
+              configured: Object.hasOwn(values, field.name) && Boolean(values[field.name]),
+              ...(field.type === 'secret' ? {} : { value: Object.hasOwn(values, field.name) ? values[field.name]! : '' }),
+            })),
           }
-        : {}),
-      backends: slot.backends.map(backend => {
-        const settings = state.settings.find(row => row.slot === slot.id && row.backend === backend.id)
-        const values = settings?.values ?? {}
-        return {
-          id: backend.id,
-          label: backend.label,
-          enabled: settings?.enabled === true && serviceBackendComplete(backend, values),
-          complete: serviceBackendComplete(backend, values),
-          fields: backend.fields.map(field => ({
-            ...field,
-            configured: Object.hasOwn(values, field.name) && Boolean(values[field.name]),
-            ...(field.type === 'secret' ? {} : { value: Object.hasOwn(values, field.name) ? values[field.name]! : '' }),
-          })),
-        }
-      }),
-    })),
+        }),
+      })),
   }
 }
 

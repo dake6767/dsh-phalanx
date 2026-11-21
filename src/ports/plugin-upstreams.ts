@@ -5,7 +5,13 @@ export interface PluginUpstreamsPort {
   revision?(packageName: string): string | Promise<string>
   list(packageName: string): readonly PluginUpstream[] | Promise<readonly PluginUpstream[]>
   receipt?(packageName: string): ContributionReceipt | undefined | Promise<ContributionReceipt | undefined>
-  save(packageName: string, upstreams: readonly PluginUpstream[], contribution?: ContributionReceipt, expectedRevision?: string): Promise<void>
+  save(
+    packageName: string,
+    upstreams: readonly PluginUpstream[],
+    contribution?: ContributionReceipt,
+    expectedRevision?: string,
+    expectedPluginRevision?: number,
+  ): Promise<void>
 }
 export interface PluginUpstreamReferencesPort {
   references(packageName: string, upstreamName: string): readonly string[] | Promise<readonly string[]>

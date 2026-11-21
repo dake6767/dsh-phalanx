@@ -1,3 +1,5 @@
+import { join, posix } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import {
   assertPluginDependencyTemplate,
   mapPluginValues,
@@ -8,24 +10,31 @@ import {
 } from '../domain/plugin-access.js'
 import {
   nativePluginDependencyPlan,
+  memberBrowserBindings,
+  retainedBrowserPlan,
+  type InstalledNativeResourceBinding,
   type NativePluginArchiveFacts,
   type NativePluginDependencyPlan,
   type NativePluginDependencyPlans,
 } from '../domain/plugin-preinstall.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 import type { RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
+import { PLAYWRIGHT_BROWSERS_ENV, type MemberPlaywrightBrowserResource } from '../domain/suite-resource-bindings.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { CommunityModelGatewayAccess } from '../ports/community-runtime.js'
 import type { MemberManagedPluginsPort } from '../ports/managed-plugins.js'
 import type { MemberPluginAccessPort, PluginAccessStorePort } from '../ports/plugin-access.js'
-import type { PluginInstallationsPort } from '../ports/plugin-installations.js'
+import type { MemberNativeResourcesPort, PluginInstallationsPort } from '../ports/plugin-installations.js'
 import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
 /** Managed entries keep their templates; native deliveries receive only literal process environment. */
 export class MemberPluginAccess implements MemberPluginAccessPort {
   constructor(
     private readonly managed: Pick<MemberManagedPluginsPort, 'effective' | 'accessible' | 'localSelection'>,
     private readonly store: PluginAccessStorePort,
-    private readonly native?: { readonly accounts: Pick<CommunityAccountReaderPort, 'get'>; readonly records: Pick<PluginInstallationsPort, 'get'> },
+    private readonly native?: {
+      readonly accounts: Pick<CommunityAccountReaderPort, 'get'>
+      readonly records: Pick<PluginInstallationsPort, 'get'> & Partial<MemberNativeResourcesPort>
+    },
     private readonly dependencies?: {
       readonly library: Pick<PluginLibraryStorePort, 'list'>
       readonly ready: (names: readonly string[]) => readonly RuntimeDependencyVersion[]
@@ -78,12 +87,13 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
     }
     const literals = native
       ? await this.nativeEnvironment(native.username, native.installed, plugins, native.dependencyVersions, native.preinstall, native.nativeResources)
-      : { environment: {}, snapshot: [], failures: [] }
+      : { environment: {}, snapshot: [], failures: [], playwrightBrowsers: [] }
     return {
       environment: { ...literals.environment, ...environment },
       entries,
       snapshot: [...(await this.revisions(plugins, native?.dependencyVersions)), ...literals.snapshot].sort(),
       ...(literals.failures.length ? { nativeFailures: literals.failures } : {}),
+      ...(literals.playwrightBrowsers.length ? { playwrightBrowsers: literals.playwrightBrowsers } : {}),
     }
   }
   private async nativeEnvironment(
@@ -97,25 +107,29 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
     const account = await this.native?.accounts.get(username),
       environment: Record<string, string> = {},
       snapshot: string[] = [],
-      failures: string[] = []
-    if (!account || account.disabled) return { environment, snapshot, failures }
+      failures: string[] = [],
+      playwrightBrowsers: MemberPlaywrightBrowserResource[] = []
+    if (!account || account.disabled) return { environment, snapshot, failures, playwrightBrowsers }
     const controlled = new Set([...managed.map(row => row.packageName), ...((await this.managed.localSelection?.(username)) ?? [])]),
       present = new Set(installed)
-    const deliveries = (await this.native!.records.get(account.spaceId)).flatMap(row => (present.has(row.packageName) ? [row.packageName] : []))
+    const deliveries = [
+      ...(await this.native!.records.get(account.spaceId)).map(row => row.packageName),
+      ...Object.entries(nativeResources).flatMap(([name, plan]) => (plan.retainedBrowser ? [name] : [])),
+    ].filter(name => present.has(name))
     for (const packageName of new Set([...deliveries, ...preinstall])) {
       if (controlled.has(packageName)) continue
       const frozen = Object.hasOwn(nativeResources, packageName) ? nativeResources[packageName] : undefined
       const library = await this.libraryRow(packageName)
-      if (this.dependencies && !this.eligible(library)) {
+      if (!frozen?.retainedBrowser && this.dependencies && !this.eligible(library)) {
         if (frozen) failures.push(packageName)
         continue
       }
       if (library?.suiteResourceBindings?.length && !frozen) continue
-      if (frozen && (!library || nativePluginDependencyPlan(library).identity !== frozen.identity)) {
+      if (frozen && !(await this.nativePlanCurrent(account.spaceId, packageName, frozen))) {
         failures.push(packageName)
         continue
       }
-      const settings = await this.store.get(packageName)
+      const settings = frozen?.retainedBrowser ? undefined : await this.store.get(packageName)
       const values =
         settings?.environment.filter(
           value => !reservedPluginEnvironment(value.name) && !value.value.includes('{access-token}') && !/\{upstream:[^{}]*\}/u.test(value.value),
@@ -123,12 +137,32 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
       try {
         const names = frozen?.dependencies ?? (await this.declarations(packageName))
         const dependencies = this.resolvedBindings(names, versions)
-        const resolved = values.map(({ name, value }) => [name, this.boundValue(value, names, dependencies)] as const).sort(([a], [b]) => a.localeCompare(b))
-        const current = frozen ? await this.libraryRow(packageName) : undefined
-        if (frozen && (!current || !this.eligible(current) || nativePluginDependencyPlan(current).identity !== frozen.identity)) {
+        const resolved = (
+          frozen?.retainedBrowser
+            ? (frozen.resources ?? []).flatMap(binding =>
+                'name' in binding && [PLAYWRIGHT_BROWSERS_ENV, 'CHROME_PATH'].includes(binding.name)
+                  ? [[binding.name, posix.join(dependencies[binding.runtimeDependency]!.mountedPath, binding.path)] as const]
+                  : [],
+              )
+            : values.map(({ name, value }) => [name, this.boundValue(value, names, dependencies)] as const)
+        ).sort(([a], [b]) => a.localeCompare(b))
+        if (frozen && !(await this.nativePlanCurrent(account.spaceId, packageName, frozen))) {
           failures.push(packageName)
           continue
         }
+        const browsers = (frozen?.resources ?? []).flatMap((binding): readonly MemberPlaywrightBrowserResource[] => {
+          if (binding.kind !== 'playwright-browser' && (!('name' in binding) || binding.name !== PLAYWRIGHT_BROWSERS_ENV)) return []
+          const version = dependencies[binding.runtimeDependency]!
+          const directory = join(version.directory, binding.path)
+          const mountedDirectory = posix.join(version.mountedPath, binding.path)
+          if (binding.kind === 'playwright-browser')
+            return [{ directory, mountedDirectory, packageName, chromiumBuild: binding.chromiumBuild, directories: binding.directories }]
+          return resolved.some(([name, value]) => name === PLAYWRIGHT_BROWSERS_ENV && value === mountedDirectory) ? [{ directory, mountedDirectory }] : []
+        })
+        playwrightBrowsers.push(...browsers)
+        for (const browser of browsers)
+          if (browser.chromiumBuild)
+            snapshot.push(`native:browser:${packageName}:${JSON.stringify([browser.chromiumBuild, browser.mountedDirectory, browser.directories])}`)
         const access = Object.entries(dependencies).map(([name, version]) => 'native:dependency:' + packageName + ':' + JSON.stringify([name, version.id]))
         snapshot.push(...access)
         if (!resolved.length) continue
@@ -141,7 +175,21 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
         failures.push(packageName)
       }
     }
-    return { environment, snapshot: snapshot.sort(), failures }
+    return { environment, snapshot: snapshot.sort(), failures, playwrightBrowsers }
+  }
+  private async nativePlanCurrent(spaceId: string, packageName: string, plan: NativePluginDependencyPlan): Promise<boolean> {
+    if (plan.retainedBrowser) {
+      const snapshot = await this.nativeResourceSnapshot(spaceId)
+      const matches = (row: Parameters<typeof retainedBrowserPlan>[0] & { readonly packageName: string }) =>
+        row.packageName === packageName && retainedBrowserPlan(row)?.identity === plan.identity
+      return snapshot.delivered.some(matches) || snapshot.recovering.some(matches)
+    }
+    const library = await this.libraryRow(packageName)
+    return !!library && this.eligible(library) && nativePluginDependencyPlan(library).identity === plan.identity
+  }
+  private async nativeResourceSnapshot(spaceId: string) {
+    const records = this.native!.records
+    return records.nativeResourceSnapshot?.(spaceId) ?? { delivered: await records.get(spaceId), recovering: [] }
   }
   async dependencyNames(username: string, installed: readonly string[]): Promise<readonly string[]> {
     const managed = (await this.managed.accessible?.(username)) ?? (await this.managed.effective(username))
@@ -163,15 +211,21 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
     if (!this.native || !this.dependencies || !Object.keys(archives).length) return {}
     const account = await this.native.accounts.get(username)
     if (!account || account.disabled) return {}
-    const [library, delivered, local, managed] = await Promise.all([
+    const [library, { delivered, recovering }, local, managed] = await Promise.all([
       this.dependencies.library.list(),
-      this.native.records.get(account.spaceId),
+      this.nativeResourceSnapshot(account.spaceId),
       this.managed.localSelection?.(username),
       this.managed.effective(username),
     ])
     const excluded = new Set([...(local ?? []), ...managed.map(row => row.packageName)])
-    return Object.fromEntries(
-      delivered.flatMap(record => {
+    return Object.fromEntries([
+      ...recovering.flatMap(record => {
+        const actual = archives[record.packageName]
+        if (excluded.has(record.packageName) || !actual || actual.version !== record.version || actual.integrity !== record.integrity) return []
+        const plan = retainedBrowserPlan(record)
+        return plan ? [[record.packageName, plan] as const] : []
+      }),
+      ...delivered.flatMap(record => {
         if (excluded.has(record.packageName)) return []
         const actual = archives[record.packageName]
         if (!actual || actual.integrity !== record.integrity || actual.version !== record.version) return []
@@ -185,12 +239,15 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
           row.stage !== 'available' ||
           row.current?.version !== actual.version ||
           row.current.integrity !== actual.integrity ||
-          row.current.runtimeRevision !== this.dependencies!.runtimeRevision
-        )
-          return []
+          row.current.runtimeRevision !== this.dependencies!.runtimeRevision ||
+          (record.browserBindings !== undefined && !sameBrowserBindings(record.browserBindings, row.suiteResourceBindings))
+        ) {
+          const retained = retainedBrowserPlan(record)
+          return retained ? [[record.packageName, retained]] : []
+        }
         return [[record.packageName, nativePluginDependencyPlan(row)]]
       }),
-    )
+    ])
   }
   private async libraryRow(packageName: string) {
     return (await this.dependencies?.library.list())?.find(row => row.packageName === packageName)
@@ -243,4 +300,9 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
       .flat()
       .sort()
   }
+}
+
+function sameBrowserBindings(left: readonly InstalledNativeResourceBinding[], right: readonly InstalledNativeResourceBinding[]): boolean {
+  const expected = memberBrowserBindings(right)
+  return left.length === expected.length && left.every(binding => expected.some(candidate => isDeepStrictEqual(binding, candidate)))
 }

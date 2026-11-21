@@ -2,6 +2,7 @@ import type { InstalledServices } from '../domain/installed-services.js'
 import type { CatalogPluginServiceSlot } from '../domain/suite-service-slots.js'
 import type { ContributionReceipt } from '../domain/contribution-receipt.js'
 import type { PluginAccessCheckpoint, PluginAccessSettings, PluginEntryConfig } from '../domain/plugin-access.js'
+import type { MemberPlaywrightBrowserResource } from '../domain/suite-resource-bindings.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 import type { CommunityModelGatewayAccess } from './community-runtime.js'
 export interface PluginInstalledServices {
@@ -56,5 +57,6 @@ export interface MemberPluginAccessPort {
     readonly entries: Readonly<Record<string, Readonly<Record<string, PluginEntryConfig>>>>
     readonly snapshot: readonly string[]
     readonly nativeFailures?: readonly string[]
+    readonly playwrightBrowsers?: readonly MemberPlaywrightBrowserResource[]
   }>
 }

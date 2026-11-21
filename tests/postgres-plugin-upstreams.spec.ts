@@ -141,6 +141,7 @@ it('reopens plugin upstream credentials and locked headers from PostgreSQL witho
     {
       name: 'search',
       baseUrl: 'https://upstream.example.test',
+      model: 'fixture-model',
       credential: 'fictional-upstream-credential',
       headers: [{ name: 'x-private-routing', value: 'fictional-locked-header' }],
     },

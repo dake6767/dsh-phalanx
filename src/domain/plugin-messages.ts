@@ -127,6 +127,8 @@ export const en = {
   'Enter a valid JSON test body.': 'Enter a valid JSON test body.',
 
   'Plugin upstreams': 'Plugin upstreams',
+  'Upstream setup required': 'Upstream setup required',
+  'Model name': 'Model name',
   'Credentials stay on the platform. Address and header changes apply to the next request.':
     'Credentials stay on the platform. Address and header changes apply to the next request.',
   'Credential configured': 'Credential configured',
@@ -386,6 +388,8 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Enter a valid JSON test body.': '请填写有效的 JSON 测试请求体。',
 
   'Plugin upstreams': '插件上游',
+  'Upstream setup required': '待配置上游',
+  'Model name': '模型名',
   'Credentials stay on the platform. Address and header changes apply to the next request.': '凭据仅保存在平台。地址和请求头修改将在下一次请求生效。',
   'Credential configured': '凭据已配置',
   'Credential not configured': '凭据未配置',

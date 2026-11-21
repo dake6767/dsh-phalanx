@@ -184,7 +184,16 @@ export interface CatalogJsonServiceBinding {
   readonly kind: 'json-settings'
   readonly file: string
   readonly upstream: string
+  readonly deferredUpstream?: true
   readonly fields: readonly CatalogJsonServiceField[]
+}
+
+export function deferredPluginUpstreams(slots: readonly CatalogPluginServiceSlot[] | undefined): readonly string[] {
+  return [...new Set(slots?.flatMap(({ binding }) => (binding.kind === 'json-settings' && binding.deferredUpstream ? [binding.upstream] : [])))]
+}
+
+export function usesDeferredPluginUpstream(slot: CatalogPluginServiceSlot | CatalogExecutionServiceSlot): boolean {
+  return 'binding' in slot && slot.binding.kind === 'json-settings' && slot.binding.deferredUpstream === true
 }
 interface PluginBackend extends CatalogServiceBackend {
   readonly protocol: 'openai-chat' | 'openai-image' | 'seedream-image'
@@ -223,14 +232,15 @@ function readPluginBinding(value: unknown): CatalogPluginServiceBinding | undefi
 }
 
 function readJsonBinding(value: unknown): CatalogJsonServiceBinding | undefined {
-  if (!object(value, ['kind', 'file', 'upstream', 'fields']) || value.kind !== 'json-settings') return
-  const { file, upstream, fields: rawFields } = value
+  if (!object(value, ['kind', 'file', 'upstream', 'deferredUpstream', 'fields']) || value.kind !== 'json-settings') return
+  const { file, upstream, deferredUpstream, fields: rawFields } = value
   if (
     typeof file !== 'string' ||
     file.length > 256 ||
     !file.endsWith('.json') ||
     !file.split('/').every(segment => /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.exec(segment)?.[0] === segment) ||
     !identifier(upstream) ||
+    (deferredUpstream !== undefined && deferredUpstream !== true) ||
     !list(rawFields, 16)
   )
     return
@@ -247,7 +257,7 @@ function readJsonBinding(value: unknown): CatalogJsonServiceBinding | undefined 
     }
   }
   if (['gateway-url', 'model', 'service-token'].some(source => fields.filter(field => field.source === source).length !== 1)) return
-  return { kind: 'json-settings', file, upstream, fields }
+  return { kind: 'json-settings', file, upstream, fields, ...(deferredUpstream ? { deferredUpstream } : {}) }
 }
 
 function readPluginBackend(value: unknown, json: boolean): PluginBackend | undefined {
@@ -319,6 +329,7 @@ export function readPluginServiceSlots(value: unknown): readonly CatalogPluginSe
       backends.push(backend)
     }
     if (binding.kind === 'revisioned-rpc' && Object.keys(binding.empty ?? {}).some(key => !fieldKeys.has(key) && !profileKeys.has(key))) return
+    if (binding.kind === 'json-settings' && binding.deferredUpstream && backends.length !== 1) return
     const paths =
       binding.kind === 'revisioned-rpc'
         ? [binding.selection, binding.profiles, ...[...fieldKeys, ...profileKeys].map(key => [...binding.active, key])]

@@ -214,13 +214,14 @@ function fixture(
           identity: definition.prepareCommand,
           directory: '/private',
           mountedPath: '/mounted',
-          commands: definition.type === 'python-library' ? ['python3'] : [definition.name],
+          commands: definition.type === 'resource' ? [] : definition.type === 'python-library' ? ['python3'] : [definition.name],
           commandPaths: {},
           ...(definition.type === 'python-library'
             ? { python: { name: definition.name, interpreter: 'venv/bin/python3', sitePackages: 'venv/lib/python3.11/site-packages', abi: 'cpython-311' } }
             : {}),
           pathDirectories: definition.pathDirectories,
           bytes: 1,
+          ...(definition.type === 'resource' ? { browserBuilds: [{ build: '1248', bytes: 1 }] } : {}),
           isolated: true,
           checks: [],
           log: 'prepared',
@@ -337,6 +338,37 @@ it('keeps an unreferenced shared dependency when the administrator unchecks remo
   // It is still a standalone catalog dependency the administrator can uninstall later.
   await f.uninstalled('ffmpeg')
   expect(f.dependencyRows.size).toBe(0)
+})
+
+it('rechecks browser references at confirmation and only removes an explicitly selected idle build', async () => {
+  const browser: SuiteCatalogEntry = {
+    ...ffmpeg,
+    items: [{ kind: 'runtime-dependency', name: 'ffmpeg', type: 'resource', prepareCommands: { amd64: 'prepare-browser' }, pathDirectories: [], commands: [] }],
+  }
+  const f = fixture({ entries: [browser, videoSuite('alpha'), videoSuite('beta')] })
+  await f.installed('alpha', 'request-aaaaaaaaaaaa1')
+  const preview = await f.suites.uninstallPreview(actor, 'alpha')
+  expect(preview.dependencies).toEqual([{ id: 'ffmpeg', references: [], browserBuilds: ['1248'], reclaimableBytes: 1 }])
+  await f.installed('beta', 'request-bbbbbbbbbbbb2')
+  expect((await f.suites.uninstallPreview(actor, 'alpha')).dependencies).toEqual([
+    {
+      id: 'ffmpeg',
+      references: [
+        { kind: 'skill', name: 'beta-render' },
+        { kind: 'suite', name: 'beta' },
+      ],
+      browserBuilds: ['1248'],
+    },
+  ])
+  await f.uninstalled('alpha', { removeDependencies: ['ffmpeg'], expertRevision: preview.expertRevision })
+  expect(f.record('ffmpeg')?.status).toBe('installed')
+  await f.uninstalled('beta', { removeDependencies: [] })
+  expect(f.record('ffmpeg')?.status).toBe('installed')
+  await f.installed('alpha', 'request-aaaaaaaaaaaa3')
+  expect(f.prepared.filter(name => name === 'ffmpeg')).toHaveLength(1)
+  await f.uninstalled('alpha', { removeDependencies: ['ffmpeg'] })
+  await expect.poll(() => f.record('ffmpeg')).toBeUndefined()
+  expect(f.dependencyRows.has('ffmpeg')).toBe(false)
 })
 
 it('blocks uninstalling a suite or shared dependency that a manual skill references', async () => {

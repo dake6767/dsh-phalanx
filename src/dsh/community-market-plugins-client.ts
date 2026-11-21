@@ -178,7 +178,7 @@ function PluginsPanel({ setupOnly = false } = {}) {
 
  function row(plugin) {
   const running = plugin.job?.status === 'running';
-  const state = {
+  const state = plugin.incompleteInstallation ? 'Installation interrupted. Uninstall before installing the current version.' : {
    native: 'Installed on the native plugin page',
    install: 'Not installed',
    unknown: 'Installation status unavailable',

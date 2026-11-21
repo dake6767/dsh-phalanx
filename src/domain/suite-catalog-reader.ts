@@ -24,11 +24,13 @@ import { readCatalogPluginArchive } from './suite-plugin.js'
 import { readCatalogResourceBindings } from './suite-resource-bindings.js'
 import { resourceReadiness } from './suite-resource-readiness.js'
 import { readExecutionServiceSlots, readPluginServiceSlots, withServiceFieldLabels } from './suite-service-slots.js'
+import { readNativeInstallDefaults } from './native-install-defaults.js'
 
 const itemExtensionFields = [
   'archive',
   'requiredFiles',
   'resourceBindings',
+  'installDefaults',
   'serviceSlots',
   'serviceFieldLabels',
   'blockedShortOptions',
@@ -232,11 +234,23 @@ function readGalleryEntry(
         return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Required files need a checksummed resource and engines.platform >=0.1.35.' } }
       items[index] = { ...item, ...readiness }
     }
+    if (Object.hasOwn(raw, 'installDefaults')) {
+      const plugin = items[index]!
+      const installDefaults = readNativeInstallDefaults(raw.installDefaults)
+      if (plugin.kind !== 'plugin' || !installDefaults || !requiresCatalogExtensionPlatform(entry.engines.platform, '0.1.39'))
+        return {
+          entry: converted,
+          problem: { reason: 'invalid-entry', detail: 'Install defaults require literal plugin settings and engines.platform >=0.1.39.' },
+        }
+      items[index] = { ...plugin, installDefaults }
+    }
     if (Object.hasOwn(raw, 'resourceBindings')) {
       const plugin = items[index]!
       const resourceBindings = plugin.kind === 'plugin' && readCatalogResourceBindings(plugin, raw.resourceBindings)
       if (plugin.kind !== 'plugin' || !resourceBindings || !requiresCatalogExtensionPlatform(entry.engines.platform))
         return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Resource bindings require pinned plugin dependencies and platform >=0.1.35.' } }
+      if (resourceBindings.some(binding => binding.kind === 'playwright-browser') && !requiresCatalogExtensionPlatform(entry.engines.platform, '0.1.39'))
+        return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Playwright browser bindings require engines.platform >=0.1.39.' } }
       const environment = resourceBindings.flatMap(binding =>
         'name' in binding ? [{ name: binding.name, value: '{dependency:' + binding.dependency + '}' + (binding.path === '.' ? '' : '/' + binding.path) }] : [],
       )
@@ -261,6 +275,12 @@ function readGalleryEntry(
         !requiresCatalogExtensionPlatform(entry.engines.platform, '0.1.36')
       )
         return { entry: converted, problem: { reason: 'invalid-entry', detail: 'JSON settings bindings require engines.platform >=0.1.36.' } }
+      if (
+        updated.kind === 'plugin' &&
+        updated.serviceSlots?.some(slot => slot.binding.kind === 'json-settings' && slot.binding.deferredUpstream) &&
+        !requiresCatalogExtensionPlatform(entry.engines.platform, '0.1.39')
+      )
+        return { entry: converted, problem: { reason: 'invalid-entry', detail: 'Deferred plugin upstreams require engines.platform >=0.1.39.' } }
       items[index] = updated
     }
   }

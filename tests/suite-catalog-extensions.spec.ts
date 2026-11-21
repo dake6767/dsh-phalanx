@@ -77,3 +77,112 @@ it('compiles a compatible signed MCP declaration and refuses executable or unpin
     rejected: [{ id: 'rail', reason: 'invalid-entry' }],
   })
 })
+
+it('requires a compatible platform range and a single fixed backend for a deferred image upstream', () => {
+  const label = { en: 'Image generation', 'zh-CN': '图像生成' }
+  const backend = {
+    id: 'openai',
+    label,
+    protocol: 'openai-image',
+    mode: 'openai',
+    upstream: { model: 'model' },
+    fields: [{ name: 'model', type: 'text', required: true }],
+  }
+  const slot = {
+    id: 'image',
+    label,
+    binding: {
+      kind: 'json-settings',
+      file: 'image-upstream.json',
+      upstream: 'image-provider',
+      deferredUpstream: true,
+      fields: [
+        { path: ['endpoint'], source: 'gateway-url' },
+        { path: ['model'], source: 'model' },
+        { path: ['token'], source: 'service-token' },
+      ],
+    },
+    backends: [backend],
+  }
+  const read = (serviceSlots: unknown[], min = '0.1.39', platformVersion = '0.1.39') => {
+    const entry = {
+      kind: 'plugin',
+      id: 'test-image-plugin',
+      version: '1.0.0',
+      engines: { platform: '>=' + min },
+      adapters: [],
+      title: label,
+      description: label,
+      source: label,
+      identity: label,
+      dependencies: [],
+      items: [
+        {
+          kind: 'plugin',
+          packageName: 'test-image-plugin',
+          version: '1.0.0',
+          integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
+          runtimeDependencies: [],
+          catalogDependencies: [],
+          access: { environment: [], entriesYaml: '' },
+          serviceSlots,
+        },
+      ],
+    }
+    const data = {
+      format: 1,
+      publishedAt: '2026-11-20T00:00:00Z',
+      entries: [{ ...entry, contentHash: suiteCatalogContentHash(entry) }],
+    }
+    return readSuiteCatalog(signRawCatalog(data, key), { trustedKeys: [key], platformVersion })
+  }
+  expect(read([slot])).toMatchObject({ status: 'ok', rejected: [], entries: [{ entry: { items: [{ serviceSlots: [slot] }] } }] })
+  expect(read([slot], '0.1.39', '0.1.38')).toMatchObject({ status: 'ok', rejected: [{ reason: 'needs-platform-upgrade' }] })
+  expect(read([slot], '0.1.38')).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+  const multiple = { ...slot, backends: [backend, { ...backend, id: 'other', mode: 'other' }] }
+  expect(read([multiple])).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+})
+
+it('accepts signed native install defaults only as plugin entries with literal configuration', () => {
+  const label = { en: 'Plugin defaults', 'zh-CN': '插件默认值' }
+  const defaults = {
+    main: { enabled: true, title: 'fixture', limit: 2.5, optional: null, values: ['a', false, { nested: [null, 7] }], appearance: { theme: 'light' } },
+  }
+  const read = (installDefaults: unknown, min = '0.1.39', platformVersion = '0.1.39') => {
+    const entry = {
+      kind: 'plugin',
+      id: 'test-native-defaults',
+      version: '1.0.0',
+      engines: { platform: '>=' + min },
+      adapters: [],
+      title: label,
+      description: label,
+      source: label,
+      identity: label,
+      dependencies: [],
+      items: [
+        {
+          kind: 'plugin',
+          packageName: 'test-native-defaults',
+          version: '1.0.0',
+          integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
+          runtimeDependencies: [],
+          catalogDependencies: [],
+          access: { environment: [], entriesYaml: '' },
+          installDefaults,
+        },
+      ],
+    }
+    const data = {
+      format: 1,
+      publishedAt: '2026-11-20T00:00:00Z',
+      entries: [{ ...entry, contentHash: suiteCatalogContentHash(entry) }],
+    }
+    return readSuiteCatalog(signRawCatalog(data, key), { trustedKeys: [key], platformVersion })
+  }
+  expect(read(defaults)).toMatchObject({ status: 'ok', rejected: [], entries: [{ entry: { items: [{ installDefaults: defaults }] } }] })
+  expect(read(defaults, '0.1.39', '0.1.38')).toMatchObject({ status: 'ok', rejected: [{ reason: 'needs-platform-upgrade' }] })
+  expect(read(defaults, '0.1.38')).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+  for (const invalid of [{ main: [[]] }, { main: { nested: [{ __jsExpr: 'not literal' }] } }, { '../outside': defaults.main }])
+    expect(read(invalid)).toMatchObject({ status: 'ok', rejected: [{ reason: 'invalid-entry' }] })
+})

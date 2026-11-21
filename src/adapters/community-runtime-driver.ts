@@ -1,5 +1,6 @@
 import { readPastaLoopbackMapping } from './container-network.js'
 import { memberRuntimeEnvironment } from './member-runtime-environment.js'
+import { applyMemberPlaywrightBrowsers } from './member-playwright-browsers.js'
 import { ContainerMemberCredentials } from './member-credentials.js'
 import { NATIVE_PLUGIN_HISTORY_ENV, NATIVE_PLUGIN_HISTORY_PATH } from '../dsh/native-plugin-install.js'
 import type { MemberNativePluginHistory } from '../ports/native-plugin-history.js'
@@ -179,6 +180,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       ...(dependencyPlan ? { dependencyVersions: dependencyPlan.bindings } : {}),
     })
     for (const name of pluginAccess?.nativeFailures ?? []) blockedPreinstalls.add(name)
+    const pluginEnvironment = { ...pluginAccess?.environment }
+    const browserVolumes = await applyMemberPlaywrightBrowsers(this.config, pluginEnvironment, pluginAccess?.playwrightBrowsers, blockedPreinstalls)
     const managedPlugins = await prepareManagedPlugins(
       this.config.dataRoot,
       spaceId,
@@ -247,7 +250,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       this.config,
       home,
       access,
-      pluginAccess?.environment,
+      pluginEnvironment,
       [...(memberSkills ? [memberSkillsProvider] : []), ...(memberExperts?.skillProviders ?? [])],
       memberModels?.volumes[0]?.host,
     )
@@ -277,7 +280,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
           gatewayUrl: access.url,
           ownership: this.ownership,
           environment,
-          dependencyVolumes: [...(dependencyVolumes ?? []), ...voiceLaunch.volumes],
+          dependencyVolumes: [...(dependencyVolumes ?? []), ...browserVolumes, ...voiceLaunch.volumes],
           ...(managedPlugins ? { managedPlugins } : {}),
           ...(memberSkills ? { memberSkills } : {}),
           ...(memberMcp ? { memberMcp } : {}),

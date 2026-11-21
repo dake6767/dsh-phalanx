@@ -1,4 +1,5 @@
 export const en = {
+  'Installation interrupted. Uninstall before installing the current version.': 'Installation interrupted. Uninstall before installing the current version.',
   'Feature settings': 'Feature settings',
   'Platform features': 'Platform features',
   'Show Platform App Center': 'Show Platform App Center',
@@ -14,6 +15,7 @@ export const en = {
     'Applies the next time an instance starts. This is not security isolation; members may still use the CLI or edit their own configuration.',
 }
 export const zhCN: Record<keyof typeof en, string> = {
+  'Installation interrupted. Uninstall before installing the current version.': '安装已中断。请卸载后再安装当前版本。',
   'Feature settings': '功能设置',
   'Platform features': '平台功能',
   'Show Platform App Center': '展示平台应用中心',

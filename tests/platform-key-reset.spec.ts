@@ -16,8 +16,10 @@ import { FileSharedModelProjection } from '../src/adapters/shared-model-projecti
 import { createMcpStorage } from '../src/composition/mcp-storage.js'
 import type { McpService } from '../src/domain/mcp-service.js'
 import { seedExecutionOwners } from './fixtures/execution-owners.js'
+import { signedMcpEntries } from './fixtures/mcp-catalog-online.js'
 import { seedMcpParents } from './fixtures/mcp-parents.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
+import { documentSuiteCatalogFixture } from './fixtures/suite-catalog-server.js'
 import { createCommunityApplication, openTestDatabase, testDatabaseConfigFile } from './support/community-application.js'
 import { restoreResetCatalog } from './support/platform-catalog-reset.js'
 import { seedPluginParents } from './support/plugin-facts.js'
@@ -41,7 +43,9 @@ it('requires an explicit phrase and recovers a lost master without deleting acco
       defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } },
     },
   }
-  let app = createCommunityApplication(config),
+  const catalog = await documentSuiteCatalogFixture(signedMcpEntries(), new Map())
+  const options = { suiteCatalog: { address: catalog.address, trustedKeys: catalog.trustedKeys } }
+  let app = createCommunityApplication(config, options),
     setupReference = ''
   try {
     const origin = await app.start()
@@ -245,7 +249,7 @@ it('requires an explicit phrase and recovers a lost master without deleting acco
       await Promise.all(Object.values(owners).map(owner => owner.close()))
       await restored.close()
     }
-    app = createCommunityApplication(config)
+    app = createCommunityApplication(config, options)
     const restarted = await app.start()
     expect((await fetch(restarted + '/admin/api/session', { headers: { cookie } })).status).not.toBe(200)
     const login = await fetch(restarted + '/login', {
@@ -276,13 +280,16 @@ it('requires an explicit phrase and recovers a lost master without deleting acco
       await store.close()
       await reopened.close()
     }
-    app = createCommunityApplication(config)
+    app = createCommunityApplication(config, options)
     const recold = await app.start()
     expect(await (await fetch(recold + '/admin/api/mcp', { headers: { cookie: renewed } })).json()).toMatchObject([
       { name: 'p-service', catalog: { version: '1.0.0', status: 'ready' }, credential: { configured: true }, testStatus: 'passed' },
     ])
   } finally {
-    await app.stop()
-    await removeCommunityFixture(root)
+    try {
+      await app.stop()
+    } finally {
+      await Promise.all([catalog.close(), removeCommunityFixture(root)])
+    }
   }
 })

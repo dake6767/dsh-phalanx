@@ -9,9 +9,9 @@ cd dsh-phalanx
 
 For the complete product on an Apple Silicon Mac, use the [development VM](#mac-development-vm).
 Direct host development uses Git, Node.js 24.21.0 and Corepack with pnpm 11.19.0. The external DSH
-build also needs its [upstream build prerequisites](https://github.com/deepseek-ai/deepseek-harness/blob/38a6a5c965aa99ab525161efb7cc5cf1fe62fced/README.md); the platform does not install developer build tools. Exact dependency versions are
-recorded in the manifests and frozen lockfile. `runtime-versions.json` records
-the supported external DSH revision: `dsh-v0.2.2-rc.3`, an upstream prerelease. Python 3.12 or newer is required for installer tests and for reading member skill directory names safely through directory descriptors. Keep `python3` available on the platform service PATH. Edit installer sources under `scripts/install/`, then regenerate
+build also needs the prerequisites listed in the README at the pinned revision
+of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). The platform does not install developer build tools. Exact dependency versions are recorded in the manifests and frozen lockfile. `runtime-versions.json` records
+the supported external DSH revision. Python 3.12 or newer is required for installer tests and for reading member skill directory names safely through directory descriptors. Keep `python3` available on the platform service PATH. Edit installer sources under `scripts/install/`, then regenerate
 the standalone entry with `node scripts/install/build-installer.mjs`.
 
 ```sh
@@ -157,7 +157,7 @@ Build an external DSH checkout beside this repository:
 
 ```sh
 git clone https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
-git -C ../deepseek-harness checkout --detach 38a6a5c965aa99ab525161efb7cc5cf1fe62fced
+git -C ../deepseek-harness checkout --detach "$(node -p "require('./runtime-versions.json').dsh.revision")"
 (cd ../deepseek-harness && corepack pnpm install --frozen-lockfile && corepack pnpm build)
 export DSH_PHALANX_DSH_ROOT="$(cd ../deepseek-harness && pwd)"
 ```

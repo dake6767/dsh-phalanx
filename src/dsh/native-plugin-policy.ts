@@ -2,6 +2,7 @@ import { DSH_BUNDLE_ENABLE, DSH_BUNDLE_LIST, DSH_BUNDLE_INSTALL, DSH_BUNDLE_REMO
 import { DSH_RPC_PREFIX } from './session-protocol.js'
 import { nativeReplacementImports, nativeReplacementModule } from './native-plugin-replacement.js'
 import { DSH_SETTINGS_UPDATE, DSH_SETTINGS_REPLACE, DSH_SETTINGS_MUTATE } from './settings-protocol.js'
+import { nativeInstallDefaultsModule } from './native-install-defaults.js'
 import { nativePackageCacheModule } from './native-package-cache.js'
 import { nativeJsonServiceSettingsModule } from './native-json-service-settings.js'
 import { nativeServiceSettingsModule } from './native-service-settings.js'
@@ -35,6 +36,7 @@ export function nativePluginPolicyModule(configuration: NativePluginPolicyConfig
   return `${nativeInstallVerifierModule}
 ${nativeReplacementImports}
 ${nativeReplacementModule}
+${nativeInstallDefaultsModule}
 ${nativeFeatureLocale}
 ${nativeServiceSettingsModule}
 ${nativeJsonServiceSettingsModule}
@@ -54,7 +56,7 @@ async function retainedArchiveIntegrity(spec) {
   }
 }
 export const name='phalanx-native-plugin-policy';
-export const inject=['connection','typertGateway','settings'];
+export const inject=['connection','typertGateway','settings','profileContext'];
 export function apply(ctx) {
   const configuration=${JSON.stringify(configuration)};
   const verifier=configuration.publicKey ? createVerifier(configuration.publicKey,configuration.subject,configuration.generation) : undefined;
@@ -196,24 +198,44 @@ export function apply(ctx) {
           }
           if (endpoint===${JSON.stringify(DSH_BUNDLE_ENABLE)} && args.name===customMarketBundle && args.enabled===true)
             return deny('platform-managed','Custom plugin markets are unavailable in this platform.');
-          if (endpoint===${JSON.stringify(DSH_BUNDLE_ENABLE)} && args.enabled===true && !configuration.allowInstall) {
+          if (endpoint===${JSON.stringify(DSH_BUNDLE_ENABLE)} && args.enabled===true) {
             const bundles=await invoke(${JSON.stringify(DSH_BUNDLE_LIST)},{},request.signal);
             const bundle=bundles.find(row=>row.name===args.name);
-            if (bundle?.official===true && bundle.optional===true && !bundle.enabled && !bundle.installed) {
+            if (await pendingNativeDefaults(bundle)) return deny('platform-archive','Finish this installation through the App Center.');
+            if (!configuration.allowInstall && bundle?.official===true && bundle.optional===true && !bundle.enabled && !bundle.installed) {
               const names=await history('read',request.signal);
               if (names===undefined) return deny('native-plugin-history-unavailable',nativeFeatureChinese(ctx,request)
                 ? '原生插件历史正在同步，请稍后重试。' : 'Native plugin history is syncing. Try again shortly.');
               if (!names.includes(bundle.name)) return groupDenied();
             }
           }
+          if (privateInstall && signed && args.installDefaults !== undefined &&
+            (typeof args.options?.requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(args.options.requestId)))
+            return deny('invalid-install','Invalid install request.');
+          const pendingRemoval=endpoint===${JSON.stringify(DSH_BUNDLE_REMOVE)}
+            ? await pendingNativeDefaults((await invoke(${JSON.stringify(DSH_BUNDLE_LIST)},{},request.signal)).find(row=>row.name===args.name))
+            : undefined;
+          if (pendingRemoval) await discardPendingDefaultEffects(pendingRemoval);
           const value=privateInstall && signed
-            ? await installWithNativeCache(nativeArgs=>invoke(endpoint,nativeArgs,request.signal),args,request.signal)
+            ? await installWithNativeCache(nativeArgs=>args.installDefaults === undefined
+              ? invoke(endpoint,nativeArgs,request.signal)
+              : installNativeBundleWithDefaults(invoke,nativeArgs,ctx.profileContext),
+              args,args.installDefaults === undefined ? request.signal : AbortSignal.timeout(660000))
             : await invoke(endpoint,args,request.signal);
-          if ((privateInstall || (endpoint===${JSON.stringify(DSH_BUNDLE_ENABLE)} && args.enabled===true))
+          if (pendingRemoval && successful(value)) await rm(defaultIntentPath(pendingRemoval.spec),{force:true});
+          if ((privateInstall || endpoint===${JSON.stringify(DSH_BUNDLE_REMOVE)} || endpoint===${JSON.stringify(DSH_BUNDLE_UPDATE)}
+            || (endpoint===${JSON.stringify(DSH_BUNDLE_ENABLE)} && args.enabled===true))
             && ['applied','restart-required'].includes(value?.application)) {
             await history('refresh',request.signal).catch(()=>{});
           }
-          return reply({ok:true,value:endpoint===${JSON.stringify(DSH_BUNDLE_LIST)} ? value.filter(bundle=>bundle.name!==customMarketBundle) : value});
+          if (endpoint===${JSON.stringify(DSH_BUNDLE_LIST)}) {
+            const bundles=await Promise.all(value.filter(bundle=>bundle.name!==customMarketBundle).map(async bundle=>{
+              const pending=await pendingNativeDefaults(bundle);
+              return pending ? {...bundle, installDefaultsPending:pending.fingerprint} : bundle;
+            }));
+            return reply({ok:true,value:bundles});
+          }
+          return reply({ok:true,value});
         };
         try {
           if (signed && args.replacement !== undefined) {
@@ -225,7 +247,7 @@ export function apply(ctx) {
             if (pendingMutations || replacements.size>=128)
               return reply({ok:true,value:{replacement:'changed',reason:'native-busy'}});
             const operation={raw,until:Infinity,result:serialized(()=>
-              installWithNativeCache(nativeArgs=>replaceNativeBundle(invoke,nativeArgs),args,AbortSignal.timeout(660000)))};
+              installWithNativeCache(nativeArgs=>replaceNativeBundle(invoke,nativeArgs,ctx.profileContext),args,AbortSignal.timeout(660000)))};
             replacements.set(id,operation);
             const done=()=>{operation.until=Date.now()+15*60*1000};
             void operation.result.then(done,done);

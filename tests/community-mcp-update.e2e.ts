@@ -20,21 +20,31 @@ import { createCommunityApplication, withTestMcpStore, withTestRuntimeDependenci
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { hasToolResult, latestHumanText, streamText, streamToolCall } from './support/real-dsh-model.js'
-import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
+import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 
 it.skipIf(!runtimeSettings.containerImage)(
   'retains a live DSH service during failed and pending catalog updates, then switches its read-only dependencies',
   async () => {
     assertPinnedDshRevision(runtimeSettings)
+    const versionTool = 'mcp__p-fixture__version'
     const results: Record<string, string> = {},
+      modelTools: { marker: string; names: string[] }[] = [],
       exchanges: { name: string; method: string; targetPort: string; status?: number; error?: string }[] = []
     const model = createServer(async (request, response) => {
       let text = ''
       for await (const chunk of request) text += chunk
       const body = JSON.parse(text),
         marker = latestHumanText(body)
+      modelTools.push({
+        marker,
+        names: (body.tools ?? []).map((tool: { name: string }) => tool.name).filter((name: string) => name.startsWith('mcp__')),
+      })
       response.setHeader('content-type', 'text/event-stream')
+      if (marker.startsWith('OBSERVE_UPDATE_TOOL_')) {
+        streamText(response, 'TOOL_CATALOG_OBSERVED')
+        return
+      }
       if (hasToolResult(body, marker, false) || hasToolResult(body, marker, true)) {
         results[marker] = JSON.stringify(
           (body.messages ?? [])
@@ -42,7 +52,7 @@ it.skipIf(!runtimeSettings.containerImage)(
             .filter((row: { type?: string; tool_use_id?: string }) => row.type === 'tool_result' && row.tool_use_id === marker),
         )
         streamText(response, 'UPDATE_QUERY_DONE')
-      } else streamToolCall(response, marker, 'mcp__p-fixture__version', {})
+      } else streamToolCall(response, marker, versionTool, {})
     })
     model.listen(0, '127.0.0.1')
     await once(model, 'listening')
@@ -113,8 +123,7 @@ it.skipIf(!runtimeSettings.containerImage)(
         },
       },
     )
-    const browser = await chromium.launch({ headless: true }),
-      rpc = createRealDshRpc()
+    const browser = await chromium.launch({ headless: true })
     let passed = false
     const inventories: Record<string, unknown> = {}
     try {
@@ -169,7 +178,8 @@ it.skipIf(!runtimeSettings.containerImage)(
         ).status(),
       ).toBe(200)
       const context = await browser.newContext({ locale: 'en' }),
-        member = await context.newPage()
+        member = await context.newPage(),
+        rpc = createBrowserDshRpc(context)
       member.setDefaultTimeout(60000)
       await signInCommunity(member, origin, 'alice', 'password')
       await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
@@ -186,9 +196,36 @@ it.skipIf(!runtimeSettings.containerImage)(
       await member.keyboard.press('Escape')
       const toggle = member.getByRole('switch', { name: 'Enable MCP service p-fixture', exact: true })
       await toggle.click()
-      await expect.poll(() => toggle.getAttribute('aria-checked')).toBe('true')
+      await member.getByRole('switch', { name: 'Enable MCP service p-fixture', exact: true, checked: true }).waitFor()
       const cookie = await cookieHeader(context, origin)
       const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
+      const prompt = (marker: string) =>
+        rpc.remoteRpc(origin, cookie, 'session/prompt', {
+          request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] },
+        })
+      const waitForIdle = (timeout = 30000) =>
+        expect
+          .poll(
+            async () =>
+              (await rpc.remoteRpc<{ items: { sessionId: string; running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(
+                row => row.sessionId === session.sessionId,
+              )?.running,
+            { timeout },
+          )
+          .toBe(false)
+      // The switch records the selection. The model's tool list confirms when the native session can use it.
+      const deadline = Date.now() + 60000
+      let observation = 0
+      let offered: string[]
+      do {
+        const marker = 'OBSERVE_UPDATE_TOOL_' + ++observation
+        const observedTools = () => modelTools.find(request => request.marker === marker)?.names
+        await prompt(marker)
+        await expect.poll(observedTools, { timeout: Math.max(1, deadline - Date.now()) }).toBeDefined()
+        await waitForIdle(Math.max(1, deadline - Date.now()))
+        offered = observedTools()!
+      } while (!offered.includes(versionTool) && Date.now() < deadline)
+      expect(offered).toContain(versionTool)
       const call = async (marker: string, version: string) => {
         inventories[marker] = {
           plugins: await rpc.remoteRpc(origin, cookie, 'pluginManager/listPlugins', {}),
@@ -196,9 +233,7 @@ it.skipIf(!runtimeSettings.containerImage)(
           library: await withTestMcpStore(root, store => store.read(), process.env.DSH_PHALANX_INSTALL_ROOT),
           preparations: { dependencies: await withTestRuntimeDependencies(root, store => store.list(), process.env.DSH_PHALANX_INSTALL_ROOT) },
         }
-        await rpc.remoteRpc(origin, cookie, 'session/prompt', {
-          request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] },
-        })
+        await prompt(marker)
         try {
           await expect.poll(() => results[marker], { timeout: 60000 }).toContain(version)
         } catch (error) {
@@ -210,15 +245,7 @@ it.skipIf(!runtimeSettings.containerImage)(
           throw error
         }
         expect(results[marker]).not.toContain('"is_error":true')
-        await expect
-          .poll(
-            async () =>
-              (await rpc.remoteRpc<{ items: { sessionId: string; running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(
-                row => row.sessionId === session.sessionId,
-              )?.running,
-            { timeout: 30000 },
-          )
-          .toBe(false)
+        await waitForIdle()
       }
       await call('BEFORE_UPDATE', 'VERSION_OLD')
       presets[0] = {
@@ -330,7 +357,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
         await writeFile(
           join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'catalog-update-result.json'),
-          JSON.stringify({ passed, results, exchanges, inventories }) + '\n',
+          JSON.stringify({ passed, results, modelTools, exchanges, inventories }) + '\n',
         )
     }
   },

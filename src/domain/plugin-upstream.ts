@@ -4,7 +4,19 @@ import { BusinessRuleError } from './business-error.js'
 export interface PluginUpstream extends Omit<CommunityPluginUpstreamInput, 'credential' | 'clearCredential'> {
   readonly credential: string
   readonly secretUnavailable?: true
+  readonly nativeServiceOnly?: true
 }
+
+export function imageUpstreamReady(upstream: PluginUpstream | undefined): upstream is PluginUpstream & { readonly model: string } {
+  return !!upstream?.baseUrl && /^[\x21-\x7e]+$/u.test(upstream.credential) && validUpstreamModel(upstream.model) && !upstream.secretUnavailable
+}
+
+function validUpstreamModel(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 256 && value.trim() === value && !/\p{Cc}/u.test(value)
+}
+
+export const managedImageUpstreamHeaders = [{ name: 'Authorization', value: 'Bearer {credential}' }] as const
+export const managedImageUpstreamTest = { method: 'GET', path: '/models' } as const
 /** Diagnostic input is protected even when it carries no separately declared credential. */
 export function upstreamTestSecrets(request: NonNullable<PluginUpstream['testRequest']>): string[] {
   const values: string[] = []
@@ -36,6 +48,7 @@ export function upstreamWriteInput(row: CommunityPluginUpstreamView, declaration
   return {
     name: row.name,
     baseUrl: row.baseUrl,
+    ...(row.model ? { model: row.model } : {}),
     headers: row.headers.map(header => ({
       name: header.name,
       value: header.configured ? '' : (declaration?.headers.find(value => value.name.toLowerCase() === header.name.toLowerCase())?.value ?? ''),
@@ -48,9 +61,12 @@ export function mergeUpstreamInput(input: CommunityPluginUpstreamInput, prior?: 
   if (prior?.secretUnavailable && ((!input.credential && !input.clearCredential) || input.headers.some(header => !header.value))) {
     throw new BusinessRuleError('invalid', 'Replace the credential and all locked headers to repair this upstream', 'plugin-upstream-invalid')
   }
+  const model = input.model ?? prior?.model
   return {
     name: input.name,
     baseUrl: input.baseUrl,
+    ...(model === undefined ? {} : { model }),
+    ...(prior?.nativeServiceOnly ? { nativeServiceOnly: true as const } : {}),
     headers: input.headers.map(header => ({
       name: header.name,
       value: header.value || prior?.headers.find(old => old.name.toLowerCase() === header.name.toLowerCase())?.value || '',
@@ -81,6 +97,7 @@ export function upstreamInput(input: CommunityPluginUpstreamInput): void {
     typeof input.name !== 'string' ||
     !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u.test(input.name) ||
     typeof input.baseUrl !== 'string' ||
+    (input.model !== undefined && !validUpstreamModel(input.model)) ||
     (input.credential !== undefined && (typeof input.credential !== 'string' || /[^\x20-\x7e]/u.test(input.credential)))
   )
     throw invalid()

@@ -3,7 +3,7 @@ import { CommunityAuthenticationError, type CommunityAccountActor } from '../dom
 import type { CommunityNativePluginJob } from '../domain/admin-contract.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import { CommunityRuntimeUnavailableError, type CommunityRuntimePort, type CommunityUserInstance } from '../ports/community-runtime.js'
-import type { PluginInstallation, PluginInstallationsPort } from '../ports/plugin-installations.js'
+import type { MemberBrowserDeliveryPort, PluginInstallation, PluginInstallationsPort } from '../ports/plugin-installations.js'
 import type { MemberNativeServiceSettings } from './member-native-service-settings.js'
 import type { NativePluginServiceAccess } from './native-plugin-service-access.js'
 import type { MemberNativePlugins } from './member-native-plugins.js'
@@ -26,6 +26,7 @@ type InstallReceipt = {
   readonly artifact: string
   readonly preparationId: string | undefined
   readonly epoch: number
+  readonly browserReservation?: string
 }
 type ReceiptRetry = {
   readonly instance: CommunityUserInstance
@@ -58,6 +59,7 @@ export class MemberNativePluginJobs {
     private readonly records: Pick<PluginInstallationsPort, 'get' | 'save'>,
     private readonly services?: Pick<NativePluginServiceAccess, 'describeDelivery'>,
     private readonly settings?: Pick<MemberNativeServiceSettings, 'apply' | 'cancelSpace'>,
+    private readonly browsers?: MemberBrowserDeliveryPort,
   ) {}
   async adapted(packageName: string): Promise<boolean> {
     return Boolean(await this.services?.describeDelivery(packageName))
@@ -226,6 +228,8 @@ export class MemberNativePluginJobs {
     retry?: ReceiptRetry,
   ): Promise<void> {
     const signal = AbortSignal.any([this.shutdown.signal, job.abort.signal])
+    let browserReservation: string | undefined
+    let retainBrowserReservation = false
     try {
       const instance = job.update?.instance ?? preinstall?.instance ?? (await this.runtime.ensure(actor.username, origin.href))
       signal.throwIfAborted()
@@ -238,7 +242,7 @@ export class MemberNativePluginJobs {
         this.services && (update || job.view.action === 'uninstall')
           ? (await this.records.get(actor.spaceId)).find(row => row.packageName === job.packageName)
           : undefined
-      const binding =
+      let binding =
         job.view.action === 'install' || (update && (previous?.serviceOrigin || previous?.resourceOrigin))
           ? await this.services?.describeDelivery(job.packageName)
           : undefined
@@ -256,6 +260,29 @@ export class MemberNativePluginJobs {
       const verified = retained && expected && (await this.native.hasDelivery(expected.plugin, instance, origin, signal)) ? retained : undefined
       if (retained && !verified) this.receipts.get(instance)?.delete(job.packageName)
       if (retry && !verified) throw this.conflict()
+      browserReservation = verified?.browserReservation
+      retainBrowserReservation = !!browserReservation
+      const reserve = async (candidate: Pick<PreparedPlugin, 'version' | 'integrity'>) => {
+        if (!this.browsers || browserReservation) return
+        if (candidate.version !== binding?.version || candidate.integrity !== binding.integrity) {
+          const previous = binding
+          binding = await this.services?.describeDelivery(job.packageName)
+          if (previous?.browser && !binding) throw this.conflict()
+        }
+        if (!binding?.browser || !binding.resourceOrigin) return
+        if (update && previous?.resourceOrigin !== binding.resourceOrigin) return
+        if (candidate.version !== binding.version || candidate.integrity !== binding.integrity) throw this.conflict()
+        browserReservation = await this.browsers.reserveBrowserDelivery(
+          actor.spaceId,
+          job.packageName,
+          { ...binding, resourceOrigin: binding.resourceOrigin },
+          instance.resourceKey,
+        )
+        if (!browserReservation) throw this.conflict()
+        // After admission, a missing response may still mean native installation committed.
+        retainBrowserReservation = true
+      }
+      if (update && previous?.resourceOrigin) await reserve(update.replacement.next)
       const application = verified
         ? { application: verified.application, version: verified.record.version, integrity: verified.record.integrity }
         : update
@@ -265,9 +292,28 @@ export class MemberNativePluginJobs {
               integrity: update.replacement.next.integrity,
             }
           : preinstall
-            ? await this.native.preinstall(actor, preinstall.plugin, instance, origin, signal, job.view.requestId, preinstall.current, progress)
+            ? await this.native.preinstall(
+                actor,
+                preinstall.plugin,
+                instance,
+                origin,
+                signal,
+                job.view.requestId,
+                preinstall.current,
+                progress,
+                ...(this.browsers ? ([reserve] as const) : []),
+              )
             : job.view.action === 'install'
-              ? await this.native.install(actor, job.packageName, instance, origin, signal, job.view.requestId, progress)
+              ? await this.native.install(
+                  actor,
+                  job.packageName,
+                  instance,
+                  origin,
+                  signal,
+                  job.view.requestId,
+                  progress,
+                  ...(this.browsers ? ([reserve] as const) : []),
+                )
               : { application: await this.native.remove(actor, job.packageName, instance, origin, signal) }
       let record: PluginInstallation | undefined
       if (application && 'version' in application && application.integrity !== undefined) {
@@ -291,6 +337,7 @@ export class MemberNativePluginJobs {
             artifact: application.prepared.artifact,
             preparationId: application.prepared.preparationId,
             epoch: actor.sessionEpoch,
+            ...(browserReservation ? { browserReservation } : {}),
           })
         }
       }
@@ -299,12 +346,19 @@ export class MemberNativePluginJobs {
       if (preinstall && !(await preinstall.current())) throw new PluginPreinstallCancelled()
       if (retry && !(await retry.current())) throw this.conflict()
       if (!application) {
+        retainBrowserReservation = false
         job.outcome = 'skipped'
         job.view = { ...job.view, status: 'succeeded', phase: 'complete', application: 'applied' }
         return
       }
       if (record) {
-        await this.records.save(actor.spaceId, record)
+        if (browserReservation && record.resourceOrigin) {
+          await this.records.save(actor.spaceId, record, browserReservation)
+          retainBrowserReservation = false
+        } else {
+          retainBrowserReservation = false
+          await this.records.save(actor.spaceId, record)
+        }
         this.receipts.get(instance)?.delete(job.packageName)
         if (record.serviceOrigin && application.application === 'applied')
           await this.settings?.apply(actor, instance, job.packageName, origin).catch(() => undefined)
@@ -334,6 +388,11 @@ export class MemberNativePluginJobs {
             ? { error: error.message, code: error.code, ...(params ? { params } : {}) }
             : { error: 'The native plugin operation could not finish.', code: 'internal-error' as const }
       job.view = { ...job.view, status: 'failed', phase: 'complete', failure, ...(restartRequired ? { application: 'restart-required' } : {}) }
+    } finally {
+      if (browserReservation && this.browsers)
+        await (
+          retainBrowserReservation ? this.browsers.deferBrowserDelivery(browserReservation) : this.browsers.releaseBrowserDelivery(browserReservation)
+        ).catch(() => {})
     }
   }
   private matchingReceipt(

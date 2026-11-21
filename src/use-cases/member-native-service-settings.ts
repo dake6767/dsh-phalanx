@@ -4,7 +4,7 @@ import type { CommunityMarketNativeServiceView, CommunityNativeServiceBindingVie
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { PluginUpstreamAccessError } from '../domain/plugin-upstream.js'
 import { canonicalJson } from '../domain/suite-catalog-document.js'
-import type { CatalogJsonServiceBinding, CatalogPluginServiceSlot } from '../domain/suite-service-slots.js'
+import { usesDeferredPluginUpstream, type CatalogJsonServiceBinding, type CatalogPluginServiceSlot } from '../domain/suite-service-slots.js'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
 import type { NativeServiceSettingsTransport } from '../ports/member-native-plugins.js'
 import type { PluginAccessStorePort } from '../ports/plugin-access.js'
@@ -112,6 +112,12 @@ export class MemberNativeServiceSettings {
     return work
   }
 
+  async refreshUpstream(actor: CommunityAccountActor, instance: CommunityUserInstance, packageName: string, origin: URL): Promise<void> {
+    if (!(await this.records.get(actor.spaceId)).some(record => record.packageName === packageName && record.serviceOrigin)) return
+    await this.running.get(actor.spaceId + '\0' + packageName)?.work.catch(() => [])
+    await this.apply(actor, instance, packageName, origin)
+  }
+
   async cancelSpace(spaceId: string) {
     const runs = [...this.running].filter(([key]) => key.startsWith(spaceId + '\0')).map(([, run]) => run)
     for (const run of runs) run.abort.abort()
@@ -140,7 +146,9 @@ export class MemberNativeServiceSettings {
     for (const slot of installed.configuration.slots) {
       if (signal.aborted) break
       const configured = installed.configuration.settings.find(row => row.slot === slot.id && row.enabled)
-      const backend = slot.backends.find(row => row.id === configured?.backend)
+      const deferred = usesDeferredPluginUpstream(slot)
+      const nextStart = slot.binding.kind === 'json-settings' && !deferred
+      const backend = deferred ? slot.backends[0] : slot.backends.find(row => row.id === configured?.backend)
       if (!backend) {
         views.push({ slot: slot.id, status: 'inactive' })
         continue
@@ -149,17 +157,17 @@ export class MemberNativeServiceSettings {
         const input: SlotSync = { actor, instance, origin, record, slot, backend, signal }
         const result: SlotResult =
           slot.binding.kind === 'json-settings'
-            ? beforeEntry
+            ? beforeEntry || deferred
               ? await this.syncJsonSlot(input, slot.binding)
               : { record, view: { status: 'pending' as const } }
             : await this.syncSlot(input)
-        views.push({ slot: slot.id, ...result.view, ...(slot.binding.kind === 'json-settings' ? { nextStart: true } : {}) })
+        views.push({ slot: slot.id, ...result.view, ...(nextStart ? { nextStart: true } : {}) })
         record = result.record
       } catch (error) {
         views.push({
           slot: slot.id,
           status: error instanceof PluginUpstreamAccessError && [403, 503].includes(error.status) ? 'inactive' : 'failed',
-          ...(slot.binding.kind === 'json-settings' ? { nextStart: true } : {}),
+          ...(nextStart ? { nextStart: true } : {}),
         })
         record = (await this.records.get(actor.spaceId)).find(row => row.packageName === packageName)
         if (!record?.serviceOrigin || record.integrity !== installed.configuration.ownerVersion) break

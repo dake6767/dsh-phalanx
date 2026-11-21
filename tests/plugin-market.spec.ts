@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto'
+import { canonicalJson } from '../src/domain/suite-catalog-document.js'
 import { expect, it } from 'vitest'
 import { PluginMarket } from '../src/use-cases/plugin-market.js'
-import type { LibraryPlugin } from '../src/domain/plugin-library.js'
+import type { LibraryPlugin, PreparedPlugin } from '../src/domain/plugin-library.js'
 
 it('records shared-credential selections without native installation, projects restart state and protects native and granted plugins', async () => {
   const admin = { username: 'admin', spaceId: 'a', sessionEpoch: 0, admin: true, groupId: 'admins', email: '', disabled: false, createdAt: 0, updatedAt: 0 }
@@ -139,7 +141,7 @@ it('uses actual native inventory for market actions without treating delivery hi
     bundlePatch: '[]',
     dependencies: {},
   }
-  let current = plugin,
+  let current: PreparedPlugin = plugin,
     publication = true,
     generation = 0
   const library = {
@@ -350,6 +352,30 @@ it('uses actual native inventory for market actions without treating delivery hi
   expect(setups).toBe(1)
   expect(selected).toEqual([])
   expect(history[0]).toMatchObject({ resourceOrigin: 'catalog', serviceOrigin: 'catalog' })
+  const defaults = { native: { policy: 'first', flag: true } }
+  // An interrupted native copy can receive the same signed defaults again.
+  // A superseding declaration or archive exposes the ordinary uninstall action.
+  current = { ...plugin, installDefaults: defaults }
+  installed = [{ ...retainedArchive[0]!, installDefaultsPending: createHash('sha256').update(canonicalJson(defaults)).digest('hex') }]
+  expect((await listMarket()).plugins[0]).toMatchObject({ status: 'install' })
+  const pendingCopy = installed
+  for (const updated of [
+    { ...current, installDefaults: { native: { policy: 'second' } } },
+    { ...current, version: '2.0.0', integrity: 'sha512-' + Buffer.alloc(64, 2).toString('base64') },
+  ]) {
+    current = updated
+    installed = pendingCopy
+    const view = (await listMarket()).plugins[0]
+    expect(view).toMatchObject({ status: 'installed', incompleteInstallation: true })
+    expect(view?.update).toBeUndefined()
+    await expect(market.install(account, 'native', origin, signal, 'changed-defaults')).rejects.toMatchObject({ code: 'plugin-market-unavailable' })
+    expect(await market.uninstall(account, 'native', origin, signal, 'remove-pending-' + updated.version.replaceAll('.', '-'))).toMatchObject({
+      job: { action: 'uninstall' },
+    })
+    await jobs.drain()
+    expect(installed).toEqual([])
+    expect((await listMarket()).plugins[0]).toMatchObject({ status: 'install' })
+  }
   await jobs.stop()
 })
 

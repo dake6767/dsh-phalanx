@@ -1,5 +1,6 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { SuiteCatalogPluginItem } from '../domain/suite-catalog.js'
+import { deferredPluginUpstreams } from '../domain/suite-service-slots.js'
 import type { PluginAccessAdministration } from './plugin-access-administration.js'
 import type { PluginLibrary } from './plugin-library.js'
 import { assertCatalogPluginBindings, type PreparedSuitePlugin } from './suite-plugin-facts.js'
@@ -44,7 +45,12 @@ export class SuitePlugins {
     const accessRevision = (await this.access.suiteSettings(item.packageName))?.revision ?? 'none'
     const prepared = await this.library.prepareSuitePlugin(origin, item, log, signal)
     assertCatalogPluginBindings(item, prepared)
-    await this.access.validateSuiteTemplate(prepared, item.access, [...item.runtimeDependencies, ...item.catalogDependencies])
+    await this.access.validateSuiteTemplate(
+      prepared,
+      item.access,
+      [...item.runtimeDependencies, ...item.catalogDependencies],
+      deferredPluginUpstreams(item.serviceSlots),
+    )
     return { item: structuredClone(item), prepared, accessRevision }
   }
   async discardSuitePlugin(origin: string) {

@@ -4,6 +4,17 @@ import { assertPluginIdentity, type PluginIdentity } from './plugin-library.js'
 import type { SuiteCatalogEntry, SuiteCatalogPluginItem } from './suite-catalog.js'
 import type { SuiteInstallRecord } from './suite-install.js'
 
+export const PLAYWRIGHT_BROWSERS_ENV = 'PLAYWRIGHT_BROWSERS_PATH'
+export const PLAYWRIGHT_NPM_PACKAGE = 'playwright'
+
+export type MemberPlaywrightBrowserResource = {
+  readonly directory: string
+  readonly mountedDirectory: string
+} & (
+  | { readonly chromiumBuild?: undefined; readonly directories?: undefined; readonly packageName?: undefined }
+  | { readonly chromiumBuild: string; readonly directories: readonly string[]; readonly packageName: string }
+)
+
 interface CatalogResourcePin {
   readonly dependency: string
   readonly version: string
@@ -15,6 +26,7 @@ export type CatalogResourceBinding = CatalogResourcePin &
     | { readonly kind?: 'environment'; readonly name: string }
     | { readonly kind: 'command-path'; readonly commands: readonly string[] }
     | { readonly kind: 'native-package-cache'; readonly packages: readonly PluginIdentity[] }
+    | { readonly kind: 'playwright-browser'; readonly playwrightVersion: string; readonly chromiumBuild: string; readonly directories: readonly string[] }
   )
 
 type ResourceDefinition = {
@@ -36,10 +48,25 @@ export function readCatalogResourceBindings(item: SuiteCatalogPluginItem, value:
   for (const row of value as readonly unknown[]) {
     if (
       !pluginAccessObject(row) ||
-      Object.keys(row).some(key => !['kind', 'dependency', 'version', 'contentHash', 'name', 'path', 'packages', 'commands'].includes(key))
+      Object.keys(row).some(
+        key =>
+          ![
+            'kind',
+            'dependency',
+            'version',
+            'contentHash',
+            'name',
+            'path',
+            'packages',
+            'commands',
+            'playwrightVersion',
+            'chromiumBuild',
+            'directories',
+          ].includes(key),
+      )
     )
       return
-    const { kind, dependency, version, contentHash, name, path, packages, commands } = row
+    const { kind, dependency, version, contentHash, name, path, packages, commands, playwrightVersion, chromiumBuild, directories } = row
     if (typeof dependency !== 'string' || !item.catalogDependencies.includes(dependency) || item.runtimeDependencies.includes(dependency)) return
     if (typeof version !== 'string' || version.trim() !== version || !isStrictSemver(version)) return
     if (typeof contentHash !== 'string' || !/^[a-f0-9]{64}$/u.test(contentHash) || contentHash.length !== 64) return
@@ -48,6 +75,7 @@ export function readCatalogResourceBindings(item: SuiteCatalogPluginItem, value:
     const existing = result.find(binding => binding.dependency === dependency)
     if (existing && (existing.version !== version || existing.contentHash !== contentHash)) return
     const pin = { dependency, version, contentHash, path }
+    if (kind !== 'playwright-browser' && (playwrightVersion !== undefined || chromiumBuild !== undefined || directories !== undefined)) return
     if (kind === undefined || kind === 'environment') {
       if (
         packages !== undefined ||
@@ -66,6 +94,29 @@ export function readCatalogResourceBindings(item: SuiteCatalogPluginItem, value:
       const valid = (command: unknown): command is string => typeof command === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.exec(command)?.[0] === command
       if (!commands.every(valid) || result.some(binding => binding.kind === kind && binding.commands.some(command => commands.includes(command)))) return
       result.push({ ...pin, kind, commands })
+    } else if (kind === 'playwright-browser') {
+      if (
+        name !== undefined ||
+        packages !== undefined ||
+        commands !== undefined ||
+        result.some(binding => binding.kind === kind) ||
+        typeof playwrightVersion !== 'string' ||
+        !isStrictSemver(playwrightVersion) ||
+        typeof chromiumBuild !== 'string' ||
+        /^[1-9][0-9]{0,7}$/u.exec(chromiumBuild)?.[0] !== chromiumBuild ||
+        !Array.isArray(directories) ||
+        !directories.length ||
+        directories.length > 2 ||
+        new Set(directories).size !== directories.length ||
+        !directories.every(
+          directory =>
+            typeof directory === 'string' &&
+            /^[a-z][a-z0-9_]{0,63}-[1-9][0-9]{0,7}$/u.exec(directory)?.[0] === directory &&
+            directory.endsWith('-' + chromiumBuild),
+        )
+      )
+        return
+      result.push({ ...pin, kind, playwrightVersion, chromiumBuild, directories: [...(directories as string[])].sort() })
     } else {
       if (kind !== 'native-package-cache' || name !== undefined || commands !== undefined || result.some(binding => binding.kind === kind)) return
       const pinnedPackages = readCachePackages(packages, item.packageName)
@@ -112,13 +163,39 @@ export function acceptsInstalledCatalogDependency(entry: SuiteCatalogEntry, id: 
   return pin ? matchesCatalogResource(pin, record) : entry.category !== 'plugin' || record?.locked !== true
 }
 
-export function catalogResourceBindingReady(binding: CatalogResourceBinding, dependency: ResourceDefinition | undefined): boolean {
+export function catalogResourceBindingReady(
+  binding: CatalogResourceBinding,
+  dependency: ResourceDefinition | undefined,
+  entries: readonly {
+    readonly category: string
+    readonly items: readonly { readonly kind: string; readonly resourceBindings?: readonly CatalogResourceBinding[] }[]
+  }[],
+): boolean {
   if (!dependency || !matchesCatalogResource(binding, dependency)) return false
+  const legacyBrowser =
+    binding.kind === 'playwright-browser' &&
+    entries.some(
+      entry =>
+        entry.category === 'plugin' &&
+        entry.items.some(
+          item =>
+            item.kind === 'plugin' &&
+            item.resourceBindings?.some(peer => 'name' in peer && peer.name === PLAYWRIGHT_BROWSERS_ENV && sameCatalogResourceLocation(peer, binding)),
+        ),
+    )
   return dependency.items.some(item => {
     const files = item.resourceFiles ?? []
     const prefix = binding.path === '.' ? '' : binding.path + '/'
     if (binding.kind === 'native-package-cache')
       return item.type === 'resource' && ['metadata/', 'store/'].every(directory => files.some(file => file.path.startsWith(prefix + directory)))
+    if (binding.kind === 'playwright-browser')
+      return (
+        item.type === 'resource' &&
+        !item.commands?.length &&
+        (binding.directories.every(directory => files.some(file => file.executable && file.path.startsWith(`${prefix}${directory}/`))) ||
+          // Older signed archives pin a launcher inside the cache instead of listing each browser executable.
+          (legacyBrowser && files.some(file => file.executable && file.path.startsWith(prefix))))
+      )
     if (binding.kind === 'command-path')
       return (
         item.type === 'resource' &&
@@ -132,6 +209,10 @@ export function catalogResourceBindingReady(binding: CatalogResourceBinding, dep
 export function catalogResourceBindings(entry: SuiteCatalogEntry): readonly CatalogResourceBinding[] {
   if (entry.category !== 'plugin') return []
   return entry.items.find(item => item.kind === 'plugin')?.resourceBindings ?? []
+}
+
+export function sameCatalogResourceLocation(first: CatalogResourcePin, second: CatalogResourcePin): boolean {
+  return first.dependency === second.dependency && first.version === second.version && first.contentHash === second.contentHash && first.path === second.path
 }
 
 export function matchesCatalogResource(

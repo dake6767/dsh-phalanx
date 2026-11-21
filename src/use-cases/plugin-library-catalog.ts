@@ -77,7 +77,7 @@ export class PluginLibraryCatalog {
   /** Prepares the locked package under a catalog origin; nothing is written until commitSuitePlugin. */
   async prepareSuitePlugin(
     origin: string,
-    item: Pick<import('../domain/suite-catalog.js').SuiteCatalogPluginItem, 'packageName' | 'version' | 'integrity' | 'archive'>,
+    item: Pick<import('../domain/suite-catalog.js').SuiteCatalogPluginItem, 'packageName' | 'version' | 'integrity' | 'archive' | 'installDefaults'>,
     log: (line: string) => Promise<void>,
     signal: AbortSignal,
   ): Promise<import('../domain/plugin-library.js').PreparedPlugin> {
@@ -88,7 +88,11 @@ export class PluginLibraryCatalog {
       throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
     const known = holder ? pluginIdentities(holder)[item.version] : undefined
     await log(`Preparing plugin ${item.packageName}@${item.version}…`)
-    const candidate: PluginCandidate = { packageName: item.packageName, version: item.version }
+    const candidate: PluginCandidate = {
+      packageName: item.packageName,
+      version: item.version,
+      ...(item.installDefaults ? { installDefaults: item.installDefaults } : {}),
+    }
     let prepared: import('../domain/plugin-library.js').PreparedPlugin
     if (item.archive) {
       if (!this.archives) throw new PluginPreparationError('plugin-runtime-required')

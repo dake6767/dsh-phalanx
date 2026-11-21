@@ -140,38 +140,50 @@ export class PostgresPluginUpstreams implements PluginUpstreamsPort {
     this.ready()
     return pluginTransaction(this.connection, async sql => (await this.load(sql, packageName)).receipts.get(packageName))
   }
-  private async lockRows(sql: PlatformSql, packageName: string): Promise<void> {
-    await sql.query('SELECT package_name FROM dsh_phalanx.plugin_library WHERE package_name=$1 FOR UPDATE', [packageName])
+  private async lockRows(sql: PlatformSql, packageName: string): Promise<number | undefined> {
+    const [plugin] = await sql.query<{ revision: string }>('SELECT revision FROM dsh_phalanx.plugin_library WHERE package_name=$1 FOR UPDATE', [packageName])
     await sql.query(
       `INSERT INTO dsh_phalanx.plugin_upstream_settings(package_name,configuration,revision) VALUES($1,'[]','none') ON CONFLICT(package_name) DO NOTHING`,
       [packageName],
     )
     await sql.query('SELECT package_name FROM dsh_phalanx.plugin_upstream_settings WHERE package_name=$1 FOR UPDATE', [packageName])
+    return plugin && Number(plugin.revision)
   }
   async lock(packageName: string): Promise<void> {
     this.ready()
     if (!('sql' in this.connection)) throw Error('Plugin adoption locks require a transaction')
     await this.lockRows(this.connection.sql, packageName)
   }
-  async save(packageName: string, upstreams: readonly PluginUpstream[], contribution?: ContributionReceipt, expectedRevision?: string): Promise<void> {
+  async save(
+    packageName: string,
+    upstreams: readonly PluginUpstream[],
+    contribution?: ContributionReceipt,
+    expectedRevision?: string,
+    expectedPluginRevision?: number,
+  ): Promise<void> {
     this.lifecycle.assertAccepting()
     this.ready()
     const next = structuredClone(upstreams),
       receipt = structuredClone(contribution)
     return this.lifecycle.write(() =>
       pluginTransaction(this.connection, async sql => {
-        await this.lockRows(sql, packageName)
+        const pluginRevision = await this.lockRows(sql, packageName)
         const [current] = await sql.query<SettingsRow>(
           'SELECT package_name,configuration,revision,receipt FROM dsh_phalanx.plugin_upstream_settings WHERE package_name=$1 FOR UPDATE',
           [packageName],
         )
-        if (expectedRevision !== undefined && expectedRevision !== (current!.configuration.length ? current!.revision : 'none'))
+        if (
+          (expectedPluginRevision !== undefined && expectedPluginRevision !== pluginRevision) ||
+          (expectedRevision !== undefined && expectedRevision !== (current!.configuration.length ? current!.revision : 'none'))
+        )
           throw new BusinessRuleError('conflict', 'Platform configuration changed. Reload before saving.', 'platform-configuration-conflict')
         const prior = (await this.load(sql, packageName)).plugins.get(packageName) ?? []
         const unchanged = configurationJson(prior) === configurationJson(next)
-        const metadata = next.map(({ name, baseUrl, headers, testRequest }) => ({
+        const metadata = next.map(({ name, baseUrl, model, headers, testRequest, nativeServiceOnly }) => ({
           name,
           baseUrl,
+          ...(model === undefined ? {} : { model }),
+          ...(nativeServiceOnly ? { nativeServiceOnly } : {}),
           headers: headers.map(header => ({ name: header.name })),
           ...(testRequest !== undefined ? { testRequest: testRequest ? { method: testRequest.method } : null } : {}),
         }))
@@ -181,7 +193,11 @@ export class PostgresPluginUpstreams implements PluginUpstreamsPort {
           [
             packageName,
             JSON.stringify(
-              metadata.map((row, index) => (next[index]?.secretUnavailable ? (current!.configuration.find(old => old.name === row.name) ?? row) : row)),
+              metadata.map((row, index) => {
+                if (!next[index]?.secretUnavailable) return row
+                const previous = current!.configuration.find(old => old.name === row.name) ?? row
+                return row.nativeServiceOnly ? { ...previous, nativeServiceOnly: true } : previous
+              }),
             ),
             revision,
             receipt ? JSON.stringify(receipt) : null,

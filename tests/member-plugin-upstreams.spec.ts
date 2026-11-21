@@ -3,7 +3,10 @@ import { MemberPluginUpstreams } from '../src/use-cases/member-plugin-upstreams.
 import type { CatalogPluginServiceSlot } from '../src/domain/suite-service-slots.js'
 
 it('reserves only installed JSON service upstreams from the legacy member paths', async () => {
-  const upstreams = ['service', 'legacy'].map(name => ({ name, baseUrl: 'https://provider.test', headers: [], credential: 'fixture-credential' }))
+  const upstreams = [
+    ...['service', 'legacy'].map(name => ({ name, baseUrl: 'https://provider.test', headers: [], credential: 'fixture-credential' })),
+    { name: 'former-service', baseUrl: 'https://provider.test', headers: [], credential: 'fixture-credential', nativeServiceOnly: true as const },
+  ]
   const slot: CatalogPluginServiceSlot = {
     id: 'image',
     label: { en: 'Image', 'zh-CN': '生图' },

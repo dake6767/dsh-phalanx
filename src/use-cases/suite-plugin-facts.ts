@@ -1,6 +1,8 @@
+import { join } from 'node:path'
 import { installServiceDefinition, type InstalledServiceIdentity } from '../domain/installed-services.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { pluginAccessIdentity } from '../domain/plugin-access.js'
+import { managedImageUpstreamHeaders, managedImageUpstreamTest, type PluginUpstream } from '../domain/plugin-upstream.js'
 import {
   assertPreparedPlugin,
   pluginCatalogRevision,
@@ -11,22 +13,38 @@ import {
   npmPluginSource,
   uploadPluginSource,
 } from '../domain/plugin-library.js'
+import type { RuntimeDependency } from '../domain/runtime-dependency.js'
+import { PLAYWRIGHT_BROWSERS_ENV, sameCatalogResourceLocation, type CatalogResourceBinding } from '../domain/suite-resource-bindings.js'
 import type { SuiteCatalogPluginItem } from '../domain/suite-catalog.js'
+import { canonicalJson } from '../domain/suite-catalog-document.js'
+import { deferredPluginUpstreams } from '../domain/suite-service-slots.js'
 import { satisfiesSemverRange } from '../domain/semver.js'
 import { readyRuntimeDependencies } from '../domain/runtime-dependency-selection.js'
+import type { PreparedBrowserDirectories, RuntimeDependencyReferencesPort } from '../ports/runtime-dependencies.js'
 import type { PluginAccessSyntaxPort } from '../ports/plugin-access.js'
 import type { SuiteRepositories } from '../ports/suite-unit-of-work.js'
 import { PluginAccessAdministration } from './plugin-access-administration.js'
 import { resolvedPluginItem } from './suite-entry-kinds.js'
 
 export function assertCatalogPluginBindings(item: SuiteCatalogPluginItem, prepared: PreparedPlugin): void {
+  if (canonicalJson(item.installDefaults ?? null) !== canonicalJson(prepared.installDefaults ?? null))
+    throw new BusinessRuleError('invalid', 'The plugin install defaults were not verified by the plugin precheck.', 'suite-catalog-invalid')
   if (item.serviceSlots?.some(slot => slot.binding.kind === 'revisioned-rpc' && !prepared.services?.includes(slot.binding.service)))
     throw new BusinessRuleError('invalid', 'The plugin did not register its declared settings service.', 'suite-catalog-invalid')
   const cache = item.resourceBindings?.find(binding => binding.kind === 'native-package-cache')
-  if (!cache) return
-  const packages = new Map(cache.packages.map(row => [row.packageName, row.version]))
+  const packages = new Map(cache?.packages.map(row => [row.packageName, row.version]))
   const optional = prepared.optionalDependencies ?? {},
     declared = { ...prepared.dependencies, ...optional }
+  const browser = item.resourceBindings?.find(binding => binding.kind === 'playwright-browser')
+  if (browser) {
+    const playwright = Object.entries(declared).filter(([name]) => name === 'playwright' || name === 'playwright-core')
+    if (
+      !playwright.length ||
+      playwright.some(([name, range]) => (packages.get(name) ?? range) !== browser.playwrightVersion || !satisfiesSemverRange(browser.playwrightVersion, range))
+    )
+      throw new BusinessRuleError('invalid', 'The browser binding must match an exact Playwright package pin.', 'suite-catalog-invalid')
+  }
+  if (!cache) return
   if (
     Object.keys(prepared.dependencies).some(name => !Object.hasOwn(optional, name) && !packages.has(name)) ||
     cache.packages.some(({ packageName, version }) => {
@@ -37,6 +55,59 @@ export function assertCatalogPluginBindings(item: SuiteCatalogPluginItem, prepar
     throw new BusinessRuleError('invalid', 'The package cache pins do not match the plugin dependencies.', 'suite-catalog-invalid')
 }
 
+/** Compare prepared directories and installed pins under the catalog transaction's locks. */
+async function assertPreparedSuitePlaywrightBrowser(
+  item: SuiteCatalogPluginItem,
+  dependencies: readonly string[],
+  runtime: readonly RuntimeDependency[],
+  plugins: readonly LibraryPlugin[],
+  memberReferences: Pick<RuntimeDependencyReferencesPort, 'retainedBrowserBindings'>,
+  directories?: PreparedBrowserDirectories,
+): Promise<void> {
+  const isBrowser = (binding: CatalogResourceBinding) =>
+    binding.kind === 'playwright-browser' || ('name' in binding && binding.name === PLAYWRIGHT_BROWSERS_ENV)
+  const declarations = item.resourceBindings?.filter(isBrowser) ?? []
+  if (!declarations.length) return
+
+  const read = async (name: string, path: string): Promise<readonly string[]> => {
+    const version = runtime.find(row => row.name === name)?.current
+    return version && directories ? directories(join(version.directory, path)) : []
+  }
+  const declared = [...item.runtimeDependencies, ...item.catalogDependencies]
+  const references = [
+    ...plugins.flatMap(plugin => (plugin.suiteResourceBindings ?? []).filter(isBrowser)),
+    ...((await memberReferences.retainedBrowserBindings?.()) ?? []),
+  ]
+  const buildDirectory = (name: string) => name.replace(/_headless_shell(?=-)/u, '')
+  for (const binding of declarations) {
+    const candidate = { ...binding, runtimeDependency: dependencies[declared.indexOf(binding.dependency)]! }
+    const available = await read(candidate.runtimeDependency, candidate.path)
+    if (candidate.kind === 'playwright-browser' && !candidate.directories.every(directory => available.includes(directory)))
+      throw new BusinessRuleError('invalid', 'Prepared Playwright browser build is unavailable.', 'suite-catalog-invalid')
+
+    for (const reference of references) {
+      if (sameCatalogResourceLocation(reference, candidate)) continue
+      const typed = candidate.kind === 'playwright-browser' ? candidate : reference.kind === 'playwright-browser' ? reference : undefined
+      if (!typed) continue
+      const peer = typed === candidate ? reference : candidate
+      const matches =
+        peer.kind === 'playwright-browser'
+          ? peer.chromiumBuild === typed.chromiumBuild
+          : (peer === candidate ? available : await read(peer.runtimeDependency, peer.path)).some(directory =>
+              typed.directories.some(declared => buildDirectory(directory) === buildDirectory(declared)),
+            )
+      if (matches) throw new BusinessRuleError('conflict', 'Playwright browser build already has a locked resource.', 'suite-catalog-invalid')
+    }
+    references.push(candidate)
+  }
+}
+
+export interface SuitePluginWiring {
+  readonly syntax?: PluginAccessSyntaxPort
+  readonly compatibilityTarget?: string
+  readonly browserDirectories?: PreparedBrowserDirectories
+}
+
 export interface PreparedSuitePlugin {
   readonly item: SuiteCatalogPluginItem
   readonly prepared: PreparedPlugin
@@ -45,21 +116,21 @@ export interface PreparedSuitePlugin {
 
 /** Parent and settings are read after the catalog acquired their locks; no checkpoint or external preparation is written here. */
 export async function writeSuitePlugin(
-  rows: Pick<SuiteRepositories, 'accounts' | 'plugins' | 'pluginAccess' | 'pluginUpstreams' | 'runtime'>,
+  rows: Pick<SuiteRepositories, 'accounts' | 'plugins' | 'pluginAccess' | 'pluginUpstreams' | 'runtime' | 'runtimeReferences'>,
   origin: string,
   plan: PreparedSuitePlugin,
   dependencies: readonly string[],
   mode: 'install' | 'update',
-  syntax: PluginAccessSyntaxPort,
-  policy: {
+  policy: SuitePluginWiring & {
     readonly serviceIdentity?: InstalledServiceIdentity
-    readonly compatibilityTarget?: string
     readonly takeover?: { readonly row: LibraryPlugin; readonly revision: string }
   } = {},
 ): Promise<LibraryPlugin> {
-  const { compatibilityTarget, takeover } = policy
+  const { compatibilityTarget, takeover, syntax } = policy
+  if (!syntax) throw new BusinessRuleError('invalid', 'Plugin preparation is unavailable.', 'suite-catalog-invalid')
   const item = resolvedPluginItem(plan.item, dependencies),
-    current = (await rows.plugins.list()).find(row => row.packageName === item.packageName),
+    plugins = await rows.plugins.list(),
+    current = plugins.find(row => row.packageName === item.packageName),
     settings = await rows.pluginAccess.get(item.packageName)
   if (current?.removing || (current?.suiteOrigin && current.suiteOrigin !== origin) || (mode === 'update' && current?.suiteOrigin !== origin))
     throw new BusinessRuleError('conflict', 'The installed plugin identity changed.', 'plugin-name-in-use')
@@ -74,7 +145,9 @@ export async function writeSuitePlugin(
   assertPreparedPlugin({ packageName: item.packageName, version: item.version }, plan.prepared, pluginIdentities(current)[item.version])
   if (plan.prepared.integrity !== item.integrity) throw new PluginPreparationError('plugin-integrity-invalid')
   assertCatalogPluginBindings(item, plan.prepared)
-  readyRuntimeDependencies(await rows.runtime.list(), dependencies)
+  const runtime = await rows.runtime.list()
+  readyRuntimeDependencies(runtime, dependencies)
+  await assertPreparedSuitePlaywrightBrowser(plan.item, dependencies, runtime, plugins, rows.runtimeReferences, policy.browserDirectories)
   const resourceNames = new Set(item.resourceBindings?.flatMap(binding => ('name' in binding ? [binding.name] : []))),
     resourceEnvironment = item.access.environment.filter(row => resourceNames.has(row.name)),
     priorResources = current?.suiteResourceEnvironment ?? [],
@@ -91,8 +164,9 @@ export async function writeSuitePlugin(
   const template = modified
     ? { environment: [...previousAccess.environment.filter(row => !priorNames.has(row.name)), ...resourceEnvironment], entriesYaml: previousAccess.entriesYaml }
     : item.access
+  const declaredUpstreams = new Set(deferredPluginUpstreams(item.serviceSlots))
   const access = new PluginAccessAdministration(rows.accounts, rows.plugins, rows.pluginAccess, rows.pluginUpstreams, syntax),
-    checked = await access.validateSuiteTemplate(plan.prepared, template, dependencies)
+    checked = await access.validateSuiteTemplate(plan.prepared, template, dependencies, [...declaredUpstreams])
   const {
     upload,
     replacement,
@@ -134,11 +208,34 @@ export async function writeSuitePlugin(
     ...(compatibilityTarget ? { checkedFor: compatibilityTarget } : {}),
   }
   await rows.plugins.save(row, current?.revision ?? 'none')
+  const previousServices = await rows.pluginAccess.installedServices?.(item.packageName)
+  const protectedUpstreams = new Set([...declaredUpstreams, ...deferredPluginUpstreams(previousServices?.configuration.slots)])
+  if (protectedUpstreams.size) {
+    const revision = await rows.pluginUpstreams.revision?.(item.packageName)
+    const upstreams = await rows.pluginUpstreams.list(item.packageName)
+    // Reserve the name even before configuration, so an older ordinary save cannot claim it.
+    const pending: PluginUpstream[] = [...declaredUpstreams]
+      .filter(name => !upstreams.some(upstream => upstream.name === name))
+      .map(name => ({
+        name,
+        baseUrl: '',
+        credential: '',
+        nativeServiceOnly: true,
+        headers: managedImageUpstreamHeaders,
+        testRequest: managedImageUpstreamTest,
+      }))
+    if (pending.length || upstreams.some(upstream => protectedUpstreams.has(upstream.name) && !upstream.nativeServiceOnly))
+      await rows.pluginUpstreams.save(
+        item.packageName,
+        [...upstreams.map(upstream => (protectedUpstreams.has(upstream.name) ? { ...upstream, nativeServiceOnly: true as const } : upstream)), ...pending],
+        undefined,
+        revision,
+      )
+  }
   if (!modified || priorResources.length || resourceEnvironment.length)
     await rows.pluginAccess.save(item.packageName, checked, undefined, settings?.revision ?? 'none')
   if (item.serviceSlots && (!policy.serviceIdentity || !rows.pluginAccess.saveInstalledServices || !rows.pluginAccess.installedServices))
     throw new BusinessRuleError('invalid', 'Installed service configuration storage is unavailable.', 'suite-catalog-invalid')
-  const previousServices = await rows.pluginAccess.installedServices?.(item.packageName)
   if (policy.serviceIdentity && (item.serviceSlots || previousServices)) {
     const configuration = installServiceDefinition(policy.serviceIdentity, item.serviceSlots, mode === 'update' ? previousServices?.configuration : undefined)
     await rows.pluginAccess.saveInstalledServices!(

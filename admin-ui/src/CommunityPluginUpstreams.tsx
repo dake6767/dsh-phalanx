@@ -17,7 +17,15 @@ import CommunityField from './CommunityField'
 import CommunityMessage from './CommunityMessage'
 import { useDraftGuard } from './useDraftGuard'
 
-export default function CommunityPluginUpstreams({ packageName, onChanged }: { packageName: string; onChanged?: () => void }) {
+export default function CommunityPluginUpstreams({
+  packageName,
+  initialUpstream,
+  onChanged,
+}: {
+  packageName: string
+  initialUpstream?: string
+  onChanged?: () => void
+}) {
   const { t, errorText } = usePlatformLanguage()
   const [revision, setRevision] = useState(0)
   const [rows, setRows] = useState<readonly CommunityPluginUpstreamView[]>()
@@ -26,12 +34,16 @@ export default function CommunityPluginUpstreams({ packageName, onChanged }: { p
   useEffect(() => {
     const controller = new AbortController()
     void communityPluginUpstreams(packageName, controller.signal)
-      .then(setRows)
+      .then(next => {
+        if (controller.signal.aborted) return
+        setRows(next)
+        if (initialUpstream) setEditing(next.find(row => row.name === initialUpstream && row.managedImage))
+      })
       .catch(error => {
         if (!controller.signal.aborted) setError(error)
       })
     return () => controller.abort()
-  }, [packageName])
+  }, [packageName, initialUpstream])
   return (
     <section className="plugin-detail-section" aria-label={t('Plugin upstreams')}>
       <div className="plugin-section-heading">
@@ -51,12 +63,23 @@ export default function CommunityPluginUpstreams({ packageName, onChanged }: { p
             <Card.Content>
               <div className="plugin-section-heading">
                 <strong>{row.name}</strong>
-                <Chip size="sm" variant="soft">
-                  <span>{t(row.credential.configured ? 'Credential configured' : 'Credential not configured')}</span>
-                  {row.credential.configured ? <span>{` ••••${row.credential.last4}`}</span> : null}
+                <Chip size="sm" variant="soft" color={row.managedImage && !row.managedImage.ready ? 'warning' : undefined}>
+                  <span>
+                    {t(
+                      row.managedImage
+                        ? row.managedImage.ready
+                          ? 'Credential configured'
+                          : 'Upstream setup required'
+                        : row.credential.configured
+                          ? 'Credential configured'
+                          : 'Credential not configured',
+                    )}
+                  </span>
+                  {!row.managedImage && row.credential.configured ? <span>{` ••••${row.credential.last4}`}</span> : null}
                 </Chip>
               </div>
               <p className="plugin-upstream-address">{row.baseUrl}</p>
+              {row.managedImage && row.model ? <p>{row.model}</p> : null}
               <CommunityUpstreamTest
                 actions={
                   <Button variant="secondary" onPress={() => setEditing(row)}>
@@ -66,7 +89,7 @@ export default function CommunityPluginUpstreams({ packageName, onChanged }: { p
                 key={`${revision}:${JSON.stringify(row)}`}
                 packageName={packageName}
                 name={row.name}
-                ready={row.credential.configured && Boolean(row.testRequest)}
+                ready={(row.managedImage?.ready ?? row.credential.configured) && Boolean(row.testRequest)}
               />
             </Card.Content>
           </Card>
@@ -105,6 +128,8 @@ function UpstreamEditor({
   const { t, errorText } = usePlatformLanguage()
   const [name, setName] = useState(existing?.name ?? '')
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? '')
+  const [model, setModel] = useState(existing?.model ?? '')
+  const managed = existing?.managedImage !== undefined
   const [credential, setCredential] = useState('')
   const [clearCredential, setClearCredential] = useState(false)
   const [headers, setHeaders] = useState<CommunityPluginUpstreamInput['headers']>(
@@ -126,6 +151,7 @@ function UpstreamEditor({
     testDirty ||
     name !== (existing?.name ?? '') ||
     baseUrl !== (existing?.baseUrl ?? '') ||
+    model !== (existing?.model ?? '') ||
     credential !== '' ||
     JSON.stringify(headers) !== JSON.stringify(existing ? upstreamWriteInput(existing).headers : [{ name: 'Authorization', value: 'Bearer {credential}' }])
   const save = async () => {
@@ -160,7 +186,14 @@ function UpstreamEditor({
       const testRequest = clearTest ? null : testPath ? { method: testMethod, path: testPath, ...(body === undefined ? {} : { body }) } : undefined
       const next = await updateCommunityPluginUpstreams(packageName, {
         action: 'save',
-        upstream: { name, baseUrl, headers, testRequest, ...(clearCredential ? { clearCredential: true } : credential ? { credential } : {}) },
+        upstream: {
+          name,
+          baseUrl,
+          headers,
+          testRequest,
+          ...(managed ? { model: model.trim() } : {}),
+          ...(clearCredential ? { clearCredential: true } : credential ? { credential } : {}),
+        },
       })
       setCredential('')
       onSaved(next)
@@ -194,7 +227,7 @@ function UpstreamEditor({
         onClose={() => guard.request(onClose)}
         footer={
           <div className="upstream-editor-actions">
-            {existing ? (
+            {existing && !managed ? (
               <Button className="upstream-delete-action" variant="danger-soft" isDisabled={busy} onPress={() => setDeleting(true)}>
                 {t('Delete upstream')}
               </Button>
@@ -202,7 +235,17 @@ function UpstreamEditor({
             <Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>
               {t('Cancel')}
             </Button>
-            <Button type="submit" form={id} isDisabled={busy || !name || !baseUrl || (!existing && names.includes(name))}>
+            <Button
+              type="submit"
+              form={id}
+              isDisabled={
+                busy ||
+                !name ||
+                !baseUrl ||
+                (!existing && names.includes(name)) ||
+                (managed && (!model.trim() || (!credential && !existing.credential.configured)))
+              }
+            >
               {t('Save changes')}
             </Button>
           </div>
@@ -219,147 +262,164 @@ function UpstreamEditor({
           }}
         >
           {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
-          <Tabs className="upstream-editor-tabs" selectedKey={editorTab} onSelectionChange={key => setEditorTab(String(key))} variant="secondary">
-            <Tabs.ListContainer>
-              <Tabs.List aria-label={t(existing ? 'Edit upstream' : 'Add upstream')}>
-                <Tabs.Tab id="basic">
-                  {t('Basic information')}
-                  <Tabs.Indicator />
-                </Tabs.Tab>
-                <Tabs.Tab id="headers">
-                  {t('Request headers')}
-                  <Tabs.Indicator />
-                </Tabs.Tab>
-                <Tabs.Tab id="test">
-                  {t('Test request')}
-                  <Tabs.Indicator />
-                </Tabs.Tab>
-              </Tabs.List>
-            </Tabs.ListContainer>
-            <Tabs.Panel id="basic" shouldForceMount data-editor-tab="basic">
-              <p className="upstream-editor-description">{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
+          {managed ? (
+            <>
+              <CommunityField label={t('Upstream address')} type="url" value={baseUrl} onChange={setBaseUrl} disabled={busy} required />
               <CommunityField
-                label={t('Upstream name')}
-                value={name}
-                onChange={setName}
-                readOnly={existing !== null}
-                disabled={busy}
-                required
-                pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
-                description={t('Use a unique name with letters, digits, underscores or hyphens.')}
-              />
-              {!existing && names.includes(name) ? <CommunityMessage status="danger" title={t('This upstream name already exists.')} /> : null}
-              <CommunityField
-                label={t('Upstream address')}
-                type="url"
-                value={baseUrl}
-                onChange={setBaseUrl}
-                disabled={busy}
-                required
-                description={t('HTTP(S) addresses, including private networks, are supported.')}
-              />
-              <CommunityField
-                label={t('Platform credential')}
+                label={t('API key')}
                 type="password"
                 value={credential}
-                placeholder={existing?.credential.configured ? `••••${existing.credential.last4}` : undefined}
-                onChange={value => {
-                  setCredential(value)
-                  setClearCredential(false)
-                }}
+                onChange={setCredential}
                 disabled={busy}
+                placeholder={existing.credential.configured ? `••••${existing.credential.last4}` : undefined}
                 autoComplete="new-password"
-                description={t(existing?.credential.configured ? 'Leave blank to keep the saved credential.' : 'Enter the credential used by this upstream.')}
+                required={!existing.credential.configured}
               />
-              {existing?.credential.configured ? (
-                <Button
-                  variant="secondary"
-                  isDisabled={busy}
-                  onPress={() => {
-                    setClearCredential(value => !value)
-                    setCredential('')
+              <CommunityField label={t('Model name')} value={model} onChange={setModel} disabled={busy} required />
+            </>
+          ) : (
+            <Tabs className="upstream-editor-tabs" selectedKey={editorTab} onSelectionChange={key => setEditorTab(String(key))} variant="secondary">
+              <Tabs.ListContainer>
+                <Tabs.List aria-label={t(existing ? 'Edit upstream' : 'Add upstream')}>
+                  <Tabs.Tab id="basic">
+                    {t('Basic information')}
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                  <Tabs.Tab id="headers">
+                    {t('Request headers')}
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                  <Tabs.Tab id="test">
+                    {t('Test request')}
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                </Tabs.List>
+              </Tabs.ListContainer>
+              <Tabs.Panel id="basic" shouldForceMount data-editor-tab="basic">
+                <p className="upstream-editor-description">{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
+                <CommunityField
+                  label={t('Upstream name')}
+                  value={name}
+                  onChange={setName}
+                  readOnly={existing !== null}
+                  disabled={busy}
+                  required
+                  pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
+                  description={t('Use a unique name with letters, digits, underscores or hyphens.')}
+                />
+                {!existing && names.includes(name) ? <CommunityMessage status="danger" title={t('This upstream name already exists.')} /> : null}
+                <CommunityField
+                  label={t('Upstream address')}
+                  type="url"
+                  value={baseUrl}
+                  onChange={setBaseUrl}
+                  disabled={busy}
+                  required
+                  description={t('HTTP(S) addresses, including private networks, are supported.')}
+                />
+                <CommunityField
+                  label={t('Platform credential')}
+                  type="password"
+                  value={credential}
+                  placeholder={existing?.credential.configured ? `••••${existing.credential.last4}` : undefined}
+                  onChange={value => {
+                    setCredential(value)
+                    setClearCredential(false)
                   }}
-                >
-                  {t(clearCredential ? 'Keep saved credential' : 'Clear saved credential')}
-                </Button>
-              ) : null}
-            </Tabs.Panel>
-            <Tabs.Panel id="headers" shouldForceMount data-editor-tab="headers">
-              <p className="upstream-editor-description">{t('Use {credential} for the saved secret. Fixed values replace member headers.')}</p>
-              {headers.map((header, index) => (
-                <div className="plugin-environment-row upstream-header-row" key={index}>
-                  <CommunityField
-                    label={t('Header name')}
-                    value={header.name}
-                    disabled={busy}
-                    required
-                    onChange={name => setHeaders(rows => rows.map((row, i) => (i === index ? { ...row, name } : row)))}
-                  />
-                  <CommunityField
-                    label={t('Header value')}
-                    placeholder={
-                      existing?.headers.find(row => row.name === header.name)?.configured
-                        ? `••••${existing.headers.find(row => row.name === header.name)!.last4}`
-                        : undefined
-                    }
-                    type="password"
-                    autoComplete="new-password"
-                    description={
-                      existing?.headers.find(row => row.name === header.name)?.configured ? t('Leave blank to keep the saved credential.') : undefined
-                    }
-                    value={header.value}
-                    disabled={busy}
-                    onChange={value => setHeaders(rows => rows.map((row, i) => (i === index ? { ...row, value } : row)))}
-                  />
-                  <Button variant="tertiary" isDisabled={busy} onPress={() => setHeaders(rows => rows.filter((_, i) => i !== index))}>
-                    {t('Remove header')}
-                  </Button>
-                </div>
-              ))}
-              <Button variant="secondary" isDisabled={busy} onPress={() => setHeaders(rows => [...rows, { name: '', value: '' }])}>
-                {t('Add header')}
-              </Button>
-            </Tabs.Panel>
-            <Tabs.Panel id="test" shouldForceMount data-editor-tab="test">
-              <p>{t('Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.')}</p>
-              <CommunitySelect
-                label={t('Test method')}
-                value={testMethod}
-                onChange={setTestMethod}
-                options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map(value => ({ id: value, label: value }))}
-              />
-              <CommunityField
-                label={t('Test path')}
-                value={testPath}
-                onChange={value => {
-                  setTestPath(value)
-                  setClearTest(false)
-                }}
-                disabled={busy}
-                description={t('Use a path such as /search. Leave blank to keep the saved test request.')}
-              />
-              {existing?.testRequest ? (
-                <>
-                  <p>{t(clearTest ? 'Saved test request will be removed.' : 'A test request is configured. Enter a complete request to replace it.')}</p>
+                  disabled={busy}
+                  autoComplete="new-password"
+                  description={t(existing?.credential.configured ? 'Leave blank to keep the saved credential.' : 'Enter the credential used by this upstream.')}
+                />
+                {existing?.credential.configured ? (
                   <Button
                     variant="secondary"
                     isDisabled={busy}
                     onPress={() => {
-                      setClearTest(true)
-                      setTestPath('')
-                      setTestBody('')
+                      setClearCredential(value => !value)
+                      setCredential('')
                     }}
                   >
-                    {t('Clear saved test request')}
+                    {t(clearCredential ? 'Keep saved credential' : 'Clear saved credential')}
                   </Button>
-                </>
-              ) : null}
-              <TextField value={testBody} onChange={setTestBody} isDisabled={busy} fullWidth>
-                <Label>{t('Test JSON body (optional)')}</Label>
-                <TextArea className="plugin-yaml-input" rows={7} />
-              </TextField>
-            </Tabs.Panel>
-          </Tabs>
+                ) : null}
+              </Tabs.Panel>
+              <Tabs.Panel id="headers" shouldForceMount data-editor-tab="headers">
+                <p className="upstream-editor-description">{t('Use {credential} for the saved secret. Fixed values replace member headers.')}</p>
+                {headers.map((header, index) => (
+                  <div className="plugin-environment-row upstream-header-row" key={index}>
+                    <CommunityField
+                      label={t('Header name')}
+                      value={header.name}
+                      disabled={busy}
+                      required
+                      onChange={name => setHeaders(rows => rows.map((row, i) => (i === index ? { ...row, name } : row)))}
+                    />
+                    <CommunityField
+                      label={t('Header value')}
+                      placeholder={
+                        existing?.headers.find(row => row.name === header.name)?.configured
+                          ? `••••${existing.headers.find(row => row.name === header.name)!.last4}`
+                          : undefined
+                      }
+                      type="password"
+                      autoComplete="new-password"
+                      description={
+                        existing?.headers.find(row => row.name === header.name)?.configured ? t('Leave blank to keep the saved credential.') : undefined
+                      }
+                      value={header.value}
+                      disabled={busy}
+                      onChange={value => setHeaders(rows => rows.map((row, i) => (i === index ? { ...row, value } : row)))}
+                    />
+                    <Button variant="tertiary" isDisabled={busy} onPress={() => setHeaders(rows => rows.filter((_, i) => i !== index))}>
+                      {t('Remove header')}
+                    </Button>
+                  </div>
+                ))}
+                <Button variant="secondary" isDisabled={busy} onPress={() => setHeaders(rows => [...rows, { name: '', value: '' }])}>
+                  {t('Add header')}
+                </Button>
+              </Tabs.Panel>
+              <Tabs.Panel id="test" shouldForceMount data-editor-tab="test">
+                <p>{t('Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.')}</p>
+                <CommunitySelect
+                  label={t('Test method')}
+                  value={testMethod}
+                  onChange={setTestMethod}
+                  options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map(value => ({ id: value, label: value }))}
+                />
+                <CommunityField
+                  label={t('Test path')}
+                  value={testPath}
+                  onChange={value => {
+                    setTestPath(value)
+                    setClearTest(false)
+                  }}
+                  disabled={busy}
+                  description={t('Use a path such as /search. Leave blank to keep the saved test request.')}
+                />
+                {existing?.testRequest ? (
+                  <>
+                    <p>{t(clearTest ? 'Saved test request will be removed.' : 'A test request is configured. Enter a complete request to replace it.')}</p>
+                    <Button
+                      variant="secondary"
+                      isDisabled={busy}
+                      onPress={() => {
+                        setClearTest(true)
+                        setTestPath('')
+                        setTestBody('')
+                      }}
+                    >
+                      {t('Clear saved test request')}
+                    </Button>
+                  </>
+                ) : null}
+                <TextField value={testBody} onChange={setTestBody} isDisabled={busy} fullWidth>
+                  <Label>{t('Test JSON body (optional)')}</Label>
+                  <TextArea className="plugin-yaml-input" rows={7} />
+                </TextField>
+              </Tabs.Panel>
+            </Tabs>
+          )}
         </form>
       </CommunityDialog>
       {guard.dialog}

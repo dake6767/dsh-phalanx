@@ -94,11 +94,33 @@ export class NativePluginHistory implements MemberNativePluginHistory {
     }
     const operation = async () => {
       assertCurrent()
-      const bundles = await this.runtime.inspect(instance, signal)
+      const holds = this.runtime.inspectInventory
+        ? await this.persistence.work.run(rows => rows.deliveries.browserDeliveries?.(member.spaceId, instance.resourceKey!) ?? Promise.resolve([]))
+        : []
+      const inventory = holds.length ? await this.runtime.inspectInventory?.(instance, signal) : undefined
+      const bundles = inventory?.optional ?? (await this.runtime.inspect(instance, signal))
+      const installed = inventory?.installed
+      const missing = installed
+        ? holds.flatMap(hold => {
+            const actual = installed.get(hold.packageName)
+            return !actual ||
+              (actual.version !== undefined && actual.version !== hold.version) ||
+              (actual.integrity !== undefined && actual.integrity !== hold.integrity)
+              ? [hold.revision]
+              : []
+          })
+        : []
       assertCurrent()
-      const write = this.record(member, bundles, assertCurrent, () => {
-        sync.write = write
-      })
+      const write = this.record(
+        member,
+        bundles,
+        assertCurrent,
+        () => {
+          sync.write = write
+        },
+        missing,
+        instance.resourceKey,
+      )
       try {
         return await write
       } finally {
@@ -152,12 +174,14 @@ export class NativePluginHistory implements MemberNativePluginHistory {
     return await this.persistence.work.run(async repositories => {
       await repositories.actors.lockMember(member)
       const deliveries = await repositories.deliveries.get(member.spaceId)
+      const browserReserved = await repositories.deliveries.isBrowserArchiveReserved?.(member.spaceId, integrity)
       signal.throwIfAborted()
       const instance = this.runtime.current(member.username)
       this.assertTarget(member, instance, generation)
       return (
         this.pendingArchive?.(instance!, integrity) === true ||
-        deliveries.some(row => row.integrity === integrity && (row.serviceOrigin !== undefined || row.resourceOrigin !== undefined))
+        deliveries.some(row => row.integrity === integrity && (row.serviceOrigin !== undefined || row.resourceOrigin !== undefined)) ||
+        browserReserved === true
       )
     })
   }
@@ -166,6 +190,8 @@ export class NativePluginHistory implements MemberNativePluginHistory {
     bundles: readonly NativeOptionalBundle[] | undefined,
     assertCurrent: () => void,
     readyToCommit?: () => void,
+    missingBrowsers: readonly string[] = [],
+    generation?: string,
   ): Promise<readonly string[]> {
     return this.persistence.work.run(async repositories => {
       await repositories.actors.lockMember(member)
@@ -180,6 +206,7 @@ export class NativePluginHistory implements MemberNativePluginHistory {
         .filter(bundle => (existing === undefined ? bundle.enabled || bundle.installed : bundle.enabled && !bundle.failed))
         .map(bundle => bundle.name)
       const remembered = await repositories.history.remember(member.spaceId, eligible)
+      if (missingBrowsers.length && generation) await repositories.deliveries.releaseMissingBrowserDeliveries?.(member.spaceId, missingBrowsers, generation)
       assertCurrent()
       // A transaction waiting on database I/O above will still roll back after cancellation.
       readyToCommit?.()

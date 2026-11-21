@@ -158,7 +158,13 @@ export function createCommunityPlugins(input: {
     nativeServiceRevision: () =>
       JSON.stringify([
         pluginStore.authorizationRevision(),
-        database.writeRevision(['dsh_phalanx.plugin_deliveries', 'dsh_phalanx.plugin_access_settings', 'dsh_phalanx.plugin_access_secrets']),
+        database.writeRevision([
+          'dsh_phalanx.plugin_deliveries',
+          'dsh_phalanx.plugin_access_settings',
+          'dsh_phalanx.plugin_access_secrets',
+          'dsh_phalanx.plugin_upstream_settings',
+          'dsh_phalanx.plugin_upstreams',
+        ]),
       ]),
     pluginOperations,
     pluginStore,
@@ -243,6 +249,7 @@ export function createCommunityPluginMembers(input: {
     installations,
     nativeServices,
     nativeSettings,
+    installations,
   )
   const preinstallDelivery = new MemberPluginPreinstalls(preinstallPolicy, nativeJobs, runtime, installations)
   const managedAdministration = new ManagedPluginAdministration(
@@ -273,7 +280,19 @@ export function createCommunityPluginMembers(input: {
     nativeSettings,
     preinstallDelivery,
   )
-  const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
+  const upstreamRefreshes = new KeyedOperations()
+  const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration, accessStore, packageName =>
+    upstreamRefreshes.run('native-service-settings', async () => {
+      if (!nativeSettings) return
+      const origin = input.origin()
+      // A delivery history write changes the authorization revision checked by other issues.
+      for (const account of await accounts.list()) {
+        const status = runtime.status(account.username)
+        if (account.disabled || (status.state !== 'ready' && status.state !== 'draining')) continue
+        await nativeSettings.refreshUpstream(account, status.instance, packageName, origin).catch(() => {})
+      }
+    }),
+  )
   const upstreamTransport = new NodePluginUpstreamTransport()
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
   return {

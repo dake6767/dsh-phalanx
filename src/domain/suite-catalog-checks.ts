@@ -1,5 +1,5 @@
 import { pythonPackagePin, pythonPackagePins } from './python-library.js'
-import { catalogResourceBindingReady, matchesCatalogResource, type CatalogResourceBinding } from './suite-resource-bindings.js'
+import { catalogResourceBindingReady, matchesCatalogResource, sameCatalogResourceLocation, type CatalogResourceBinding } from './suite-resource-bindings.js'
 import type { SuiteCatalogArchitecture } from './suite-catalog.js'
 
 /** Hosts the five download-source classes cover; mirrors the bundled download-source presets. */
@@ -178,8 +178,20 @@ export function suiteResourceBindingViolations(entry: SuiteCatalogCheckEntry, en
   for (const binding of bindings) {
     const dependency = entries.find(row => row.id === binding.dependency && row.category === 'dependency')
     if (!matchesCatalogResource(binding, dependency)) violations.push(`${entry.id}: resource binding requires exact locked dependency ${binding.dependency}`)
-    else if (!catalogResourceBindingReady(binding, dependency))
+    else if (!catalogResourceBindingReady(binding, dependency, entries))
       violations.push(`${entry.id}: resource binding path ${binding.path} is not covered by required files of ${binding.dependency}`)
+    if (
+      binding.kind === 'playwright-browser' &&
+      entries.some(other =>
+        other.items.some(item =>
+          item.resourceBindings?.some(
+            candidate =>
+              candidate.kind === binding.kind && candidate.chromiumBuild === binding.chromiumBuild && !sameCatalogResourceLocation(candidate, binding),
+          ),
+        ),
+      )
+    )
+      violations.push(`${entry.id}: Playwright browser build ${binding.chromiumBuild} must use one locked resource`)
   }
   return violations
 }

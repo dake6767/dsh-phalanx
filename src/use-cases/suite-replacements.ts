@@ -107,7 +107,7 @@ export async function planSharedDependencies(
     if (
       !dependency ||
       (entry.category === 'plugin' && locked && !pins.length) ||
-      (pins.length > 0 && (dependency.category !== 'dependency' || pins.some(binding => !catalogResourceBindingReady(binding, dependency)))) ||
+      (pins.length > 0 && (dependency.category !== 'dependency' || pins.some(binding => !catalogResourceBindingReady(binding, dependency, entries)))) ||
       (locked && record?.status === 'installed' && (!declaredLocked || !matchesCatalogResource(dependency, record)))
     ) {
       missing.push(id)

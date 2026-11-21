@@ -14,6 +14,7 @@ export interface UploadedPlugin extends PluginIdentity {
 export interface PluginCandidate extends PluginIdentity {
   readonly retainedIntegrity?: string
   readonly upload?: { readonly archive: string; readonly integrity: string }
+  readonly installDefaults?: import('./native-install-defaults.js').NativeInstallDefaults
 }
 /** Recorded when a package name first enters the library; replacements and updates must keep it. The npm package name is the row key. */
 export type PluginSource = { readonly kind: 'npm' } | { readonly kind: 'upload' } | { readonly kind: 'github'; readonly repository: string }
@@ -78,6 +79,7 @@ export interface PreparedPlugin extends PluginIdentity {
   readonly sourceCommit?: string
   /** Signed catalog Release asset that supplied this exact prepared archive. */
   readonly catalogArchiveUrl?: string
+  readonly installDefaults?: import('./native-install-defaults.js').NativeInstallDefaults
   readonly integrity: string
   readonly artifact: string
   readonly runtimeRevision: string

@@ -46,7 +46,12 @@ export interface CommunitySuiteCatalogEntryView {
   readonly skills?: readonly string[]
   readonly packName?: string
   /** Plugin entries: the npm package this entry brings, at the locked version. */
-  readonly plugin?: { readonly packageName: string; readonly version: string; readonly integrity: string }
+  readonly plugin?: {
+    readonly packageName: string
+    readonly version: string
+    readonly integrity: string
+    readonly deferredUpstreams?: readonly string[]
+  }
   /** Shared catalog dependency ids this suite installs or reuses. */
   readonly dependencies?: readonly string[]
   /** External services this suite reaches at runtime. */
@@ -151,7 +156,12 @@ export interface CommunitySuiteUninstallPreview {
     readonly selectedMembers: number
   }[]
   /** Shared catalog dependencies: removable when nothing else references them, otherwise kept with the remaining references. */
-  readonly dependencies: readonly { readonly id: string; readonly references: readonly { readonly kind: string; readonly name: string }[] }[]
+  readonly dependencies: readonly {
+    readonly id: string
+    readonly references: readonly { readonly kind: string; readonly name: string }[]
+    readonly browserBuilds?: readonly string[]
+    readonly reclaimableBytes?: number
+  }[]
 }
 export interface CommunitySuiteUninstallInput {
   readonly removeDependencies?: readonly string[]

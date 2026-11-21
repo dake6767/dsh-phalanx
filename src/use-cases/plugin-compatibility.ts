@@ -91,6 +91,7 @@ export class PluginCompatibility {
       version: input.version,
       ...(input.upload ? { upload: input.upload } : {}),
       ...(retained ? { retainedIntegrity: retained.integrity } : {}),
+      ...(retained?.installDefaults ? { installDefaults: retained.installDefaults } : {}),
     }
     const prepared = await this.preparer.prepare(candidate, async () => {}, this.controller.signal)
     this.controller.signal.throwIfAborted()

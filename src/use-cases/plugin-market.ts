@@ -1,6 +1,7 @@
 import type { CatalogPluginDistributionIdentity } from '../domain/plugin-group-contract.js'
 import { suiteInstallOrigin } from '../domain/suite-install.js'
 import type { CommunityMarketPageData, CommunityPluginContributionInfo } from '../domain/admin-contract.js'
+import { matchesPendingInstallDefaults } from '../domain/native-install-defaults.js'
 import { nativeUpdateChoice } from '../domain/member-plugin-update.js'
 import type { NativePluginArchiveFacts } from '../domain/plugin-preinstall.js'
 import type { InstalledMarketPlugin } from '../ports/plugin-market.js'
@@ -115,11 +116,12 @@ export class PluginMarket {
       (await this.available(actor.username)).map(async plugin => {
         const actual = installed.find(row => row.packageName === plugin.packageName),
           shared = await this.sharedChoice(plugin.packageName, selected.has(plugin.packageName))
+        const resumable = actual?.installDefaultsPending !== undefined && matchesPendingInstallDefaults(plugin, actual)
         const status = granted.has(plugin.packageName)
           ? ('managed' as const)
           : shared && selected.has(plugin.packageName)
             ? ('selected' as const)
-            : actual
+            : actual && !resumable
               ? !actual.version
                 ? ('unknown' as const)
                 : actual.retainedArchive
@@ -128,8 +130,8 @@ export class PluginMarket {
               : ('install' as const)
         const contribution = libraryContributionCredit((await this.library.list()).find(row => row.packageName === plugin.packageName)?.provenance)
         const candidate = await this.native?.get(actor, plugin.packageName, instance, actual)
-        const retryReceipt = status === 'installed' && actual && this.native?.canRetryReceipt(actor, instance, plugin, actual)
-        const choice = status === 'installed' && actual ? await this.updateChoice(actor, actual, plugin) : undefined
+        const retryReceipt = status === 'installed' && actual && !actual.installDefaultsPending && this.native?.canRetryReceipt(actor, instance, plugin, actual)
+        const choice = status === 'installed' && actual && !actual.installDefaultsPending ? await this.updateChoice(actor, actual, plugin) : undefined
         const update = choice && actual && (await this.verifyArchive(instance, actual, signal)) ? choice : undefined
         const job =
           candidate?.status === 'running' ||
@@ -144,6 +146,7 @@ export class PluginMarket {
           description: plugin.description,
           version: plugin.version,
           status,
+          ...(status === 'installed' && actual?.installDefaultsPending ? { incompleteInstallation: true as const } : {}),
           ...(actual?.version && (status === 'installed' || status === 'native') ? { installedVersion: actual.version } : {}),
           ...(update ? { update } : {}),
           ...(contribution ? { contribution } : {}),
@@ -225,7 +228,7 @@ export class PluginMarket {
       }
       const selected = await this.selections.get(account.spaceId),
         shared = await this.sharedChoice(packageName, selected.includes(packageName))
-      if (actual && !(shared && selected.includes(packageName))) throw this.unavailable()
+      if (actual && !(shared && selected.includes(packageName)) && !matchesPendingInstallDefaults(plugin, actual)) throw this.unavailable()
       if (!shared) {
         if (!this.native) throw this.unavailable()
         return { job: await this.native.install(actor, packageName, origin, requestId ?? '') }
@@ -257,6 +260,7 @@ export class PluginMarket {
         if (
           !actual?.version ||
           !actual.archiveIntegrity ||
+          actual.installDefaultsPending !== undefined ||
           actual.enabled === undefined ||
           (verify && !(await this.verifyArchive(instance, actual, checkSignal)))
         )

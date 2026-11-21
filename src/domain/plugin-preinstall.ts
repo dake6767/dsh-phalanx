@@ -1,16 +1,43 @@
 import type { CommunityAccountActor, CommunityAccountRecord } from './community-account.js'
-import type { CatalogResourceBinding } from './suite-resource-bindings.js'
+import { PLAYWRIGHT_BROWSERS_ENV, type CatalogResourceBinding } from './suite-resource-bindings.js'
 import type { LibraryPlugin, PreparedPlugin } from './plugin-library.js'
 
 export interface NativePluginDependencyPlan {
   readonly identity?: string
   readonly dependencies: readonly string[]
   readonly resources?: readonly InstalledNativeResourceBinding[]
+  readonly retainedBrowser?: true
 }
 export type NativePluginArchiveFacts = Readonly<Record<string, { readonly version: string; readonly integrity: string }>>
 export type NativePluginDependencyPlans = Readonly<Record<string, NativePluginDependencyPlan>>
 
 export type InstalledNativeResourceBinding = CatalogResourceBinding & { readonly runtimeDependency: string }
+
+export function isPlaywrightResource(binding: InstalledNativeResourceBinding): boolean {
+  return binding.kind === 'playwright-browser' || ('name' in binding && binding.name === PLAYWRIGHT_BROWSERS_ENV)
+}
+
+export function memberBrowserBindings(bindings: readonly InstalledNativeResourceBinding[]): readonly InstalledNativeResourceBinding[] {
+  const resources = new Set(bindings.filter(isPlaywrightResource).map(binding => binding.runtimeDependency))
+  return bindings.filter(
+    binding => isPlaywrightResource(binding) || ('name' in binding && binding.name === 'CHROME_PATH' && resources.has(binding.runtimeDependency)),
+  )
+}
+
+export function retainedBrowserPlan(record: {
+  readonly resourceOrigin?: string
+  readonly version: string
+  readonly integrity?: string
+  readonly browserBindings?: readonly InstalledNativeResourceBinding[]
+}): NativePluginDependencyPlan | undefined {
+  if (!record.resourceOrigin || !record.integrity || !record.browserBindings?.length) return
+  return {
+    identity: JSON.stringify([record.resourceOrigin, record.version, record.integrity, record.browserBindings]),
+    dependencies: [...new Set(record.browserBindings.map(binding => binding.runtimeDependency))],
+    resources: record.browserBindings,
+    retainedBrowser: true,
+  }
+}
 
 export function nativePluginDependencyPlan(row: LibraryPlugin): NativePluginDependencyPlan {
   return {

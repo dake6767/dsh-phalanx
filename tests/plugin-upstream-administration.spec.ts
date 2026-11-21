@@ -1,7 +1,9 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { PluginUpstreamAdministration } from '../src/use-cases/plugin-upstream-administration.js'
 import type { PluginUpstream } from '../src/domain/plugin-upstream.js'
 import type { LibraryPlugin } from '../src/domain/plugin-library.js'
+import { suiteInstallOrigin } from '../src/domain/suite-install.js'
+import type { CatalogPluginServiceSlot } from '../src/domain/suite-service-slots.js'
 
 const admin = { username: 'admin', spaceId: 'a', sessionEpoch: 0, admin: true, disabled: false, groupId: 'g', email: '', createdAt: 0, updatedAt: 0 }
 function fixture() {
@@ -103,4 +105,86 @@ it('retains saved test requests across credential replacement and supports clear
   expect((await f.useCase.execute(admin, 'plugin', { action: 'save', upstream: { ...f.input, testRequest: null } }))[0]?.testRequest).toBeUndefined()
   for (const path of ['//other.test/path', 'https://other.test/', '/bad path', '/path#fragment'])
     await expect(f.useCase.execute(admin, 'plugin', { action: 'save', upstream: { ...f.input, testRequest: { method: 'POST', path } } })).rejects.toThrow()
+})
+
+it('exposes a pending signed upstream, preconfigures its request and reuses a matching stored configuration', async () => {
+  const names = { en: 'Image provider', 'zh-CN': '生图服务' }
+  const slot = {
+    id: 'image',
+    label: names,
+    binding: {
+      kind: 'json-settings',
+      deferredUpstream: true,
+      file: 'image-upstream.json',
+      upstream: 'images',
+      fields: [
+        { path: ['endpoint'], source: 'gateway-url' },
+        { path: ['model'], source: 'model' },
+        { path: ['token'], source: 'service-token' },
+      ],
+    },
+    backends: [
+      {
+        id: 'openai',
+        label: names,
+        protocol: 'openai-image',
+        mode: 'openai',
+        fields: [{ name: 'model', required: true, type: 'text' }],
+        upstream: { model: 'model' },
+      },
+    ],
+  } as const satisfies CatalogPluginServiceSlot
+  const plugin = { packageName: 'plugin', suiteOrigin: suiteInstallOrigin('images'), current: { integrity: 'archive-integrity' } } as LibraryPlugin
+  const write = vi.fn(async (_packageName: string, values: readonly PluginUpstream[]) => {
+    rows = values
+  })
+  const refresh = vi.fn(async () => undefined)
+  let rows: readonly PluginUpstream[] = []
+  let definition: readonly CatalogPluginServiceSlot[] = [slot]
+  const administration = new PluginUpstreamAdministration(
+    { get: async () => admin },
+    { list: async () => [plugin] },
+    { list: () => rows, save: write },
+    undefined,
+    {
+      installedServices: async () => ({
+        revision: 'revision',
+        configuration: { identity: { id: 'images', version: '1.0.0' }, ownerVersion: plugin.current!.integrity, slots: definition, settings: [] },
+      }),
+    },
+    refresh,
+  )
+  expect(await administration.list(admin, 'plugin')).toMatchObject([{ name: 'images', managedImage: { ready: false }, credential: { configured: false } }])
+  expect(write).not.toHaveBeenCalled()
+  const baseUrl = 'https://images.example.test/v1'
+  const credential = 'image-fixture-key'
+  const saved = await administration.execute(admin, 'plugin', {
+    action: 'save',
+    upstream: { name: 'images', model: 'fixture-model', baseUrl, credential, headers: [{ name: 'x-ignored', value: 'ignored' }] },
+  })
+  expect(saved).toMatchObject([{ name: 'images', model: 'fixture-model', managedImage: { ready: true } }])
+  expect(JSON.stringify(saved)).not.toContain(credential)
+  expect(rows).toEqual([
+    {
+      name: 'images',
+      baseUrl,
+      credential,
+      model: 'fixture-model',
+      nativeServiceOnly: true,
+      headers: [{ name: 'Authorization', value: 'Bearer {credential}' }],
+      testRequest: { method: 'GET', path: '/models' },
+    },
+  ])
+  expect(refresh).toHaveBeenCalledWith('plugin')
+  await expect(administration.execute(admin, 'plugin', { action: 'delete', name: 'images' })).rejects.toThrow(/referenced/u)
+  definition = []
+  expect((await administration.list(admin, 'plugin'))[0]?.managedImage).toBeUndefined()
+  await administration.execute(admin, 'plugin', {
+    action: 'save',
+    upstream: { name: 'images', baseUrl, headers: rows[0]!.headers },
+  })
+  expect(rows[0]?.nativeServiceOnly).toBe(true)
+  definition = [slot]
+  expect((await administration.list(admin, 'plugin'))[0]?.managedImage?.ready).toBe(true)
+  expect(write).toHaveBeenCalledTimes(2)
 })

@@ -255,12 +255,29 @@ export class SuiteCatalogQueries {
   }
   /** Originals of every row the install will take over, captured before the task starts. */
 
-  async dependenciesAfterUninstall(record: SuiteInstallRecord): Promise<readonly { id: string; references: readonly { kind: string; name: string }[] }[]> {
+  async dependenciesAfterUninstall(record: SuiteInstallRecord): Promise<CommunitySuiteUninstallPreview['dependencies']> {
+    const installed = (await this.state()).installs
     return (
       await Promise.all(
         (record.dependencies ?? []).map(async id => {
-          const shared = (await this.state()).installs.find(row => row.id === id && row.status === 'installed')
-          return shared ? [{ id, references: (await this.blockedReferences(shared, record)).flatMap(block => block.references) }] : []
+          const shared = installed.find(row => row.id === id && row.status === 'installed')
+          if (!shared) return []
+          const [blocking, resources] = await Promise.all([
+            this.blockedReferences(shared, record),
+            Promise.all(shared.entries.filter(entry => entry.kind === 'runtime-dependency').map(entry => this.dependencies.browserResource(entry.name))),
+          ])
+          const references = blocking.flatMap(block => block.references)
+          const browserBuilds = [...new Set(resources.flatMap(resource => resource?.builds.map(build => build.build) ?? []))]
+          return [
+            {
+              id,
+              references,
+              ...(browserBuilds.length ? { browserBuilds } : {}),
+              ...(browserBuilds.length && !references.length
+                ? { reclaimableBytes: resources.reduce((bytes, resource) => bytes + (resource?.bytes ?? 0), 0) }
+                : {}),
+            },
+          ]
         }),
       )
     ).flat()

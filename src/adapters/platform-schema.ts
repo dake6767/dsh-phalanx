@@ -1,4 +1,5 @@
 import { accountSchema } from './platform-account-schema.js'
+import { memberBrowserSchema } from './platform-browser-schema.js'
 import { catalogSchema } from './platform-catalog-schema.js'
 import { contributionSchema } from './platform-contribution-schema.js'
 import { expertSchema } from './platform-expert-schema.js'
@@ -40,6 +41,8 @@ export const PLATFORM_TABLES = [
   'plugin_grant_receipts',
   'plugin_choices',
   'plugin_deliveries',
+  'member_browser_dependencies',
+  'member_browser_reservations',
   'skills',
   'skill_packs',
   'skill_pack_members',
@@ -217,6 +220,7 @@ export const PLATFORM_MIGRATIONS: readonly { readonly version: number; readonly 
       state text NOT NULL CHECK(state IN ('offering','offered','suspended'))
     );`,
   },
+  { version: 27, name: 'member browser dependencies', sql: memberBrowserSchema },
 ]
 
 /** The newest version this code can prepare, always the last migration. */

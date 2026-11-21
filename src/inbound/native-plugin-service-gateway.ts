@@ -6,7 +6,7 @@ import type { SessionRegistryPort } from '../ports/session-registry.js'
 import { NATIVE_PLUGIN_SERVICE_PATH, type NativePluginServiceAccess } from '../use-cases/native-plugin-service-access.js'
 import type { UsagePolicy } from '../use-cases/usage-policy.js'
 import { sendCommunityJson } from './community-errors.js'
-import { CommunityRequestError, readCommunityJson } from './community-request.js'
+import { CommunityRequestError, readCommunityBytes, readCommunityJson } from './community-request.js'
 import { downstreamAbort } from './upstream-stream.js'
 
 export const NATIVE_SERVICE_BODY_LIMIT = 32 * 1024 * 1024
@@ -43,11 +43,14 @@ export function createNativePluginServiceGateway(deps: {
       await deps.access.authenticate(scope, token)
       if (Number(request.headers['content-length']) > NATIVE_SERVICE_BODY_LIMIT)
         throw new PluginUpstreamTransportError(413, 'Plugin request body exceeds 32 MiB')
-      const body = await readCommunityJson(request, NATIVE_SERVICE_BODY_LIMIT, signal)
+      const editing = operation === 'images/edits'
+      const contentType = editing ? (request.headers['content-type'] ?? '') : 'application/json'
+      const bytes = editing ? await readCommunityBytes(request, 'multipart/form-data', NATIVE_SERVICE_BODY_LIMIT, signal) : undefined
+      const body = bytes ? await readImageEdit(bytes, contentType) : await readCommunityJson(request, NATIVE_SERVICE_BODY_LIMIT, signal)
       const grant = await deps.access.register(scope, token, signal, (current, onAbort) => {
         const expected = current.protocol === 'openai-chat' ? 'chat/completions' : 'images/generations'
-        if (operation !== expected) throw new PluginUpstreamAccessError(404, 'Plugin service operation was not found')
-        if (!requestMatches(body, current.model, current.protocol))
+        if (operation !== expected && !(editing && current.multipartEdits)) throw new PluginUpstreamAccessError(404, 'Plugin service operation was not found')
+        if (!(body instanceof FormData ? imageEditMatches(body, current.model) : requestMatches(body, current.model, current.protocol)))
           throw new PluginServiceHttpError(400, 'Request does not match the configured plugin service')
         attempt = deps.usage?.begin(
           { username: current.username, groupId: current.groupId },
@@ -64,15 +67,21 @@ export function createNativePluginServiceGateway(deps: {
         return current
       })
       signal.throwIfAborted()
-      const bytes = Buffer.from(JSON.stringify(body))
+      const outgoing = body instanceof FormData ? new Response(body) : undefined
+      const payloadBytes = outgoing ? Buffer.from(await outgoing.arrayBuffer()) : Buffer.from(JSON.stringify(body))
+      signal.throwIfAborted()
       const upstream = await deps.transport.send({
         upstream: grant.upstream,
         path: '/' + operation,
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'content-length': String(bytes.length), accept: 'application/json' },
+        headers: {
+          'content-type': outgoing?.headers.get('content-type') ?? 'application/json',
+          'content-length': String(payloadBytes.length),
+          accept: 'application/json',
+        },
         body: new ReadableStream({
           start(stream) {
-            stream.enqueue(bytes)
+            stream.enqueue(payloadBytes)
             stream.close()
           },
         }),
@@ -130,7 +139,7 @@ export function createNativePluginServiceGateway(deps: {
 
 function target(raw: string | undefined) {
   const parts = raw?.startsWith(NATIVE_PLUGIN_SERVICE_PATH) ? raw.slice(NATIVE_PLUGIN_SERVICE_PATH.length).split('/') : []
-  if (parts.length !== 7 || parts.some(part => !part) || !['chat/completions', 'images/generations'].includes(parts.slice(5).join('/')))
+  if (parts.length !== 7 || parts.some(part => !part) || !['chat/completions', 'images/generations', 'images/edits'].includes(parts.slice(5).join('/')))
     throw new PluginUpstreamAccessError(404, 'Plugin service operation was not found')
   try {
     const [username, packageName, slot, backend] = parts.slice(0, 4).map(decodeURIComponent) as [string, string, string, string]
@@ -140,6 +149,26 @@ function target(raw: string | undefined) {
   } catch {
     throw new PluginUpstreamAccessError(404, 'Plugin service operation was not found')
   }
+}
+
+async function readImageEdit(bytes: Buffer, contentType: string): Promise<FormData> {
+  try {
+    return await new Response(new Uint8Array(bytes), { headers: { 'content-type': contentType } }).formData()
+  } catch {
+    throw new PluginServiceHttpError(400, 'Invalid multipart image edit request')
+  }
+}
+
+function imageEditMatches(form: FormData, model: string): boolean {
+  if (form.get('model') !== model) return false
+  const prompt = form.get('prompt')
+  if (typeof prompt !== 'string' || !prompt.trim()) return false
+  const images = [...form.getAll('image'), ...form.getAll('image[]')]
+  if (!images.length || images.some(image => typeof image === 'string' || !image.size || !image.type.startsWith('image/'))) return false
+  const fields = ['model', 'prompt', 'size', 'quality', 'response_format']
+  return [...form].every(
+    ([name, value]) => name === 'image' || name === 'image[]' || (fields.includes(name) && typeof value === 'string' && form.getAll(name).length === 1),
+  )
 }
 
 function requestMatches(body: unknown, model: string, protocol: import('../use-cases/native-plugin-service-access.js').NativePluginServiceProtocol) {

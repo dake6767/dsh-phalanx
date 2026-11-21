@@ -107,7 +107,12 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
           .map(row => row.location)
       : []
   }
-  async validateSuiteTemplate(prepared: PreparedPlugin, input: CommunityPluginAccessInput, dependencies: readonly string[]) {
+  async validateSuiteTemplate(
+    prepared: PreparedPlugin,
+    input: CommunityPluginAccessInput,
+    dependencies: readonly string[],
+    declaredUpstreams: readonly string[] = [],
+  ) {
     const occupied = new Set(
       Object.entries(await this.store.list())
         .filter(([name]) => name !== prepared.packageName)
@@ -118,7 +123,7 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
       source => this.syntax.parse(source),
       this.syntax.entryIds(prepared),
       occupied,
-      new Set((await this.upstreams.list(prepared.packageName)).map(row => row.name)),
+      new Set([...(await this.upstreams.list(prepared.packageName)).map(row => row.name), ...declaredUpstreams]),
       new Set(dependencies),
     )
   }
