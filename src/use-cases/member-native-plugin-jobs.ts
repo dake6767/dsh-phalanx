@@ -27,6 +27,7 @@ type InstallReceipt = {
   readonly preparationId: string | undefined
   readonly epoch: number
   readonly browserReservation?: string
+  readonly serviceGeneration?: string
 }
 type ReceiptRetry = {
   readonly instance: CommunityUserInstance
@@ -316,9 +317,14 @@ export class MemberNativePluginJobs {
                 )
               : { application: await this.native.remove(actor, job.packageName, instance, origin, signal) }
       let record: PluginInstallation | undefined
+      let serviceGeneration: string | undefined
       if (application && 'version' in application && application.integrity !== undefined) {
         const checked = binding?.version === application.version && binding.integrity === application.integrity ? binding : undefined
-        const serviceOrigin = checked?.serviceOrigin && (!update || previous?.serviceOrigin === checked.serviceOrigin) ? checked.serviceOrigin : undefined
+        const serviceOrigin =
+          checked?.serviceGeneration && checked.serviceOrigin && (!update || previous?.serviceOrigin === checked.serviceOrigin)
+            ? checked.serviceOrigin
+            : undefined
+        serviceGeneration = verified ? verified.serviceGeneration : serviceOrigin ? checked?.serviceGeneration : undefined
         const resourceOrigin = checked?.resourceOrigin && (!update || previous?.resourceOrigin === checked.resourceOrigin) ? checked.resourceOrigin : undefined
         record = verified?.record ?? {
           packageName: job.packageName,
@@ -338,6 +344,7 @@ export class MemberNativePluginJobs {
             preparationId: application.prepared.preparationId,
             epoch: actor.sessionEpoch,
             ...(browserReservation ? { browserReservation } : {}),
+            ...(serviceGeneration ? { serviceGeneration } : {}),
           })
         }
       }
@@ -353,11 +360,11 @@ export class MemberNativePluginJobs {
       }
       if (record) {
         if (browserReservation && record.resourceOrigin) {
-          await this.records.save(actor.spaceId, record, browserReservation)
+          await this.records.save(actor.spaceId, record, browserReservation, serviceGeneration)
           retainBrowserReservation = false
         } else {
           retainBrowserReservation = false
-          await this.records.save(actor.spaceId, record)
+          await this.records.save(actor.spaceId, record, undefined, serviceGeneration)
         }
         this.receipts.get(instance)?.delete(job.packageName)
         if (record.serviceOrigin && application.application === 'applied')

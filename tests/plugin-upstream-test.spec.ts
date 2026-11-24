@@ -48,6 +48,7 @@ it('masks fixed locked headers and their JSON encodings from upstream diagnostic
 })
 function fixture(response: () => Response) {
   let credential = 'fictional-secret'
+  let secretUnavailable = false
   const requested: unknown[] = []
   let clock = 10
   const tester = new PluginUpstreamTest(
@@ -58,6 +59,7 @@ function fixture(response: () => Response) {
           name: 'search',
           baseUrl: 'http://localhost/api',
           credential,
+          ...(secretUnavailable ? { secretUnavailable: true } : {}),
           headers: [{ name: 'X-API-Key', value: '{credential}' }],
           testRequest: { method: 'POST', path: '/test?q=one', body: { query: 'sample' } },
         } as PluginUpstream,
@@ -75,11 +77,20 @@ function fixture(response: () => Response) {
   return {
     tester,
     requested,
+    markUnreadable: () => {
+      secretUnavailable = true
+    },
     replace: () => {
       credential = 'replacement-secret'
     },
   }
 }
+it('refuses diagnostics before sending when some saved upstream values are unreadable', async () => {
+  const f = fixture(() => new Response('unexpected request'))
+  f.markUnreadable()
+  await expect(f.tester.execute(actor, 'plugin', 'search')).rejects.toMatchObject({ code: 'plugin-upstream-test-required' })
+  expect(f.requested).toHaveLength(0)
+})
 it('uses saved request and current credentials, reports elapsed/status and redacts split secrets', async () => {
   const f = fixture(
     () =>

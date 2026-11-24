@@ -8,6 +8,7 @@ import { chromium, type Browser, type BrowserContext } from 'playwright'
 import { expect, it, onTestFinished } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
+import type { CommunityMarketPageData } from '../src/domain/plugin-admin-contract.js'
 import { withSuiteCatalogContentHash } from '../src/domain/suite-catalog-document.js'
 import { DSH_CONTAINER_HOME, dshHomePath } from '../src/dsh/profile-layout.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
@@ -25,6 +26,7 @@ const packageName = 'dsh-media-desk'
 const version = '2.7.1'
 const label = { en: 'Media Desk', 'zh-CN': '自媒体工作台' }
 const settingsPath = 'plugins/services?packageName=' + packageName
+const upstreamsPath = 'plugins/upstreams?packageName=' + packageName
 
 export const mediaDeskCatalogEntry = withSuiteCatalogContentHash({
   kind: 'plugin',
@@ -78,6 +80,26 @@ export const mediaDeskCatalogEntry = withSuiteCatalogContentHash({
   ],
 })
 
+function mediaDeskUpgradeEntry() {
+  if (mediaDeskCatalogEntry.kind !== 'plugin') throw Error('Invalid Media Desk catalog entry')
+  const item = mediaDeskCatalogEntry.items.find(row => row.kind === 'plugin')
+  const slot = item?.serviceSlots?.[0]
+  if (!item || slot?.binding.kind !== 'json-settings') throw Error('Invalid Media Desk fixture')
+  return withSuiteCatalogContentHash({
+    ...mediaDeskCatalogEntry,
+    version: '2.7.2',
+    engines: { platform: '>=0.1.40' },
+    items: [
+      {
+        ...item,
+        version: '2.7.2',
+        integrity: 'sha512-C0i6WLFriV03Kh8Zk6SiYZHpSwxHS0dsoIthHh2XxXersijA3W/vvnHfkIrb3ZkoVorxgYYVwt5MemuB/ugeEw==',
+        serviceSlots: [{ ...slot, binding: { ...slot.binding, deferredUpstream: true } }],
+      },
+    ],
+  })
+}
+
 function required(name: string): string {
   const value = process.env[name]
   if (!value) throw new Error('Missing Media Desk acceptance input ' + name)
@@ -93,7 +115,7 @@ async function credential(name: string): Promise<string> {
   return value
 }
 
-it('configures both native Media Desk deliveries and produces a real exported draft', async () => {
+it('upgrades a live Media Desk installation and keeps its model, headers, published access and member choices', async () => {
   const installed = required('DSH_PHALANX_INSTALL_ROOT')
   const candidate = required('DSH_PHALANX_CANDIDATE_SHA')
   if (process.platform !== 'linux' || !runtimeSettings.containerImage) throw new Error('Use an installed Linux image')
@@ -171,13 +193,24 @@ it('configures both native Media Desk deliveries and produces a real exported dr
     expect(catalog.entries).toContainEqual(expect.objectContaining({ id: packageName, available: true }))
     await api('suites', { action: 'install', input: { id: packageName, requestId: 'media-desk-suite-install', publish: false } })
     const installation = async () =>
-      (await api<{ installations: { id: string; status: string; failureCode: string | null }[] }>('suites')).installations.find(row => row.id === packageName)
+      (await api<{ installations: { id: string; version: string; status: string; failureCode: string | null }[] }>('suites')).installations.find(
+        row => row.id === packageName,
+      )
     await expect.poll(async () => (await installation())?.status, { timeout: 240_000 }).toMatch(/^(installed|failed)$/u)
     const installedSuite = await installation()
     expect(installedSuite?.status, installedSuite?.failureCode ?? 'Media Desk suite installation').toBe('installed')
-    await api('plugins/upstreams?packageName=' + packageName, {
+    await api(upstreamsPath, {
       action: 'save',
-      upstream: { name: 'image-provider', baseUrl: required('DSH_PHALANX_MEDIA_IMAGE_URL'), credential: imageKey, headers: [] },
+      upstream: {
+        name: 'image-provider',
+        baseUrl: required('DSH_PHALANX_MEDIA_IMAGE_URL'),
+        model: 'unused-legacy-upstream-model',
+        credential: imageKey,
+        headers: [
+          { name: 'Authorization', value: 'Bearer {credential}' },
+          { name: 'X-Dsh-Media-Desk', value: 'migration-check' },
+        ],
+      },
     })
     await api(settingsPath, {
       revision: (await api(settingsPath)).revision,
@@ -261,55 +294,52 @@ it('configures both native Media Desk deliveries and produces a real exported dr
     expect(imageUrl.hostname).toBe('127.0.0.1')
     expect(Boolean(imageUrl.username || imageUrl.password || imageUrl.search || imageUrl.hash)).toBe(false)
     expect(imageUrl.pathname.startsWith('/_dsh-phalanx/plugin-services/')).toBe(true)
-    const generate = () =>
-      fetch(imageUrl, {
+    const generate = (projection = selectedProjection) =>
+      fetch(new URL(projection.baseUrl + '/images/generations'), {
         method: 'POST',
         redirect: 'error',
-        headers: { authorization: 'Bearer ' + selectedProjection.apiKey, 'content-type': 'application/json' },
+        headers: { authorization: 'Bearer ' + projection.apiKey, 'content-type': 'application/json' },
         body: JSON.stringify({ model: imageModel, prompt: 'One paper boat on calm water', n: 1, size: '1536x1024' }),
         signal: AbortSignal.timeout(180_000),
       })
-    const image = await generate()
-    expect(image.status).toBe(200)
-    const response = (await image.json()) as { data: { b64_json?: string }[] }
-    expect(typeof response.data[0]?.b64_json).toBe('string')
-    expect(Buffer.from(response.data[0]!.b64_json!, 'base64').byteLength).toBeGreaterThan(512)
-
+    const produceExport = async (context: BrowserContext, username: string) => {
+      await call(context, 'settings', { imageCount: 1, shotCount: 0 })
+      const item = await call<{ receipts: { target: string }[] }>(context, 'ops', {
+        ops: [{ op: 'add_item', kind: 'note', title: 'Paper boat on a quiet morning', body: 'A paper boat becomes a small way to notice the river.' }],
+      })
+      const id = item.receipts[0]!.target
+      await call(context, 'produce', { id, withImages: true })
+      await expect
+        .poll(async () => (await call<{ production: { status: string } }>(context, 'production?id=' + encodeURIComponent(id))).production.status, {
+          timeout: 480_000,
+        })
+        .toBe('done')
+      const exported = await call<{ path: string; files: string[]; hashes: Record<string, string> }>(context, 'produce/save', { id })
+      expect(Boolean(exported.path)).toBe(true)
+      expect(Object.keys(exported.hashes).length).toBeGreaterThan(0)
+      const imageFile = exported.files.find(file => /\.(png|webp|jpe?g)$/iu.test(file))
+      expect(imageFile).toBeDefined()
+      const destination = relative(DSH_CONTAINER_HOME, exported.path)
+      expect(destination.startsWith('..')).toBe(false)
+      const exportHome = await realpath(await home(username))
+      const artifacts = async (name: string) => {
+        expect(/^[^/\\]+$/u.test(name) && name !== '..' && name !== '.').toBe(true)
+        const file = await realpath(join(exportHome, destination, name))
+        expect(file.startsWith(exportHome + '/')).toBe(true)
+        return file
+      }
+      expect((await stat(await artifacts(imageFile!))).size).toBeGreaterThan(512)
+      const [textFile, expectedHash] = Object.entries(exported.hashes)[0]!
+      const written = await readFile(await artifacts(textFile))
+      expect(createHash('sha256').update(written).digest('hex')).toBe(expectedHash)
+    }
     const { context, page } = preinstalledBrowser
-    await call(context, 'settings', { imageCount: 1, shotCount: 0 })
-    const draft = await call<{ modelOk: boolean; answer: { text?: string; content?: string } }>(context, 'chat', {
+    const draft = await call<{ modelOk: boolean; answer: { text?: string } }>(context, 'chat', {
       message: 'Draft one short original headline and opening about a paper boat. Do not change any saved items.',
     })
     expect(draft.modelOk).toBe(true)
     expect(draft.answer.text?.trim().length).toBeGreaterThan(0)
-    const item = await call<{ receipts: { target: string }[] }>(context, 'ops', {
-      ops: [{ op: 'add_item', kind: 'note', title: 'Paper boat on a quiet morning', body: 'A paper boat becomes a small way to notice the river.' }],
-    })
-    const id = item.receipts[0]!.target
-    await call(context, 'produce', { id, withImages: true })
-    await expect
-      .poll(async () => (await call<{ production: { status: string } }>(context, 'production?id=' + encodeURIComponent(id))).production.status, {
-        timeout: 480_000,
-      })
-      .toBe('done')
-    const exported = await call<{ path: string; files: string[]; hashes: Record<string, string> }>(context, 'produce/save', { id })
-    expect(Boolean(exported.path)).toBe(true)
-    expect(Object.keys(exported.hashes).length).toBeGreaterThan(0)
-    const imageFile = exported.files.find(file => /\.(png|webp|jpe?g)$/iu.test(file))
-    expect(imageFile).toBeDefined()
-    const destination = relative(DSH_CONTAINER_HOME, exported.path)
-    expect(destination.startsWith('..')).toBe(false)
-    const exportHome = await realpath(await home('media-preinstalled'))
-    const artifacts = async (name: string) => {
-      expect(/^[^/\\]+$/u.test(name) && name !== '..' && name !== '.').toBe(true)
-      const file = await realpath(join(exportHome, destination, name))
-      expect(file.startsWith(exportHome + '/')).toBe(true)
-      return file
-    }
-    expect((await stat(await artifacts(imageFile!))).size).toBeGreaterThan(512)
-    const [textFile, expectedHash] = Object.entries(exported.hashes)[0]!
-    const written = await readFile(await artifacts(textFile))
-    expect(createHash('sha256').update(written).digest('hex')).toBe(expectedHash)
+    await produceExport(context, 'media-preinstalled')
 
     const tokenDigest = async () =>
       createHash('sha256')
@@ -324,12 +354,110 @@ it('configures both native Media Desk deliveries and produces a real exported dr
     await page.reload()
     expect((await load(context)).image.model).toBe('member-personal-model')
     expect(await api(settingsPath)).toMatchObject({ slots: [{ jsonSettings: { upstream: 'image-provider', personal: true } }] })
+
+    fixture.publish([mediaDeskUpgradeEntry()])
+    const gallery = await admin.newPage()
+    await gallery.goto(origin + '/admin/plugins?tab=catalog')
+    const card = gallery.locator('.catalog-entry-card').filter({ hasText: 'Media Desk' })
+    await card.getByRole('button', { name: 'Update', exact: true }).click()
+    const confirmation = gallery.getByRole('dialog', { name: 'Media Desk', exact: true })
+    await confirmation.getByText('Plugin dsh-media-desk: 2.7.1 → 2.7.2', { exact: true }).waitFor()
+    await confirmation.getByRole('button', { name: 'Confirm update', exact: true }).click()
+    await expect.poll(installation, { timeout: 240_000 }).toMatchObject({ version: '2.7.2', status: 'installed' })
+    const migrated = await api<unknown[]>(upstreamsPath)
+    expect(migrated).toHaveLength(1)
+    expect(migrated[0]).toMatchObject({
+      name: 'image-provider',
+      baseUrl: required('DSH_PHALANX_MEDIA_IMAGE_URL'),
+      model: imageModel,
+      credential: { configured: true, last4: '' },
+      headers: [
+        { name: 'Authorization', configured: true, last4: '' },
+        { name: 'X-Dsh-Media-Desk', configured: true, last4: '' },
+      ],
+      managedImage: { ready: true },
+    })
+    expect(JSON.stringify(migrated).includes(imageKey)).toBe(false)
+    await card.getByRole('button', { name: 'View catalog entry Media Desk', exact: true }).click()
+    const galleryDetails = gallery.getByRole('dialog', { name: 'Media Desk', exact: true })
+    await galleryDetails.getByText(imageModel, { exact: true }).waitFor()
+    await gallery.goto(origin + '/admin/plugins')
+    await gallery.getByRole('button', { name: 'View plugin ' + packageName, exact: true }).click()
+    await gallery.getByRole('tab', { name: 'Access settings', exact: true }).click()
+    await gallery.getByText(imageModel, { exact: true }).waitFor()
+    const updateMember = async ({ context, page }: typeof selectedBrowser, username: string) => {
+      const endpoint = origin + '/market/api/plugins'
+      const row = async () => {
+        const response = await context.request.get(endpoint)
+        expect(response.ok()).toBe(true)
+        const { plugins } = (await response.json()) as CommunityMarketPageData
+        return plugins.find(plugin => plugin.packageName === packageName)
+      }
+      const available = (await row())?.update
+      expect(available).toMatchObject({ version: '2.7.2' })
+      const update = await context.request.post(endpoint, {
+        headers: { origin },
+        data: { action: 'update', packageName, requestId: 'media-update-' + username, target: available!.target },
+      })
+      expect(update.status()).toBe(202)
+      await expect.poll(async () => (await row())?.job?.status, { timeout: 240_000 }).toBe('succeeded')
+      await restart(context)
+      await page.reload()
+      expect((await row())?.installedVersion).toBe('2.7.2')
+    }
+    await updateMember(preinstalledBrowser, 'media-preinstalled')
+    expect((await load(context)).image.model).toBe('member-personal-model')
+    await updateMember(selectedBrowser, 'media-selected')
+    await expect.poll(() => load(selectedBrowser.context)).toMatchObject({ imageReady: true, image: { model: imageModel, hasKey: true } })
+    const freshProjection = await readProjection('media-selected')
+    expect(freshProjection.apiKey === selectedProjection.apiKey).toBe(false)
+    await produceExport(selectedBrowser.context, 'media-selected')
+    expect((await generate()).status).toBe(403)
+
     await preinstall([])
     await api('plugins/publication', { action: 'publish', packageName, published: false, confirmed: true, selectedMembers: 0 })
-    const denied = await generate()
+    const denied = await generate(freshProjection)
     expect(denied.status).toBe(403)
     expect(await denied.json()).toMatchObject({
       error: { message: 'Platform service is no longer available to this plugin. Choose a service in the plugin settings.' },
     })
+
+    const uninstall = async () => {
+      await preinstall([])
+      await api('suites', { action: 'uninstall', id: packageName, input: {} })
+      await expect.poll(installation, { timeout: 180_000 }).toBeUndefined()
+    }
+    const freshInstall = async (username: string, configured: boolean) => {
+      await uninstall()
+      await gallery.goto(origin + '/admin/plugins?tab=catalog')
+      await gallery.getByRole('button', { name: 'View catalog entry Media Desk', exact: true }).click()
+      const entry = gallery.getByRole('dialog', { name: 'Media Desk', exact: true })
+      if (configured) {
+        const image = entry.getByRole('region', { name: 'Image generation', exact: true })
+        await image.getByLabel('Upstream address', { exact: true }).fill(required('DSH_PHALANX_MEDIA_IMAGE_URL'))
+        try {
+          await image.getByLabel('API key', { exact: true }).fill(imageKey)
+        } catch {
+          throw Error('Could not fill the protected Media Desk credential')
+        }
+        await image.getByLabel('Model name', { exact: true }).fill(imageModel)
+      }
+      await entry.getByRole('button', { name: 'Install entry', exact: true }).click()
+      await expect.poll(installation, { timeout: 240_000 }).toMatchObject({ version: '2.7.2', status: 'installed' })
+      await preinstall([packageName])
+      await api('accounts', { username, password: 'password', email: '' })
+      return browserSession(username)
+    }
+    const skipped = await freshInstall('media-skipped', false)
+    expect(await load(skipped.context)).toMatchObject({ imageReady: false })
+    const textOnly = await call<{ modelOk: boolean; answer: { text?: string } }>(skipped.context, 'chat', {
+      message: 'Write one original sentence about a paper boat.',
+    })
+    expect(textOnly.modelOk).toBe(true)
+    expect(textOnly.answer.text?.trim().length).toBeGreaterThan(0)
+
+    const configured = await freshInstall('media-configured', true)
+    expect(await load(configured.context)).toMatchObject({ imageReady: true, image: { model: imageModel, hasKey: true } })
+    await produceExport(configured.context, 'media-configured')
   }
 }, 1_800_000)

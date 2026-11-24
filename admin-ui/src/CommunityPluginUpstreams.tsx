@@ -8,9 +8,10 @@ import { Tabs } from '@heroui/react/tabs'
 import { Button } from '@heroui/react/button'
 import { Chip } from '@heroui/react/chip'
 import { Card } from '@heroui/react/card'
+import { Checkbox } from '@heroui/react/checkbox'
 import { upstreamWriteInput } from '../../src/domain/plugin-upstream'
 import type { CommunityPluginUpstreamInput, CommunityPluginUpstreamView } from '../../src/domain/admin-contract'
-import { communityPluginUpstreams, updateCommunityPluginUpstreams } from './community-api'
+import { CommunityApiRequestError, communityPluginUpstreams, updateCommunityPluginUpstreams } from './community-api'
 import { CommunityCopyError, usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
 import CommunityField from './CommunityField'
@@ -19,15 +20,18 @@ import { useDraftGuard } from './useDraftGuard'
 
 export default function CommunityPluginUpstreams({
   packageName,
-  initialUpstream,
+  mode = 'manual',
+  embedded = false,
   onChanged,
 }: {
   packageName: string
-  initialUpstream?: string
+  mode?: 'manual' | 'catalog' | 'advanced'
+  embedded?: boolean
   onChanged?: () => void
 }) {
   const { t, errorText } = usePlatformLanguage()
   const [revision, setRevision] = useState(0)
+  const [reload, setReload] = useState(0)
   const [rows, setRows] = useState<readonly CommunityPluginUpstreamView[]>()
   const [editing, setEditing] = useState<CommunityPluginUpstreamView | null>()
   const [error, setError] = useState<unknown>()
@@ -37,39 +41,49 @@ export default function CommunityPluginUpstreams({
       .then(next => {
         if (controller.signal.aborted) return
         setRows(next)
-        if (initialUpstream) setEditing(next.find(row => row.name === initialUpstream && row.managedImage))
+        setError(undefined)
       })
       .catch(error => {
         if (!controller.signal.aborted) setError(error)
       })
     return () => controller.abort()
-  }, [packageName, initialUpstream])
+  }, [packageName, reload])
+  const catalog = mode === 'catalog'
+  const visible = rows?.filter(row => mode === 'manual' || Boolean(row.managedImage) === catalog)
+  if (catalog && visible?.length === 0 && !error) return null
+  const title = t(catalog ? 'Access settings' : 'Plugin upstreams')
   return (
-    <section className="plugin-detail-section" aria-label={t('Plugin upstreams')}>
-      <div className="plugin-section-heading">
-        <h2>{t('Plugin upstreams')}</h2>
-        <Button size="sm" variant="secondary" isDisabled={rows === undefined} onPress={() => setEditing(null)}>
-          {t('Add upstream')}
-        </Button>
-      </div>
+    <section className={embedded ? 'catalog-service-slot' : 'plugin-detail-section'} aria-label={embedded ? undefined : title}>
+      {!embedded ? (
+        <div className="plugin-section-heading">
+          <h2>{title}</h2>
+          {!catalog ? (
+            <Button size="sm" variant="secondary" isDisabled={rows === undefined} onPress={() => setEditing(null)}>
+              {t('Add upstream')}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <p>{t('Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.')}</p>
       <p>{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
       {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
-      {rows === undefined ? (
+      {visible === undefined ? (
         <p role="status">{t('Loading…')}</p>
       ) : (
-        rows.map(row => (
+        visible.map(row => (
           <Card className="plugin-upstream-card" key={row.name}>
             <Card.Content>
               <div className="plugin-section-heading">
-                <strong>{row.name}</strong>
+                <strong>{row.managedImage ? t('Image generation') : row.name}</strong>
                 <Chip size="sm" variant="soft" color={row.managedImage && !row.managedImage.ready ? 'warning' : undefined}>
                   <span>
                     {t(
                       row.managedImage
-                        ? row.managedImage.ready
-                          ? 'Credential configured'
-                          : 'Upstream setup required'
+                        ? row.managedImage.disabled
+                          ? 'Disabled'
+                          : row.managedImage.ready
+                            ? 'Access configured'
+                            : 'Upstream setup required'
                         : row.credential.configured
                           ? 'Credential configured'
                           : 'Credential not configured',
@@ -78,12 +92,22 @@ export default function CommunityPluginUpstreams({
                   {!row.managedImage && row.credential.configured ? <span>{` ••••${row.credential.last4}`}</span> : null}
                 </Chip>
               </div>
-              <p className="plugin-upstream-address">{row.baseUrl}</p>
+              {row.baseUrl ? <p className="plugin-upstream-address">{row.baseUrl}</p> : null}
               {row.managedImage && row.model ? <p>{row.model}</p> : null}
+              {row.managedImage?.credentialUnavailable ? <p>{t('Saved upstream credentials could not be read. Re-enter them in the configuration.')}</p> : null}
+              {row.managedImage && (!row.baseUrl || !row.credential.configured || !row.model) ? (
+                <p>
+                  {t('Fields to configure: {fields}', {
+                    fields: [!row.baseUrl && t('Upstream address'), !row.credential.configured && t('API key'), !row.model && t('Model name')]
+                      .filter(Boolean)
+                      .join(' · '),
+                  })}
+                </p>
+              ) : null}
               <CommunityUpstreamTest
                 actions={
                   <Button variant="secondary" onPress={() => setEditing(row)}>
-                    {t('Edit upstream')}
+                    {t(row.managedImage ? 'Edit configuration' : 'Edit upstream')}
                   </Button>
                 }
                 key={`${revision}:${JSON.stringify(row)}`}
@@ -101,6 +125,11 @@ export default function CommunityPluginUpstreams({
           existing={editing}
           names={rows?.map(row => row.name) ?? []}
           onClose={() => setEditing(undefined)}
+          onReload={() => {
+            setEditing(undefined)
+            setRows(undefined)
+            setReload(value => value + 1)
+          }}
           onSaved={next => {
             setRows(next)
             onChanged?.()
@@ -117,12 +146,14 @@ function UpstreamEditor({
   existing,
   names,
   onClose,
+  onReload,
   onSaved,
 }: {
   packageName: string
   existing: CommunityPluginUpstreamView | null
   names: readonly string[]
   onClose: () => void
+  onReload: () => void
   onSaved: (rows: readonly CommunityPluginUpstreamView[]) => void
 }) {
   const { t, errorText } = usePlatformLanguage()
@@ -130,23 +161,30 @@ function UpstreamEditor({
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? '')
   const [model, setModel] = useState(existing?.model ?? '')
   const managed = existing?.managedImage !== undefined
+  const savedEnabled = !existing?.managedImage?.disabled
+  const [enabled, setEnabled] = useState(savedEnabled)
+  const enabledChanged = managed && enabled !== savedEnabled
   const [credential, setCredential] = useState('')
   const [clearCredential, setClearCredential] = useState(false)
   const [headers, setHeaders] = useState<CommunityPluginUpstreamInput['headers']>(
     existing ? upstreamWriteInput(existing).headers : [{ name: 'Authorization', value: 'Bearer {credential}' }],
   )
+  const repairing = existing?.managedImage?.credentialUnavailable === true
+  const repairHeaders = headers.filter(header => existing?.managedImage?.unreadableHeaders?.includes(header.name))
   const [testMethod, setTestMethod] = useState(existing?.testRequest?.method ?? 'GET')
   const [testPath, setTestPath] = useState('')
   const [testBody, setTestBody] = useState('')
   const [clearTest, setClearTest] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>()
+  const conflict = error instanceof CommunityApiRequestError && error.code === 'platform-configuration-conflict'
   const [deleting, setDeleting] = useState(false)
   const id = useId()
   const form = useRef<HTMLFormElement>(null)
   const [editorTab, setEditorTab] = useState('basic')
   const testDirty = clearTest || testMethod !== (existing?.testRequest?.method ?? 'GET') || testPath !== '' || testBody !== ''
   const dirty =
+    enabledChanged ||
     clearCredential ||
     testDirty ||
     name !== (existing?.name ?? '') ||
@@ -155,7 +193,7 @@ function UpstreamEditor({
     credential !== '' ||
     JSON.stringify(headers) !== JSON.stringify(existing ? upstreamWriteInput(existing).headers : [{ name: 'Authorization', value: 'Bearer {credential}' }])
   const save = async () => {
-    if (busy) return false
+    if (busy || conflict) return false
     if (!existing && names.includes(name)) {
       setEditorTab('basic')
       setError(new CommunityCopyError('This upstream name already exists.'))
@@ -186,6 +224,8 @@ function UpstreamEditor({
       const testRequest = clearTest ? null : testPath ? { method: testMethod, path: testPath, ...(body === undefined ? {} : { body }) } : undefined
       const next = await updateCommunityPluginUpstreams(packageName, {
         action: 'save',
+        ...(existing?.managedImage?.revision ? { expectedRevision: existing.managedImage.revision } : {}),
+        ...(enabledChanged ? { enabled } : {}),
         upstream: {
           name,
           baseUrl,
@@ -218,11 +258,27 @@ function UpstreamEditor({
     }
   }
   const guard = useDraftGuard(dirty, save, () => setCredential(''), busy)
+  const changeCredential = (value: string) => {
+    setCredential(value)
+    setClearCredential(false)
+  }
+  const clearSavedCredential = existing?.credential.configured ? (
+    <Button
+      variant="secondary"
+      isDisabled={busy}
+      onPress={() => {
+        setClearCredential(value => !value)
+        setCredential('')
+      }}
+    >
+      {t(clearCredential ? 'Keep saved credential' : 'Clear saved credential')}
+    </Button>
+  ) : null
   return (
     <>
       <CommunityDialog
         size="lg"
-        title={t(existing ? 'Edit upstream' : 'Add upstream')}
+        title={t(managed ? 'Image generation' : existing ? 'Edit upstream' : 'Add upstream')}
         busy={busy}
         onClose={() => guard.request(onClose)}
         footer={
@@ -235,15 +291,22 @@ function UpstreamEditor({
             <Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>
               {t('Cancel')}
             </Button>
+            {conflict ? (
+              <Button variant="secondary" onPress={onReload}>
+                {t('Retry loading configuration')}
+              </Button>
+            ) : null}
             <Button
               type="submit"
               form={id}
               isDisabled={
                 busy ||
+                conflict ||
                 !name ||
                 !baseUrl ||
                 (!existing && names.includes(name)) ||
-                (managed && (!model.trim() || (!credential && !existing.credential.configured)))
+                (managed && (!model.trim() || (!credential && !existing.credential.configured))) ||
+                repairHeaders.some(header => !header.value)
               }
             >
               {t('Save changes')}
@@ -269,13 +332,48 @@ function UpstreamEditor({
                 label={t('API key')}
                 type="password"
                 value={credential}
-                onChange={setCredential}
+                onChange={changeCredential}
                 disabled={busy}
-                placeholder={existing.credential.configured ? `••••${existing.credential.last4}` : undefined}
+                description={t(
+                  repairing && !existing.credential.configured
+                    ? 'Saved upstream credentials could not be read. Re-enter them in the configuration.'
+                    : existing.credential.configured
+                      ? 'Saved credential'
+                      : 'No saved credential',
+                )}
                 autoComplete="new-password"
                 required={!existing.credential.configured}
               />
+              {clearSavedCredential}
               <CommunityField label={t('Model name')} value={model} onChange={setModel} disabled={busy} required />
+              {repairHeaders.length ? (
+                <details>
+                  <summary>{t('Request headers')}</summary>
+                  <p>{t('Use {credential} for the saved secret. Fixed values replace member headers.')}</p>
+                  {repairHeaders.map(header => (
+                    <CommunityField
+                      key={header.name}
+                      label={header.name}
+                      type="password"
+                      autoComplete="new-password"
+                      value={header.value}
+                      disabled={busy}
+                      required
+                      onChange={value => setHeaders(rows => rows.map(row => (row.name === header.name ? { ...row, value } : row)))}
+                    />
+                  ))}
+                </details>
+              ) : null}
+              {existing.managedImage?.ready || existing.managedImage?.disabled ? (
+                <Checkbox isSelected={enabled} isDisabled={busy} onChange={setEnabled}>
+                  <Checkbox.Content>
+                    <Checkbox.Control>
+                      <Checkbox.Indicator />
+                    </Checkbox.Control>
+                    {t('Enable image generation')}
+                  </Checkbox.Content>
+                </Checkbox>
+              ) : null}
             </>
           ) : (
             <Tabs className="upstream-editor-tabs" selectedKey={editorTab} onSelectionChange={key => setEditorTab(String(key))} variant="secondary">
@@ -322,26 +420,12 @@ function UpstreamEditor({
                   type="password"
                   value={credential}
                   placeholder={existing?.credential.configured ? `••••${existing.credential.last4}` : undefined}
-                  onChange={value => {
-                    setCredential(value)
-                    setClearCredential(false)
-                  }}
+                  onChange={changeCredential}
                   disabled={busy}
                   autoComplete="new-password"
                   description={t(existing?.credential.configured ? 'Leave blank to keep the saved credential.' : 'Enter the credential used by this upstream.')}
                 />
-                {existing?.credential.configured ? (
-                  <Button
-                    variant="secondary"
-                    isDisabled={busy}
-                    onPress={() => {
-                      setClearCredential(value => !value)
-                      setCredential('')
-                    }}
-                  >
-                    {t(clearCredential ? 'Keep saved credential' : 'Clear saved credential')}
-                  </Button>
-                ) : null}
+                {clearSavedCredential}
               </Tabs.Panel>
               <Tabs.Panel id="headers" shouldForceMount data-editor-tab="headers">
                 <p className="upstream-editor-description">{t('Use {credential} for the saved secret. Fixed values replace member headers.')}</p>

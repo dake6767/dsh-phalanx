@@ -9,7 +9,7 @@ import type { PluginAccessStorePort, PluginInstalledServices } from '../ports/pl
 import type { PlatformSql } from './platform-database.js'
 import { protectedTable } from './platform-secret-codec.js'
 import { PlatformStoreLifecycle } from './platform-store-lifecycle.js'
-import { pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
+import { pluginServiceGeneration, pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
 
 interface AccessRecord {
   services?: PluginInstalledServices
@@ -139,6 +139,21 @@ export class PostgresPluginAccessStore implements PluginAccessStorePort {
         [packageName],
       )
       return row?.owner ?? undefined
+    })
+  }
+  async serviceDeliveryGeneration(packageName: string, serviceOrigin: string, integrity: string): Promise<string | undefined> {
+    this.ready()
+    return await pluginTransaction(this.connection, async sql => {
+      const [row] = await sql.query<{ service_generation: string }>(
+        `SELECT ${pluginServiceGeneration} AS service_generation FROM dsh_phalanx.plugin_library AS plugin
+       JOIN dsh_phalanx.plugin_access_settings AS access USING (package_name)
+       WHERE plugin.package_name=$1 AND plugin.suite_origin=$2 AND plugin.stage='available'
+       AND plugin.current->>'integrity'=$3
+       AND access.configuration #>> '{services,configuration,ownerVersion}'=$3
+       AND jsonb_array_length(access.configuration #> '{services,configuration,slots}') > 0`,
+        [packageName, serviceOrigin, integrity],
+      )
+      return row?.service_generation
     })
   }
   saveInstalledServices(

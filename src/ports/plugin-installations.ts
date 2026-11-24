@@ -14,7 +14,7 @@ export interface PluginInstallation {
 }
 export interface PluginInstallationsPort {
   get(spaceId: string): Promise<readonly PluginInstallation[]>
-  save(spaceId: string, record: PluginInstallation, browserReservation?: string): Promise<void>
+  save(spaceId: string, record: PluginInstallation, browserReservation?: string, expectedServiceGeneration?: string): Promise<void>
   resetForSpace(spaceId: string): Promise<void>
 }
 

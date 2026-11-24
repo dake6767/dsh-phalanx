@@ -8,6 +8,7 @@ import {
   managedImageUpstreamHeaders,
   managedImageUpstreamTest,
   mergeUpstreamInput,
+  validImageCredential,
   type PluginUpstream,
 } from '../domain/plugin-upstream.js'
 import { deferredPluginUpstreams } from '../domain/suite-service-slots.js'
@@ -41,13 +42,27 @@ export class PluginUpstreamAdministration {
   ) {}
   async list(actor: CommunityAccountActor, packageName: string): Promise<readonly CommunityPluginUpstreamView[]> {
     const plugin = await this.assertAdmin(actor, packageName)
-    const rows = await this.store.list(packageName)
+    const snapshot = await this.store.snapshot?.(packageName)
+    const rows = snapshot?.upstreams ?? (await this.store.list(packageName))
     const declared = new Set(await this.managedImages(plugin))
+    const managedImage = (row?: PluginUpstream) => ({
+      ready: imageUpstreamReady(row),
+      ...(row?.imageDisabled ? { disabled: true as const } : {}),
+      ...(row?.secretUnavailable ? { credentialUnavailable: true as const } : {}),
+      ...(row?.unreadableHeaders?.length ? { unreadableHeaders: row.unreadableHeaders } : {}),
+      ...(snapshot && plugin.revision !== undefined ? { revision: { upstream: snapshot.revision, plugin: plugin.revision } } : {}),
+    })
     return [
-      ...rows.map(row => ({
-        ...view(row),
-        ...(declared.has(row.name) ? { managedImage: { ready: imageUpstreamReady(row) } } : {}),
-      })),
+      ...rows.map(row => {
+        const projected = view(row)
+        if (!declared.has(row.name)) return projected
+        return {
+          ...projected,
+          headers: projected.headers.map(header => ({ ...header, last4: '' })),
+          credential: { configured: validImageCredential(row.credential), last4: '' },
+          managedImage: managedImage(row),
+        }
+      }),
       ...[...declared]
         .filter(name => !rows.some(row => row.name === name))
         .map(name => ({
@@ -55,7 +70,7 @@ export class PluginUpstreamAdministration {
           baseUrl: '',
           headers: [],
           credential: { configured: false, last4: '' },
-          managedImage: { ready: false },
+          managedImage: managedImage(),
         })),
     ]
   }
@@ -68,10 +83,11 @@ export class PluginUpstreamAdministration {
   }
   async execute(actor: CommunityAccountActor, packageName: string, input: CommunityPluginUpstreamAction) {
     const plugin = await this.assertAdmin(actor, packageName)
-    const expectedRevision = await this.store.revision?.(packageName)
-    const current = await this.store.list(packageName)
-    const managed = new Set(await this.managedImages(plugin))
     if (!input || !['save', 'delete'].includes(input.action)) throw new BusinessRuleError('invalid', 'Invalid upstream action', 'plugin-upstream-invalid')
+    const snapshot = await this.store.snapshot?.(packageName)
+    const expectedRevision = snapshot?.revision ?? (await this.store.revision?.(packageName))
+    const current = snapshot?.upstreams ?? (await this.store.list(packageName))
+    const managed = new Set(await this.managedImages(plugin))
     if (input.action === 'delete') {
       if (!current.some(row => row.name === input.name)) throw new BusinessRuleError('missing', 'Upstream was not found', 'not-found')
       const references = managed.has(input.name) ? ['catalog'] : ((await this.references?.references(packageName, input.name)) ?? [])
@@ -90,7 +106,23 @@ export class PluginUpstreamAdministration {
       if (!input.upstream || typeof input.upstream !== 'object') throw new BusinessRuleError('invalid', 'Invalid upstream action', 'plugin-upstream-invalid')
       const existing = current.find(row => row.name === input.upstream.name)
       const isManaged = managed.has(input.upstream.name)
-      const next: PluginUpstream = isManaged
+      const stale = isManaged
+        ? !snapshot || input.expectedRevision?.upstream !== snapshot.revision || input.expectedRevision?.plugin !== plugin.revision
+        : input.expectedRevision !== undefined
+      if (stale) throw new BusinessRuleError('conflict', 'Platform configuration changed. Reload before saving.', 'platform-configuration-conflict')
+      if (input.enabled !== undefined && (!isManaged || typeof input.enabled !== 'boolean'))
+        throw new BusinessRuleError('invalid', 'Invalid upstream action', 'plugin-upstream-invalid')
+      if (isManaged && input.upstream.credential && !validImageCredential(input.upstream.credential))
+        throw new BusinessRuleError('invalid', 'Enter a valid API key.', 'plugin-upstream-invalid')
+      let managedHeaders = existing?.headers ?? managedImageUpstreamHeaders
+      if (isManaged && existing?.secretUnavailable) {
+        const unreadable = new Set(existing.unreadableHeaders ?? existing.headers.filter(header => !header.value).map(header => header.name))
+        const submitted = Array.isArray(input.upstream.headers) ? input.upstream.headers : []
+        managedHeaders = existing.headers.map(header =>
+          unreadable.has(header.name) ? { name: header.name, value: submitted.find(row => row?.name === header.name)?.value ?? '' } : header,
+        )
+      }
+      let next: PluginUpstream = isManaged
         ? {
             ...mergeUpstreamInput(
               {
@@ -99,7 +131,7 @@ export class PluginUpstreamAdministration {
                 ...(input.upstream.model === undefined ? {} : { model: input.upstream.model }),
                 ...(input.upstream.credential === undefined ? {} : { credential: input.upstream.credential }),
                 ...(input.upstream.clearCredential ? { clearCredential: true } : {}),
-                headers: existing?.headers ?? managedImageUpstreamHeaders,
+                headers: managedHeaders,
                 testRequest: existing?.testRequest ?? managedImageUpstreamTest,
               },
               existing,
@@ -107,8 +139,15 @@ export class PluginUpstreamAdministration {
             nativeServiceOnly: true,
           }
         : mergeUpstreamInput(input.upstream, existing)
+      if (input.enabled !== undefined) {
+        const { imageDisabled, ...configuration } = next
+        void imageDisabled
+        if (input.enabled && !imageUpstreamReady(configuration))
+          throw new BusinessRuleError('invalid', 'Complete the required fields.', 'plugin-upstream-invalid')
+        next = input.enabled ? configuration : { ...configuration, imageDisabled: true }
+      }
       await this.store.save(packageName, [...current.filter(row => row.name !== next.name), next], undefined, expectedRevision, plugin.revision)
-      if (isManaged && imageUpstreamReady(next)) await this.onManagedImageSaved?.(packageName)
+      if (isManaged && (imageUpstreamReady(next) || imageUpstreamReady(existing))) await this.onManagedImageSaved?.(packageName)
     }
     return await this.list(actor, packageName)
   }

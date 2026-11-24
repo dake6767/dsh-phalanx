@@ -41,7 +41,7 @@ export class NativePluginServiceAccess {
       library: Pick<PluginLibraryStorePort, 'list'>
       grants: Pick<PluginGroupConfigurationPort, 'preinstalls'>
       installations: Pick<PluginInstallationsPort, 'get'>
-      services: Required<Pick<PluginAccessStorePort, 'installedServices' | 'installedServiceOwner'>>
+      services: Required<Pick<PluginAccessStorePort, 'installedServices' | 'serviceDeliveryGeneration'>>
       upstreams?: Pick<PluginUpstreamsPort, 'list'>
       runtime: Pick<CommunityRuntimePort, 'status'>
       manager: Pick<MemberPluginManagerPort, 'list'> & Required<Pick<MemberPluginManagerPort, 'verifyArchive'>>
@@ -52,6 +52,11 @@ export class NativePluginServiceAccess {
       runtimeRevision: string
     },
   ) {}
+
+  async installedServiceOrigins(): Promise<ReadonlyMap<string, string>> {
+    const rows = await this.deps.library.list()
+    return new Map(rows.flatMap(row => (row.suiteOrigin && !row.removing ? [[row.packageName, row.suiteOrigin]] : [])))
+  }
 
   /** A successful new delivery may claim this exact catalog origin. Old delivery rows have no claim. */
   async describeDelivery(packageName: string) {
@@ -64,13 +69,14 @@ export class NativePluginServiceAccess {
       plugin.current?.runtimeRevision !== this.deps.runtimeRevision
     )
       return undefined
-    const serviceOrigin = (await this.deps.services.installedServiceOwner(packageName)) === plugin.current.integrity ? plugin.suiteOrigin : undefined
+    const serviceGeneration = await this.deps.services.serviceDeliveryGeneration(packageName, plugin.suiteOrigin, plugin.current.integrity)
+    const serviceOrigin = serviceGeneration ? plugin.suiteOrigin : undefined
     const resourceOrigin = plugin.suiteResourceBindings?.length ? plugin.suiteOrigin : undefined
     if (!serviceOrigin && !resourceOrigin) return undefined
     return {
       version: plugin.current.version,
       integrity: plugin.current.integrity,
-      ...(serviceOrigin ? { serviceOrigin } : {}),
+      ...(serviceOrigin ? { serviceOrigin, serviceGeneration } : {}),
       ...(resourceOrigin ? { resourceOrigin } : {}),
       ...(plugin.suiteResourceBindings?.some(isPlaywrightResource) ? { browser: true } : {}),
     }
@@ -263,6 +269,10 @@ export class NativePluginServiceAccess {
     const authorization = deferred
       ? canonicalJson([plugin.suiteOrigin, prepared.integrity, slot.binding, backend.protocol])
       : JSON.stringify([plugin.suiteOrigin, prepared.integrity, services.configuration.identity])
+    const configuredHeaders = deferred ? (upstream?.headers ?? []) : []
+    const headers = configuredHeaders.some(header => header.name.toLowerCase() === 'authorization')
+      ? configuredHeaders
+      : [...managedImageUpstreamHeaders, ...configuredHeaders]
     return {
       binding: createHash('sha256').update(authorization).digest('base64url'),
       username: account.username,
@@ -270,7 +280,7 @@ export class NativePluginServiceAccess {
       model: configuredModel,
       multipartEdits: deferred,
       protocol: backend.protocol,
-      upstream: { name: scope.backend, baseUrl: base.href, credential, headers: managedImageUpstreamHeaders },
+      upstream: { name: scope.backend, baseUrl: base.href, credential, headers },
     }
   }
 }

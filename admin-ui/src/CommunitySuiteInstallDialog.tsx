@@ -19,7 +19,9 @@ import { filledCredentials } from './community-suite-credentials'
 import { Button } from '@heroui/react/button'
 import { usePlatformLanguage } from './CommunityLanguage'
 import { useDraftGuard } from './useDraftGuard'
-import { catalogPluginDistribution, catalogServiceActions, serviceDraftKey } from './community-catalog-setup'
+import { catalogPluginDistribution, catalogServiceActions, pluginServiceSettings } from './community-catalog-setup'
+import CommunityCatalogServiceFields from './CommunityCatalogServiceFields'
+import CommunityCatalogImageSettings, { catalogImageGroups, type CatalogImageDrafts } from './CommunityCatalogImageSettings'
 
 export default function CommunitySuiteInstallDialog({
   entry,
@@ -52,7 +54,9 @@ export default function CommunitySuiteInstallDialog({
   const [granted, setGranted] = useState<readonly string[]>([])
   const [publish, setPublish] = useState(false)
   const [credentials, setCredentials] = useState<Readonly<Record<string, string>>>({})
+  const [imageDrafts, setImageDrafts] = useState<CatalogImageDrafts>({})
   const [serviceDrafts, setServiceDrafts] = useState<Record<string, Record<string, string>>>({})
+  const [serviceChoices, setServiceChoices] = useState<Record<string, string>>({})
   const [setup, setSetup] = useState<Readonly<ReturnType<typeof catalogServiceActions>>>([])
   const [setupErrors, setSetupErrors] = useState<readonly { task: (typeof setup)[number]; error: unknown }[]>([])
   const [confirmPublish, setConfirmPublish] = useState(false)
@@ -70,7 +74,9 @@ export default function CommunitySuiteInstallDialog({
     if (draftIdentity.current === catalogIdentity || !canInstall) return
     draftIdentity.current = catalogIdentity
     setCredentials({})
+    setImageDrafts({})
     setServiceDrafts({})
+    setServiceChoices({})
     setGranted([])
     setPublish(false)
     setReplace(false)
@@ -102,12 +108,15 @@ export default function CommunitySuiteInstallDialog({
     return () => controller.abort()
   }, [entry.id, entry.version, entry.contentHash, entry.plugin?.packageName, entry.packName, canInstall, previewReload])
   const serviceActions = catalogServiceActions(
-    entry.services ?? [],
+    entry.services?.filter(owner => owner.kind === 'execution') ?? [],
     serviceDrafts,
     locale,
     entry,
     t('Service configuration changed. Review the installed settings.'),
   )
+  const imageGroups = catalogImageGroups(entry.plugin?.deferredUpstreams ?? [], imageDrafts)
+  const incompleteImages = imageGroups.some(group => group.missing.length > 0)
+  const { settings: serviceSettings, incomplete: incompleteServices } = pluginServiceSettings(entry.services ?? [], serviceDrafts)
   const runSetup = async (actions: Readonly<ReturnType<typeof catalogServiceActions>>, publishConfirmed?: true) => {
     if (applying.current) return
     applying.current = true
@@ -135,6 +144,7 @@ export default function CommunitySuiteInstallDialog({
     if (!failures.length) {
       setServiceDrafts({})
       setCredentials({})
+      setImageDrafts({})
       setPublish(false)
       setGranted([])
     }
@@ -158,6 +168,8 @@ export default function CommunitySuiteInstallDialog({
       pending.current ||
       !preview?.available ||
       !preview.creates.length ||
+      incompleteImages ||
+      incompleteServices ||
       (preview.replacements?.length && !replace)
     )
       return
@@ -165,6 +177,7 @@ export default function CommunitySuiteInstallDialog({
     setBusy(true)
     setError(undefined)
     const filled = filledCredentials(credentials)
+    const imageSettings = imageGroups.filter(group => group.started).map(group => group.values)
     try {
       const accepted = await installCommunitySuite({
         id: entry.id,
@@ -173,6 +186,8 @@ export default function CommunitySuiteInstallDialog({
         ...(entry.packName && granted.length ? { groups: granted } : {}),
         ...(entry.packName && publish ? { publish: true } : {}),
         ...(Object.keys(filled).length ? { credentials: filled } : {}),
+        ...(imageSettings.length ? { imageSettings } : {}),
+        ...(serviceSettings.length ? { serviceSettings } : {}),
         ...(replace && preview?.replacements?.length ? { replace: preview.replacements } : {}),
       })
       requestId.current = communityRequestId()
@@ -190,6 +205,8 @@ export default function CommunitySuiteInstallDialog({
       setSetup(actions)
       if (!actions.length) {
         setCredentials({})
+        setImageDrafts({})
+        setServiceDrafts({})
         setGranted([])
         setPublish(false)
       }
@@ -200,6 +217,7 @@ export default function CommunitySuiteInstallDialog({
         setLoaded(undefined)
         setReplace(false)
         setCredentials({})
+        setImageDrafts({})
         setServiceDrafts({})
         onSubmitted()
       }
@@ -215,7 +233,14 @@ export default function CommunitySuiteInstallDialog({
   const blocked = busy || setupBusy || installedBusy || (installation?.status === 'installing' && setup.length > 0 && !refreshError)
   const dirty =
     installedDraft ||
-    (canInstall && (replace || publish || granted.length > 0 || serviceActions.length > 0 || Object.keys(filledCredentials(credentials)).length > 0)) ||
+    (canInstall &&
+      (replace ||
+        publish ||
+        granted.length > 0 ||
+        serviceActions.length > 0 ||
+        serviceSettings.length > 0 ||
+        imageGroups.some(group => group.started) ||
+        Object.keys(filledCredentials(credentials)).length > 0)) ||
     (installation?.status !== 'failed' && setup.length > 0)
   const guard = useDraftGuard(dirty, undefined, () => {}, blocked)
   const close = () => guard.request(onClose)
@@ -234,7 +259,14 @@ export default function CommunitySuiteInstallDialog({
           </Button>
           {canInstall ? (
             <Button
-              isDisabled={installing || !preview?.available || !preview.creates.length || (Boolean(preview.replacements?.length) && !replace)}
+              isDisabled={
+                installing ||
+                incompleteImages ||
+                incompleteServices ||
+                !preview?.available ||
+                !preview.creates.length ||
+                (Boolean(preview.replacements?.length) && !replace)
+              }
               onPress={() => {
                 void submit()
               }}
@@ -424,10 +456,11 @@ export default function CommunitySuiteInstallDialog({
                 ] as const
               ).map(([names, message]) => (names?.length ? <CatalogWarning key={message} message={t(message, { names: names.join(', ') })} /> : null))}
             </section>
-            {(execution || entry.services?.length) && preview.creates.length ? (
+            {(execution || entry.services?.length || imageGroups.length) && preview.creates.length ? (
               <section className="plugin-detail-section">
-                <h2>{t('Set up service backends')}</h2>
-                {entry.services?.length ? <p>{t('Service configuration is optional. You can also add it after installation.')}</p> : null}
+                <h2>{t(entry.plugin ? 'Access settings' : 'Set up service backends')}</h2>
+                {entry.services?.length || imageGroups.length ? <p>{t('Service configuration is optional. You can also add it after installation.')}</p> : null}
+                <CommunityCatalogImageSettings groups={imageGroups} drafts={imageDrafts} onDrafts={setImageDrafts} disabled={blocked} />
                 {execution ? (
                   <div className="page-stack">
                     <h3>{t('Team credentials (optional)')}</h3>
@@ -452,49 +485,14 @@ export default function CommunitySuiteInstallDialog({
                     </p>
                   </div>
                 ) : null}
-                {entry.services?.map(owner =>
-                  owner.slots.map(slot => (
-                    <section key={JSON.stringify([owner.kind, owner.name, slot.id])} className="catalog-service-slot" aria-label={slot.label[locale]}>
-                      <h3>{slot.label[locale]}</h3>
-                      {slot.backends.map(backend => {
-                        const key = serviceDraftKey(owner, slot.id, backend.id)
-                        return (
-                          <details key={key} className="catalog-service-backend">
-                            <summary>{backend.label[locale]}</summary>
-                            <div className="page-stack">
-                              {backend.fields.map(field => (
-                                <CommunityField
-                                  key={field.name}
-                                  label={field.label?.[locale] ?? field.name}
-                                  type={field.type === 'secret' ? 'password' : field.type}
-                                  autoComplete={field.type === 'secret' ? 'new-password' : 'off'}
-                                  value={serviceDrafts[key]?.[field.name] ?? ''}
-                                  disabled={blocked}
-                                  description={[
-                                    field.label ? field.name : '',
-                                    field.required
-                                      ? t('Required field')
-                                      : field.requiredGroup
-                                        ? t('Fill one of {fields}', {
-                                            fields: backend.fields
-                                              .filter(other => other.requiredGroup === field.requiredGroup)
-                                              .map(other => other.label?.[locale] ?? other.name)
-                                              .join(' / '),
-                                          })
-                                        : '',
-                                  ]
-                                    .filter(Boolean)
-                                    .join(' · ')}
-                                  onChange={value => setServiceDrafts(current => ({ ...current, [key]: { ...current[key], [field.name]: value } }))}
-                                />
-                              ))}
-                            </div>
-                          </details>
-                        )
-                      })}
-                    </section>
-                  )),
-                )}
+                <CommunityCatalogServiceFields
+                  definitions={entry.services ?? []}
+                  drafts={serviceDrafts}
+                  onDrafts={setServiceDrafts}
+                  choices={serviceChoices}
+                  onChoices={setServiceChoices}
+                  disabled={blocked}
+                />
               </section>
             ) : null}
             {entry.plugin || entry.packName ? (

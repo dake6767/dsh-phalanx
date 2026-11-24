@@ -1,4 +1,4 @@
-import { DSH_BUNDLE_ENABLE, DSH_BUNDLE_INSTALL, DSH_BUNDLE_LIST, DSH_BUNDLE_REMOVE } from './plugin-manager-protocol.js'
+import { DSH_BUNDLE_ENABLE, DSH_BUNDLE_INCOMPATIBLE_VERSION, DSH_BUNDLE_INSTALL, DSH_BUNDLE_LIST, DSH_BUNDLE_REMOVE } from './plugin-manager-protocol.js'
 import { dshProfileWriterLoader } from './profile-writer.js'
 import { platformPluginContainerPath } from './community-platform-plugin.js'
 import { DSH_CONTAINER_PROFILE, DSH_PATCH_CONFIG, DSH_PROFILE_LOCK, DSH_PROFILE_MANIFEST } from './profile-layout.js'
@@ -163,6 +163,7 @@ async function replaceNativeBundle(invoke, args, profileContext) {
   const fail = (replacement, reason, recovery) => ({ replacement, reason, ...(recovery ? { recovery } : {}) });
   if (!oldPath || !newPath || newPath !== args.spec || newPath === oldPath ||
     typeof packageName !== 'string' || typeof previous.enabled !== 'boolean' ||
+    (previous.incompatibleRuntime !== undefined && previous.incompatibleRuntime !== true) ||
     typeof previous.version !== 'string' || typeof next.version !== 'string' || typeof authorizationUrl !== 'string')
     return fail('changed', 'invalid-update');
   const delivery = args.installDefaults;
@@ -176,6 +177,10 @@ async function replaceNativeBundle(invoke, args, profileContext) {
   const current = async () => owned(await inventory());
   const matches = (row, path, version) => row?.installed === true && row.source === 'file:' + path && row.version === version;
   const sameState = (row, path, version) => matches(row, path, version) && row.enabled === previous.enabled && !row.error;
+  const expectedPreviousError = row => previous.incompatibleRuntime
+    ? row.error?.code === ${JSON.stringify(DSH_BUNDLE_INCOMPATIBLE_VERSION)}
+    : !row.error;
+  const samePreviousState = row => matches(row, oldPath, previous.version) && row.enabled === previous.enabled && expectedPreviousError(row);
   const verify = (path, integrity) => verifiedArchive(path, integrity).catch(() => false);
   const installedArchive = (path, integrity) => resolvedArchive(packageName, path, integrity).catch(() => false);
   const remove = (name = packageName) => call(${JSON.stringify(DSH_BUNDLE_REMOVE)}, { name });
@@ -204,7 +209,7 @@ async function replaceNativeBundle(invoke, args, profileContext) {
     if (!(await installedArchive(oldPath, previous.integrity)) || !(await verify(newPath, next.integrity)))
       return fail('changed', 'archive-unverified');
     before = await current();
-    if (!sameState(before, oldPath, previous.version) || !before.removable) return fail('changed', 'copy-changed');
+    if (!samePreviousState(before) || !before.removable) return fail('changed', 'copy-changed');
     recovery = await mkdtemp(join(archiveDirectory, 'recovery-'));
     const savedArchive = join(recovery, 'previous.tgz');
     await copyArchive(oldPath, savedArchive);
@@ -233,7 +238,7 @@ async function replaceNativeBundle(invoke, args, profileContext) {
     const confirmation = await fetch(authorizationUrl, { method: 'HEAD', redirect: 'error', signal: AbortSignal.timeout(20000) });
     const rows = await inventory();
     const actual = owned(rows);
-    if (!confirmation.ok || !sameState(actual, oldPath, previous.version) || !actual.removable) throw new NativeRecoveryFailure('copy-changed');
+    if (!confirmation.ok || !samePreviousState(actual) || !actual.removable) throw new NativeRecoveryFailure('copy-changed');
     occupied = new Set(rows.filter(row => row.installed || row.enabled).map(row => row.name));
   } catch {
     await clean();
@@ -320,11 +325,11 @@ async function replaceNativeBundle(invoke, args, profileContext) {
       actual = await current();
       if (actual?.enabled !== false) throw new NativeRecoveryFailure('previous-copy-not-confirmed');
     }
-    if (!matches(actual, oldPath, previous.version) || actual.error || !(await installedArchive(oldPath, previous.integrity)))
+    if (!matches(actual, oldPath, previous.version) || !expectedPreviousError(actual) || !(await installedArchive(oldPath, previous.integrity)))
       throw new NativeRecoveryFailure('previous-copy-not-confirmed');
     if (actual.enabled !== previous.enabled && !noteApplication(await select(previous.enabled)))
       throw new NativeRecoveryFailure('previous-selection-failed');
-    if (!sameState(await current(), oldPath, previous.version) || !(await installedArchive(oldPath, previous.integrity))) throw new NativeRecoveryFailure('previous-copy-not-confirmed');
+    if (!samePreviousState(await current()) || !(await installedArchive(oldPath, previous.integrity))) throw new NativeRecoveryFailure('previous-copy-not-confirmed');
     if (!(await defaultSettingsMatch(originalSettings, settingsRows))) throw new NativeRecoveryFailure('settings-changed');
     if (unexpectedRemains) throw new NativeRecoveryFailure('unexpected-copy');
     await clean();

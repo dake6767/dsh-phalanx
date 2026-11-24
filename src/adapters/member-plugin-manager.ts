@@ -1,4 +1,4 @@
-import { DSH_BUNDLE_LIST, DSH_BUNDLE_REMOVE } from '../dsh/plugin-manager-protocol.js'
+import { DSH_BUNDLE_INCOMPATIBLE_VERSION, DSH_BUNDLE_LIST, DSH_BUNDLE_REMOVE } from '../dsh/plugin-manager-protocol.js'
 import type {
   NativePluginInstallTransport,
   NativePluginCache,
@@ -31,12 +31,14 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
       source?: string
       enabled?: boolean
       removable?: boolean
-      error?: unknown
+      error?: { code?: string }
       installDefaultsPending?: string
     }>
     if (!Array.isArray(rows)) throw this.failure()
     return rows.flatMap(row => {
       const archiveIntegrity = retainedMemberPluginArchiveIntegrity(row.source)
+      const archive =
+        archiveIntegrity && row.removable === true && typeof row.enabled === 'boolean' ? { integrity: archiveIntegrity, enabled: row.enabled } : undefined
       return row.installed === true && typeof row.name === 'string'
         ? [
             {
@@ -48,9 +50,8 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
               (row.installDefaultsPending === 'discarding' || /^[a-f0-9]{64}$/u.test(row.installDefaultsPending))
                 ? { installDefaultsPending: row.installDefaultsPending }
                 : {}),
-              ...(archiveIntegrity && row.removable === true && !row.error && typeof row.enabled === 'boolean'
-                ? { archiveIntegrity, enabled: row.enabled }
-                : {}),
+              ...(archive && !row.error ? { archiveIntegrity: archive.integrity, enabled: archive.enabled } : {}),
+              ...(archive && row.error?.code === DSH_BUNDLE_INCOMPATIBLE_VERSION ? { incompatibleArchive: archive } : {}),
             },
           ]
         : []

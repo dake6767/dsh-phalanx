@@ -15,6 +15,37 @@ When your group shows **Platform App Center**, open it from the DSH sidebar. The
 
 If an administrator enabled voice input, start or restart your instance to receive it. Use a secure browser context (HTTPS remotely or localhost) and allow the browser to use the microphone. For platform web search, ask an administrator to configure the platform search key. Your shared model key is not used for that setting.
 
+## Install a native plugin from a local archive
+
+Your group needs permission to add native plugins and open the member terminal. If a plugin publishes a compatible `.tgz` and your member instance cannot download it directly, download the archive in your browser. Keep its original filename and check its SHA-256 against the release. Open a conversation in your own member instance and attach the archive using the composer. Once the attachment appears, leave the conversation as a draft.
+
+In a member terminal, get the path for the verified archive. Substitute the original filename and full SHA-256.
+
+```sh
+filename='your-plugin.tgz'
+sha256='the-full-published-sha256'
+prefix=$(printf '%.2s' "$sha256")
+printf '%s\n' "$HOME/.dsh/attachments/v1/files/$prefix/$sha256/$filename"
+```
+
+With no copy of that package installed in your instance, open **Plugins → Add plugin** in the DSH sidebar. Paste the path as the package address, install, and enable the plugin. Restart the instance if DSH prompts you, then open the plugin from the sidebar. Keep the uploaded archive in your member home so the local package source remains available.
+
+## Open the native billion-context panel remotely
+
+Install and enable `billion-context` through **Plugins → Add plugin**. Restart your instance if DSH prompts you, then open **Settings → bili** in your signed-in Phalanx member space. The plugin's panel service listens on loopback inside your instance. For remote browser access through the same member space, enable the plugin's relay in your own configuration.
+
+In the member terminal, edit the configuration the plugin reads. The default is `~/.config/billion-context/billion-context.json`, or `billion-context/billion-context.json` under `XDG_CONFIG_HOME` when set. A `BILI_CONFIG_FILE` override can be a file path or a name that resolves to `<name>.json` in the plugin's configuration directory. Set `security.adminRelay` to `true` and keep your other settings. A new configuration can start with this JSON.
+
+```json
+{
+  "security": {
+    "adminRelay": true
+  }
+}
+```
+
+Reload your member page and reopen **Settings → bili** to see the compression overview and sessions. After a conversation's first model request, open its **Context** tab. DSH may put it under **More conversation views**. The relay is off by default. Enabling it makes the full panel, including its configuration and credential controls, available through your own authenticated Phalanx member space.
+
 ## Switching accounts in this browser
 
 Administrators see **Go to admin console** as the first item in the DSH sidebar

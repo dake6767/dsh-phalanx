@@ -369,6 +369,7 @@ export class SuiteTransactions {
             await writeSuitePlugin(rows, origin, unit.plugin, dependencies, 'install', {
               serviceIdentity: installedCatalogIdentity(entry),
               ...this.pluginWiring,
+              ...(entry.id === choices.id ? { accessSettings: choices } : {}),
               ...(takeover ? { takeover } : {}),
             })
           }

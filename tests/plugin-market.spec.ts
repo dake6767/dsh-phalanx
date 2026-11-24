@@ -215,7 +215,15 @@ it('uses actual native inventory for market actions without treating delivery hi
     records,
     {
       describeDelivery: async () =>
-        adapted ? { version: plugin.version, integrity: plugin.integrity, resourceOrigin: 'catalog', serviceOrigin: 'catalog' } : undefined,
+        adapted
+          ? {
+              version: plugin.version,
+              integrity: plugin.integrity,
+              resourceOrigin: 'catalog',
+              serviceOrigin: 'catalog',
+              serviceGeneration: 'fixture-revision',
+            }
+          : undefined,
     },
     {
       apply: async () => {

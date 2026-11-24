@@ -80,13 +80,28 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
         requests.push({
           path: request.url,
           key: request.headers.authorization,
+          tenant: request.headers['x-provider-tenant'],
           cookie: request.headers.cookie,
           model: multipart.get('model'),
           prompt: multipart.get('prompt'),
           image: [...new Uint8Array(await image.arrayBuffer())],
         })
         response.setHeader('content-type', 'application/json')
-        response.end(JSON.stringify({ data: [{ b64_json: 'AAE=' }] }))
+        const imagePayload = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jG1sAAAAASUVORK5CYII='
+        const shellOnly = Buffer.from('89504e470d0a1a0a0000000049454e44ae426082', 'hex').toString('base64')
+        response.end(
+          JSON.stringify(
+            multipart.get('prompt') === 'echo-header'
+              ? { data: [{ url: 'https://example.test/image?tenant=' + request.headers['x-provider-tenant'] }] }
+              : multipart.get('prompt') === 'image-with-metadata'
+                ? { created: 1, data: [{ b64_json: imagePayload }] }
+                : multipart.get('prompt') === 'false-image'
+                  ? { data: [{ b64_json: 'not an image: ' + request.headers['x-provider-tenant'] }] }
+                  : multipart.get('prompt') === 'image-shell-only'
+                    ? { data: [{ b64_json: shellOnly }] }
+                    : { data: [{ b64_json: 'AAE=' }] },
+          ),
+        )
         return
       }
       const body = JSON.parse(Buffer.concat(chunks).toString())
@@ -182,6 +197,8 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
   let gateway = ''
   let imageProviderKey = 'fixture-image-key'
   let imageModel = ''
+  let tenant = 'tenant-secret-fixture'
+  let imageDisabled = false
   const access = new NativePluginServiceAccess({
     accounts: {
       ...accountState(username => (username === member.username ? member : undefined)),
@@ -195,7 +212,7 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
       ],
     },
     services: {
-      installedServiceOwner: async () => integrity,
+      serviceDeliveryGeneration: async () => 'fixture-catalog-revision',
       installedServices: async () => ({
         revision: String(revision),
         configuration: {
@@ -214,9 +231,10 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
         {
           name: 'image-provider',
           baseUrl: upstream + '/v1',
-          headers: [],
+          headers: imageModel ? [{ name: 'X-Provider-Tenant', value: tenant }] : [],
           credential: imageProviderKey,
           ...(imageModel ? { model: imageModel } : {}),
+          ...(imageDisabled ? { imageDisabled: true as const } : {}),
         },
       ],
     },
@@ -424,7 +442,7 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
     editForm?.(form)
     return fetch(grant.url + '/images/edits', {
       method: 'POST',
-      headers: { authorization: 'Bearer ' + grant.token, cookie: 'member=private' },
+      headers: { authorization: 'Bearer ' + grant.token, cookie: 'member=private', 'x-provider-tenant': 'member-tenant' },
       body: form,
     })
   }
@@ -453,11 +471,37 @@ it('uses a member and backend scoped bearer and applies changes only to new requ
   expect(requests.at(-1)).toEqual({
     path: '/v1/images/edits',
     key: 'Bearer rotated-image-key',
+    tenant: 'tenant-secret-fixture',
     cookie: undefined,
     model: imageModel,
     prompt: 'Change the color',
     image: [0, 255, 65, 13, 10],
   })
+  const echoedHeader = await edit(managed, imageModel, form => form.set('prompt', 'echo-header'))
+  expect(echoedHeader.status).toBe(502)
+  expect(await echoedHeader.text()).not.toContain('tenant-secret-fixture')
+  tenant = 'qZ'
+  revision++
+  const echoedShortHeader = await edit(managed, imageModel, form => form.set('prompt', 'echo-header'))
+  expect(echoedShortHeader.status).toBe(502)
+  expect(await echoedShortHeader.text()).not.toContain('qZ')
+  tenant = '1'
+  revision++
+  const realImage = await edit(managed, imageModel, form => form.set('prompt', 'image-with-metadata'))
+  expect(realImage.status).toBe(200)
+  expect(await realImage.json()).toMatchObject({ created: 1, data: [{ b64_json: expect.stringContaining('1') }] })
+  const fakeImage = await edit(managed, imageModel, form => form.set('prompt', 'false-image'))
+  expect(fakeImage.status).toBe(502)
+  tenant = 'A'
+  revision++
+  const fakeImageContainer = await edit(managed, imageModel, form => form.set('prompt', 'image-shell-only'))
+  expect(fakeImageContainer.status).toBe(502)
+  const sent = requests.length
+  imageDisabled = true
+  revision++
+  expect((await edit(managed, imageModel)).status).toBe(503)
+  expect(requests).toHaveLength(sent)
+  imageDisabled = false
   version = '1.2.0'
   revision++
   expect(await access.issue(member, instance, packageName, 'image', 'openai', AbortSignal.timeout(5000))).toEqual(managed)

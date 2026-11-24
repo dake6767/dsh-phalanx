@@ -4,15 +4,23 @@ import { BusinessRuleError } from './business-error.js'
 export interface PluginUpstream extends Omit<CommunityPluginUpstreamInput, 'credential' | 'clearCredential'> {
   readonly credential: string
   readonly secretUnavailable?: true
+  readonly unreadableHeaders?: readonly string[]
   readonly nativeServiceOnly?: true
+  readonly imageDisabled?: true
 }
 
 export function imageUpstreamReady(upstream: PluginUpstream | undefined): upstream is PluginUpstream & { readonly model: string } {
-  return !!upstream?.baseUrl && /^[\x21-\x7e]+$/u.test(upstream.credential) && validUpstreamModel(upstream.model) && !upstream.secretUnavailable
+  return !!upstream?.baseUrl && !upstream.imageDisabled && imageUpstreamCredentialReady(upstream) && validUpstreamModel(upstream.model)
 }
 
+export function imageUpstreamCredentialReady(upstream: PluginUpstream): boolean {
+  return !upstream.secretUnavailable && validImageCredential(upstream.credential)
+}
+
+export const validImageCredential = (value: unknown): value is string => typeof value === 'string' && /^[\x21-\x7e]+$/u.test(value)
+
 function validUpstreamModel(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 256 && value.trim() === value && !/\p{Cc}/u.test(value)
+  return typeof value === 'string' && value.length > 0 && value.length <= 4096 && value.trim() === value && !/\p{Cc}/u.test(value)
 }
 
 export const managedImageUpstreamHeaders = [{ name: 'Authorization', value: 'Bearer {credential}' }] as const
@@ -58,7 +66,11 @@ export function upstreamWriteInput(row: CommunityPluginUpstreamView, declaration
 }
 export function mergeUpstreamInput(input: CommunityPluginUpstreamInput, prior?: PluginUpstream): PluginUpstream {
   upstreamInput(input)
-  if (prior?.secretUnavailable && ((!input.credential && !input.clearCredential) || input.headers.some(header => !header.value))) {
+  const unreadable = new Set(prior?.unreadableHeaders ?? prior?.headers.filter(header => !header.value).map(header => header.name))
+  if (
+    prior?.secretUnavailable &&
+    ((!input.credential && !input.clearCredential && !prior.credential) || input.headers.some(header => !header.value && unreadable.has(header.name)))
+  ) {
     throw new BusinessRuleError('invalid', 'Replace the credential and all locked headers to repair this upstream', 'plugin-upstream-invalid')
   }
   const model = input.model ?? prior?.model
@@ -67,6 +79,7 @@ export function mergeUpstreamInput(input: CommunityPluginUpstreamInput, prior?: 
     baseUrl: input.baseUrl,
     ...(model === undefined ? {} : { model }),
     ...(prior?.nativeServiceOnly ? { nativeServiceOnly: true as const } : {}),
+    ...(prior?.imageDisabled ? { imageDisabled: true as const } : {}),
     headers: input.headers.map(header => ({
       name: header.name,
       value: header.value || prior?.headers.find(old => old.name.toLowerCase() === header.name.toLowerCase())?.value || '',

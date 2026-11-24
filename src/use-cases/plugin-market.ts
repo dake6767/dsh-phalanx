@@ -2,7 +2,7 @@ import type { CatalogPluginDistributionIdentity } from '../domain/plugin-group-c
 import { suiteInstallOrigin } from '../domain/suite-install.js'
 import type { CommunityMarketPageData, CommunityPluginContributionInfo } from '../domain/admin-contract.js'
 import { matchesPendingInstallDefaults } from '../domain/native-install-defaults.js'
-import { nativeUpdateChoice } from '../domain/member-plugin-update.js'
+import { nativeUpdateChoice, nativeUpdatePrevious } from '../domain/member-plugin-update.js'
 import type { NativePluginArchiveFacts } from '../domain/plugin-preinstall.js'
 import type { InstalledMarketPlugin } from '../ports/plugin-market.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
@@ -257,13 +257,8 @@ export class PluginMarket {
         if (!current()) throw this.updateChanged()
         const installed = await this.manager.list(instance, origin, checkSignal)
         const actual = installed.find(row => row.packageName === packageName)
-        if (
-          !actual?.version ||
-          !actual.archiveIntegrity ||
-          actual.installDefaultsPending !== undefined ||
-          actual.enabled === undefined ||
-          (verify && !(await this.verifyArchive(instance, actual, checkSignal)))
-        )
+        const previous = actual && nativeUpdatePrevious(actual)
+        if (!actual || !previous || actual.installDefaultsPending !== undefined || (verify && !(await this.verifyArchive(instance, actual, checkSignal))))
           throw this.updateChanged()
         const plugin = (await this.available(actor.username)).find(entry => entry.packageName === packageName)
         const delivery = await jobs.delivery(actor, packageName)
@@ -282,7 +277,7 @@ export class PluginMarket {
           source: delivery.source,
           replacement: {
             packageName,
-            previous: { version: actual.version, integrity: actual.archiveIntegrity, enabled: actual.enabled },
+            previous,
             next: { version: plugin.version, integrity: plugin.integrity },
           },
         }
@@ -388,7 +383,8 @@ export class PluginMarket {
     )
   }
   private async verifyArchive(instance: CommunityUserInstance, actual: InstalledMarketPlugin, signal: AbortSignal) {
-    return actual.archiveIntegrity && (await this.manager.verifyArchive?.(instance, actual.packageName, actual.archiveIntegrity, signal))
+    const previous = nativeUpdatePrevious(actual)
+    return previous && (await this.manager.verifyArchive?.(instance, actual.packageName, previous.integrity, signal))
   }
   private async updateChoice(actor: CommunityAccountActor, actual: InstalledMarketPlugin, plugin: PreparedPlugin) {
     const row = (await this.library.list()).find(row => row.packageName === actual.packageName)

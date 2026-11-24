@@ -64,7 +64,10 @@ it('persists an intent before native save and recovers a committed save after a 
         },
       }),
     },
-    { issue: async () => ({ token: 'member-scope', url: 'http://localhost/scoped', model: 'model', protocol: 'openai-chat' }) },
+    {
+      issue: async () => ({ token: 'member-scope', url: 'http://localhost/scoped', model: 'model', protocol: 'openai-chat' }),
+      installedServiceOrigins: async () => new Map(),
+    },
     { syncSettings },
   )
   expect(await settings.apply(actor, instance, 'native', origin)).toEqual([{ slot: 'chat', status: 'failed' }])
@@ -120,7 +123,10 @@ it('defers JSON bindings until the next entry and persists detached fields even 
         },
       }),
     },
-    { issue: async () => ({ token: 'member-scope', url: 'http://localhost/scoped', model: 'model', protocol: 'openai-image' }) },
+    {
+      issue: async () => ({ token: 'member-scope', url: 'http://localhost/scoped', model: 'model', protocol: 'openai-image' }),
+      installedServiceOrigins: async () => new Map(),
+    },
     { syncSettings: vi.fn(), syncJsonSettings },
   )
   expect(await settings.apply(actor, instance, 'native', origin)).toEqual([{ slot: 'chat', status: 'pending', nextStart: true }])
@@ -141,4 +147,40 @@ it('defers JSON bindings until the next entry and persists detached fields even 
   syncJsonSettings.mockResolvedValueOnce({ status: 'applied', fields })
   await settings.ensureLaunch(actor, { ...instance, processId: 44 }, origin)
   expect(syncJsonSettings.mock.calls.at(-1)?.[2].previous).toEqual(fields)
+})
+
+it('shows incompatible platform setups only while the catalog origin and member delivery still exist', async () => {
+  const delivery: PluginInstallation = { packageName: 'native', source: 'selected', version: '1.0.0', integrity: 'old', serviceOrigin: 'suite:catalog' }
+  let records = [delivery]
+  let origins = new Map([['native', 'suite:catalog']])
+  const settings = new MemberNativeServiceSettings(
+    { get: async () => records, replaceServiceSettings: async () => false },
+    {
+      installedServices: async () => ({
+        revision: 'current',
+        configuration: { identity: { id: 'catalog', version: '2.0.0' }, ownerVersion: 'new', slots: [slot], settings: [] },
+      }),
+    },
+    {
+      issue: vi.fn(),
+      bindingAvailability: async () => undefined,
+      installedServiceOrigins: async () => origins,
+    },
+    { syncSettings: vi.fn() },
+  )
+
+  await settings.ensureLaunch(actor, instance, origin)
+  expect(await settings.list(actor, instance)).toEqual([{ packageName: 'native', bindings: [{ slot: '', status: 'unsupported' }] }])
+
+  origins = new Map()
+  expect(await settings.list(actor, instance)).toEqual([])
+  const nextInstance = { ...instance, processId: 43 }
+  await settings.ensureLaunch(actor, nextInstance, origin)
+  expect(await settings.list(actor, nextInstance)).toEqual([])
+
+  origins = new Map([['native', 'suite:another-catalog']])
+  expect(await settings.list(actor, nextInstance)).toEqual([])
+  origins = new Map([['native', 'suite:catalog']])
+  records = [{ packageName: 'native', source: 'selected', version: '1.0.0', integrity: 'old' }]
+  expect(await settings.list(actor, nextInstance)).toEqual([])
 })

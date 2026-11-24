@@ -2,12 +2,14 @@ import { pluginCatalogRevision } from '../src/domain/plugin-library.js'
 import { expect, it } from 'vitest'
 import { YamlPluginAccessSyntax } from '../src/adapters/plugin-access-syntax.js'
 import { MemberPluginUpstreams } from '../src/use-cases/member-plugin-upstreams.js'
+import { PluginUpstreamAdministration } from '../src/use-cases/plugin-upstream-administration.js'
 import { createSuiteStorage } from '../src/composition/suite-storage.js'
 import { SuiteTransactions } from '../src/use-cases/suite-transactions.js'
 import { assertCatalogPluginBindings, writeSuitePlugin } from '../src/use-cases/suite-plugin-facts.js'
 import type { SuiteCatalogPluginItem } from '../src/domain/suite-catalog.js'
 import type { CatalogPluginServiceSlot } from '../src/domain/suite-service-slots.js'
 import { suiteInstallOrigin } from '../src/domain/suite-install.js'
+import { imageUpstreamReady } from '../src/domain/plugin-upstream.js'
 import { postgresSuiteService, suiteVersion } from './fixtures/postgres-suite-service.js'
 
 const plugin = (version: 1 | 2) => {
@@ -37,6 +39,158 @@ const plugin = (version: 1 | 2) => {
   }
 }
 
+const label = { en: 'Image', 'zh-CN': '图片' }
+const imageSlot = {
+  id: 'image',
+  label,
+  binding: {
+    kind: 'json-settings',
+    deferredUpstream: true,
+    file: 'image-upstream.json',
+    upstream: 'image-provider',
+    fields: [
+      { path: ['endpoint'], source: 'gateway-url' },
+      { path: ['token'], source: 'service-token' },
+      { path: ['model'], source: 'model' },
+    ],
+  },
+  backends: [
+    {
+      id: 'openai',
+      label,
+      protocol: 'openai-image',
+      mode: 'openai',
+      fields: [{ name: 'model', type: 'text', required: true }],
+      upstream: { model: 'model' },
+    },
+  ],
+} satisfies CatalogPluginServiceSlot
+
+it.each([
+  { scenario: 'enabled', enabled: true, unreadable: false, credential: 'fixture-secret' },
+  { scenario: 'disabled', enabled: false, unreadable: false, credential: 'fixture-secret' },
+  { scenario: 'unreadable', enabled: true, unreadable: true, credential: 'fixture-secret' },
+  { scenario: 'unreadable header', enabled: true, unreadable: true, credential: 'fixture-secret' },
+  { scenario: 'long model', enabled: true, unreadable: false, credential: 'fixture-secret' },
+  { scenario: 'missing credential', enabled: true, unreadable: false, credential: '' },
+  { scenario: 'never configured', enabled: false, unreadable: false, credential: undefined },
+])('migrates the legacy image settings when $scenario', async ({ scenario, enabled, unreadable, credential }) => {
+  const f = await postgresSuiteService()
+  const storage = createSuiteStorage(f.database)
+  const before = plugin(1)
+  const after = plugin(2)
+  const name = before.item.packageName
+  const identity = { id: 'fixture-plugin', version: '1.0.0' }
+  const origin = suiteInstallOrigin(identity.id)
+  const syntax = new YamlPluginAccessSyntax()
+  const legacyModel = scenario === 'long model' ? 'm'.repeat(300) : 'legacy-active-model'
+  const corruptHeader = scenario === 'unreadable header'
+  const legacy = {
+    ...imageSlot,
+    binding: { kind: 'json-settings', file: imageSlot.binding.file, upstream: imageSlot.binding.upstream, fields: imageSlot.binding.fields },
+    backends: [{ ...imageSlot.backends[0]!, fields: [{ name: 'MODEL', type: 'text', required: true }], upstream: { model: 'MODEL' } }],
+  } satisfies CatalogPluginServiceSlot
+  const provider = {
+    name: 'image-provider',
+    baseUrl: 'https://example.test/v1',
+    model: 'unused-upstream-model',
+    credential: credential ?? '',
+    headers: [{ name: 'X-Request-Key', value: '{credential}' }],
+  }
+  try {
+    await storage.work.run(async rows => {
+      await writeSuitePlugin(rows, origin, { ...before, item: { ...before.item, serviceSlots: [legacy] } }, [], 'install', {
+        syntax,
+        serviceIdentity: identity,
+      })
+      if (credential === undefined) return
+      await rows.pluginUpstreams.save(name, [provider])
+      const services = (await rows.pluginAccess.installedServices!(name))!
+      await rows.pluginAccess.saveInstalledServices!(
+        name,
+        origin,
+        { ...services.configuration, settings: [{ slot: 'image', backend: 'openai', enabled, values: { MODEL: legacyModel } }] },
+        services.revision,
+      )
+    })
+    if (unreadable)
+      await f.database.query(
+        corruptHeader
+          ? 'UPDATE dsh_phalanx.plugin_upstreams SET headers=jsonb_build_array(credential) WHERE package_name=$1 AND name=$2'
+          : 'UPDATE dsh_phalanx.plugin_upstreams SET credential=headers->0 WHERE package_name=$1 AND name=$2',
+        [name, provider.name],
+      )
+    const readProtected = () =>
+      f.database.query('SELECT credential, headers FROM dsh_phalanx.plugin_upstreams WHERE package_name=$1 AND name=$2', [name, provider.name])
+    const originalProtected = await readProtected()
+    const update = (rows: Parameters<typeof writeSuitePlugin>[0]) =>
+      writeSuitePlugin(rows, origin, { ...after, item: { ...after.item, serviceSlots: [imageSlot] } }, [], 'update', {
+        syntax,
+        serviceIdentity: { ...identity, version: '2.0.0' },
+      })
+    if (scenario === 'enabled') {
+      await expect(
+        storage.work.run(async rows => {
+          await update(rows)
+          throw Error('interrupted update')
+        }),
+      ).rejects.toThrow('interrupted update')
+      expect(await readProtected()).toEqual(originalProtected)
+      await storage.work.run(async rows => {
+        expect((await rows.pluginAccess.installedServices!(name))?.configuration.ownerVersion).toBe(before.item.integrity)
+        expect((await rows.pluginUpstreams.list(name))[0]?.model).toBe(provider.model)
+      })
+    }
+    await storage.work.run(update)
+    await storage.work.run(async rows => {
+      const upstreams = await rows.pluginUpstreams.list(name)
+      expect(upstreams).toHaveLength(1)
+      expect(upstreams[0]).toMatchObject({ name: provider.name, nativeServiceOnly: true })
+      expect(upstreams[0]?.model).toBe(credential === undefined ? undefined : legacyModel)
+      expect(upstreams[0]?.baseUrl).toBe(credential === undefined ? '' : provider.baseUrl)
+      expect(upstreams[0]?.credential).toBe(unreadable && !corruptHeader ? '' : provider.credential)
+      if (credential !== undefined) expect(upstreams[0]?.headers).toEqual(corruptHeader ? [{ name: 'X-Request-Key', value: '' }] : provider.headers)
+      expect(imageUpstreamReady(upstreams[0])).toBe(enabled && !unreadable && Boolean(credential))
+      expect(await rows.pluginAccess.installedServices!(name)).toMatchObject({ configuration: { ownerVersion: after.item.integrity, settings: [] } })
+    })
+    if (credential !== undefined) expect(await readProtected()).toEqual(originalProtected)
+    if (unreadable) {
+      await storage.work.run(async rows => {
+        const administration = new PluginUpstreamAdministration(f.accounts, rows.plugins, rows.pluginUpstreams, undefined, rows.pluginAccess)
+        const [unavailable] = await administration.list(f.actor, name)
+        expect(unavailable).toMatchObject({
+          credential: { configured: corruptHeader, last4: '' },
+          managedImage: { ready: false, credentialUnavailable: true },
+        })
+        const repair = {
+          action: 'save',
+          expectedRevision: unavailable!.managedImage!.revision!,
+          upstream: {
+            name: provider.name,
+            baseUrl: provider.baseUrl,
+            headers: corruptHeader ? provider.headers : [],
+            ...(corruptHeader ? {} : { credential: 'replacement-fixture-key' }),
+          },
+        } as const
+        if (corruptHeader)
+          await expect(administration.execute(f.actor, name, { ...repair, upstream: { ...repair.upstream, headers: [] } })).rejects.toMatchObject({
+            code: 'plugin-upstream-invalid',
+          })
+        const [restored] = await administration.execute(f.actor, name, repair)
+        expect(restored).toMatchObject({
+          model: legacyModel,
+          credential: { configured: true, last4: '' },
+          managedImage: { ready: true },
+        })
+        expect(restored?.managedImage).not.toHaveProperty('credentialUnavailable')
+        expect((await rows.pluginUpstreams.list(name))[0]?.headers).toEqual(provider.headers)
+      })
+    }
+  } finally {
+    await f.close()
+  }
+})
+
 it.each([true, false])('reserves the native upstream at adoption and retains its scope after removal (previous row: %s)', async ready => {
   const f = await postgresSuiteService()
   const storage = createSuiteStorage(f.database)
@@ -44,32 +198,6 @@ it.each([true, false])('reserves the native upstream at adoption and retains its
   const name = original.item.packageName
   const identity = { id: 'fixture-plugin', version: '1.0.0' }
   const origin = suiteInstallOrigin(identity.id)
-  const label = { en: 'Image', 'zh-CN': '图片' }
-  const slot: CatalogPluginServiceSlot = {
-    id: 'image',
-    label,
-    binding: {
-      kind: 'json-settings',
-      deferredUpstream: true,
-      file: 'image-upstream.json',
-      upstream: 'image-provider',
-      fields: [
-        { path: ['endpoint'], source: 'gateway-url' },
-        { path: ['token'], source: 'service-token' },
-        { path: ['model'], source: 'model' },
-      ],
-    },
-    backends: [
-      {
-        id: 'openai',
-        label,
-        protocol: 'openai-image',
-        mode: 'openai',
-        fields: [{ name: 'model', type: 'text', required: true }],
-        upstream: { model: 'model' },
-      },
-    ],
-  }
   const provider = {
     name: 'image-provider',
     baseUrl: 'https://example.test/v1',
@@ -102,7 +230,7 @@ it.each([true, false])('reserves the native upstream at adoption and retains its
     const stalePlugin = await storage.work.run(async rows => (await rows.plugins.list())[0]!.revision)
     await storage.work.run(async rows => {
       const row = (await rows.plugins.list())[0]!
-      const item = { ...original.item, serviceSlots: [slot] }
+      const item = { ...original.item, serviceSlots: [imageSlot] }
       await writeSuitePlugin(rows, origin, { ...original, item }, [], 'install', {
         syntax,
         serviceIdentity: identity,
@@ -189,9 +317,11 @@ it('commits prepared plugin bytes, protected template settings and catalog recei
     storage = createSuiteStorage(f.database),
     unit = new SuiteTransactions(storage.work, f.dependencies, { now: () => 2 }, { syntax: new YamlPluginAccessSyntax() })
   try {
-    const plan = plugin(1),
-      entry = { ...suiteVersion(1), category: 'plugin' as const, id: 'fixture-plugin', items: [plan.item] },
-      options = { id: entry.id, requestId: 'request-plugin-transaction' }
+    const prepared = plugin(1)
+    const plan = { ...prepared, item: { ...prepared.item, serviceSlots: [imageSlot] } }
+    const entry = { ...suiteVersion(1), category: 'plugin' as const, id: 'fixture-plugin', items: [plan.item] }
+    const imageSettings = { name: 'image-provider', baseUrl: 'https://images.example.test/v1', model: 'fixture-image', credential: 'fictional-install-key' }
+    const options = { id: entry.id, requestId: 'request-plugin-transaction', imageSettings: [imageSettings] }
     await storage.installs.save({
       id: entry.id,
       version: '1',
@@ -214,6 +344,7 @@ it('commits prepared plugin bytes, protected template settings and catalog recei
     await expect(unit.install(f.actor, units, options, request)).rejects.toMatchObject({ sqlState: '23503' })
     expect(await storage.work.run(rows => rows.plugins.list())).toEqual([])
     expect(await storage.work.run(async rows => rows.pluginAccess.get(plan.item.packageName))).toBeUndefined()
+    expect(await storage.work.run(async rows => await rows.pluginUpstreams.list(plan.item.packageName))).toEqual([])
     expect(await storage.requests.get(options.requestId)).toEqual(request)
     expect(await storage.installs.get(entry.id)).toEqual(installed)
     await f.database.query('DROP TRIGGER reject_plugin ON dsh_phalanx.catalog_installs')
@@ -226,6 +357,14 @@ it('commits prepared plugin bytes, protected template settings and catalog recei
       [plan.item.packageName],
     )
     expect(raw[0]!.configuration).not.toHaveProperty('checkpoint')
+    expect(await storage.work.run(async rows => await rows.pluginUpstreams.list(plan.item.packageName))).toMatchObject([
+      {
+        ...imageSettings,
+        nativeServiceOnly: true,
+      },
+    ])
+    expect(JSON.stringify(await storage.installs.get(entry.id))).not.toContain(imageSettings.credential)
+    expect(JSON.stringify(await storage.requests.get(options.requestId))).not.toContain(imageSettings.credential)
     const before = await storage.work.run(async rows => ({ plugin: await rows.plugins.list(), access: await rows.pluginAccess.get(plan.item.packageName) }))
     await unit.install(f.actor, units, options, request)
     expect(await storage.work.run(async rows => ({ plugin: await rows.plugins.list(), access: await rows.pluginAccess.get(plan.item.packageName) }))).toEqual(

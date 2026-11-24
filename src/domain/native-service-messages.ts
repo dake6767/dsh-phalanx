@@ -1,4 +1,7 @@
 export const en = {
+  'Enable image generation': 'Enable image generation',
+  'Saved upstream credentials could not be read. Re-enter them in the configuration.':
+    'Saved upstream credentials could not be read. Re-enter them in the configuration.',
   'Restart the instance to apply service settings': 'Restart the instance to apply service settings',
   'Personal plugin settings are preserved.': 'Personal plugin settings are preserved.',
   'Platform settings apply at the next instance startup.': 'Platform settings apply at the next instance startup.',
@@ -16,6 +19,8 @@ export const en = {
 }
 
 export const zhCN = {
+  'Enable image generation': '启用生图',
+  'Saved upstream credentials could not be read. Re-enter them in the configuration.': '无法读取已保存的上游凭据，请在接入配置中重新填写。',
   'Restart the instance to apply service settings': '重启实例以应用服务设置',
   'Personal plugin settings are preserved.': '已保留成员的个人插件配置。',
   'Platform settings apply at the next instance startup.': '平台设置将在下次启动实例时生效。',

@@ -15,6 +15,8 @@ const authorizationTables = [
 export type PluginRepositoryConnection = RowRepositoryConnection
 export const pluginSql = repositorySql
 export const pluginTransaction = repositoryTransaction
+/** A preexisting library row keeps its initial fallback when it is next saved. */
+export const pluginServiceGeneration = "COALESCE(plugin.configuration->>'serviceDeliveryGeneration', 'legacy:' || plugin.revision::text)"
 export function pluginAuthorizationRevision(connection: PluginRepositoryConnection): string {
   if ('sql' in connection) throw Error('A transaction repository has no synchronous authorization view')
   return connection.writeRevision(authorizationTables)

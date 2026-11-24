@@ -17,7 +17,8 @@ export async function suiteCatalogRoute(
   // Opening the gallery and checking for updates fetch the signed catalog. Installation records stay local:
   // install, uninstall, detach and credential actions never wait for the catalog service.
   if (request.method === 'GET') {
-    if (url.pathname === '/admin/api/suites' || url.pathname === '/admin/api/suites/update-preview') await suites.refreshCatalog(actor)
+    if ((url.pathname === '/admin/api/suites' && url.searchParams.get('local') !== '1') || url.pathname === '/admin/api/suites/update-preview')
+      await suites.refreshCatalog(actor)
     if (url.pathname === '/admin/api/suites') {
       sendCommunityJson(response, 200, await suites.catalog(actor))
       return true

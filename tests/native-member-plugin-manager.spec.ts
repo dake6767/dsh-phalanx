@@ -122,6 +122,24 @@ it('distinguishes current retained archive dependencies from independently insta
           ok: true,
           value: [
             { name: 'retained', version: '1.0.0', installed: true, source: prefix + 'a'.repeat(128) + '.tgz' },
+            {
+              name: 'incompatible',
+              version: '1.0.0',
+              installed: true,
+              removable: true,
+              enabled: true,
+              source: prefix + 'a'.repeat(128) + '.tgz',
+              error: { code: 'incompatible-version' },
+            },
+            {
+              name: 'other-error',
+              version: '1.0.0',
+              installed: true,
+              removable: true,
+              enabled: true,
+              source: prefix + 'a'.repeat(128) + '.tgz',
+              error: { code: 'activation-failed' },
+            },
             { name: 'upgraded', version: '2.0.0', installed: true, source: 'upgraded@^2.0.0' },
             { name: 'unknown', version: '1.0.0', installed: true },
             { name: 'foreign', version: '1.0.0', installed: true, source: 'file:/tmp/' + 'a'.repeat(128) + '.tgz' },
@@ -145,6 +163,13 @@ it('distinguishes current retained archive dependencies from independently insta
     )
     expect(rows).toEqual([
       { packageName: 'retained', version: '1.0.0', retainedArchive: true },
+      {
+        packageName: 'incompatible',
+        version: '1.0.0',
+        retainedArchive: true,
+        incompatibleArchive: { integrity: 'sha512-' + Buffer.alloc(64, 0xaa).toString('base64'), enabled: true },
+      },
+      { packageName: 'other-error', version: '1.0.0', retainedArchive: true },
       { packageName: 'upgraded', version: '2.0.0' },
       { packageName: 'unknown', version: '1.0.0' },
       { packageName: 'foreign', version: '1.0.0' },

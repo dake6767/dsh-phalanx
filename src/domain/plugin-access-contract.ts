@@ -21,13 +21,29 @@ export interface CommunityPluginUpstreamInput {
   readonly headers: readonly { readonly name: string; readonly value: string }[]
 }
 export interface CommunityPluginUpstreamView extends Omit<CommunityPluginUpstreamInput, 'credential' | 'headers' | 'testRequest'> {
-  readonly managedImage?: { readonly ready: boolean }
+  readonly managedImage?: {
+    readonly ready: boolean
+    readonly disabled?: true
+    readonly credentialUnavailable?: true
+    readonly unreadableHeaders?: readonly string[]
+    readonly revision?: CommunityPluginUpstreamRevision
+  }
   readonly testRequest?: CommunityPluginUpstreamTestRequest | { readonly method: string; readonly configured: true }
   readonly credential: { readonly configured: boolean; readonly last4: string }
   readonly headers: readonly { readonly name: string; readonly configured: boolean; readonly last4: string }[]
 }
+export interface CommunityPluginUpstreamRevision {
+  readonly upstream: string
+  readonly plugin: number
+}
 export type CommunityPluginUpstreamAction =
-  { readonly action: 'save'; readonly upstream: CommunityPluginUpstreamInput } | { readonly action: 'delete'; readonly name: string }
+  | {
+      readonly action: 'save'
+      readonly upstream: CommunityPluginUpstreamInput
+      readonly expectedRevision?: CommunityPluginUpstreamRevision
+      readonly enabled?: boolean
+    }
+  | { readonly action: 'delete'; readonly name: string }
 
 export interface CommunityPluginAccessInput {
   readonly clearEntriesYaml?: boolean

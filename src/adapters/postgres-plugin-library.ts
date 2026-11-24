@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto'
 import { PostgresRuntimeReferences } from './postgres-runtime-references.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { LibraryPlugin } from '../domain/plugin-library.js'
 import { assertPluginIdentity, decodePluginSource } from '../domain/plugin-library.js'
 import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
-import { pluginAuthorizationRevision, pluginSql, pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
+import { pluginAuthorizationRevision, pluginServiceGeneration, pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
 
 /** Library rows and upload references change together, without retaining a fact snapshot. */
 export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
@@ -25,7 +26,7 @@ export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
         provenance: LibraryPlugin['provenance'] | null
         suite_origin: string | null
         dependencies: readonly string[]
-        configuration: Partial<LibraryPlugin>
+        configuration: Partial<LibraryPlugin> & { serviceDeliveryGeneration?: string }
         uploads: readonly { scope: string; archive: string; integrity: string }[]
       }>(
         `SELECT plugin_library.*,
@@ -34,6 +35,8 @@ export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
          FROM dsh_phalanx.plugin_library ORDER BY package_name`,
       )
       return rows.map(row => {
+        const { serviceDeliveryGeneration, ...configuration } = row.configuration
+        void serviceDeliveryGeneration
         const uploaded = (scope: string) => {
           const ref = row.uploads.find(value => value.scope === scope)
           return ref ? { archive: ref.archive, integrity: ref.integrity } : undefined
@@ -41,9 +44,9 @@ export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
         const upload = uploaded('current'),
           replacementUpload = uploaded('replacement')
         return {
-          ...row.configuration,
-          source: decodePluginSource(row.configuration.source),
-          ...(Object.hasOwn(row.configuration, 'runtimeDependencies') || row.dependencies.length ? { runtimeDependencies: row.dependencies } : {}),
+          ...configuration,
+          source: decodePluginSource(configuration.source),
+          ...(Object.hasOwn(configuration, 'runtimeDependencies') || row.dependencies.length ? { runtimeDependencies: row.dependencies } : {}),
           packageName: row.package_name,
           revision: Number(row.revision),
           version: row.version,
@@ -92,6 +95,18 @@ export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
     const { upload: replacementUpload, ...candidate } = replacement ?? {}
     void replacementUpload
     await pluginTransaction(this.connection, async sql => {
+      const prior =
+        suiteOrigin && expectedRevision !== 'none'
+          ? (
+              await sql.query<{ suite_origin: string | null; service_generation: string }>(
+                `SELECT suite_origin, ${pluginServiceGeneration} AS service_generation
+                 FROM dsh_phalanx.plugin_library AS plugin WHERE package_name=$1 FOR UPDATE`,
+                [packageName],
+              )
+            )[0]
+          : undefined
+      const sameCatalogOwner = prior && suiteOrigin === prior.suite_origin
+      const generation = suiteOrigin ? (sameCatalogOwner ? prior.service_generation : randomUUID()) : undefined
       const values = [
         packageName,
         version,
@@ -102,7 +117,7 @@ export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
         identities ? JSON.stringify(identities) : null,
         provenance ? JSON.stringify(provenance) : null,
         suiteOrigin ?? null,
-        JSON.stringify({ ...metadata, ...(runtimeDependencies ? { runtimeDependencies: [] } : {}) }),
+        JSON.stringify({ ...metadata, serviceDeliveryGeneration: generation, ...(runtimeDependencies ? { runtimeDependencies: [] } : {}) }),
       ]
       const saved =
         typeof expectedRevision !== 'number'
@@ -116,6 +131,9 @@ export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
               [...values, expectedRevision],
             )
       if (!saved.length) throw new BusinessRuleError('conflict', 'Platform configuration changed. Reload before saving.', 'platform-configuration-conflict')
+      // A new catalog owner must not inherit service claims left by older uninstalls.
+      if (suiteOrigin && !sameCatalogOwner)
+        await sql.query('UPDATE dsh_phalanx.plugin_deliveries SET service_origin=NULL WHERE package_name=$1 AND service_origin=$2', [packageName, suiteOrigin])
       const cipher = 'sql' in this.connection ? this.connection.cipher : this.connection.cipher()
       await new PostgresRuntimeReferences({ sql, cipher }).replace({ kind: 'plugin', name: packageName }, runtimeDependencies ?? [])
       for (const [scope, upload] of [
@@ -133,13 +151,18 @@ export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
     })
   }
   async remove(packageName: string, expectedRevision?: number): Promise<void> {
-    const removed = await pluginSql(this.connection).query(
-      expectedRevision === undefined
-        ? 'DELETE FROM dsh_phalanx.plugin_library WHERE package_name=$1 RETURNING package_name'
-        : 'DELETE FROM dsh_phalanx.plugin_library WHERE package_name=$1 AND revision=$2 RETURNING package_name',
-      expectedRevision === undefined ? [packageName] : [packageName, expectedRevision],
-    )
-    if (expectedRevision !== undefined && !removed.length)
-      throw new BusinessRuleError('conflict', 'The plugin impact changed. Review it again.', 'plugin-impact-changed')
+    await pluginTransaction(this.connection, async sql => {
+      const [removed] = await sql.query<{ suite_origin: string | null }>(
+        'DELETE FROM dsh_phalanx.plugin_library WHERE package_name=$1 AND ($2::bigint IS NULL OR revision=$2) RETURNING suite_origin',
+        [packageName, expectedRevision ?? null],
+      )
+      if (expectedRevision !== undefined && !removed)
+        throw new BusinessRuleError('conflict', 'The plugin impact changed. Review it again.', 'plugin-impact-changed')
+      if (removed?.suite_origin)
+        await sql.query('UPDATE dsh_phalanx.plugin_deliveries SET service_origin=NULL WHERE package_name=$1 AND service_origin=$2', [
+          packageName,
+          removed.suite_origin,
+        ])
+    })
   }
 }

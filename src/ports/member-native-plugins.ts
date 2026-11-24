@@ -13,7 +13,7 @@ export type NativePluginInstallPhase = 'downloading' | 'installing'
 export type NativePluginApplication = 'applied' | 'restart-required'
 export interface NativePluginReplacement {
   readonly packageName: string
-  readonly previous: { readonly version: string; readonly integrity: string; readonly enabled: boolean }
+  readonly previous: { readonly version: string; readonly integrity: string; readonly enabled: boolean; readonly incompatibleRuntime?: true }
   readonly next: { readonly version: string; readonly integrity: string }
 }
 export interface MemberNativePluginManagerPort extends MemberPluginManagerPort {

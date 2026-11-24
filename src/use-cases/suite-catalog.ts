@@ -1,7 +1,7 @@
 import { legacyCatalogExecutionVariables } from '../domain/execution-service-environment.js'
 import { SuiteCatalogQueries } from './suite-catalog-queries.js'
 import { SuiteChanges } from './suite-changes.js'
-import type { SuitePluginWiring } from './suite-plugin-facts.js'
+import { installPluginItem, type SuitePluginWiring } from './suite-plugin-facts.js'
 import { SuiteTransactions } from './suite-transactions.js'
 import { SuiteRetirement } from './suite-retirement.js'
 import { SuiteTaskRecords } from './suite-task-records.js'
@@ -24,7 +24,6 @@ import {
   invalidRequest,
   type SuiteCatalogArchitecture,
   type SuiteCatalogEntry,
-  type SuiteCatalogPluginItem,
   type SuiteInstallRequest,
   type SuiteReplacedEntry,
 } from '../domain/suite-catalog.js'
@@ -165,6 +164,7 @@ export class SuiteCatalog {
         throw new BusinessRuleError('invalid', 'This suite entry has no preparation for the current architecture.', 'suite-arch-unavailable')
       const variables = new Set(this.queries.executionItems(entry).flatMap(item => legacyCatalogExecutionVariables(item).map(row => row.name)))
       if (Object.keys(value.credentials ?? {}).some(name => !variables.has(name))) throw invalidRequest()
+      const pluginItem = installPluginItem(entry, value)
       for (const item of entry.items) if (item.kind === 'plugin') await this.plugins?.assertSuiteAdmission(suiteInstallOrigin(entry.id), item.packageName)
       const plan = await this.queries.replacements(entry)
       if (shared.missing.length) throw new BusinessRuleError('missing', 'A shared catalog dependency is not available right now.', 'suite-dependency-missing')
@@ -196,8 +196,7 @@ export class SuiteCatalog {
       if (!replacementConfirmed(plan, value.replace))
         throw new BusinessRuleError('conflict', 'Confirm replacing the manual entries listed in the preview.', 'suite-replace-unconfirmed')
       // Declaring dependencies on the record up front makes an in-flight install count as their user.
-      const pluginPackage =
-        entry.category === 'plugin' ? entry.items.find((item): item is SuiteCatalogPluginItem => item.kind === 'plugin')?.packageName : undefined
+      const pluginPackage = pluginItem?.packageName
       const record: CatalogInstallRecord = {
         id: entry.id,
         version: entry.version,

@@ -5,6 +5,7 @@ export interface InstalledMarketPlugin {
   readonly retainedArchive?: true
   readonly archiveIntegrity?: string
   readonly enabled?: boolean
+  readonly incompatibleArchive?: { readonly integrity: string; readonly enabled: boolean }
   readonly installDefaultsPending?: string
 }
 export interface MemberPluginManagerPort {

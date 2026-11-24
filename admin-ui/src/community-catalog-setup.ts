@@ -1,5 +1,6 @@
 import type { CatalogServiceField } from '../../src/domain/suite-service-slots'
 import type { CommunityCatalogServiceDefinition } from '../../src/domain/suite-contract'
+import type { SuiteInstallServiceSettings } from '../../src/domain/suite-catalog'
 import { CommunityApiRequestError, publishCommunityPlugin, updateCommunityGroupPlugins } from './community-api'
 import type { CatalogPluginDistributionIdentity } from '../../src/domain/plugin-group-contract'
 import { changeCommunityInstalledServices, communityInstalledServices } from './community-installed-services-api'
@@ -14,6 +15,39 @@ interface CatalogSetupTask {
 
 export function serviceDraftKey(owner: CommunityCatalogServiceDefinition, slot: string, backend: string) {
   return JSON.stringify([owner.kind, owner.name, slot, backend])
+}
+
+export function serviceSlotKey(owner: CommunityCatalogServiceDefinition, slot: string) {
+  return JSON.stringify([owner.kind, owner.name, slot])
+}
+
+export function missingServiceFields(fields: readonly CatalogServiceField[], values: Readonly<Record<string, string>>) {
+  const configured = (name: string) => Boolean(Object.hasOwn(values, name) && values[name]?.trim())
+  const groups = new Set(fields.filter(field => field.requiredGroup && configured(field.name)).map(field => field.requiredGroup))
+  return fields.filter(field => (field.required && !configured(field.name)) || (field.requiredGroup && !groups.has(field.requiredGroup)))
+}
+
+export function hasServiceDraft(values: Readonly<Record<string, string>>) {
+  return Object.values(values).some(value => value.trim())
+}
+
+export function pluginServiceSettings(
+  definitions: readonly CommunityCatalogServiceDefinition[],
+  drafts: Readonly<Record<string, Readonly<Record<string, string>>>>,
+): { settings: SuiteInstallServiceSettings[]; incomplete: boolean } {
+  let incomplete = false
+  const settings = definitions.flatMap(owner => {
+    if (owner.kind !== 'plugin') return []
+    return owner.slots.flatMap(slot =>
+      slot.backends.flatMap(backend => {
+        const values = drafts[serviceDraftKey(owner, slot.id, backend.id)]
+        if (!values || !hasServiceDraft(values)) return []
+        incomplete ||= missingServiceFields(backend.fields, values).length > 0
+        return [{ slot: slot.id, backend: backend.id, values }]
+      }),
+    )
+  })
+  return { settings, incomplete }
 }
 
 function fieldSignature(fields: readonly CatalogServiceField[]) {

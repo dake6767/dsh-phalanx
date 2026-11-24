@@ -40,7 +40,8 @@ export class MemberNativeServiceSettings {
   constructor(
     private readonly records: Pick<PluginInstallationsPort, 'get'> & PluginServiceSettingsHistoryPort,
     private readonly settings: Required<Pick<PluginAccessStorePort, 'installedServices'>>,
-    private readonly access: Pick<NativePluginServiceAccess, 'issue'> & Partial<Pick<NativePluginServiceAccess, 'bindingAvailability'>>,
+    private readonly access: Pick<NativePluginServiceAccess, 'issue' | 'installedServiceOrigins'> &
+      Partial<Pick<NativePluginServiceAccess, 'bindingAvailability'>>,
     private readonly transport: NativeServiceSettingsTransport,
   ) {}
 
@@ -49,9 +50,16 @@ export class MemberNativeServiceSettings {
   }
 
   async list(actor: CommunityAccountActor, instance: CommunityUserInstance): Promise<readonly CommunityMarketNativeServiceView[]> {
+    const views = this.views.get(instance)
+    if (!views?.size) return []
+    const [deliveries, origins] = await Promise.all([this.records.get(actor.spaceId), this.access.installedServiceOrigins()])
+    const active = deliveries.filter(record => record.serviceOrigin && origins.get(record.packageName) === record.serviceOrigin)
     return await Promise.all(
-      [...(this.views.get(instance) ?? [])]
-        .filter(([, view]) => view.bindings.length)
+      active
+        .flatMap(({ packageName }) => {
+          const view = views.get(packageName)
+          return view?.bindings.length ? [[packageName, view] as const] : []
+        })
         .map(async ([packageName, view]) => {
           if (!this.access.bindingAvailability) return { packageName, bindings: view.bindings }
           const current = await this.access.bindingAvailability(actor, instance, packageName)

@@ -2,15 +2,15 @@ import { featureVisible } from '../../src/domain/release-visibility'
 import CommunityPluginAddDialog from './CommunityPluginAddDialog'
 import { pluginSourceLabel, pluginStageLabels as stageLabels, pluginVersionLabel } from './community-plugin-stage'
 import CommunitySuitesPage from './CommunitySuitesPage'
+import CommunitySuiteUninstallDialog from './CommunitySuiteUninstallDialog'
 import { useSuiteOriginName } from './useSuiteOriginName'
 import CommunityPluginDependencies from './CommunityPluginDependencies'
 import CommunityLibraryMaintenance from './CommunityLibraryMaintenance'
 import CommunityContributions from './CommunityContributions'
-import CommunityPluginAccess from './CommunityPluginAccess'
+import CommunityPluginAdvancedSettings from './CommunityPluginAdvancedSettings'
 import CommunityInstalledServiceSettings from './CommunityInstalledServiceSettings'
 import CommunityPluginPublication from './CommunityPluginPublication'
 import { CommunityPublicationStatus } from './CommunityPublicationSection'
-import CommunityPluginUpstreams from './CommunityPluginUpstreams'
 import CommunityPluginChanges from './CommunityPluginChanges'
 import CommunityPluginUploadDialog from './CommunityPluginUploadDialog'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -19,9 +19,10 @@ import { Card } from '@heroui/react/card'
 import { Chip } from '@heroui/react/chip'
 import { Tabs } from '@heroui/react/tabs'
 import CommunityIcon from './CommunityIcon'
-import type { CommunityPluginView } from '../../src/domain/admin-contract'
+import type { CommunityPluginView, CommunitySuiteCatalogView } from '../../src/domain/admin-contract'
 import { platformError } from '../../src/domain/platform-copy'
-import { retryCommunityPlugin, communityPlugins } from './community-api'
+import { suiteInstallOrigin } from '../../src/domain/suite-install'
+import { retryCommunityPlugin, communityPlugins, request } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
 import CommunityMessage from './CommunityMessage'
@@ -54,17 +55,15 @@ export default function CommunityPluginsPage() {
     if (dependencyCloseGuard.current) dependencyCloseGuard.current(access)
     else access()
   }
-  const closeDetails = () =>
-    guarded(() => {
-      setSelected(undefined)
-      setInitialUpstream(undefined)
-    })
+  const closeDetails = () => guarded(() => setSelected(undefined))
   const [selected, setSelected] = useState<string>()
-  const [initialUpstream, setInitialUpstream] = useState<string>()
   const [detailTab, setDetailTab] = useState('basic')
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState<unknown>()
   const [retrying, setRetrying] = useState<string>()
+  const [uninstalling, setUninstalling] = useState<{ id: string; title: string }>()
+  const [pendingUninstall, setPendingUninstall] = useState<string>()
+  const [uninstallError, setUninstallError] = useState<unknown>()
   const pending = useRef(false)
   const refresh = useCallback(() => setRevision(value => value + 1), [])
   const showLibraryTab = (tab: string) => {
@@ -102,6 +101,34 @@ export default function CommunityPluginsPage() {
       if (timer) clearTimeout(timer)
     }
   }, [revision])
+  useEffect(() => {
+    if (!pendingUninstall) return
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const load = async () => {
+      try {
+        const { installations } = await request<CommunitySuiteCatalogView>('/admin/api/suites?local=1', { signal: controller.signal })
+        if (controller.signal.aborted) return
+        const installation = installations.find(row => row.id === pendingUninstall)
+        setUninstallError(installation?.failureCode ? { code: installation.failureCode, error: '' } : undefined)
+        if (installation?.status === 'uninstalling') {
+          timer = setTimeout(() => void load(), 1000)
+          return
+        }
+        setPendingUninstall(undefined)
+        refresh()
+      } catch (failure) {
+        if (controller.signal.aborted) return
+        setUninstallError(failure)
+        timer = setTimeout(() => void load(), 2000)
+      }
+    }
+    void load()
+    return () => {
+      controller.abort()
+      if (timer) clearTimeout(timer)
+    }
+  }, [pendingUninstall, refresh])
   const retry = async (plugin: CommunityPluginView) => {
     if (pending.current) return
     pending.current = true
@@ -157,6 +184,8 @@ export default function CommunityPluginsPage() {
           </Button>
         </>
       ) : null}
+      {uninstallError !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(uninstallError)} /> : null}
+      {pendingUninstall ? <p role="status">{t('Removing…')}</p> : null}
       <Tabs className="skill-library-tabs library-workspace-tabs" selectedKey={libraryTab} onSelectionChange={key => showLibraryTab(String(key))}>
         <Tabs.ListContainer>
           <Tabs.List aria-label={t('Plugin library')}>
@@ -300,17 +329,7 @@ export default function CommunityPluginsPage() {
           </Tabs.Panel>
         ) : null}
         <Tabs.Panel id="catalog">
-          <CommunitySuitesPage
-            category="plugin"
-            plugins={plugins}
-            onLibraryChanged={refresh}
-            onConfigureUpstream={(packageName, name) => {
-              showLibraryTab('plugins')
-              setDetailTab('access')
-              setSelected(packageName)
-              setInitialUpstream(name)
-            }}
-          />
+          <CommunitySuitesPage category="plugin" plugins={plugins} onLibraryChanged={refresh} />
         </Tabs.Panel>
       </Tabs>
       {uploading ? (
@@ -423,9 +442,9 @@ export default function CommunityPluginsPage() {
                     onDraft={onServiceDraft}
                   />
                 ) : null}
-                <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName} initialUpstream={initialUpstream} onChanged={refresh} />
-                <CommunityPluginAccess
-                  key={detail.packageName + '-access'}
+                <CommunityPluginAdvancedSettings
+                  key={detail.packageName}
+                  catalog={Boolean(detail.suiteOrigin)}
                   packageName={detail.packageName}
                   onChanged={refresh}
                   onSaveFailed={() => setDetailTab('access')}
@@ -453,6 +472,17 @@ export default function CommunityPluginsPage() {
                       </button>
                     </p>
                     {integrity}
+                    <Button
+                      variant="danger"
+                      isDisabled={Boolean(pendingUninstall) || detail.removing}
+                      onPress={() => {
+                        const origin = detail.suiteOrigin
+                        if (!origin) return
+                        guarded(() => setUninstalling({ id: origin.slice(suiteInstallOrigin('').length), title: detail.title }))
+                      }}
+                    >
+                      {t('Uninstall')}
+                    </Button>
                   </>
                 ) : (
                   <CommunityPluginChanges
@@ -476,6 +506,20 @@ export default function CommunityPluginsPage() {
             </Tabs>
           </div>
         </CommunityDialog>
+      ) : null}
+      {uninstalling ? (
+        <CommunitySuiteUninstallDialog
+          id={uninstalling.id}
+          title={uninstalling.title}
+          titleOf={id => originName(suiteInstallOrigin(id))}
+          onClose={() => setUninstalling(undefined)}
+          onSubmitted={() => {
+            setUninstallError(undefined)
+            setPendingUninstall(uninstalling.id)
+            setUninstalling(undefined)
+            setSelected(undefined)
+          }}
+        />
       ) : null}
     </div>
   )

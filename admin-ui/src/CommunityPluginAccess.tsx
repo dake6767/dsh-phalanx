@@ -17,11 +17,13 @@ export default function CommunityPluginAccess({
   onChanged,
   onSaveFailed,
   onCloseGuard,
+  onDraft,
 }: {
   packageName: string
   onChanged: () => void
-  onSaveFailed: () => void
-  onCloseGuard: (guard: ((action: () => void) => void) | undefined) => void
+  onSaveFailed?: (() => void) | undefined
+  onCloseGuard?: ((guard: ((action: () => void) => void) | undefined) => void) | undefined
+  onDraft?: ((key: string, dirty: boolean, busy: boolean) => void) | undefined
 }) {
   const { t, errorText } = usePlatformLanguage()
   const [saved, setSaved] = useState<CommunityPluginAccessView>()
@@ -65,7 +67,7 @@ export default function CommunityPluginAccess({
       return true
     } catch (error) {
       setError(error)
-      onSaveFailed()
+      onSaveFailed?.()
       return false
     } finally {
       setBusy(false)
@@ -82,9 +84,14 @@ export default function CommunityPluginAccess({
     busy,
   )
   useEffect(() => {
-    onCloseGuard(guard.request)
-    return () => onCloseGuard(undefined)
+    onCloseGuard?.(guard.request)
+    return () => onCloseGuard?.(undefined)
   }, [onCloseGuard, guard.request])
+  useEffect(() => {
+    const key = 'plugin-access:' + packageName
+    onDraft?.(key, dirty, busy)
+    return () => onDraft?.(key, false, false)
+  }, [packageName, dirty, busy, onDraft])
   const update = (index: number, field: 'name' | 'value', value: string) => {
     setNotice(false)
     setEnvironment(rows => rows.map((row, i) => (i === index ? { ...row, [field]: value } : row)))

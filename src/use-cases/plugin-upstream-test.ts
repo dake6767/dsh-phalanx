@@ -28,7 +28,7 @@ export class PluginUpstreamTest {
     return this.run(mergeUpstreamInput(input, prior))
   }
   private async run(upstream: PluginUpstream): Promise<CommunityPluginUpstreamTestResult> {
-    if (!upstream.testRequest || !upstream.credential)
+    if (upstream.imageDisabled || upstream.secretUnavailable || !upstream.testRequest || !upstream.credential)
       throw new BusinessRuleError('invalid', 'Save a test request and credential first', 'plugin-upstream-test-required')
     const started = this.clock.now(),
       controller = new AbortController()

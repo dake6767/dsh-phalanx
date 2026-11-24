@@ -12,7 +12,6 @@ import CommunityIcon from './CommunityIcon'
 import { suiteInstallOrigin } from '../../src/domain/suite-install'
 import type { CommunityPluginView, CommunitySuiteCatalogEntryView, CommunitySuiteCatalogView, CommunitySuiteInstallView } from '../../src/domain/admin-contract'
 import { communitySuites } from './community-api'
-import CatalogUpstreamActions from './CatalogUpstreamActions'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityMessage from './CommunityMessage'
 import CommunitySuiteUpdateDialog from './CommunitySuiteUpdateDialog'
@@ -52,12 +51,10 @@ export default function CommunitySuitesPage({
   category = 'suite',
   plugins,
   onLibraryChanged,
-  onConfigureUpstream,
 }: {
   category?: 'suite' | 'plugin'
   plugins?: readonly CommunityPluginView[]
   onLibraryChanged?: () => void
-  onConfigureUpstream?: (packageName: string, name: string) => void
 }) {
   const { t, locale, errorText } = usePlatformLanguage()
   const [view, setView] = useState<CommunitySuiteCatalogView>()
@@ -141,10 +138,6 @@ export default function CommunitySuitesPage({
   const selectedPackage = details ? installedPackage(details.id) : undefined
   const hasInstalledPackage = selectedInstallation && selectedInstallation.status !== 'failed' && selectedInstallation.status !== 'installing'
   const selectedStatus = details ? statusOf(details) : undefined
-  const configureUpstream = (packageName: string, name: string) => {
-    setDetails(undefined)
-    onConfigureUpstream?.(packageName, name)
-  }
   const titleOf = (id: string): string => entries.find(row => row.id === id)?.title[locale] ?? id
   // Installation records stay usable when the catalog is unreachable or a whole document was rejected.
   const catalogIds = new Set(entries.map(entry => entry.id))
@@ -162,10 +155,6 @@ export default function CommunitySuitesPage({
   // A catalog dependency that suites satisfy with a same-command manual dependency instead of its own copy.
   const manualOf = (entry: CommunitySuiteCatalogEntryView): string | undefined =>
     view?.installations.flatMap(row => row.manualDependencies ?? []).find(row => row.id === entry.id)?.name
-  const referenceText = (reference: { kind: string; name: string }) =>
-    reference.kind === 'suite'
-      ? `${t('Catalog entry')} · ${titleOf(reference.name)}`
-      : `${Object.hasOwn(kindLabels, reference.kind) ? t(kindLabels[reference.kind as keyof typeof kindLabels]) : reference.kind} · ${reference.name}`
   return (
     <div className="community-page">
       {error !== undefined ? (
@@ -260,9 +249,6 @@ export default function CommunitySuitesPage({
                     <div className="catalog-entry-actions">
                       {installation?.status === 'installed' ? (
                         <>
-                          {onConfigureUpstream && entry.plugin?.deferredUpstreams?.length ? (
-                            <CatalogUpstreamActions plugin={entry.plugin} onConfigure={configureUpstream} />
-                          ) : null}
                           {entry.updateAvailable ? (
                             <Button className="relative z-10" size="sm" variant="primary" onPress={() => setUpdating(entry)}>
                               {t('Update')}
@@ -379,8 +365,8 @@ export default function CommunitySuitesPage({
       ) : null}
       {uninstalling ? (
         <CommunitySuiteUninstallDialog
-          referenceText={referenceText}
-          entry={uninstalling}
+          id={uninstalling.id}
+          title={uninstalling.title[locale]}
           titleOf={titleOf}
           onClose={() => setUninstalling(undefined)}
           onSubmitted={() => {
@@ -413,9 +399,6 @@ export default function CommunitySuitesPage({
                 </div>
                 {installError}
                 {reload}
-                {onConfigureUpstream && selectedInstallation?.status === 'installed' && details.plugin?.deferredUpstreams?.length ? (
-                  <CatalogUpstreamActions plugin={details.plugin} onConfigure={configureUpstream} />
-                ) : null}
                 {installationOf(details)?.failureCode === 'skill-catalog-limit-exceeded' ? (
                   <CommunityMessage role="alert" status="danger" title={platformError(locale, { code: 'skill-catalog-limit-exceeded', error: '' })} />
                 ) : null}
@@ -579,7 +562,7 @@ export default function CommunitySuitesPage({
               ) : null}
               {!setupPending && selectedInstallation?.status === 'installed'
                 ? selectedInstallation.entries.map(({ kind, name }) =>
-                    kind === 'execution' || kind === 'plugin' ? (
+                    kind === 'execution' || (kind === 'plugin' && name === selectedPackage?.packageName) ? (
                       <CommunityInstalledServiceSettings key={kind + ':' + name} kind={kind} name={name} onDraft={reportDraft} />
                     ) : null,
                   )

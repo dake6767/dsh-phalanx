@@ -153,8 +153,19 @@ it('accepts one signed platform installation while reserving platform archives a
   expect(installations).toBe(3)
 })
 
-it.each(['activation-failed', 'target-archive-changed', 'partial-removal', 'moved-alias', 'renamed-alias', 'renamed-key-alias'] as const)(
-  'continues a signed replacement after disconnect and restores the old dependency only once after %s',
+const signedReplacementCases = [
+  'activation-failed',
+  'target-archive-changed',
+  'partial-removal',
+  'moved-alias',
+  'renamed-alias',
+  'renamed-key-alias',
+  'incompatible-upgrade',
+  'incompatible-restore-failure',
+] as const
+
+it.each(signedReplacementCases)(
+  'continues a signed native replacement after the observer disconnects and verifies the final dependency and its saved settings for %s',
   async failure => {
     const { mkdtemp, mkdir, readFile, readdir, rm, writeFile } = await import('node:fs/promises')
     const { tmpdir } = await import('node:os')
@@ -183,6 +194,7 @@ it.each(['activation-failed', 'target-archive-changed', 'partial-removal', 'move
       }
       const previous = await archive('old checked content', '1.0.0')
       const next = await archive('new checked content', '2.0.0')
+      const incompatible = failure === 'incompatible-upgrade' || failure === 'incompatible-restore-failure'
       const packageName = '@fixture/update'
       const first = '- id: first\n  config: { value: &same { id: own, config: { setting: 1 } } }\n'
       const second = '- id: second\n  config: { value: &same { id: own, config: { setting: 2 } } }\n'
@@ -240,6 +252,7 @@ it.each(['activation-failed', 'target-archive-changed', 'partial-removal', 'move
                       installed: true,
                       removable: true,
                       enabled: active.enabled,
+                      ...(incompatible && active.archive === previous ? { error: { code: 'incompatible-version' } } : {}),
                       rows: [{ rowId: 'own', moduleName: renamesModule && active.archive === next ? packageName + '/new' : packageName }],
                     },
                   ]
@@ -270,6 +283,7 @@ it.each(['activation-failed', 'target-archive-changed', 'partial-removal', 'move
                 // The native gateway accepts omission of an optional field, but rejects an explicit undefined wire value.
                 expect(args.options).not.toHaveProperty('requestId')
                 restoreCount++
+                if (failure === 'incompatible-restore-failure') return { application: 'failed', error: { code: 'incompatible-version' } }
               }
               await lock(target)
               active = { archive: target, enabled: args.options!.enabled }
@@ -277,7 +291,7 @@ it.each(['activation-failed', 'target-archive-changed', 'partial-removal', 'move
             }
             if (method === 'setBundleEnabled') {
               enableCount++
-              if (active?.archive === previous) {
+              if (active && (active.archive === previous || failure === 'incompatible-upgrade')) {
                 active.enabled = true
                 return { application: 'applied' }
               }
@@ -297,7 +311,7 @@ it.each(['activation-failed', 'target-archive-changed', 'partial-removal', 'move
             replacement: {
               packageName,
               authorizationUrl: 'data:,permitted',
-              previous: { version: previous.version, integrity: previous.integrity, enabled: true },
+              previous: { version: previous.version, integrity: previous.integrity, enabled: true, ...(incompatible ? { incompatibleRuntime: true } : {}) },
               next,
             },
             options: { registry: 'https://registry.example', requestId: 'update-once' },
@@ -324,6 +338,25 @@ it.each(['activation-failed', 'target-archive-changed', 'partial-removal', 'move
       controller.abort()
       const replay = call()
       release()
+      if (failure === 'incompatible-upgrade') {
+        const outcome = { result: { ok: true, value: { application: 'applied' } } }
+        expect(await original).toMatchObject(outcome)
+        expect(await replay).toMatchObject(outcome)
+        expect(removeCount).toBe(1)
+        expect(restoreCount).toBe(0)
+        expect(active).toEqual({ archive: next, enabled: true })
+        expect(await readFile(join(profile, 'cordis.patch.yml'), 'utf8')).toBe(patch)
+        return
+      }
+      if (failure === 'incompatible-restore-failure') {
+        const outcome = { result: { ok: true, value: { replacement: 'restore-failed', reason: 'activation-failed/previous-install-failed' } } }
+        expect(await original).toMatchObject(outcome)
+        expect(await replay).toMatchObject(outcome)
+        const [recovery] = (await readdir(archiveDirectory)).filter(name => name.startsWith('recovery-'))
+        expect(await readFile(join(archiveDirectory, recovery!, 'previous.tgz'), 'utf8')).toBe('old checked content')
+        expect(await readFile(join(profile, 'cordis.patch.yml'), 'utf8')).toBe(patch)
+        return
+      }
       if (failure === 'partial-removal' || failure === 'moved-alias') {
         const reason = failure === 'partial-removal' ? 'previous-copy-not-confirmed' : 'settings-alias-conflict'
         const outcome = { result: { ok: true, value: { replacement: 'restore-failed', reason: 'remove-failed/' + reason } } }

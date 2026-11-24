@@ -3,6 +3,7 @@ import type { CatalogResourceBinding } from './suite-resource-bindings.js'
 import type { RuntimeDependencyDefinition } from './runtime-dependency.js'
 import { BusinessRuleError } from './business-error.js'
 import { runtimeDependencyInput } from './runtime-dependency.js'
+import { imageUpstreamReady, upstreamInput } from './plugin-upstream.js'
 
 /** Preparation commands are keyed by deployment architecture; a missing key means unavailable. */
 export type SuiteCatalogArchitecture = 'amd64' | 'arm64'
@@ -137,8 +138,66 @@ export interface SuiteInstallRequest {
   readonly publish?: boolean
   /** Delegated execution variable values; held in memory for the task only, never in the install record. */
   readonly credentials?: Readonly<Record<string, string>>
+  /** Image credentials stay in the task until the installation transaction commits. */
+  readonly imageSettings?: readonly SuiteInstallImageSettings[]
+  /** Service values stay in the task until the installation transaction commits. */
+  readonly serviceSettings?: readonly SuiteInstallServiceSettings[]
   /** The manual entries the confirmed preview listed for replacement; the install is refused if the plan differs. */
   readonly replace?: readonly SuiteReplacedEntry[]
+}
+
+export interface SuiteInstallImageSettings {
+  readonly name: string
+  readonly baseUrl: string
+  readonly model: string
+  readonly credential: string
+}
+
+export interface SuiteInstallServiceSettings {
+  readonly slot: string
+  readonly backend: string
+  readonly values: Readonly<Record<string, string>>
+}
+
+function suiteInstallServiceSettings(value: unknown): readonly SuiteInstallServiceSettings[] {
+  if (!Array.isArray(value) || value.length > 64) throw invalidRequest()
+  const names = new Set<string>()
+  return value.map(row => {
+    if (!row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).some(key => !['slot', 'backend', 'values'].includes(key)))
+      throw invalidRequest()
+    const { slot, backend, values } = row as SuiteInstallServiceSettings
+    if (
+      [slot, backend].some(id => typeof id !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/u.test(id)) ||
+      !values ||
+      typeof values !== 'object' ||
+      Array.isArray(values) ||
+      Object.keys(values).length > 64
+    )
+      throw invalidRequest()
+    const entries = Object.entries(values)
+    if (entries.some(([name, field]) => !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u.test(name) || typeof field !== 'string' || field.length > 65536))
+      throw invalidRequest()
+    const identity = JSON.stringify([slot, backend])
+    if (names.has(identity)) throw invalidRequest()
+    names.add(identity)
+    return { slot, backend, values: Object.fromEntries(entries.filter(([, field]) => field.trim() !== '')) }
+  })
+}
+
+function suiteInstallImageSettings(value: unknown): readonly SuiteInstallImageSettings[] {
+  if (!Array.isArray(value) || value.length > 32) throw invalidRequest()
+  const names = new Set<string>()
+  return value.map(row => {
+    if (!row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).some(key => !['name', 'baseUrl', 'model', 'credential'].includes(key)))
+      throw invalidRequest()
+    const { name, baseUrl, model, credential } = row as SuiteInstallImageSettings
+    if (typeof credential !== 'string' || credential.length > 65536 || typeof baseUrl !== 'string' || baseUrl.length > 4096) throw invalidRequest()
+    const input = { name, baseUrl, model, credential, headers: [] }
+    upstreamInput(input)
+    if (!imageUpstreamReady(input) || names.has(name)) throw invalidRequest()
+    names.add(name)
+    return { name, baseUrl, model, credential }
+  })
 }
 
 export const invalidRequest = () => new BusinessRuleError('invalid', 'Invalid suite catalog request.', 'suite-catalog-invalid')
@@ -194,13 +253,25 @@ export function suiteInstallInput(value: unknown): SuiteInstallRequest {
   if (
     !value ||
     typeof value !== 'object' ||
-    Object.keys(value).some(key => !['id', 'requestId', 'preview', 'groups', 'publish', 'credentials', 'replace'].includes(key)) ||
+    Object.keys(value).some(
+      key => !['id', 'requestId', 'preview', 'groups', 'publish', 'credentials', 'imageSettings', 'serviceSettings', 'replace'].includes(key),
+    ) ||
     typeof (value as { id?: unknown }).id !== 'string' ||
     typeof (value as { requestId?: unknown }).requestId !== 'string' ||
     !/^[A-Za-z0-9_-]{16,128}$/u.test((value as { requestId: string }).requestId)
   )
     throw invalidRequest()
-  const request = value as { id: string; requestId: string; preview?: unknown; groups?: unknown; publish?: unknown; credentials?: unknown; replace?: unknown }
+  const request = value as {
+    id: string
+    requestId: string
+    preview?: unknown
+    groups?: unknown
+    publish?: unknown
+    credentials?: unknown
+    imageSettings?: unknown
+    serviceSettings?: unknown
+    replace?: unknown
+  }
   if (
     request.replace !== undefined &&
     (!Array.isArray(request.replace) ||
@@ -225,6 +296,9 @@ export function suiteInstallInput(value: unknown): SuiteInstallRequest {
     throw invalidRequest()
   const preview = request.preview === undefined ? undefined : suitePreviewIdentity(request.preview)
   const credentials = request.credentials === undefined ? undefined : suiteCredentialsInput(request.credentials)
+  const imageSettings = request.imageSettings === undefined ? [] : suiteInstallImageSettings(request.imageSettings)
+  const serviceSettings = request.serviceSettings === undefined ? [] : suiteInstallServiceSettings(request.serviceSettings)
+  if ((imageSettings.length || serviceSettings.length) && !preview) throw invalidRequest()
   return {
     id: request.id,
     requestId: request.requestId,
@@ -232,6 +306,8 @@ export function suiteInstallInput(value: unknown): SuiteInstallRequest {
     ...(request.groups !== undefined ? { groups: request.groups as readonly string[] } : {}),
     ...(request.publish !== undefined ? { publish: request.publish } : {}),
     ...(credentials && Object.keys(credentials).length ? { credentials } : {}),
+    ...(imageSettings.length ? { imageSettings } : {}),
+    ...(serviceSettings.length ? { serviceSettings } : {}),
     ...(Array.isArray(request.replace) && request.replace.length
       ? {
           replace: (request.replace as readonly SuiteReplacedEntry[]).map(row => ({

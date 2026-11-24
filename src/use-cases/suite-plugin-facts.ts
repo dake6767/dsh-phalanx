@@ -1,8 +1,16 @@
 import { join } from 'node:path'
-import { installServiceDefinition, type InstalledServiceIdentity } from '../domain/installed-services.js'
+import {
+  configureServiceBackend,
+  installServiceDefinition,
+  serviceBackendComplete,
+  type InstalledServiceIdentity,
+  type InstalledServiceSettings,
+  type InstalledServices,
+} from '../domain/installed-services.js'
+import { installedCatalogIdentity } from '../domain/execution-service-environment.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { pluginAccessIdentity } from '../domain/plugin-access.js'
-import { managedImageUpstreamHeaders, managedImageUpstreamTest, type PluginUpstream } from '../domain/plugin-upstream.js'
+import { managedImageUpstreamHeaders, managedImageUpstreamTest, mergeUpstreamInput, type PluginUpstream } from '../domain/plugin-upstream.js'
 import {
   assertPreparedPlugin,
   pluginCatalogRevision,
@@ -15,9 +23,9 @@ import {
 } from '../domain/plugin-library.js'
 import type { RuntimeDependency } from '../domain/runtime-dependency.js'
 import { PLAYWRIGHT_BROWSERS_ENV, sameCatalogResourceLocation, type CatalogResourceBinding } from '../domain/suite-resource-bindings.js'
-import type { SuiteCatalogPluginItem } from '../domain/suite-catalog.js'
+import { invalidRequest, type SuiteCatalogEntry, type SuiteCatalogPluginItem, type SuiteInstallRequest } from '../domain/suite-catalog.js'
 import { canonicalJson } from '../domain/suite-catalog-document.js'
-import { deferredPluginUpstreams } from '../domain/suite-service-slots.js'
+import { deferredPluginUpstreams, type CatalogPluginServiceSlot } from '../domain/suite-service-slots.js'
 import { satisfiesSemverRange } from '../domain/semver.js'
 import { readyRuntimeDependencies } from '../domain/runtime-dependency-selection.js'
 import type { PreparedBrowserDirectories, RuntimeDependencyReferencesPort } from '../ports/runtime-dependencies.js'
@@ -25,6 +33,27 @@ import type { PluginAccessSyntaxPort } from '../ports/plugin-access.js'
 import type { SuiteRepositories } from '../ports/suite-unit-of-work.js'
 import { PluginAccessAdministration } from './plugin-access-administration.js'
 import { resolvedPluginItem } from './suite-entry-kinds.js'
+
+type InstallAccessSettings = Pick<SuiteInstallRequest, 'imageSettings' | 'serviceSettings'>
+
+function configureInstallServices(state: InstalledServices<CatalogPluginServiceSlot> | undefined, services: InstallAccessSettings['serviceSettings']) {
+  let configured = state
+  for (const { slot, backend, values } of services ?? []) {
+    const definition = configured?.slots.find(row => row.id === slot)?.backends.find(row => row.id === backend)
+    if (!configured || !definition || !serviceBackendComplete(definition, values)) throw invalidRequest()
+    configured = configureServiceBackend(configured, { slot, backend, values, action: 'save' })
+  }
+  return configured
+}
+
+export function installPluginItem(entry: SuiteCatalogEntry, access: InstallAccessSettings) {
+  const plugin = entry.category === 'plugin' ? entry.items.find(item => item.kind === 'plugin') : undefined
+  const names = new Set(deferredPluginUpstreams(plugin?.serviceSlots))
+  if (access.imageSettings?.some(row => !names.has(row.name))) throw invalidRequest()
+  if (access.serviceSettings?.length)
+    configureInstallServices(installServiceDefinition(installedCatalogIdentity(entry), plugin?.serviceSlots), access.serviceSettings)
+  return plugin
+}
 
 export function assertCatalogPluginBindings(item: SuiteCatalogPluginItem, prepared: PreparedPlugin): void {
   if (canonicalJson(item.installDefaults ?? null) !== canonicalJson(prepared.installDefaults ?? null))
@@ -114,6 +143,37 @@ export interface PreparedSuitePlugin {
   readonly accessRevision: string
 }
 
+function legacyImageSettings(slots: readonly CatalogPluginServiceSlot[] | undefined, previous: InstalledServices<CatalogPluginServiceSlot> | undefined) {
+  const migrations = new Map<string, { model: string | undefined; setting: InstalledServiceSettings | undefined }>()
+  for (const slot of slots ?? []) {
+    const { binding } = slot
+    if (binding.kind !== 'json-settings' || !binding.deferredUpstream) continue
+    const prior = previous?.slots.find(row => row.id === slot.id)
+    if (
+      prior?.binding.kind !== 'json-settings' ||
+      prior.binding.deferredUpstream ||
+      canonicalJson({ ...prior.binding, deferredUpstream: true }) !== canonicalJson(binding) ||
+      prior.backends.length !== 1
+    )
+      continue
+    const backend = prior.backends[0]!
+    const target = slot.backends[0]
+    if (
+      target?.id !== backend.id ||
+      target.mode !== backend.mode ||
+      target.protocol !== 'openai-image' ||
+      backend.protocol !== 'openai-image' ||
+      backend.fields.some(field => field.name !== backend.upstream.model)
+    )
+      continue
+    if (migrations.has(binding.upstream))
+      throw new BusinessRuleError('conflict', 'Multiple legacy image services use the same upstream.', 'platform-configuration-conflict')
+    const setting = previous?.settings.find(row => row.slot === slot.id && row.backend === backend.id)
+    migrations.set(binding.upstream, { model: setting?.values[backend.upstream.model], setting })
+  }
+  return migrations
+}
+
 /** Parent and settings are read after the catalog acquired their locks; no checkpoint or external preparation is written here. */
 export async function writeSuitePlugin(
   rows: Pick<SuiteRepositories, 'accounts' | 'plugins' | 'pluginAccess' | 'pluginUpstreams' | 'runtime' | 'runtimeReferences'>,
@@ -124,6 +184,7 @@ export async function writeSuitePlugin(
   policy: SuitePluginWiring & {
     readonly serviceIdentity?: InstalledServiceIdentity
     readonly takeover?: { readonly row: LibraryPlugin; readonly revision: string }
+    readonly accessSettings?: InstallAccessSettings
   } = {},
 ): Promise<LibraryPlugin> {
   const { compatibilityTarget, takeover, syntax } = policy
@@ -165,6 +226,8 @@ export async function writeSuitePlugin(
     ? { environment: [...previousAccess.environment.filter(row => !priorNames.has(row.name)), ...resourceEnvironment], entriesYaml: previousAccess.entriesYaml }
     : item.access
   const declaredUpstreams = new Set(deferredPluginUpstreams(item.serviceSlots))
+  const { imageSettings, serviceSettings } = policy.accessSettings ?? {}
+  if (imageSettings?.some(input => !declaredUpstreams.has(input.name))) throw invalidRequest()
   const access = new PluginAccessAdministration(rows.accounts, rows.plugins, rows.pluginAccess, rows.pluginUpstreams, syntax),
     checked = await access.validateSuiteTemplate(plan.prepared, template, dependencies, [...declaredUpstreams])
   const {
@@ -209,6 +272,8 @@ export async function writeSuitePlugin(
   }
   await rows.plugins.save(row, current?.revision ?? 'none')
   const previousServices = await rows.pluginAccess.installedServices?.(item.packageName)
+  const previous = mode === 'update' ? previousServices?.configuration : undefined
+  const migrations = legacyImageSettings(item.serviceSlots, previous?.ownerVersion === current?.current?.integrity ? previous : undefined)
   const protectedUpstreams = new Set([...declaredUpstreams, ...deferredPluginUpstreams(previousServices?.configuration.slots)])
   if (protectedUpstreams.size) {
     const revision = await rows.pluginUpstreams.revision?.(item.packageName)
@@ -224,20 +289,48 @@ export async function writeSuitePlugin(
         headers: managedImageUpstreamHeaders,
         testRequest: managedImageUpstreamTest,
       }))
-    if (pending.length || upstreams.some(upstream => protectedUpstreams.has(upstream.name) && !upstream.nativeServiceOnly))
+    if (
+      migrations.size ||
+      imageSettings?.length ||
+      pending.length ||
+      upstreams.some(upstream => protectedUpstreams.has(upstream.name) && !upstream.nativeServiceOnly)
+    ) {
+      const chosen = new Map(imageSettings?.map(input => [input.name, input]))
       await rows.pluginUpstreams.save(
         item.packageName,
-        [...upstreams.map(upstream => (protectedUpstreams.has(upstream.name) ? { ...upstream, nativeServiceOnly: true as const } : upstream)), ...pending],
+        [...upstreams, ...pending].map(upstream => {
+          if (!protectedUpstreams.has(upstream.name)) return upstream
+          const migrated = migrations.get(upstream.name)
+          if (migrated) {
+            const { model: previousModel, ...connection } = upstream
+            void previousModel
+            return {
+              ...connection,
+              ...(migrated.model ? { model: migrated.model } : {}),
+              ...(migrated.setting?.enabled === false ? { imageDisabled: true } : {}),
+              nativeServiceOnly: true,
+            }
+          }
+          const input = chosen.get(upstream.name)
+          const settings = input
+            ? mergeUpstreamInput({ ...input, headers: upstream.headers, testRequest: upstream.testRequest ?? managedImageUpstreamTest }, upstream)
+            : upstream
+          return { ...settings, nativeServiceOnly: true }
+        }),
         undefined,
         revision,
       )
+    }
   }
   if (!modified || priorResources.length || resourceEnvironment.length)
     await rows.pluginAccess.save(item.packageName, checked, undefined, settings?.revision ?? 'none')
   if (item.serviceSlots && (!policy.serviceIdentity || !rows.pluginAccess.saveInstalledServices || !rows.pluginAccess.installedServices))
     throw new BusinessRuleError('invalid', 'Installed service configuration storage is unavailable.', 'suite-catalog-invalid')
   if (policy.serviceIdentity && (item.serviceSlots || previousServices)) {
-    const configuration = installServiceDefinition(policy.serviceIdentity, item.serviceSlots, mode === 'update' ? previousServices?.configuration : undefined)
+    const moved = new Set([...migrations.values()].map(row => row.setting))
+    const retained = previous && migrations.size ? { ...previous, settings: previous.settings.filter(setting => !moved.has(setting)) } : previous
+    const definition = installServiceDefinition(policy.serviceIdentity, item.serviceSlots, retained)
+    const configuration = configureInstallServices(definition, serviceSettings)
     await rows.pluginAccess.saveInstalledServices!(
       item.packageName,
       origin,

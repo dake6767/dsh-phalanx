@@ -1,6 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { seedLegacyNativeServiceToken } from './support/legacy-native-service-token.js'
-import { assertLegacyNativeServiceCopy } from './support/legacy-native-service-copy.js'
+import { assertRetiredQiaomuService } from './support/retired-qiaomu-service.js'
 import { showAppCenterForFixture } from './support/app-center-visibility.js'
 import { memberSpacePath } from './support/real-dsh-runtime.js'
 import { prepareAndConfirmNpmPlugin } from './support/plugin-intake.js'
@@ -778,30 +778,29 @@ export function apply(ctx) {
   for (const name of ['native-service-tls.mjs', 'native-service-key.pem', 'native-service-cert.pem']) await copyFile(join(home, name), join(nextHome, name))
   const groupSession = await form('/login', { username: 'preinstalled-member', password: 'password' })
   const [entry, parallel] = await Promise.all([openCommunityHttpEntry(origin, groupSession, 180000), openCommunityHttpEntry(origin, groupSession, 180000)])
-  for (const { cookie } of [entry, parallel]) {
-    const state = await rpc.remoteRpc<{ data: { settings: { ai: object } } }>(origin, cookie, 'qiaomuCoverDesign/load', {})
-    expect(state.data.settings.ai).toMatchObject({
-      chatId: expect.stringMatching(/^platform-/u),
-      imageId: expect.stringMatching(/^platform-/u),
-      model: 'fixture-chat-openai',
-      imageModel: 'fixture-image-seedream',
-    })
-    const setup = await fetch(origin + '/market/api/plugins/setup', { headers: { cookie } })
-    expect(await setup.json()).toMatchObject({
-      nativeServices: [
-        {
-          packageName,
-          bindings: [
-            { slot: 'chat', status: 'applied' },
-            { slot: 'image', status: 'applied' },
-          ],
-        },
-      ],
-    })
-  }
   const nextAccount = (await accounts.get('preinstalled-member'))!
   expect((await records.get(nextAccount.spaceId)).filter(row => row.packageName === packageName)).toMatchObject([
     { source: 'preinstall', integrity, serviceOrigin: expect.any(String) },
   ])
-  await assertLegacyNativeServiceCopy({ origin, nextAccount, packageName, integrity, records, entry, groupSession, preinstall, api })
+  await assertRetiredQiaomuService({
+    origin,
+    packageName,
+    packageVersion,
+    integrity,
+    records,
+    entry,
+    nextAccount,
+    groupSession,
+    parallel,
+    home,
+    dataRoot: runtime.dataRoot,
+    features,
+    preinstall,
+    api,
+    form,
+    installation,
+    savedServices,
+    serviceOrigin: serviceOrigin!,
+    nextIntegrity,
+  })
 }

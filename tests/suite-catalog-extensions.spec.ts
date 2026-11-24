@@ -1,11 +1,25 @@
 import { expect, it } from 'vitest'
 import { checkUnsignedSuiteCatalog, readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
 import { suiteCatalogContentHash } from '../src/domain/suite-catalog-document.js'
+import { suiteInstallInput } from '../src/domain/suite-catalog.js'
 import { createCatalogSigningKey, signRawCatalog } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
 
 const key = createCatalogSigningKey()
 const options = { trustedKeys: [key], platformVersion: '0.1.36' }
+
+it('accepts complete image settings bound to the reviewed install preview and rejects incomplete groups', () => {
+  const image = { name: 'image-provider', baseUrl: 'https://images.example.test/v1', credential: 'fixture-secret', model: 'fixture-model' }
+  const request = { id: 'fixture-plugin', requestId: 'request-for-images', preview: { version: '1.0.0' } }
+  expect(suiteInstallInput({ ...request, imageSettings: [image] })).toEqual({ ...request, imageSettings: [image] })
+  expect(suiteInstallInput(request)).toEqual(request)
+  for (const imageSettings of [[{ ...image, model: '' }], [{ ...image, credential: ' ' }], [image, image], [{ ...image, headers: [] }]])
+    expect(() => suiteInstallInput({ ...request, imageSettings })).toThrow()
+  expect(() => suiteInstallInput({ ...request, preview: undefined, imageSettings: [image] })).toThrow()
+  const service = { slot: 'chat', backend: 'openai', values: { 'api-key': 'fixture-secret', MODEL: 'fixture-model' } }
+  expect(suiteInstallInput({ ...request, serviceSettings: [service] })).toEqual({ ...request, serviceSettings: [service] })
+  expect(() => suiteInstallInput({ ...request, serviceSettings: [service, service] })).toThrow()
+})
 
 it('verifies gallery tags without changing entry identity and isolates malformed display metadata online', () => {
   const entry = onlineCatalogEntries.find(row => row.id === 'wecom')!

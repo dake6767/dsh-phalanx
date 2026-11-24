@@ -9,7 +9,7 @@ import { protectedTable } from './platform-secret-codec.js'
 import { PlatformStoreLifecycle } from './platform-store-lifecycle.js'
 import { pluginAuthorizationRevision, pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
 
-type Metadata = Omit<PluginUpstream, 'credential' | 'headers' | 'secretUnavailable' | 'testRequest'> & {
+type Metadata = Omit<PluginUpstream, 'credential' | 'headers' | 'secretUnavailable' | 'unreadableHeaders' | 'testRequest'> & {
   headers: readonly { name: string }[]
   testRequest?: { method: string } | null
 }
@@ -29,6 +29,7 @@ interface SecretRow extends Record<string, unknown> {
 }
 const recordId = (packageName: string, name: string) => JSON.stringify([packageName, name])
 const upstreamSecrets = protectedTable('plugin_upstreams')
+const protectedValues = ({ credential, headers, testRequest }: PluginUpstream) => [credential, headers, testRequest ?? null]
 function configurationJson(upstreams: unknown): string {
   const ordered = (value: unknown): unknown =>
     Array.isArray(value)
@@ -77,40 +78,36 @@ export class PostgresPluginUpstreams implements PluginUpstreamsPort {
     const plugins = new Map(
       settings.map(setting => [
         setting.package_name,
-        setting.configuration.map(metadata => {
-          const row = byRecord.get(recordId(setting.package_name, metadata.name))
-          try {
-            if (!row) throw Error('Plugin upstream credential record is missing')
-            const { testRequest, ...plain } = metadata
-            return {
-              ...plain,
-              ...(testRequest === null ? { testRequest: null } : {}),
-              credential: upstreamSecrets.decrypt(this.cipher(), recordId(setting.package_name, metadata.name), 'credential', row.credential),
-              ...(metadata.testRequest
-                ? {
-                    testRequest: JSON.parse(
-                      upstreamSecrets.decrypt(this.cipher(), recordId(setting.package_name, metadata.name), 'testRequest', row.test_request!),
-                    ) as NonNullable<PluginUpstream['testRequest']>,
-                  }
-                : {}),
-              headers: metadata.headers.map((header, index) => ({
-                name: header.name,
-                value: upstreamSecrets.decrypt(
-                  this.cipher(),
-                  recordId(setting.package_name, metadata.name),
-                  'headers/' + header.name.toLowerCase(),
-                  row.headers[index]!,
-                ),
-              })),
+        setting.configuration.map((metadata): PluginUpstream => {
+          const id = recordId(setting.package_name, metadata.name)
+          const row = byRecord.get(id)
+          let secretUnavailable = false
+          const decode = <T>(field: string, envelope: PlatformSecretEnvelope | null | undefined, parse: (text: string) => T): T | undefined => {
+            try {
+              if (!envelope) throw Error('Plugin upstream secret is missing')
+              return parse(upstreamSecrets.decrypt(this.cipher(), id, field, envelope))
+            } catch {
+              secretUnavailable = true
+              return undefined
             }
-          } catch {
-            return {
-              ...metadata,
-              testRequest: null,
-              credential: '',
-              headers: metadata.headers.map(header => ({ name: header.name, value: '' })),
-              secretUnavailable: true as const,
-            }
+          }
+          const { testRequest: diagnostic, ...plain } = metadata
+          const credential = decode('credential', row?.credential, text => text) ?? ''
+          const testRequest = diagnostic
+            ? (decode('testRequest', row?.test_request, text => JSON.parse(text) as NonNullable<PluginUpstream['testRequest']>) ?? null)
+            : diagnostic
+          const unreadableHeaders: string[] = []
+          const headers = metadata.headers.map(({ name }, index) => {
+            const value = decode('headers/' + name.toLowerCase(), row?.headers[index], text => text)
+            if (value === undefined) unreadableHeaders.push(name)
+            return { name, value: value ?? '' }
+          })
+          return {
+            ...plain,
+            credential,
+            headers,
+            ...(testRequest === undefined ? {} : { testRequest }),
+            ...(secretUnavailable ? { secretUnavailable: true, unreadableHeaders } : {}),
           }
         }),
       ]),
@@ -130,10 +127,14 @@ export class PostgresPluginUpstreams implements PluginUpstreamsPort {
     return pluginAuthorizationRevision(this.connection)
   }
   async revision(packageName: string): Promise<string> {
+    return (await this.snapshot(packageName)).revision
+  }
+  async snapshot(packageName: string) {
     this.ready()
     return pluginTransaction(this.connection, async sql => {
       const row = await this.load(sql, packageName)
-      return row.plugins.get(packageName)?.length ? row.revisions.get(packageName)! : 'none'
+      const upstreams = row.plugins.get(packageName) ?? []
+      return { upstreams, revision: upstreams.length ? row.revisions.get(packageName)! : 'none' }
     })
   }
   async receipt(packageName: string): Promise<ContributionReceipt | undefined> {
@@ -179,11 +180,12 @@ export class PostgresPluginUpstreams implements PluginUpstreamsPort {
           throw new BusinessRuleError('conflict', 'Platform configuration changed. Reload before saving.', 'platform-configuration-conflict')
         const prior = (await this.load(sql, packageName)).plugins.get(packageName) ?? []
         const unchanged = configurationJson(prior) === configurationJson(next)
-        const metadata = next.map(({ name, baseUrl, model, headers, testRequest, nativeServiceOnly }) => ({
+        const metadata = next.map(({ name, baseUrl, model, headers, testRequest, nativeServiceOnly, imageDisabled }) => ({
           name,
           baseUrl,
           ...(model === undefined ? {} : { model }),
           ...(nativeServiceOnly ? { nativeServiceOnly } : {}),
+          ...(imageDisabled ? { imageDisabled } : {}),
           headers: headers.map(header => ({ name: header.name })),
           ...(testRequest !== undefined ? { testRequest: testRequest ? { method: testRequest.method } : null } : {}),
         }))
@@ -195,8 +197,8 @@ export class PostgresPluginUpstreams implements PluginUpstreamsPort {
             JSON.stringify(
               metadata.map((row, index) => {
                 if (!next[index]?.secretUnavailable) return row
-                const previous = current!.configuration.find(old => old.name === row.name) ?? row
-                return row.nativeServiceOnly ? { ...previous, nativeServiceOnly: true } : previous
+                const previous = current!.configuration.find(old => old.name === row.name)
+                return previous ? { ...row, headers: previous.headers, testRequest: previous.testRequest } : row
               }),
             ),
             revision,
@@ -208,7 +210,12 @@ export class PostgresPluginUpstreams implements PluginUpstreamsPort {
           next.map(row => row.name),
         ])
         for (const upstream of next) {
-          if (upstream.secretUnavailable || configurationJson([prior.find(row => row.name === upstream.name)]) === configurationJson([upstream])) continue
+          const previous = prior.find(row => row.name === upstream.name)
+          if (
+            upstream.secretUnavailable ||
+            (previous && !previous.secretUnavailable && configurationJson(protectedValues(previous)) === configurationJson(protectedValues(upstream)))
+          )
+            continue
           await sql.query(
             `INSERT INTO dsh_phalanx.plugin_upstreams(package_name,name,credential,headers,test_request) VALUES($1,$2,$3,$4,$5)
             ON CONFLICT(package_name,name) DO UPDATE SET credential=EXCLUDED.credential,headers=EXCLUDED.headers,test_request=EXCLUDED.test_request`,

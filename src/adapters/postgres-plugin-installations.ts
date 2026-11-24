@@ -11,7 +11,7 @@ import type {
   MemberNativeResourcesPort,
   MemberNativeResourceSnapshot,
 } from '../ports/plugin-installations.js'
-import { pluginSql, pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
+import { pluginServiceGeneration, pluginSql, pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
 import { insertMemberBrowserDependencies, reserveMemberBrowserResources } from './platform-browser-schema.js'
 import type { InstalledNativeResourceBinding } from '../domain/plugin-preinstall.js'
 
@@ -154,9 +154,19 @@ export class PostgresPluginInstallations
       )
     })
   }
-  async save(spaceId: string, record: PluginInstallation, browserReservation?: string): Promise<void> {
+  async save(spaceId: string, record: PluginInstallation, browserReservation?: string, expectedServiceGeneration?: string): Promise<void> {
     await pluginTransaction(this.connection, async sql => {
       const { packageName, version, source, integrity, serviceOrigin, resourceOrigin } = record
+      let serviceClaim = serviceOrigin
+      if (serviceOrigin && expectedServiceGeneration) {
+        // Match catalog retirement's lock order: the library owner, then the delivery history.
+        const [current] = await sql.query(
+          `SELECT package_name FROM dsh_phalanx.plugin_library AS plugin
+           WHERE package_name=$1 AND suite_origin=$2 AND ${pluginServiceGeneration}=$3 FOR SHARE`,
+          [packageName, serviceOrigin, expectedServiceGeneration],
+        )
+        if (!current) serviceClaim = undefined
+      }
       await sql.query('SELECT package_name FROM dsh_phalanx.plugin_deliveries WHERE space_id=$1 AND package_name=$2 FOR UPDATE', [spaceId, packageName])
       await sql.query(
         `DELETE FROM dsh_phalanx.member_browser_dependencies m USING dsh_phalanx.plugin_deliveries d
@@ -169,7 +179,7 @@ export class PostgresPluginInstallations
         WHEN EXCLUDED.service_origin IS NOT NULL AND plugin_deliveries.service_origin=EXCLUDED.service_origin
         THEN plugin_deliveries.service_settings
         ELSE (SELECT jsonb_object_agg(key, value) FROM jsonb_each(plugin_deliveries.service_settings) WHERE value ? 'jsonFiles') END`,
-        [spaceId, packageName, version, source, integrity ?? null, serviceOrigin ?? null, resourceOrigin ?? null],
+        [spaceId, packageName, version, source, integrity ?? null, serviceClaim ?? null, resourceOrigin ?? null],
       )
       if (browserReservation && resourceOrigin && integrity) {
         const committed = await sql.query(

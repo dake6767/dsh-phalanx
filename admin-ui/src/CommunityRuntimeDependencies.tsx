@@ -410,11 +410,9 @@ export default function CommunityRuntimeDependencies() {
       ) : null}
       {uninstalling ? (
         <CommunitySuiteUninstallDialog
-          entry={uninstalling}
+          id={uninstalling.id}
+          title={uninstalling.title[locale]}
           titleOf={titleOf}
-          referenceText={reference =>
-            reference.kind === 'suite' ? `${t('Catalog entry')} · ${titleOf(reference.name)}` : `${reference.kind} · ${reference.name}`
-          }
           onClose={() => setUninstalling(undefined)}
           onSubmitted={() => {
             setUninstalling(undefined)

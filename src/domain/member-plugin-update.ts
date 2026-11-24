@@ -3,20 +3,35 @@ import { pluginIdentities, type LibraryPlugin, type PreparedPlugin } from './plu
 import type { CommunityPluginUpdateChoice } from './plugin-admin-contract.js'
 import { compareStrictVersions } from './semver.js'
 
+type UpdateInventory = {
+  readonly retainedArchive?: true
+  readonly version?: string
+  readonly archiveIntegrity?: string
+  readonly enabled?: boolean
+  readonly incompatibleArchive?: { readonly integrity: string; readonly enabled: boolean }
+}
+
+export function nativeUpdatePrevious(installed: UpdateInventory) {
+  if (!installed.retainedArchive || !installed.version) return undefined
+  const { version, incompatibleArchive, archiveIntegrity, enabled } = installed
+  if (incompatibleArchive) return { version, ...incompatibleArchive, incompatibleRuntime: true as const }
+  if (archiveIntegrity && enabled !== undefined) return { version, integrity: archiveIntegrity, enabled }
+  return undefined
+}
+
 /** Match current DSH identity to a member delivery and a checked library archive. */
 export function nativeUpdateChoice(
-  installed: { readonly retainedArchive?: true; readonly version?: string; readonly archiveIntegrity?: string; readonly enabled?: boolean },
+  installed: UpdateInventory,
   target: PreparedPlugin,
   library: LibraryPlugin,
   delivery?: { readonly version: string; readonly integrity?: string },
 ): CommunityPluginUpdateChoice | undefined {
-  const { version, archiveIntegrity, enabled } = installed
-  if (!version || !archiveIntegrity) return undefined
+  const previous = nativeUpdatePrevious(installed)
+  if (!previous) return undefined
+  const { version, integrity: archiveIntegrity } = previous
   const identities = pluginIdentities(library)
   const legacy = library.identities?.['legacy:' + version] ?? identities[version]
   if (
-    !installed.retainedArchive ||
-    enabled === undefined ||
     delivery?.version !== version ||
     (delivery.integrity ?? legacy) !== archiveIntegrity ||
     !/^sha512-[A-Za-z0-9+/]{86}==$/u.test(target.integrity) ||
@@ -30,7 +45,18 @@ export function nativeUpdateChoice(
     kind: comparison > 0 ? 'version' : 'content',
     version: target.version,
     target: createHash('sha256')
-      .update(JSON.stringify([version, archiveIntegrity, target.version, target.integrity, target.artifact, target.preparationId, target.sourceCommit]))
+      .update(
+        JSON.stringify([
+          version,
+          archiveIntegrity,
+          target.version,
+          target.integrity,
+          target.artifact,
+          target.preparationId,
+          target.sourceCommit,
+          ...('incompatibleRuntime' in previous ? [previous.incompatibleRuntime] : []),
+        ]),
+      )
       .digest('hex'),
   }
 }

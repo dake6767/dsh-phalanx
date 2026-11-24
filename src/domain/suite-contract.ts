@@ -218,12 +218,4 @@ export interface CommunitySuiteUpdatePreview {
   readonly conflicts?: readonly string[]
   readonly missingDependencies?: readonly string[]
 }
-export interface CommunitySuiteInstallInput {
-  readonly id: string
-  readonly requestId: string
-  readonly preview?: import('./suite-catalog.js').SuiteInstallRequest['preview']
-  readonly groups?: readonly string[]
-  readonly publish?: boolean
-  readonly credentials?: Readonly<Record<string, string>>
-  readonly replace?: readonly import('./suite-catalog.js').SuiteReplacedEntry[]
-}
+export type CommunitySuiteInstallInput = import('./suite-catalog.js').SuiteInstallRequest

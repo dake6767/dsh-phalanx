@@ -9,6 +9,7 @@ import { PostgresPluginGrants } from '../src/adapters/postgres-plugin-grants.js'
 import { PostgresPluginInstallations } from '../src/adapters/postgres-plugin-installations.js'
 import { PostgresPluginLibraryStore } from '../src/adapters/postgres-plugin-library.js'
 import { PostgresPluginSelections } from '../src/adapters/postgres-plugin-selections.js'
+import { PostgresCatalogInstalls } from '../src/adapters/postgres-catalog-records.js'
 import { PostgresPluginUpstreams } from '../src/adapters/postgres-plugin-upstreams.js'
 import { PostgresUnitOfWork } from '../src/adapters/postgres-unit-of-work.js'
 import { openTestDatabase } from './support/community-application.js'
@@ -27,6 +28,7 @@ it('rolls back plugin removal across relations and cascades only facts owned by 
     await library.save({
       source: { kind: 'upload' as const },
       packageName: 'plugin',
+      suiteOrigin: 'suite:fixture',
       version: '1.0.0',
       stage: 'failed',
       current: null,
@@ -50,7 +52,9 @@ it('rolls back plugin removal across relations and cascades only facts owned by 
     await grants.grantContribution('default', 'plugin', { id: 'contribution', revision: 'one' })
     await selections.set(member.spaceId, ['plugin'])
     await local.set(member.spaceId, ['plugin'])
-    await history.save(member.spaceId, { packageName: 'plugin', version: '1.0.0', source: 'preinstall' })
+    const delivery = { packageName: 'plugin', version: '1.0.0', source: 'preinstall' as const }
+    const platformDelivery = { ...delivery, serviceOrigin: 'suite:fixture' }
+    await history.save(member.spaceId, platformDelivery)
     const access = new PostgresPluginAccessStore(database),
       upstreams = new PostgresPluginUpstreams(database)
     await access.initialize()
@@ -78,6 +82,7 @@ it('rolls back plugin removal across relations and cascades only facts owned by 
     expect(await grants.preinstalls(preinstalledGroup.id)).toEqual(['plugin'])
     expect(await selections.get(member.spaceId)).toEqual(['plugin'])
     expect(await local.get(member.spaceId)).toEqual(['plugin'])
+    expect(await history.get(member.spaceId)).toEqual([platformDelivery])
     const beforeRemoval = library.authorizationRevision()
     await work.run(repositories => repositories.library.remove('plugin'))
     expect(await library.list()).toEqual([])
@@ -90,7 +95,121 @@ it('rolls back plugin removal across relations and cascades only facts owned by 
     expect(await grants.contributionReceipt('default', 'plugin')).toBeUndefined()
     expect(await selections.get(member.spaceId)).toEqual([])
     expect(await local.get(member.spaceId)).toEqual([])
-    expect(await history.get(member.spaceId)).toEqual([{ packageName: 'plugin', version: '1.0.0', source: 'preinstall' }])
+    expect(await history.get(member.spaceId)).toEqual([delivery])
+
+    // A predecessor could leave the service claim behind after the library row was removed.
+    await history.save(member.spaceId, platformDelivery)
+    const { suiteOrigin: origin, revision, ...manual } = originalLibrary[0]!
+    void revision
+    await library.save(manual, 'none')
+    const [manualRow] = await library.list()
+    await library.save({ ...manualRow!, suiteOrigin: origin! })
+    expect(await history.get(member.spaceId)).toEqual([delivery])
+  } finally {
+    await database.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('rejects the service claim of a delivery that arrives after the same catalog entry was reintroduced', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plugin-retired-delivery-')),
+    database = await openTestDatabase(root)
+  try {
+    const member = await new PostgresCommunityAccountStore(database).create({ username: 'member', email: '', password: 'password' })
+    const installs = new PostgresCatalogInstalls(database)
+    const library = new PostgresPluginLibraryStore(database)
+    const access = new PostgresPluginAccessStore(database)
+    await access.initialize()
+    const history = new PostgresPluginInstallations(database)
+    const record = { id: 'fixture', category: 'plugin', version: '1.0.0', status: 'installed', entries: [], updatedAt: Date.now(), log: '' } as const
+    await installs.save(record)
+    const delivery = { packageName: 'plugin', version: '1.0.0', source: 'selected', integrity: 'archive' } as const
+    const platformDelivery = { ...delivery, serviceOrigin: 'suite:fixture' }
+    const { packageName, version, integrity, serviceOrigin } = platformDelivery
+    const display = { en: 'Image', 'zh-CN': '生图' }
+    async function introduce() {
+      await library.save(
+        {
+          packageName,
+          version,
+          source: { kind: 'npm' },
+          stage: 'available',
+          suiteOrigin: serviceOrigin,
+          published: true,
+          current: {
+            packageName,
+            version,
+            integrity,
+            artifact: 'plugin.tgz',
+            runtimeRevision: 'runtime',
+            title: 'Plugin',
+            description: '',
+            bundlePatch: '',
+            dependencies: {},
+          },
+        },
+        'none',
+      )
+      await access.saveInstalledServices(
+        packageName,
+        serviceOrigin,
+        {
+          identity: { id: record.id, version },
+          ownerVersion: integrity,
+          slots: [
+            {
+              id: 'image',
+              label: display,
+              binding: { kind: 'json-settings', file: 'settings.json', upstream: 'image', fields: [{ path: ['image', 'url'], source: 'gateway-url' }] },
+              backends: [
+                {
+                  id: 'openai',
+                  label: display,
+                  mode: 'api',
+                  protocol: 'openai-image',
+                  upstream: { endpoint: 'url', key: 'key', model: 'model' },
+                  fields: [],
+                },
+              ],
+            },
+          ],
+          settings: [],
+        },
+        'none',
+      )
+      const generation = await access.serviceDeliveryGeneration(packageName, serviceOrigin, integrity)
+      expect(generation).toEqual(expect.any(String))
+      return generation!
+    }
+    await introduce()
+    // Existing deployments have the same library row without an explicit generation.
+    await database.query("UPDATE dsh_phalanx.plugin_library SET configuration=configuration-'serviceDeliveryGeneration' WHERE package_name=$1", [packageName])
+    const admittedGeneration = (await access.serviceDeliveryGeneration(packageName, serviceOrigin, integrity))!
+    const admitted = (await installs.get(record.id))!
+
+    await installs.save({ ...record, status: 'updating' }, admitted.revision)
+    expect(await access.serviceDeliveryGeneration(packageName, serviceOrigin, integrity)).toBe(admittedGeneration)
+    await history.save(member.spaceId, platformDelivery, undefined, admittedGeneration)
+    expect(await history.get(member.spaceId)).toEqual([platformDelivery])
+    const updating = (await installs.get(record.id))!
+    await installs.save(record, updating.revision)
+    const restored = (await installs.get(record.id))!
+    const [published] = await library.list()
+    await library.save({ ...published!, published: false })
+    expect(await access.serviceDeliveryGeneration(packageName, serviceOrigin, integrity)).toBe(admittedGeneration)
+    await history.save(member.spaceId, platformDelivery, undefined, admittedGeneration)
+    expect(await history.get(member.spaceId)).toEqual([platformDelivery])
+
+    // An authorized delivery can also arrive after the original installation is gone.
+    await library.remove(packageName)
+    await installs.remove(record.id, restored.revision)
+    await installs.save(record)
+    const currentGeneration = await introduce()
+    expect(currentGeneration).not.toBe(admittedGeneration)
+    await history.save(member.spaceId, platformDelivery, undefined, admittedGeneration)
+    expect(await history.get(member.spaceId)).toEqual([delivery])
+    await history.save(member.spaceId, platformDelivery, undefined, currentGeneration)
+    expect(await history.get(member.spaceId)).toEqual([platformDelivery])
   } finally {
     await database.close()
     await rm(root, { recursive: true, force: true })

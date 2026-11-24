@@ -12,6 +12,7 @@ export interface PluginInstalledServices {
 export interface PluginAccessStorePort {
   installedServices?(packageName: string): Promise<PluginInstalledServices | undefined>
   installedServiceOwner?(packageName: string): Promise<string | undefined>
+  serviceDeliveryGeneration?(packageName: string, serviceOrigin: string, integrity: string): Promise<string | undefined>
   saveInstalledServices?(
     packageName: string,
     origin: string | null,

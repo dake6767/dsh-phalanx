@@ -3,6 +3,9 @@ import type { PluginUpstream } from '../domain/plugin-upstream.js'
 export interface PluginUpstreamsPort {
   authorizationRevision?(packageName: string): string
   revision?(packageName: string): string | Promise<string>
+  snapshot?(
+    packageName: string,
+  ): { upstreams: readonly PluginUpstream[]; revision: string } | Promise<{ upstreams: readonly PluginUpstream[]; revision: string }>
   list(packageName: string): readonly PluginUpstream[] | Promise<readonly PluginUpstream[]>
   receipt?(packageName: string): ContributionReceipt | undefined | Promise<ContributionReceipt | undefined>
   save(

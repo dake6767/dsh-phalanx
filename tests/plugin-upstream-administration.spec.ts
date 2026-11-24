@@ -134,9 +134,11 @@ it('exposes a pending signed upstream, preconfigures its request and reuses a ma
       },
     ],
   } as const satisfies CatalogPluginServiceSlot
-  const plugin = { packageName: 'plugin', suiteOrigin: suiteInstallOrigin('images'), current: { integrity: 'archive-integrity' } } as LibraryPlugin
+  const plugin = { packageName: 'plugin', revision: 7, suiteOrigin: suiteInstallOrigin('images'), current: { integrity: 'archive-integrity' } } as LibraryPlugin
+  let revision = 'none'
   const write = vi.fn(async (_packageName: string, values: readonly PluginUpstream[]) => {
     rows = values
+    revision += '-saved'
   })
   const refresh = vi.fn(async () => undefined)
   let rows: readonly PluginUpstream[] = []
@@ -144,7 +146,7 @@ it('exposes a pending signed upstream, preconfigures its request and reuses a ma
   const administration = new PluginUpstreamAdministration(
     { get: async () => admin },
     { list: async () => [plugin] },
-    { list: () => rows, save: write },
+    { list: () => rows, revision: () => revision, snapshot: () => ({ upstreams: rows, revision }), save: write },
     undefined,
     {
       installedServices: async () => ({
@@ -154,16 +156,43 @@ it('exposes a pending signed upstream, preconfigures its request and reuses a ma
     },
     refresh,
   )
-  expect(await administration.list(admin, 'plugin')).toMatchObject([{ name: 'images', managedImage: { ready: false }, credential: { configured: false } }])
+  const opened = (await administration.list(admin, 'plugin'))[0]!
+  expect(opened).toMatchObject({
+    name: 'images',
+    managedImage: { ready: false, revision: { upstream: 'none', plugin: 7 } },
+    credential: { configured: false },
+  })
   expect(write).not.toHaveBeenCalled()
   const baseUrl = 'https://images.example.test/v1'
   const credential = 'image-fixture-key'
   const saved = await administration.execute(admin, 'plugin', {
     action: 'save',
+    expectedRevision: opened.managedImage!.revision!,
     upstream: { name: 'images', model: 'fixture-model', baseUrl, credential, headers: [{ name: 'x-ignored', value: 'ignored' }] },
   })
   expect(saved).toMatchObject([{ name: 'images', model: 'fixture-model', managedImage: { ready: true } }])
   expect(JSON.stringify(saved)).not.toContain(credential)
+  expect(saved[0]?.credential).toEqual({ configured: true, last4: '' })
+  await expect(
+    administration.execute(admin, 'plugin', {
+      action: 'save',
+      upstream: { name: 'images', model: 'old-page-model', baseUrl, credential: 'old-page-key', headers: [] },
+    }),
+  ).rejects.toMatchObject({ code: 'platform-configuration-conflict' })
+  await expect(
+    administration.execute(admin, 'plugin', {
+      action: 'save',
+      expectedRevision: saved[0]!.managedImage!.revision!,
+      upstream: { name: 'images', model: 'fixture-model', baseUrl, credential: 'key with whitespace', headers: [] },
+    }),
+  ).rejects.toMatchObject({ code: 'plugin-upstream-invalid' })
+  await expect(
+    administration.execute(admin, 'plugin', {
+      action: 'save',
+      expectedRevision: opened.managedImage!.revision!,
+      upstream: { name: 'images', model: 'stale-model', baseUrl, credential: 'stale-key', headers: [] },
+    }),
+  ).rejects.toMatchObject({ code: 'platform-configuration-conflict' })
   expect(rows).toEqual([
     {
       name: 'images',
@@ -187,4 +216,31 @@ it('exposes a pending signed upstream, preconfigures its request and reuses a ma
   definition = [slot]
   expect((await administration.list(admin, 'plugin'))[0]?.managedImage?.ready).toBe(true)
   expect(write).toHaveBeenCalledTimes(2)
+  const current = (await administration.list(admin, 'plugin'))[0]!
+  const disabled = (
+    await administration.execute(admin, 'plugin', {
+      action: 'save',
+      expectedRevision: current.managedImage!.revision!,
+      enabled: false,
+      upstream: { name: 'images', baseUrl, headers: [] },
+    })
+  )[0]!
+  expect(disabled).toMatchObject({ credential: { configured: true }, managedImage: { disabled: true, ready: false } })
+  const updated = (
+    await administration.execute(admin, 'plugin', {
+      action: 'save',
+      expectedRevision: disabled.managedImage!.revision!,
+      upstream: { name: 'images', baseUrl, model: 'updated-model', headers: [] },
+    })
+  )[0]!
+  expect(updated).toMatchObject({ model: 'updated-model', managedImage: { disabled: true, ready: false } })
+  const enabled = (
+    await administration.execute(admin, 'plugin', {
+      action: 'save',
+      expectedRevision: updated.managedImage!.revision!,
+      enabled: true,
+      upstream: { name: 'images', baseUrl, headers: [] },
+    })
+  )[0]!
+  expect(enabled).toMatchObject({ model: 'updated-model', credential: { configured: true }, managedImage: { ready: true } })
 })

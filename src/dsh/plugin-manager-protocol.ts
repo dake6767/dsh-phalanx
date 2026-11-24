@@ -5,6 +5,7 @@ export const DSH_BUNDLE_ENABLE = 'pluginManager/setBundleEnabled'
 export const DSH_BUNDLE_UPDATE = 'pluginManager/updateBundle'
 export const DSH_PLUGIN_ENABLE = 'pluginManager/setPluginEnabled'
 export const DSH_BUNDLE_REMOVE = 'pluginManager/removeBundle'
+export const DSH_BUNDLE_INCOMPATIBLE_VERSION = 'incompatible-version'
 
 /** Read only public official optional-bundle state, rejecting malformed native inventory. */
 export function nativeOptionalBundles(value: unknown): readonly import('../ports/native-plugin-history.js').NativeOptionalBundle[] {

@@ -2,7 +2,7 @@ import { featureVisible } from '../../src/domain/release-visibility'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Checkbox } from '@heroui/react/checkbox'
-import type { CommunitySuiteCatalogEntryView, CommunitySuiteUninstallPreview } from '../../src/domain/admin-contract'
+import type { CommunitySuiteUninstallPreview } from '../../src/domain/admin-contract'
 import { communitySuiteUninstallPreview, uninstallCommunitySuite } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
@@ -11,21 +11,25 @@ import { browserBuildName, dependencySize } from './CommunityPlaywrightBrowsers'
 import { suiteKindLabels as kindLabels } from './community-suite-labels'
 
 export default function CommunitySuiteUninstallDialog({
-  referenceText,
-  entry,
+  id,
+  title,
   titleOf,
   onClose,
   onSubmitted,
 }: {
-  referenceText: (reference: { kind: string; name: string }) => string
-  entry: CommunitySuiteCatalogEntryView
+  id: string
+  title: string
   titleOf: (id: string) => string
   onClose: () => void
   onSubmitted: () => void
 }) {
   const { t, locale, errorText } = usePlatformLanguage()
-  const describeReference = (reference: { kind: string; name: string }) =>
-    reference.kind === 'member-plugin' ? `${t('Member plugin copy')} · ${reference.name}` : referenceText(reference)
+  const describeReference = (reference: { kind: string; name: string }) => {
+    if (reference.kind === 'member-plugin') return `${t('Member plugin copy')} · ${reference.name}`
+    if (reference.kind === 'suite') return `${t('Catalog entry')} · ${titleOf(reference.name)}`
+    const label = Object.hasOwn(kindLabels, reference.kind) ? t(kindLabels[reference.kind as keyof typeof kindLabels]) : reference.kind
+    return `${label} · ${reference.name}`
+  }
   const [preview, setPreview] = useState<CommunitySuiteUninstallPreview>()
   const [removeDependencies, setRemoveDependencies] = useState<readonly string[]>([])
   const [error, setError] = useState<unknown>()
@@ -34,7 +38,7 @@ export default function CommunitySuiteUninstallDialog({
   useEffect(() => {
     const controller = new AbortController()
     // Unreferenced shared dependencies are offered for removal and checked by default.
-    void communitySuiteUninstallPreview(entry.id, controller.signal)
+    void communitySuiteUninstallPreview(id, controller.signal)
       .then(value => {
         setPreview(value)
         setRemoveDependencies(value.dependencies.filter(row => !row.references.length).map(row => row.id))
@@ -43,14 +47,14 @@ export default function CommunitySuiteUninstallDialog({
         if (!controller.signal.aborted) setError(failure)
       })
     return () => controller.abort()
-  }, [entry.id])
+  }, [id])
   const submit = async () => {
     if (pending.current) return
     pending.current = true
     setBusy(true)
     setError(undefined)
     try {
-      await uninstallCommunitySuite(entry.id, { removeDependencies, ...(preview ? { expertRevision: preview.expertRevision } : {}) })
+      await uninstallCommunitySuite(id, { removeDependencies, ...(preview ? { expertRevision: preview.expertRevision } : {}) })
       onSubmitted()
     } catch (failure) {
       setError(failure)
@@ -62,7 +66,7 @@ export default function CommunitySuiteUninstallDialog({
   const blocked = preview?.blocked.some(item => item.references.length > 0) ?? false
   return (
     <CommunityDialog
-      title={entry.title[locale]}
+      title={title}
       busy={busy}
       onClose={onClose}
       footer={
