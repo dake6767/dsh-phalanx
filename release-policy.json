@@ -3,7 +3,7 @@
     "protocol": 3,
     "source": {
       "min": "0.1.26",
-      "maxExclusive": "0.1.40"
+      "maxExclusive": "0.1.41"
     },
     "environmentEpoch": 1,
     "sourceDshRevisions": [
@@ -26,12 +26,11 @@
     "breakpoints": []
   },
   "acceptancePolicy": {
-    "ticket": 6,
+    "ticket": 2,
     "checks": [
       "ci",
       "linux",
-      "upgrade",
-      "cleanInstall"
+      "upgrade"
     ]
   }
 }

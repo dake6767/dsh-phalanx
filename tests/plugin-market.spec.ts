@@ -141,6 +141,7 @@ it('uses actual native inventory for market actions without treating delivery hi
     bundlePatch: '[]',
     dependencies: {},
   }
+  let replacement: { from: { version: string; integrity: string }; to: { version: string; integrity: string } } | undefined
   let current: PreparedPlugin = plugin,
     publication = true,
     generation = 0
@@ -151,6 +152,7 @@ it('uses actual native inventory for market actions without treating delivery hi
         source: { kind: 'npm' as const },
         ...current,
         current,
+        ...(replacement ? { suiteOrigin: 'catalog:native', catalogReplacement: replacement } : {}),
         identities: {
           [plugin.version]: plugin.integrity,
           ['legacy:' + plugin.version]: plugin.integrity,
@@ -300,6 +302,15 @@ it('uses actual native inventory for market actions without treating delivery hi
   generation++
   current = { ...current, version: '0.9.0' }
   expect((await listMarket()).plugins[0]?.update).toBeUndefined()
+  replacement = { from: plugin, to: current }
+  expect((await listMarket()).plugins[0]).toMatchObject({ update: { kind: 'version', version: '0.9.0' } })
+  const legacyReceipt = history
+  history = [{ packageName: 'native', version: '1.0.0', source: 'selected' }]
+  expect((await listMarket()).plugins[0]?.update).toBeUndefined()
+  history = legacyReceipt
+  replacement = { from: { ...plugin, integrity: current.integrity }, to: current }
+  expect((await listMarket()).plugins[0]?.update).toBeUndefined()
+  replacement = undefined
   current = { ...current, version: '1.0.0' }
   expect((await listMarket()).plugins[0]).toMatchObject({ update: { kind: 'content', version: '1.0.0' } })
   const recorded = history

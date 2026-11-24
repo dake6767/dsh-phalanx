@@ -13,6 +13,7 @@ import { pluginAccessIdentity } from '../domain/plugin-access.js'
 import { managedImageUpstreamHeaders, managedImageUpstreamTest, mergeUpstreamInput, type PluginUpstream } from '../domain/plugin-upstream.js'
 import {
   assertPreparedPlugin,
+  catalogPluginPredecessor,
   pluginCatalogRevision,
   pluginIdentities,
   PluginPreparationError,
@@ -239,6 +240,7 @@ export async function writeSuitePlugin(
     retainedIntegrity,
     suiteResourceEnvironment,
     suiteResourceBindings,
+    catalogReplacement: _catalogReplacement,
     ...metadata
   } = current ?? {}
   void upload
@@ -249,11 +251,23 @@ export async function writeSuitePlugin(
   void retainedIntegrity
   void suiteResourceEnvironment
   void suiteResourceBindings
+  void _catalogReplacement
   const declaredDependencies = [...plan.item.runtimeDependencies, ...plan.item.catalogDependencies]
   const resourceBindings = item.resourceBindings?.map(binding => ({
     ...binding,
     runtimeDependency: dependencies[declaredDependencies.indexOf(binding.dependency)]!,
   }))
+  const from = item.replaces,
+    prior = current?.current,
+    retained = current && prior && catalogPluginPredecessor(current, prior)
+  const replacing =
+    mode === 'update' &&
+    current?.suiteOrigin === origin &&
+    from &&
+    ((prior?.version === from.version && prior.integrity === from.integrity) ||
+      (retained && retained.version === from.version && retained.integrity === from.integrity))
+  if (replacing && canonicalJson(suiteResourceBindings ?? []) !== canonicalJson(resourceBindings ?? []))
+    throw new BusinessRuleError('conflict', 'Keep the locked resource bindings while replacing a catalog plugin archive.', 'plugin-impact-changed')
   const row: LibraryPlugin = {
     ...metadata,
     packageName: item.packageName,
@@ -261,6 +275,7 @@ export async function writeSuitePlugin(
     source: item.archive ? uploadPluginSource : npmPluginSource,
     runtimeDependencies: [...dependencies],
     suiteOrigin: origin,
+    ...(replacing ? { catalogReplacement: { from, to: { version: item.version, integrity: item.integrity } } } : {}),
     ...(resourceBindings?.length ? { suiteResourceBindings: resourceBindings } : {}),
     ...(modified ? {} : { suiteAppliedAccess: pluginAccessIdentity(item.access) }),
     ...(resourceEnvironment.length ? { suiteResourceEnvironment: resourceEnvironment } : {}),

@@ -493,3 +493,107 @@ it('projects a locked catalog resource only for an exact member delivery and ret
     ).playwrightBrowsers,
   ).toEqual(resolved.playwrightBrowsers)
 })
+
+it('keeps the locked environment binding of an exact catalog predecessor during migration', async () => {
+  const previous = { version: '2.0.0', integrity: 'previous' }
+  const current = {
+    version: '1.0.0',
+    integrity: 'current',
+    artifact: 'archive',
+    runtimeRevision: 'rev',
+    packageName: 'adapted',
+    title: '',
+    description: '',
+    bundlePatch: '',
+    dependencies: {},
+  }
+  const binding = {
+    kind: 'environment' as const,
+    dependency: 'locked-tool',
+    runtimeDependency: 'locked-tool',
+    path: 'bin/tool',
+    version: '1.0.0',
+    contentHash: 'a'.repeat(64),
+    name: 'TOOL_PATH',
+  }
+  const delivered = { packageName: current.packageName, source: 'selected' as const, ...previous, resourceOrigin: 'catalog' }
+  let receipt = delivered
+  const row = {
+    ...current,
+    source: { kind: 'npm' as const },
+    current,
+    stage: 'available' as const,
+    published: true,
+    suiteOrigin: 'catalog',
+    catalogReplacement: { from: previous, to: current },
+    suiteResourceBindings: [binding],
+    runtimeDependencies: ['locked-tool'],
+  }
+  const version = {
+    id: 'fixture',
+    identity: 'fixture',
+    directory: '/host/fixture',
+    mountedPath: '/dependency/fixture',
+    pathDirectories: [],
+    commands: [],
+    commandPaths: {},
+    bytes: 1,
+    isolated: true,
+    checks: [],
+    log: '',
+  }
+  const access = new MemberPluginAccess(
+    { effective: async () => [] },
+    {
+      get: () => ({ environment: [{ name: 'ADMIN_OVERRIDE', value: 'new-only' }], entries: {}, entriesYaml: '', revision: 'fixture' }),
+      list: () => ({}),
+      save: async () => {},
+      remove: async () => {},
+    },
+    {
+      accounts: {
+        get: async username => ({
+          username,
+          spaceId: username,
+          sessionEpoch: 0,
+          disabled: false,
+          admin: false,
+          groupId: 'g',
+          email: '',
+          createdAt: 0,
+          updatedAt: 0,
+        }),
+      },
+      records: { get: async space => (space === 'owner' ? [receipt] : []) },
+    },
+    { library: { list: async () => [row] }, ready: () => [version], runtimeRevision: 'rev' },
+  )
+  const facts = { adapted: previous }
+  const nativeResources = await access.nativeDependencyPlans('owner', facts)
+  const resolved = await access.resolve(
+    [],
+    { url: 'http://localhost', token: 'fixture' },
+    {
+      username: 'owner',
+      installed: ['adapted'],
+      nativeResources,
+      dependencyVersions: { 'locked-tool': version },
+    },
+  )
+  expect(resolved.environment).toEqual({ TOOL_PATH: '/dependency/fixture/bin/tool' })
+  expect(await access.nativeDependencyPlans('owner', { adapted: { ...previous, integrity: 'different' } })).toEqual({})
+  expect(await access.nativeDependencyPlans('another-member', facts)).toEqual({})
+  receipt = { ...receipt, integrity: 'changed-after-planning' }
+  expect(
+    await access.resolve(
+      [],
+      { url: 'http://localhost', token: 'fixture' },
+      {
+        username: 'owner',
+        installed: ['adapted'],
+        nativeResources,
+        dependencyVersions: { 'locked-tool': version },
+      },
+    ),
+  ).toMatchObject({ environment: {}, nativeFailures: ['adapted'] })
+})

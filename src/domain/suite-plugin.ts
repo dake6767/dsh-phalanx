@@ -1,4 +1,5 @@
-import { assertGithubRepository, assertPluginIdentity } from './plugin-library.js'
+import { assertGithubRepository, assertPluginIdentity, type PluginArchiveIdentity } from './plugin-library.js'
+import { compareStrictVersions } from './semver.js'
 import type { SuiteCatalogPluginArchive, SuiteCatalogPluginItem } from './suite-catalog.js'
 
 /** Catalog plugin declarations never carry administrator credentials. */
@@ -52,4 +53,12 @@ export function readCatalogPluginArchive(value: unknown): SuiteCatalogPluginArch
   } catch {
     return
   }
+}
+
+export function readCatalogPluginPredecessor(value: unknown, target: PluginArchiveIdentity): PluginArchiveIdentity | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length !== 2) return
+  const { version, integrity } = value as Record<string, unknown>
+  if (typeof version !== 'string' || version.length > 128 || typeof integrity !== 'string' || !/^sha512-[A-Za-z0-9+/]{86}==$/u.test(integrity)) return
+  if (integrity === target.integrity || compareStrictVersions(target.version, version) !== -1) return
+  return { version, integrity }
 }

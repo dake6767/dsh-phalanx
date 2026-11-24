@@ -17,7 +17,7 @@ import {
   type NativePluginDependencyPlan,
   type NativePluginDependencyPlans,
 } from '../domain/plugin-preinstall.js'
-import type { PreparedPlugin } from '../domain/plugin-library.js'
+import { catalogPluginPredecessor, type PreparedPlugin } from '../domain/plugin-library.js'
 import type { RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import { PLAYWRIGHT_BROWSERS_ENV, type MemberPlaywrightBrowserResource } from '../domain/suite-resource-bindings.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
@@ -129,7 +129,7 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
         failures.push(packageName)
         continue
       }
-      const settings = frozen?.retainedBrowser ? undefined : await this.store.get(packageName)
+      const settings = frozen?.retainedBrowser || frozen?.catalogPredecessor ? undefined : await this.store.get(packageName)
       const values =
         settings?.environment.filter(
           value => !reservedPluginEnvironment(value.name) && !value.value.includes('{access-token}') && !/\{upstream:[^{}]*\}/u.test(value.value),
@@ -138,9 +138,9 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
         const names = frozen?.dependencies ?? (await this.declarations(packageName))
         const dependencies = this.resolvedBindings(names, versions)
         const resolved = (
-          frozen?.retainedBrowser
+          frozen?.retainedBrowser || frozen?.catalogPredecessor
             ? (frozen.resources ?? []).flatMap(binding =>
-                'name' in binding && [PLAYWRIGHT_BROWSERS_ENV, 'CHROME_PATH'].includes(binding.name)
+                'name' in binding && (frozen.catalogPredecessor || [PLAYWRIGHT_BROWSERS_ENV, 'CHROME_PATH'].includes(binding.name))
                   ? [[binding.name, posix.join(dependencies[binding.runtimeDependency]!.mountedPath, binding.path)] as const]
                   : [],
               )
@@ -185,7 +185,18 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
       return snapshot.delivered.some(matches) || snapshot.recovering.some(matches)
     }
     const library = await this.libraryRow(packageName)
-    return !!library && this.eligible(library) && nativePluginDependencyPlan(library).identity === plan.identity
+    if (!library?.current || !this.eligible(library) || nativePluginDependencyPlan(library).identity !== plan.identity) return false
+    if (!plan.catalogPredecessor) return true
+    const previous = catalogPluginPredecessor(library, library.current)
+    if (!previous) return false
+    const { delivered } = await this.nativeResourceSnapshot(spaceId)
+    return delivered.some(
+      record =>
+        record.packageName === packageName &&
+        record.resourceOrigin === library.suiteOrigin &&
+        record.version === previous.version &&
+        record.integrity === previous.integrity,
+    )
   }
   private async nativeResourceSnapshot(spaceId: string) {
     const records = this.native!.records
@@ -225,11 +236,13 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
         const plan = retainedBrowserPlan(record)
         return plan ? [[record.packageName, plan] as const] : []
       }),
-      ...delivered.flatMap(record => {
+      ...delivered.flatMap((record): readonly (readonly [string, NativePluginDependencyPlan])[] => {
         if (excluded.has(record.packageName)) return []
         const actual = archives[record.packageName]
         if (!actual || actual.integrity !== record.integrity || actual.version !== record.version) return []
         const row = library.find(row => row.packageName === record.packageName)
+        const current = row?.current
+        const retained = retainedBrowserPlan(record)
         if (
           !row?.suiteOrigin ||
           row.suiteOrigin !== record.resourceOrigin ||
@@ -237,15 +250,28 @@ export class MemberPluginAccess implements MemberPluginAccessPort {
           row.removing ||
           row.incompatible ||
           row.stage !== 'available' ||
-          row.current?.version !== actual.version ||
-          row.current.integrity !== actual.integrity ||
-          row.current.runtimeRevision !== this.dependencies!.runtimeRevision ||
+          !current ||
+          current.runtimeRevision !== this.dependencies!.runtimeRevision ||
           (record.browserBindings !== undefined && !sameBrowserBindings(record.browserBindings, row.suiteResourceBindings))
         ) {
-          const retained = retainedBrowserPlan(record)
           return retained ? [[record.packageName, retained]] : []
         }
-        return [[record.packageName, nativePluginDependencyPlan(row)]]
+        const plan = nativePluginDependencyPlan(row)
+        if (current.version === actual.version && current.integrity === actual.integrity) return [[record.packageName, plan]]
+        const predecessor = catalogPluginPredecessor(row, current)
+        if (predecessor?.version === actual.version && predecessor.integrity === actual.integrity) {
+          return [
+            [
+              record.packageName,
+              {
+                ...plan,
+                dependencies: [...new Set(row.suiteResourceBindings.map(binding => binding.runtimeDependency))],
+                catalogPredecessor: true,
+              },
+            ],
+          ]
+        }
+        return retained ? [[record.packageName, retained]] : []
       }),
     ])
   }

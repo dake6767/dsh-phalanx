@@ -7,6 +7,7 @@ export interface NativePluginDependencyPlan {
   readonly dependencies: readonly string[]
   readonly resources?: readonly InstalledNativeResourceBinding[]
   readonly retainedBrowser?: true
+  readonly catalogPredecessor?: true
 }
 export type NativePluginArchiveFacts = Readonly<Record<string, { readonly version: string; readonly integrity: string }>>
 export type NativePluginDependencyPlans = Readonly<Record<string, NativePluginDependencyPlan>>
@@ -50,6 +51,7 @@ export function nativePluginDependencyPlan(row: LibraryPlugin): NativePluginDepe
       row.runtimeDependencies,
       row.suiteResourceBindings,
       row.suiteResourceEnvironment,
+      ...(row.catalogReplacement ? [row.catalogReplacement] : []),
     ]),
     dependencies: row.runtimeDependencies ?? [],
     ...(row.suiteResourceBindings ? { resources: row.suiteResourceBindings } : {}),

@@ -20,7 +20,7 @@ import type { SuiteCatalogEntry, SuiteCatalogExecutionItem, SuiteCatalogItem, Su
 import type { SuiteCatalogRuntimeDependencyItem as SuiteCatalogDocumentRuntimeItem } from './suite-catalog-document.js'
 import { suitePrepareCheckCommand, suitePrepareCommands } from './suite-prepare-commands.js'
 import { compareSemver, parseSemver, parseSemverRange, satisfiesSemverRange } from './semver.js'
-import { readCatalogPluginArchive } from './suite-plugin.js'
+import { readCatalogPluginArchive, readCatalogPluginPredecessor } from './suite-plugin.js'
 import { readCatalogResourceBindings } from './suite-resource-bindings.js'
 import { resourceReadiness } from './suite-resource-readiness.js'
 import { readExecutionServiceSlots, readPluginServiceSlots, withServiceFieldLabels } from './suite-service-slots.js'
@@ -31,6 +31,7 @@ const itemExtensionFields = [
   'requiredFiles',
   'resourceBindings',
   'installDefaults',
+  'replaces',
   'serviceSlots',
   'serviceFieldLabels',
   'blockedShortOptions',
@@ -243,6 +244,16 @@ function readGalleryEntry(
           problem: { reason: 'invalid-entry', detail: 'Install defaults require literal plugin settings and engines.platform >=0.1.39.' },
         }
       items[index] = { ...plugin, installDefaults }
+    }
+    if (Object.hasOwn(raw, 'replaces')) {
+      const plugin = items[index]!
+      const replaces = plugin.kind === 'plugin' && readCatalogPluginPredecessor(raw.replaces, plugin)
+      if (plugin.kind !== 'plugin' || !replaces || !requiresCatalogExtensionPlatform(entry.engines.platform, '0.1.41'))
+        return {
+          entry: converted,
+          problem: { reason: 'invalid-entry', detail: 'Plugin replacements require an exact predecessor archive and engines.platform >=0.1.41.' },
+        }
+      items[index] = { ...plugin, replaces }
     }
     if (Object.hasOwn(raw, 'resourceBindings')) {
       const plugin = items[index]!

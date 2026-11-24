@@ -137,11 +137,13 @@ export class SuiteRetirement {
           await rows.packs.store.save(manual, row.rowRevision)
         }
         for (const row of before.plugins.filter(row => includes('plugin', row.packageName))) {
-          const { suiteOrigin, suiteAppliedAccess, suiteResourceEnvironment, suiteResourceBindings, installDefaults, current, ...manual } = row
+          const { suiteOrigin, suiteAppliedAccess, suiteResourceEnvironment, suiteResourceBindings, installDefaults, catalogReplacement, current, ...manual } =
+            row
           void suiteOrigin
           void suiteAppliedAccess
           void suiteResourceEnvironment
           void suiteResourceBindings
+          void catalogReplacement
           const services = await rows.pluginAccess.installedServices?.(row.packageName)
           if (services)
             await rows.pluginAccess.saveInstalledServices?.(row.packageName, origin, disableInstalledServiceBackends(services.configuration), services.revision)

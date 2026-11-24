@@ -682,3 +682,76 @@ it('rejects an unavailable or already supplied browser build before writing a si
   installedBindings = []
   await expect(write()).rejects.toThrow('Playwright browser build already has a locked resource')
 })
+
+it('keeps the same locked resource through a signed replacement and subsequent releases', async () => {
+  const f = await postgresSuiteService()
+  const storage = createSuiteStorage(f.database)
+  const previous = plugin(2)
+  const target = plugin(1)
+  const from = { version: previous.item.version, integrity: previous.item.integrity }
+  const to = { version: target.item.version, integrity: target.item.integrity }
+  const dependency = 'locked-assets'
+  const binding = { dependency, version: '1.0.0', contentHash: 'a'.repeat(64), name: 'ASSET_ROOT', path: 'bin/tool' }
+  const withResource = ({ item, ...plan }: typeof previous, path = binding.path) => ({
+    ...plan,
+    item: {
+      ...item,
+      catalogDependencies: [dependency],
+      resourceBindings: [{ ...binding, path }],
+      access: { ...item.access, environment: [...item.access.environment, { name: binding.name, value: '{dependency:' + dependency + '}/' + path }] },
+    },
+  })
+  const initial = withResource(previous)
+  const candidate = withResource(target)
+  const declared = { ...candidate, item: { ...candidate.item, replaces: from } }
+  const origin = suiteInstallOrigin('fixture-plugin')
+  const syntax = new YamlPluginAccessSyntax()
+  const row = () => storage.work.run(async rows => (await rows.plugins.list())[0])
+  const update = async (plan: typeof declared | typeof candidate) => {
+    const accessRevision = (await storage.work.run(async rows => rows.pluginAccess.get(previous.item.packageName)))!.revision
+    await storage.work.run(rows => writeSuitePlugin(rows, origin, { ...plan, accessRevision }, [dependency], 'update', { syntax }))
+  }
+  try {
+    await storage.work.run(async rows => {
+      await rows.runtime.save({
+        name: dependency,
+        type: 'resource',
+        prepareCommand: 'fixture',
+        pathDirectories: [],
+        source: 'suite-catalog',
+        stage: 'ready',
+        updatedAt: 1,
+        log: '',
+        checks: [],
+        current: {
+          id: 'a'.repeat(64),
+          identity: 'fixture',
+          directory: '/fixture',
+          mountedPath: '/fixture',
+          pathDirectories: [],
+          commands: [],
+          commandPaths: {},
+          bytes: 1,
+          isolated: true,
+          checks: [],
+          log: '',
+        },
+      })
+      await writeSuitePlugin(rows, origin, initial, [dependency], 'install', { syntax })
+    })
+    const original = await row()
+    const changed = withResource(target, 'bin/different')
+    await expect(update({ ...changed, item: { ...changed.item, replaces: from } })).rejects.toMatchObject({ code: 'plugin-impact-changed' })
+    expect(await row()).toEqual(original)
+
+    await update(declared)
+    expect(await row()).toMatchObject({ version: to.version, catalogReplacement: { from, to } })
+    const newer = { version: '1.1.0', integrity: 'sha512-' + Buffer.alloc(64, 3).toString('base64') }
+    await update({ ...declared, item: { ...declared.item, ...newer }, prepared: { ...declared.prepared, ...newer } })
+    expect(await row()).toMatchObject({ version: newer.version, catalogReplacement: { from, to: newer } })
+    await update({ ...candidate, item: { ...candidate.item, ...newer }, prepared: { ...candidate.prepared, ...newer } })
+    expect((await row())?.catalogReplacement).toBeUndefined()
+  } finally {
+    await f.close()
+  }
+})

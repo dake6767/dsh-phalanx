@@ -7,6 +7,10 @@ export interface PluginIdentity {
   readonly packageName: string
   readonly version: string
 }
+export interface PluginArchiveIdentity {
+  readonly version: string
+  readonly integrity: string
+}
 export interface UploadedPlugin extends PluginIdentity {
   readonly archive: string
   readonly integrity: string
@@ -106,6 +110,7 @@ export interface LibraryPlugin extends PluginCandidate {
   readonly suiteOrigin?: string
   /** Hash of the catalog access template this platform applied last; updates compare it to detect manual edits. */
   readonly suiteAppliedAccess?: string
+  readonly catalogReplacement?: { readonly from: PluginArchiveIdentity; readonly to: PluginArchiveIdentity }
   readonly suiteResourceBindings?: readonly import('./plugin-preinstall.js').InstalledNativeResourceBinding[]
   readonly suiteResourceEnvironment?: readonly { readonly name: string; readonly value: string }[]
   readonly pendingAdministrator?: { readonly actor: import('./community-account.js').CommunityAccountActor; readonly submittedAt: number }
@@ -123,6 +128,12 @@ export interface LibraryPlugin extends PluginCandidate {
   readonly current: PreparedPlugin | null
   readonly published: boolean
   readonly failureCode?: PluginPreparationFailureCode
+}
+
+export function catalogPluginPredecessor(row: LibraryPlugin, target: PluginArchiveIdentity): PluginArchiveIdentity | undefined {
+  const replacement = row.catalogReplacement
+  if (row.suiteOrigin && replacement?.to.version === target.version && replacement.to.integrity === target.integrity) return replacement.from
+  return undefined
 }
 export type PluginPreparationFailureCode =
   | 'plugin-incompatible'

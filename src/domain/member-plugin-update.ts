@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { pluginIdentities, type LibraryPlugin, type PreparedPlugin } from './plugin-library.js'
+import { catalogPluginPredecessor, pluginIdentities, type LibraryPlugin, type PreparedPlugin } from './plugin-library.js'
 import type { CommunityPluginUpdateChoice } from './plugin-admin-contract.js'
 import { compareStrictVersions } from './semver.js'
 
@@ -40,9 +40,13 @@ export function nativeUpdateChoice(
   )
     return undefined
   const comparison = compareStrictVersions(target.version, version)
-  if (comparison === undefined || comparison < 0) return undefined
+  if (comparison === undefined) return undefined
+  if (comparison < 0) {
+    const predecessor = catalogPluginPredecessor(library, target)
+    if (predecessor?.version !== version || predecessor.integrity !== archiveIntegrity || delivery.integrity !== archiveIntegrity) return undefined
+  }
   return {
-    kind: comparison > 0 ? 'version' : 'content',
+    kind: comparison !== 0 ? 'version' : 'content',
     version: target.version,
     target: createHash('sha256')
       .update(
