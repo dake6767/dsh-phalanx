@@ -1,26 +1,25 @@
-import { spawnSync } from 'node:child_process'
 import { mkdtemp, rm, writeFile, mkdir, access, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { parse } from 'yaml'
+import { runAsyncCommand as runCommand } from './support/async-command.js'
 
-it('pulls verified matching development images through the chosen source and explains build fallbacks', () => {
-  const result = spawnSync('python3', ['tests/fixtures/development-image.py'], { encoding: 'utf8' })
+it.concurrent('pulls verified matching development images through the chosen source and explains build fallbacks', async () => {
+  const result = await runCommand('python3', ['tests/fixtures/development-image.py'])
   expect(result.status, result.stderr).toBe(0)
 })
 
-it('confines synthetic DNS repair to owned guest entries and public answers', () => {
-  const result = spawnSync('python3', ['tests/fixtures/development-dns.py'], { encoding: 'utf8' })
+it.concurrent('confines synthetic DNS repair to owned guest entries and public answers', async () => {
+  const result = await runCommand('python3', ['tests/fixtures/development-dns.py'])
   expect(result.status, result.stderr).toBe(0)
 })
 
-it('explains the single Lima prerequisite before attempting VM creation', async () => {
+it.concurrent('explains the single Lima prerequisite before attempting VM creation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dev-vm-'))
   try {
-    const result = spawnSync('/bin/bash', [resolve('scripts/dev/vm.sh'), 'up'], {
+    const result = await runCommand('/bin/bash', [resolve('scripts/dev/vm.sh'), 'up'], {
       env: { ...process.env, PATH: root },
-      encoding: 'utf8',
     })
     expect(result.status).not.toBe(0)
     expect(result.stderr.trim()).toBe('Lima is required: brew install lima')
@@ -29,7 +28,7 @@ it('explains the single Lima prerequisite before attempting VM creation', async 
   }
 })
 
-it('creates one isolated VM, reuses it for upgrades, and controls only that instance', async () => {
+it.concurrent('creates one isolated VM, reuses it for upgrades, and controls only that instance', async () => {
   const version = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
   const root = await mkdtemp(join(tmpdir(), 'dev-vm-'))
   try {
@@ -50,7 +49,7 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
       testFail = '0',
       imageHash = 'a'.repeat(64)
     const invoke = (...args: string[]) =>
-      spawnSync('/bin/bash', [resolve('scripts/dev/vm.sh'), ...args], {
+      runCommand('/bin/bash', [resolve('scripts/dev/vm.sh'), ...args], {
         env: {
           ...process.env,
           PATH: `${bin}:${process.env.PATH}`,
@@ -62,13 +61,12 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
           FIXTURE_TEST_FAIL: testFail,
           FIXTURE_IMAGE_HASH: imageHash,
         },
-        encoding: 'utf8',
       })
-    let result = invoke('up')
+    let result = await invoke('up')
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('Port 18080 is already in use')
     portBusy = '0'
-    result = invoke('up')
+    result = await invoke('up')
     expect(result.status, result.stderr).toBe(0)
     const firstCalls = (await readFile(log, 'utf8'))
       .trim()
@@ -91,16 +89,16 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
       portForwards: [{ guestPort: 8080, hostIP: '127.0.0.1', hostPort: 18080 }, { ignore: true }],
     })
     await writeFile(join(home, '.dsh-phalanx-version'), '0.1.99\n')
-    result = invoke('destroy')
+    result = await invoke('destroy')
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('version')
     await writeFile(join(home, '.dsh-phalanx-version'), `${version}\n`)
     await writeFile(join(home, '.operation-lock'), String(process.pid) + '\n')
-    result = invoke('test')
+    result = await invoke('test')
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain(String(process.pid))
     await writeFile(join(home, '.operation-lock'), '99999999\n')
-    result = invoke('up', '--source', 'official')
+    result = await invoke('up', '--source', 'official')
     expect(result.status, result.stderr).toBe(0)
     const reusedCalls = (await readFile(log, 'utf8'))
       .trim()
@@ -108,31 +106,31 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
       .map(line => JSON.parse(line) as string[])
     expect(reusedCalls.filter(args => args[0] === 'start')).toHaveLength(2)
     await writeFile(join(root, 'cache/.operation-lock'), String(process.pid) + '\n')
-    result = invoke('test')
+    result = await invoke('test')
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain(String(process.pid))
     await rm(join(root, 'cache/.operation-lock'))
-    result = invoke('up', '--resident', '0.1.23')
+    result = await invoke('up', '--resident', '0.1.23')
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('version')
-    result = invoke('down')
+    result = await invoke('down')
     expect(result.status, result.stderr).toBe(0)
     expect(await readFile(log, 'utf8')).toContain('"stop"')
-    result = invoke('up')
+    result = await invoke('up')
     expect(result.status, result.stderr).toBe(0)
     for (const action of ['logs', 'shell', 'test']) {
-      result = invoke(action)
+      result = await invoke(action)
       expect(result.status, result.stderr).toBe(0)
     }
     imageHash = 'b'.repeat(64)
-    result = invoke('test')
+    result = await invoke('test')
     expect(result.status, result.stderr).toBe(0)
     const metadata = join(root, 'cache', imageHash, 'metadata.json')
     const priorMetadata = await readFile(metadata, 'utf8')
     const beforeFailure = (await readFile(log, 'utf8')).trim().split('\n').length
     imageHash = 'c'.repeat(64)
     testFail = '1'
-    result = invoke('test')
+    result = await invoke('test')
     expect(result.status).toBe(87)
     const failedCalls = (await readFile(log, 'utf8'))
       .trim()
@@ -154,7 +152,7 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
     expect(calls.filter(args => args[0] === 'shell').every(args => args[1] === '--workdir=/mnt/dsh-phalanx' && args[2] === 'development')).toBe(true)
     const beforeBlocked = calls.length
     clockNotReady = '1'
-    result = invoke('test')
+    result = await invoke('test')
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('clock configuration still requires a restart')
     const blockedCalls = (await readFile(log, 'utf8'))
@@ -165,7 +163,7 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
     expect(blockedCalls.filter(args => args[0] === 'stop')).toHaveLength(1)
     expect(blockedCalls.some(args => args.at(-1) === 'test')).toBe(false)
     clockNotReady = '0'
-    result = invoke('destroy')
+    result = await invoke('destroy')
     expect(result.status, result.stderr).toBe(0)
     await expect(access(join(home, 'development'))).rejects.toThrow()
     await expect(access(join(home, '.dsh-phalanx-checkout'))).resolves.toBeUndefined()
@@ -174,7 +172,7 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
   }
 })
 
-it('does not stop or delete instances in an unowned Lima home', async () => {
+it.concurrent('does not stop or delete instances in an unowned Lima home', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dev-vm-'))
   try {
     const bin = join(root, 'bin'),
@@ -186,9 +184,8 @@ it('does not stop or delete instances in an unowned Lima home', async () => {
     await writeFile(join(bin, 'uname'), '#!/bin/bash\nif [ "$1" = -m ]; then echo arm64; else echo Darwin; fi\n', { mode: 0o755 })
     await writeFile(join(bin, 'limactl'), '#!/bin/bash\ntouch "$FIXTURE_VM_STARTED"\n', { mode: 0o755 })
     for (const action of ['down', 'destroy']) {
-      const result = spawnSync('/bin/bash', [resolve('scripts/dev/vm.sh'), action], {
+      const result = await runCommand('/bin/bash', [resolve('scripts/dev/vm.sh'), action], {
         env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, DSH_PHALANX_VM_HOME: home, FIXTURE_VM_STARTED: started },
-        encoding: 'utf8',
       })
       expect(result.status).not.toBe(0)
       expect(result.stderr).toContain('not owned by this checkout')
@@ -200,7 +197,7 @@ it('does not stop or delete instances in an unowned Lima home', async () => {
   }
 })
 
-it('refuses an undersized Mac or disk before creating or starting a VM', async () => {
+it.concurrent('refuses an undersized Mac or disk before creating or starting a VM', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dev-vm-'))
   try {
     const bin = join(root, 'bin')
@@ -217,7 +214,7 @@ it('refuses an undersized Mac or disk before creating or starting a VM', async (
       ['8589934592', '52428800', '16 GiB of host memory'],
       ['17179869184', '20971520', '30 GiB of free disk'],
     ]) {
-      const result = spawnSync('/bin/bash', [resolve('scripts/dev/vm.sh'), 'up'], {
+      const result = await runCommand('/bin/bash', [resolve('scripts/dev/vm.sh'), 'up'], {
         env: {
           ...process.env,
           PATH: `${bin}:/usr/bin:/bin`,
@@ -226,7 +223,6 @@ it('refuses an undersized Mac or disk before creating or starting a VM', async (
           FIXTURE_DISK: disk,
           FIXTURE_VM_STARTED: started,
         },
-        encoding: 'utf8',
       })
       expect(result.status).not.toBe(0)
       expect(result.stderr).toContain(message)
@@ -237,22 +233,22 @@ it('refuses an undersized Mac or disk before creating or starting a VM', async (
   }
 })
 
-it('retains only tool-owned image entries referenced by the three most recent versions', () => {
-  const result = spawnSync('python3', ['tests/fixtures/development-cache.py'], { encoding: 'utf8' })
+it.concurrent('retains only tool-owned image entries referenced by the three most recent versions', async () => {
+  const result = await runCommand('python3', ['tests/fixtures/development-cache.py'])
   expect(result.status, result.stderr).toBe(0)
 })
 
-it('keeps the fresh guest reserve while allowing resident operations at 5 GiB', () => {
-  const result = spawnSync('python3', ['tests/fixtures/development-resources.py'], { encoding: 'utf8' })
+it.concurrent('keeps the fresh guest reserve while allowing resident operations at 5 GiB', async () => {
+  const result = await runCommand('python3', ['tests/fixtures/development-resources.py'])
   expect(result.status, result.stderr).toBe(0)
 })
 
-it('resumes installation only from matching retained bytes and an empty preserved deployment', () => {
-  const result = spawnSync('python3', ['tests/fixtures/development-install-resume.py'], { encoding: 'utf8' })
+it.concurrent('resumes installation only from matching retained bytes and an empty preserved deployment', async () => {
+  const result = await runCommand('python3', ['tests/fixtures/development-install-resume.py'])
   expect(result.status, result.stderr).toBe(0)
 })
 
-it('starts an owned retained VM without rebuilding or changing its installation', () => {
-  const result = spawnSync('python3', ['tests/fixtures/development-start.py'], { encoding: 'utf8' })
+it.concurrent('starts an owned retained VM without rebuilding or changing its installation', async () => {
+  const result = await runCommand('python3', ['tests/fixtures/development-start.py'])
   expect(result.status, result.stderr).toBe(0)
 })

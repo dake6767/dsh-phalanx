@@ -459,7 +459,7 @@ jobs:
     if: ${{ !inputs.development_image_only && needs.scope.outputs.mode != 'none' }}
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 16
       matrix:
         architecture: [amd64, arm64]
         shard: ${{ fromJSON(needs.scope.outputs.matrix).include }}
@@ -576,13 +576,14 @@ jobs:
         env:
           MODE: ${{ needs.scope.outputs.mode }}
           SHARD: ${{ matrix.shard.index }}
+          SHARD_TOTAL: ${{ matrix.shard.total }}
           TEST_FILES: ${{ join(matrix.shard.files, ',') }}
           BASELINE_RUN: ${{ inputs.reuse_baseline_run }}
           EXPECT_REUSE: ${{ contains(matrix.shard.files, 'tests/installed-image-reuse.e2e.ts') }}
         run: |-
           image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
           mode=()
-          if [ "$MODE" = full ]; then mode=(--shard "$SHARD/4"); else mode=(--files "$TEST_FILES"); fi
+          if [ "$MODE" = full ]; then mode=(--shard "$SHARD/$SHARD_TOTAL"); else mode=(--files "$TEST_FILES"); fi
           if [ "$EXPECTED_ARCH" = amd64 ] && [ -n "$BASELINE_RUN" ] && [ "$EXPECT_REUSE" = true ]; then
             test -d /var/tmp/dsh-phalanx-reuse-baseline
             mode+=(--reuse-baseline /var/tmp/dsh-phalanx-reuse-baseline --reuse-target /var/tmp/dsh-phalanx-spike-bundle)

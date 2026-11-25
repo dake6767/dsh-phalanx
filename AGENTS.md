@@ -35,7 +35,8 @@ version narration against this map as well.
 | [Member guide](docs/member-guide.md) / [中文](docs/member-guide.zh-CN.md) | Members | Sign-in, DSH workspace, platform apps, plugin settings and environment recovery |
 | [Plugin and MCP access](docs/plugin-access.md) / [中文](docs/plugin-access.zh-CN.md) | Administrators | Plugin upstreams, shared service bindings, MCP configuration and credentials |
 | [Skill execution](docs/skill-execution.md) / [中文](docs/skill-execution.zh-CN.md) | Administrators | Skill execution, dependencies, credential bindings and test runs |
-| [Architecture](docs/architecture.md) | Contributors, agents | Ownership, engineering laws, data boundaries and system update transaction |
+| [Architecture](docs/architecture.md) | Contributors, agents | Core layers, ten engineering laws, persistence pattern, gates, signed catalogs, key decisions and update overview |
+| `docs/architecture/` ([DSH seams](docs/architecture/dsh-seams.md), [persistence views](docs/architecture/persistence-views.md), [runtime boundaries](docs/architecture/runtime-boundaries.md), [system update](docs/architecture/system-update.md)) | Contributors, agents | Detailed subsystem invariants split from the core architecture blueprint |
 | [Contributing](CONTRIBUTING.md) | Contributors, maintainers | Development, DSH verification, Linux acceptance, candidate and release workflow |
 | [Admin UI design](admin-ui/DESIGN.md) | Admin UI contributors | Admin and entry page components, layout, responsive states and themes |
 | [Native DSH UI design](docs/dsh-ui/DESIGN.md) | DSH integration contributors | DSH slots, primitives, theme tokens and platform app center |

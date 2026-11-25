@@ -1,11 +1,11 @@
-import { spawnSync } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { assetNames, imageName, sha256 } from '../scripts/release/integrity.mjs'
+import { runAsyncCommand as runCommand } from './support/async-command.js'
 
-it.each(['0.1.0', '0.1.1', '0.1.4'])('publishes and promotes the exact image digest without overwriting tags for %s', async version => {
+it.concurrent.each(['0.1.0', '0.1.1', '0.1.4'])('publishes and promotes the exact image digest without overwriting tags for %s', async version => {
   const root = await mkdtemp(join(tmpdir(), 'image-publication-'))
   try {
     const directory = join(root, 'assets'),
@@ -47,8 +47,7 @@ it.each(['0.1.0', '0.1.1', '0.1.4'])('publishes and promotes the exact image dig
     const state = async () =>
       JSON.parse(await readFile(path, 'utf8')) as { digest: string; tags: Record<string, string>; copies: number; anonymousReads: number }
     const invoke = (promotion?: string) =>
-      spawnSync(process.execPath, ['--import', fixture, 'scripts/release/publish-image.mjs', directory], {
-        encoding: 'utf8',
+      runCommand(process.execPath, ['--import', fixture, 'scripts/release/publish-image.mjs', directory], {
         env: {
           ...process.env,
           PATH: `${bin}:${process.env.PATH}`,
@@ -60,24 +59,24 @@ it.each(['0.1.0', '0.1.1', '0.1.4'])('publishes and promotes the exact image dig
           PROMOTION_VERSION: promotion,
         },
       })
-    expect(invoke().status).toBe(0)
-    expect(invoke().status).toBe(0)
+    expect((await invoke()).status).toBe(0)
+    expect((await invoke()).status).toBe(0)
     expect((await state()).copies).toBe(1)
-    expect(invoke(version).status).toBe(0)
+    expect((await invoke(version)).status).toBe(0)
     expect((await state()).tags[version]).toBe(digest)
     expect((await state()).anonymousReads).toBeGreaterThan(0)
-    expect(invoke(version === '0.1.0' ? '0.1.1' : '0.1.0').status).not.toBe(0)
+    expect((await invoke(version === '0.1.0' ? '0.1.1' : '0.1.0')).status).not.toBe(0)
     const conflict = await state()
     conflict.tags[manifest.image.tag] = `sha256:${'f'.repeat(64)}`
     await writeFile(path, JSON.stringify(conflict))
-    expect(invoke().status).not.toBe(0)
+    expect((await invoke()).status).not.toBe(0)
     expect((await state()).copies).toBe(2)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-it.each(['0.1.0', '0.1.1', '0.1.4'])(
+it.concurrent.each(['0.1.0', '0.1.1', '0.1.4'])(
   'recovers a partial draft, rejects changed bytes, retries complete candidates and promotes unchanged assets in an isolated sample for %s',
   async version => {
     const root = await mkdtemp(join(tmpdir(), 'release-publication-'))
@@ -127,34 +126,33 @@ it.each(['0.1.0', '0.1.1', '0.1.4'])(
         CANDIDATE_TAG: manifest.tag,
         CANDIDATE_SHA: commit,
       }
-      const invoke = (changes = {}) =>
-        spawnSync(process.execPath, ['scripts/release/publish-release.mjs', directory], { env: { ...env, ...changes }, encoding: 'utf8' })
+      const invoke = (changes = {}) => runCommand(process.execPath, ['scripts/release/publish-release.mjs', directory], { env: { ...env, ...changes } })
       const state = async () =>
         JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as {
           refs: { ref: string; object: { sha: string } }[]
           releases: { draft: boolean; body: string; latest?: boolean; assets: { name: string }[] }[]
         }
-      expect(invoke({ RELEASE_FIXTURE_FAIL_ASSET: 'SHA256SUMS', RELEASE_FIXTURE_STALE_LIST: 'true' }).status).not.toBe(0)
+      expect((await invoke({ RELEASE_FIXTURE_FAIL_ASSET: 'SHA256SUMS', RELEASE_FIXTURE_STALE_LIST: 'true' })).status).not.toBe(0)
       expect((await state()).releases[0]!.draft).toBe(true)
       expect((await state()).releases[0]!.assets).toHaveLength(2)
-      expect(invoke().status).toBe(0)
+      expect((await invoke()).status).toBe(0)
       expect((await state()).releases[0]!.draft).toBe(false)
       expect((await state()).releases[0]!.latest).toBe(false)
       expect((await state()).releases[0]!.body).toBe('Private preview candidate. Verify SHA256SUMS and manifest before installation.')
-      expect(invoke().status).toBe(0)
+      expect((await invoke()).status).toBe(0)
       const initial = await readFile(join(directory, assetNames[0]!))
       await writeFile(join(root, manifest.tag, assetNames[0]!), 'conflicting uploaded bytes')
-      expect(invoke().status).not.toBe(0)
+      expect((await invoke()).status).not.toBe(0)
       await writeFile(join(root, manifest.tag, assetNames[0]!), initial)
       for (const name of ['acceptance.json', 'acceptance.md', 'release.json']) await writeFile(join(directory, name), 'isolated sample only')
       for (const invalid of [undefined, '', '# 9.9.9\n\nWrong release']) {
         if (invalid !== undefined) await writeFile(join(root, 'notes.md'), invalid)
-        expect(invoke({ PROMOTION_VERSION: version }).status).not.toBe(0)
+        expect((await invoke({ PROMOTION_VERSION: version })).status).not.toBe(0)
         expect((await state()).releases[1]!.draft).toBe(true)
       }
       const notes = `# ${version}\n\n## English\n\nRead [install](../../docs/install.md#skills). [angle](<../../docs/install.md>) [external](<https://example.com/guide>)\n\n## 简体中文\n\n阅读[安装](../../docs/install.zh-CN.md#技能)。\n`
       await writeFile(join(root, 'notes.md'), notes)
-      expect(invoke({ PROMOTION_VERSION: version }).status).toBe(0)
+      expect((await invoke({ PROMOTION_VERSION: version })).status).toBe(0)
       expect((await state()).releases[1]!.body).toContain(`https://github.com/fixture/sample/blob/v${version}/docs/install.md#skills`)
       expect((await state()).releases[1]!.body).toContain('## 简体中文')
       expect((await state()).releases[1]!.body).toContain(`[angle](<https://github.com/fixture/sample/blob/v${version}/docs/install.md>)`)
@@ -167,7 +165,7 @@ it.each(['0.1.0', '0.1.1', '0.1.4'])(
       expect(await readFile(join(root, `v${version}`, assetNames[0]!))).toEqual(initial)
       await writeFile(join(root, 'notes.md'), '# 9.9.9\n\nChanged after publication')
       const published = (await state()).releases[1]!.body
-      expect(invoke({ PROMOTION_VERSION: version }).status).toBe(0)
+      expect((await invoke({ PROMOTION_VERSION: version })).status).toBe(0)
       expect((await state()).releases[1]!.body).toBe(published)
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -175,7 +173,7 @@ it.each(['0.1.0', '0.1.1', '0.1.4'])(
   },
 )
 
-it.each(['0.1.16', '0.1.27'])('publishes a run candidate into the candidate repository using its own metadata anchor for %s', async version => {
+it.concurrent.each(['0.1.16', '0.1.27'])('publishes a run candidate into the candidate repository using its own metadata anchor for %s', async version => {
   const root = await mkdtemp(join(tmpdir(), 'run-candidate-publication-'))
   try {
     const directory = join(root, 'assets'),
@@ -228,13 +226,12 @@ it.each(['0.1.16', '0.1.27'])('publishes a run candidate into the candidate repo
       CANDIDATE_TAG: 'run-123',
       CANDIDATE_SHA: commit,
     }
-    const invoke = (changes = {}) =>
-      spawnSync(process.execPath, ['scripts/release/publish-release.mjs', directory], { env: { ...env, ...changes }, encoding: 'utf8' })
+    const invoke = (changes = {}) => runCommand(process.execPath, ['scripts/release/publish-release.mjs', directory], { env: { ...env, ...changes } })
     for (const invalid of [{ CANDIDATE_TAG: 'run-124' }, { GITHUB_RUN_ID: '124' }, { CANDIDATE_SHA: undefined }]) {
-      expect(invoke(invalid).status).not.toBe(0)
+      expect((await invoke(invalid)).status).not.toBe(0)
     }
     expect(JSON.parse(await readFile(join(root, 'state.json'), 'utf8')).refs).toEqual([])
-    const result = invoke()
+    const result = await invoke()
     expect(result.status, result.stderr).toBe(0)
     const state = JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as {
       refs: { ref: string; object: { sha: string }; repository: string }[]
@@ -265,11 +262,11 @@ it.each(['0.1.16', '0.1.27'])('publishes a run candidate into the candidate repo
       manifestSha256: sha256(await readFile(join(directory, 'manifest.json'))),
       workflow: { path: '.github/workflows/candidate.yml', commit, ref: `refs/heads/candidate/${version}` },
     })
-    expect(invoke().status).toBe(0)
+    expect((await invoke()).status).toBe(0)
     const advanced = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
     advanced.anchor = 'e'.repeat(40)
     await writeFile(join(root, 'state.json'), JSON.stringify(advanced))
-    expect(invoke().status).toBe(0)
+    expect((await invoke()).status).toBe(0)
     const rehearsal = {
       purpose: 'publication-rehearsal',
       acceptance: 'not-accepted',
@@ -288,7 +285,7 @@ it.each(['0.1.16', '0.1.27'])('publishes a run candidate into the candidate repo
       GITHUB_REF: `refs/heads/candidate/${version}`,
       GITHUB_WORKFLOW: 'Candidate rehearsal',
     }
-    const trial = invoke(rehearsalEnv)
+    const trial = await invoke(rehearsalEnv)
     expect(trial.status, trial.stderr).toBe(0)
     const trialState = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
     expect(trialState.refs[1]).toMatchObject({
@@ -301,14 +298,14 @@ it.each(['0.1.16', '0.1.27'])('publishes a run candidate into the candidate repo
     expect(trialState.releases[1].assets.map((asset: { name: string }) => asset.name)).not.toContain('acceptance.json')
     expect(await readFile(join(root, `v${version}-rehearsal.123`, assetNames[0]!))).toEqual(await readFile(join(directory, assetNames[0]!)))
     for (const invalid of [{ GITHUB_REF: 'refs/heads/topic' }, { GITHUB_WORKFLOW: 'Release' }, { CANDIDATE_RUN_ID: '124' }, { PROMOTION_VERSION: version }]) {
-      expect(invoke({ ...rehearsalEnv, ...invalid }).status).not.toBe(0)
+      expect((await invoke({ ...rehearsalEnv, ...invalid })).status).not.toBe(0)
     }
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-it('publishes a formal snapshot by fast-forwarding main before the tag and deletes the candidate only after completion', async () => {
+it.concurrent('publishes a formal snapshot by fast-forwarding main before the tag and deletes the candidate only after completion', async () => {
   const root = await mkdtemp(join(tmpdir(), 'formal-snapshot-publication-'))
   try {
     const source = join(root, 'source'),
@@ -318,24 +315,24 @@ it('publishes a formal snapshot by fast-forwarding main before the tag and delet
     await mkdir(source)
     await mkdir(bin)
     await mkdir(directory)
-    const git = (...args: string[]) => {
-      const result = spawnSync('git', args, { cwd: source, encoding: 'utf8' })
+    const git = async (...args: string[]) => {
+      const result = await runCommand('git', args, { cwd: source })
       if (result.status !== 0) throw Error(result.stderr)
       return result.stdout.trim()
     }
-    git('init', '-q', '-b', 'main')
-    git('config', 'user.name', 'Fixture')
-    git('config', 'user.email', 'fixture@example.invalid')
-    git('config', 'commit.gpgsign', 'false')
-    git('commit', '--allow-empty', '-qm', 'stable')
-    git('init', '--bare', '-q', remote)
-    git('remote', 'add', 'origin', remote)
-    git('push', 'origin', 'main')
-    const stable = git('rev-parse', 'HEAD')
-    git('switch', '-c', 'candidate/0.1.24')
-    git('commit', '--allow-empty', '-qm', 'Release 0.1.24')
-    const commit = git('rev-parse', 'HEAD')
-    git('push', 'origin', 'candidate/0.1.24')
+    await git('init', '-q', '-b', 'main')
+    await git('config', 'user.name', 'Fixture')
+    await git('config', 'user.email', 'fixture@example.invalid')
+    await git('config', 'commit.gpgsign', 'false')
+    await git('commit', '--allow-empty', '-qm', 'stable')
+    await git('init', '--bare', '-q', remote)
+    await git('remote', 'add', 'origin', remote)
+    await git('push', 'origin', 'main')
+    const stable = await git('rev-parse', 'HEAD')
+    await git('switch', '-c', 'candidate/0.1.24')
+    await git('commit', '--allow-empty', '-qm', 'Release 0.1.24')
+    const commit = await git('rev-parse', 'HEAD')
+    await git('push', 'origin', 'candidate/0.1.24')
     await writeFile(join(bin, 'gh'), `#!/bin/sh\nexec '${process.execPath}' '${resolve('tests/fixtures/release-gh.mjs')}' "$@"\n`, { mode: 0o755 })
     const digest = `sha256:${'a'.repeat(64)}`
     const manifest = {
@@ -365,9 +362,8 @@ it('publishes a formal snapshot by fast-forwarding main before the tag and delet
     await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${manifest.files[name]}  ${name}\n`).join(''))
     await writeFile(join(root, 'notes.md'), '# 0.1.24\n\nMember improvements.\n')
     const invoke = (changes = {}) =>
-      spawnSync(process.execPath, [resolve('scripts/release/publish-release.mjs'), directory], {
+      runCommand(process.execPath, [resolve('scripts/release/publish-release.mjs'), directory], {
         cwd: source,
-        encoding: 'utf8',
         env: {
           ...process.env,
           PATH: `${bin}:${process.env.PATH}`,
@@ -384,16 +380,16 @@ it('publishes a formal snapshot by fast-forwarding main before the tag and delet
         },
       })
     await writeFile(join(root, 'state.json'), JSON.stringify({ refs: [{ ref: 'refs/tags/v0.1.24', object: { type: 'commit', sha: stable } }], releases: [] }))
-    expect(invoke().status).not.toBe(0)
-    expect(git('ls-remote', 'origin', 'refs/heads/main')).toBe(`${stable}\trefs/heads/main`)
+    expect((await invoke()).status).not.toBe(0)
+    expect(await git('ls-remote', 'origin', 'refs/heads/main')).toBe(`${stable}\trefs/heads/main`)
     await writeFile(join(root, 'state.json'), JSON.stringify({ refs: [], releases: [] }))
-    expect(invoke({ RELEASE_FIXTURE_FAIL_ASSET: 'SHA256SUMS' }).status).not.toBe(0)
-    expect(git('ls-remote', 'origin', 'refs/heads/main')).toBe(`${commit}\trefs/heads/main`)
-    expect(git('ls-remote', 'origin', 'refs/heads/candidate/0.1.24')).toContain(commit)
-    expect(git('ls-remote', 'origin', 'refs/tags/v0.1.24')).toBe(`${commit}\trefs/tags/v0.1.24`)
-    const result = invoke()
+    expect((await invoke({ RELEASE_FIXTURE_FAIL_ASSET: 'SHA256SUMS' })).status).not.toBe(0)
+    expect(await git('ls-remote', 'origin', 'refs/heads/main')).toBe(`${commit}\trefs/heads/main`)
+    expect(await git('ls-remote', 'origin', 'refs/heads/candidate/0.1.24')).toContain(commit)
+    expect(await git('ls-remote', 'origin', 'refs/tags/v0.1.24')).toBe(`${commit}\trefs/tags/v0.1.24`)
+    const result = await invoke()
     expect(result.status, result.stderr).toBe(0)
-    expect(git('ls-remote', 'origin', 'refs/heads/candidate/0.1.24')).toBe('')
+    expect(await git('ls-remote', 'origin', 'refs/heads/candidate/0.1.24')).toBe('')
     const state = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
     expect(state.releases[0]).toMatchObject({ draft: false, latest: true })
   } finally {
@@ -401,7 +397,7 @@ it('publishes a formal snapshot by fast-forwarding main before the tag and delet
   }
 })
 
-it('publishes an ordered stable version index including the promoted version and excluding candidates', async () => {
+it.concurrent('publishes an ordered stable version index including the promoted version and excluding candidates', async () => {
   const { releaseVersionIndex } = await import('../scripts/release/version-index.mjs')
   expect(releaseVersionIndex('0.1.28', ['v0.1.28-rc.1', 'run-123', 'v0.1.26', 'v0.1.27', 'v0.1.29', 'v0.1.26'])).toEqual(['v0.1.26', 'v0.1.27', 'v0.1.28'])
 })

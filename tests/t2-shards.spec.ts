@@ -45,8 +45,9 @@ it.each(['amd64', 'arm64'])('requires every %s shard and the complete frozen res
       }
       receipts.push(receipt)
       await writeFile(join(dir, 'shard.json'), JSON.stringify(receipt))
-      if (shard.index < 4) expect(invoke().status).not.toBe(0)
+      if (shard.index < plan.shards.length) expect(invoke().status).not.toBe(0)
     }
+    expect(plan.shards).toHaveLength(8)
     const passed = invoke()
     expect(passed.status, passed.stderr).toBe(0)
     for (const identityKey of Object.keys(identity)) {
@@ -56,7 +57,14 @@ it.each(['amd64', 'arm64'])('requires every %s shard and the complete frozen res
       expect(invoke().status).not.toBe(0)
     }
     await writeFile(join(root, '1/shard.json'), JSON.stringify(receipts[0]))
-    for (const patch of [{ index: 2 }, { files: ['tests/installed-candidate.e2e.ts'] }, { regularReport: null }, { inventoryHash: 'wrong' }]) {
+    for (const patch of [
+      { index: 2 },
+      { total: 4 },
+      { weight: 1 },
+      { files: ['tests/installed-candidate.e2e.ts'] },
+      { regularReport: null },
+      { inventoryHash: 'wrong' },
+    ]) {
       await writeFile(join(root, '1/shard.json'), JSON.stringify({ ...receipts[0], ...patch }))
       expect(invoke().status).not.toBe(0)
     }

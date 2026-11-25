@@ -1,58 +1,104 @@
-import { spawnSync } from 'node:child_process'
 import { expect, it } from 'vitest'
+import { runAsyncCommand } from './support/async-command.js'
 
-it('admits Debian-family hosts through the installation command and reports verification and capability failures', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-hosts.py'], { encoding: 'utf8' })
-  expect(result.status, result.stderr).toBe(0)
-})
+const runPython = (script: string, timeout = 28_000) => runAsyncCommand('python3', [script], { timeout })
 
-it('uses saved download sources and rejects bad proxy bytes through the installation and upgrade CLI', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-download-sources.py'], { encoding: 'utf8', timeout: 30000 })
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'admits Debian-family hosts through the installation command and reports verification and capability failures',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-hosts.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
 
-it('requires explicit development opt-in for native arm64 installation', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-development.py'], { encoding: 'utf8' })
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'uses saved download sources and rejects bad proxy bytes through the installation and upgrade CLI',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-download-sources.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
 
-it('honors the installation command contract at filesystem and operating-system I/O', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-contract.py'], { encoding: 'utf8' })
-  expect(result.stderr, result.stdout).not.toContain('Traceback')
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'requires explicit development opt-in for native arm64 installation',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-development.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
 
-it('guides retries and preserves terminal input with heredoc source', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-experience.py'], { encoding: 'utf8' })
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'honors the installation command contract at filesystem and operating-system I/O',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-contract.py')
+    expect(result.stderr, result.stdout).not.toContain('Traceback')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
 
-it('shows live progress and keeps machine output and diagnostics safe', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-output.py'], { encoding: 'utf8', timeout: 30000 })
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'guides retries and preserves terminal input with heredoc source',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-experience.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
 
-it('coalesces human progress while retaining CLI and Web facts, and preserves real PTY summaries', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-progress-rendering.py'], { encoding: 'utf8', timeout: 30000 })
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'shows live progress and keeps machine output and diagnostics safe',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-output.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
 
-it('discovers stable releases and development candidates using only verified release assets', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-release-assets.py'], { encoding: 'utf8', timeout: 30000 })
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'coalesces human progress while retaining CLI and Web facts, and preserves real PTY summaries',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-progress-rendering.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
 
-it('uses a protected authenticated CONNECT proxy for installation, updates and product-user pulls', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-egress-proxy.py'], { encoding: 'utf8', timeout: 30000 })
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'discovers stable releases and development candidates using only verified release assets',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-release-assets.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
 
-it('prepares a digest-verified rootless PostgreSQL service and private bootstrap configuration', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-database.py'], { encoding: 'utf8' })
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'uses a protected authenticated CONNECT proxy for installation, updates and product-user pulls',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-egress-proxy.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
 
-it('runs the shared bilingual installation flow, rechecks sources and retains hidden explicit configuration', () => {
-  const result = spawnSync('python3', ['tests/fixtures/installer-bilingual.py'], { encoding: 'utf8', timeout: 30000 })
-  expect(result.status, result.stderr).toBe(0)
-})
+it.concurrent(
+  'prepares a digest-verified rootless PostgreSQL service and private bootstrap configuration',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-database.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)
+
+it.concurrent(
+  'runs the shared bilingual installation flow, rechecks sources and retains hidden explicit configuration',
+  async () => {
+    const result = await runPython('tests/fixtures/installer-bilingual.py')
+    expect(result.status, result.stderr).toBe(0)
+  },
+  35_000,
+)

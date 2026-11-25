@@ -191,6 +191,12 @@ export async function startPostgresFixture() {
       'max_connections=100',
       '-c',
       'work_mem=2MB',
+      '-c',
+      'fsync=off',
+      '-c',
+      'synchronous_commit=off',
+      '-c',
+      'full_page_writes=off',
     ])
     const deadline = Date.now() + 60_000
     while (call(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'], false).status !== 0) {

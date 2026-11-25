@@ -82,10 +82,11 @@ it('pushes one release-notes snapshot over public main and replaces only the can
     git('add', '.')
     git('commit', '-qm', 'installer change')
     await record()
-    expect(invoke().status).not.toBe(0)
+    // cleanInstall is a non-blocking on-demand check; installer changes do not require adding it to acceptancePolicy.checks.
+    expect(invoke().status).toBe(0)
     await writeFile(join(source, 'release-policy.json'), JSON.stringify({ acceptancePolicy: { checks: ['ci', 'linux', 'upgrade', 'cleanInstall'] } }))
     git('add', '.')
-    git('commit', '-qm', 'declare installer acceptance')
+    git('commit', '-qm', 'optional cleanInstall policy remains compatible')
     await record()
     expect(invoke().status).toBe(0)
     git('switch', 'main')

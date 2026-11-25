@@ -388,26 +388,27 @@ formal-upgrade release gate. The independent development-image workflow uses
 only six native arm64 smoke cases and does not satisfy full Candidate acceptance.
 
 The executable inventory is `scripts/validation/t2-selection.json`. Each architecture
-prepares one immutable bundle and distributes a full run across four independent
-native runners. Both architectures use the same frozen shard plan. Aggregation rejects missing, duplicate
+prepares one immutable bundle and distributes a full run across eight independent
+native runners using duration-weighted LPT balancing. Both architectures use the same frozen shard plan. Aggregation rejects missing, duplicate
 or failed shards, unexpected skips, changed case counts, and differing
 platform/source/run/attempt or bundle identities. Both retain two Unix identities,
 UID mapping and separate container stores. The real-news credential migration and live 12306
 query are optional environment checks, not successful skips inside this inventory.
 
-Ordinary changes use an explicit Linux subset of new or changed cases plus
-affected regressions. Subprocess and configuration behavior require explicit
-selection beyond import analysis. Shared support, fixtures, execution or build
-inputs, high-impact runtime/installation changes and unbounded impact require
-full acceptance. Local milestone batches also run full acceptance. Workflows
+Ordinary changes touching Linux-specific paths use an explicit on-demand subset of
+affected cases on the local development VM (or hosted Linux workflow). Subprocess and
+configuration behavior require explicit selection beyond import analysis. Full
+dual-architecture acceptance is owned by the hosted Candidate workflow; the local
+development VM serves as an on-demand Linux sandbox for targeted subsets, real-credential
+checks and failure reproduction rather than routine full-inventory runs. Workflows
 run only by explicit dispatch or trusted calls, with no nightly trigger. Failed
 runs retain reports and diagnostics; image handoff is a separate immutable artifact.
 
 The manual workflow accepts `test_files`, a comma-separated regular inventory
-subset, in one native test runner per architecture; leave it empty for four-shard
+subset, in one native test runner per architecture; leave it empty for eight-shard
 full acceptance on each architecture.
 Use the same subset with `t2-host.py --files`. Subset reports verify every
-selected file and its frozen case count. CI uses `--shard INDEX/4` for full
+selected file and its frozen case count. CI uses `--shard INDEX/8` for full
 acceptance; `--files`, `--shard` and `--smoke` are mutually exclusive. The local
 host command without these options retains serial full acceptance. `node scripts/validation/t2-plan.mjs` prints the deterministic shard
 plan; `node scripts/validation/t2.mjs --list` prints the exact selection.
@@ -462,11 +463,14 @@ legacy release-gate classification. This legacy optional environment acceptance 
 Candidate gate and does not add checks to release policy. Build inputs such as the lockfile, TypeScript build
 configuration, `.node-version` and build workflows trigger every stage. Test
 changes count only for stages whose entry tests import or locate them, compared
-with the harness commit each stage actually ran. The clean installation reruns
-only for installer deliverables, its own entry file or the E2E runner
-configuration, not for shared test support. Unlisted paths conservatively
-trigger every stage. The report is advice for the acceptance run and does not
-skip anything itself.
+with the harness commit each stage actually ran. Clean installation is a
+non-blocking on-demand check rather than a blocking promotion gate: its
+advisory trigger paths cover only `install.sh`, `scripts/install/**`,
+`scripts/download-sources.py`, `deploy/**`, `runtime-versions.json` outside
+`dsh`, its own entry file or the E2E runner configuration — not
+`scripts/release/**`, `release-policy.json` or shared test support. Unlisted
+paths conservatively trigger every stage. The report is advice for the
+acceptance run and does not skip anything itself.
 
 Optional environment acceptance may install a pristine formal-release baseline
 on an isolated validation host and keep it as a read-only qcow2 snapshot plus a
@@ -742,10 +746,13 @@ commit, run ID and digest. `node scripts/release/harness-reuse.mjs <built-source
 Harness input digest. Record `harnessReuse: { builtSource, inputDigest, reruns }`
 in acceptance JSON; `reruns` maps the reported checks to `passed` only after
 those checks pass on that input. Receipt-only and prose changes require no new
-build. Any product or image-input change requires a new candidate. Subprocess
-fixtures and shared runner changes include all potentially affected installed
-stages, including clean installation when it is a blocking check for this
-version; missing rerun evidence rejects promotion.
+build. Any product or image-input change requires a new candidate. Current
+releases fix `acceptancePolicy.checks` to `["ci", "linux", "upgrade"]` and treat
+clean installation as a non-blocking on-demand check (historical manifests that
+declared `cleanInstall` remain protocol-compatible). Subprocess fixtures and
+shared runner changes include all potentially affected installed stages required
+by the version's `acceptancePolicy.checks`; missing rerun evidence rejects
+promotion.
 
 Anonymous image visibility is checked before completing the release; anonymous asset downloads and digest pull are checked explicitly. The completed stable release becomes Latest; previews never do. Tags, assets and images are published by the explicit workflow, without depending on its `GITHUB_TOKEN` event starting another workflow. Do not write an accepted record or invoke promotion with any required check incomplete.
 

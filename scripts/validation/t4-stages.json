@@ -82,7 +82,7 @@
         "containers/**",
         "runtime/**",
         "runtime-versions.json",
-        "release-policy.json#compatibility",
+        "release-policy.json",
         "install.sh",
         "scripts/install/**",
         "scripts/release/**",
@@ -181,10 +181,9 @@
       "paths": [
         "install.sh",
         "scripts/install/**",
-        "scripts/release/**",
         "scripts/download-sources.py",
-        "runtime-versions.json#!dsh",
-        "release-policy.json"
+        "deploy/**",
+        "runtime-versions.json#!dsh"
       ],
       "deliverableOnly": true
     }

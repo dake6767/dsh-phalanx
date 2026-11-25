@@ -23,8 +23,70 @@ export async function gitFixture(options: { readonly host?: string; readonly rep
   git(['config', 'uploadpack.allowReachableSHA1InWant', 'true'])
   git(['config', 'user.name', 'Fixture'])
   git(['config', 'user.email', 'fixture@example.test'])
-  const commit = async (files: Record<string, string | null>) => {
+  let fastImported = false
+  let commitSeq = 0
+  const formatFastImportPath = (rawPath: string): string => {
+    const normalized = rawPath.replace(/^(?:\.\/)+/u, '').replace(/\/+/gu, '/')
+    if (
+      normalized === '' ||
+      normalized.startsWith('/') ||
+      normalized.endsWith('/') ||
+      normalized.split('/').some(segment => segment === '' || segment === '.' || segment === '..')
+    ) {
+      throw new Error(`Invalid git fast-import path: ${rawPath}`)
+    }
+    let quoted = '"'
+    for (const byte of Buffer.from(normalized, 'utf8')) {
+      if (byte === 0x5c) quoted += '\\\\'
+      else if (byte === 0x22) quoted += '\\"'
+      else if (byte === 0x0a) quoted += '\\n'
+      else if (byte === 0x0d) quoted += '\\r'
+      else if (byte === 0x09) quoted += '\\t'
+      else if (byte < 0x20 || byte >= 0x7f) quoted += `\\${byte.toString(8).padStart(3, '0')}`
+      else quoted += String.fromCharCode(byte)
+    }
+    return `${quoted}"`
+  }
+  const fastImportCommit = (files: Record<string, string | null>) => {
+    const headRef = git(['symbolic-ref', 'HEAD'])
+    let parentSha: string | undefined
+    try {
+      parentSha = git(['rev-parse', '--verify', '--quiet', `${headRef}^{commit}`])
+    } catch {
+      parentSha = undefined
+    }
+    const timestamp = 1700000000 + ++commitSeq
+    const chunks: Buffer[] = [Buffer.from(`commit ${headRef}\ncommitter Fixture <fixture@example.test> ${timestamp} +0000\ndata 7\nFixture\n`, 'utf8')]
+    if (parentSha) chunks.push(Buffer.from(`from ${parentSha}\n`, 'utf8'))
     for (const [path, contents] of Object.entries(files)) {
+      const formattedPath = formatFastImportPath(path)
+      if (contents === null) {
+        chunks.push(Buffer.from(`D ${formattedPath}\n`, 'utf8'))
+      } else {
+        const bytes = Buffer.from(contents, 'utf8')
+        chunks.push(Buffer.from(`M 100644 inline ${formattedPath}\ndata ${bytes.length}\n`, 'utf8'), bytes, Buffer.from('\n', 'utf8'))
+      }
+    }
+    execFileSync('git', ['fast-import', '--quiet'], {
+      cwd: repo,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+      input: Buffer.concat(chunks),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: 16 * 1024 * 1024,
+    })
+    fastImported = true
+    return git(['rev-parse', headRef])
+  }
+  const commit = async (files: Record<string, string | null>) => {
+    const entries = Object.entries(files)
+    if (fastImported) {
+      if (entries.length === 0) throw new Error('Cannot mix empty working-tree commit with a fast-imported git fixture')
+      return fastImportCommit(files)
+    }
+    if (entries.length >= 256) {
+      return fastImportCommit(files)
+    }
+    for (const [path, contents] of entries) {
       const target = join(repo, path)
       if (contents === null) await rm(target, { force: true })
       else {

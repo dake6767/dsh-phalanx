@@ -46,12 +46,15 @@ it('runs only the always-on release gate when the diff is version metadata', () 
     ),
   ).toEqual(only())
   // Metadata never hides a parent replacement or an added/removed field file.
-  expect(run({ path: 'release-policy.json', fields: ['compatibility'] })).toMatchObject({ fullUpgrade: true, cleanInstall: true })
+  expect(run({ path: 'release-policy.json', fields: ['compatibility'] })).toEqual(only('fullUpgrade'))
   expect(run({ path: 'package.json', fields: [''] })).toEqual(every())
 })
 
-it('treats other policy fields as installer and upgrade behavior', () => {
-  expect(run({ path: 'release-policy.json', fields: ['compatibility.sourceDshRevisions'] })).toEqual(only('fullUpgrade', 'cleanInstall'))
+it('treats other policy fields as upgrade behavior without triggering cleanInstall', () => {
+  expect(run({ path: 'release-policy.json', fields: ['compatibility.sourceDshRevisions'] })).toEqual(only('fullUpgrade'))
+  const checksOnly = classifyStages([{ path: 'release-policy.json', fields: ['acceptancePolicy.checks'] }], table)
+  expect(checksOnly.unlisted).toEqual([])
+  expect(runs(checksOnly)).toEqual(only('fullUpgrade'))
 })
 
 it('separates the DSH revision from every other runtime version for the clean install', () => {
@@ -69,6 +72,8 @@ it('triggers every stage for build inputs that shape all delivered bytes', () =>
 
 it('routes installer, storage and entry changes to the stages that exercise them', () => {
   expect(run({ path: 'scripts/install/installer_release.py' })).toEqual(only('fullUpgrade', 'offlineTransport', 'https', 'cleanInstall'))
+  expect(run({ path: 'deploy/systemd/dsh-phalanx.service' })).toEqual(only('https', 'cleanInstall'))
+  expect(run({ path: 'scripts/release/snapshot.mjs' })).toEqual(only('fullUpgrade', 'offlineTransport'))
   expect(run({ path: 'scripts/install/installer_storage.py' })).toMatchObject({ offlineTransport: true })
   for (const path of [
     'src/adapters/postgres-community-accounts.ts',
@@ -209,8 +214,8 @@ it('compares deliverables with the tested source and each stage harness with the
     ).toEqual([])
     const exact = classify('--harness-base', formal, '--harness-base', `cleanInstall=${harness}`)
     expect(exact.harnessBases).toMatchObject({ cleanInstall: harness, native: formal })
-    // The unparsable policy reaches every policy-tracked stage.
-    expect(runs(exact)).toEqual(only('fullUpgrade', 'native', 'cleanInstall'))
+    // The unparsable policy reaches every policy-tracked stage without triggering cleanInstall.
+    expect(runs(exact)).toEqual(only('fullUpgrade', 'native'))
   } finally {
     await rm(root, { recursive: true, force: true })
   }

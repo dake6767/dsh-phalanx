@@ -50,6 +50,11 @@ function headings(text) {
 for (const [english, chinese] of [
   ['README.md', 'README.zh-CN.md'],
   ['docs/install.md', 'docs/install.zh-CN.md'],
+  ['docs/operations.md', 'docs/operations.zh-CN.md'],
+  ['docs/admin-guide.md', 'docs/admin-guide.zh-CN.md'],
+  ['docs/member-guide.md', 'docs/member-guide.zh-CN.md'],
+  ['docs/plugin-access.md', 'docs/plugin-access.zh-CN.md'],
+  ['docs/skill-execution.md', 'docs/skill-execution.zh-CN.md'],
 ]) {
   if (!documents.has(english) || !documents.has(chinese)) errors.push(`${english}: missing paired document ${chinese}`)
   else if (

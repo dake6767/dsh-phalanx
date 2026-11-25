@@ -23,7 +23,7 @@ it.each(['amd64', 'arm64'])('only hands off %s artifacts after aggregation of al
   expect(verify.run).toContain('test "$TEST_RESULT" = success')
   expect(verify.run.indexOf('t2-shards.mjs verify')).toBeLessThan(verify.run.indexOf("printf '" + output + '='))
   const tests = workflow.jobs['native-tests']
-  expect(tests.strategy).toMatchObject({ 'fail-fast': false, 'max-parallel': 8, matrix: { architecture: ['amd64', 'arm64'] } })
+  expect(tests.strategy).toMatchObject({ 'fail-fast': false, 'max-parallel': 16, matrix: { architecture: ['amd64', 'arm64'] } })
   expect(tests.strategy.matrix.shard).toBe('${{ fromJSON(needs.scope.outputs.matrix).include }}')
   expect(tests['runs-on']).toContain('ubuntu-24.04-arm')
   expect(workflow.jobs['native-arm64']['runs-on']).toBe('ubuntu-24.04-arm')
@@ -49,14 +49,18 @@ it('runs only the arm64 smoke in development image mode, leaving full acceptance
 it.each(['amd64', 'arm64'])('passes the assigned frozen shard and native archive to the %s runner', architecture => {
   const workflow = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8'))
   const step = workflow.jobs['native-tests'].steps.find((entry: { name: string }) => entry.name === 'Run the assigned installed Linux cases')
+  expect(step.env).toMatchObject({
+    SHARD: '${{ matrix.shard.index }}',
+    SHARD_TOTAL: '${{ matrix.shard.total }}',
+  })
   const result = spawnSync('bash', ['-eo', 'pipefail', '-c', `cat() { printf '%s\\n' fixture-image; }; sudo() { printf '%s\\n' "$@"; };\n${step.run}`], {
     encoding: 'utf8',
-    env: { PATH: process.env.PATH, MODE: 'full', SHARD: '2', EXPECTED_ARCH: architecture, SOURCE_SHA: 'a'.repeat(40) },
+    env: { PATH: process.env.PATH, MODE: 'full', SHARD: '2', SHARD_TOTAL: '8', EXPECTED_ARCH: architecture, SOURCE_SHA: 'a'.repeat(40) },
   })
   expect(result.status, result.stderr).toBe(0)
   const argv = result.stdout.trim().split('\n')
   expect(argv).toContain('--shard')
-  expect(argv).toContain('2/4')
+  expect(argv).toContain('2/8')
   expect(argv).toContain('/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-' + architecture + '.oci.tar')
   expect(argv).toContain('--identity')
   expect(argv).not.toContain('--smoke')

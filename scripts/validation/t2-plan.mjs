@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
+export const DEFAULT_SHARDS = 8
 export const selection = JSON.parse(readFileSync(new URL('./t2-selection.json', import.meta.url), 'utf8'))
 export const inventoryHash = createHash('sha256').update(JSON.stringify(selection)).digest('hex')
 export function validateFiles(files) {
@@ -10,20 +11,39 @@ export function validateFiles(files) {
     throw Error('Select distinct regular T2 inventory files')
   return files
 }
+function validateWeights() {
+  const weights = selection.regularFileWeights
+  if (!weights || typeof weights !== 'object' || Array.isArray(weights) || Object.keys(weights).length !== selection.regular.length) {
+    throw Error('regularFileWeights must map every regular T2 inventory file without extra entries')
+  }
+}
+function fileWeight(file) {
+  const weight = selection.regularFileWeights?.[file]
+  if (!Number.isSafeInteger(weight) || weight < 1) throw Error(`Missing positive duration weight for ${file}`)
+  return weight
+}
 export function plan(files) {
   if (files) return { mode: 'subset', inventoryHash, shards: [{ index: 1, total: 1, files: validateFiles(files) }] }
-  const shards = Array.from({ length: 4 }, (_, index) => ({ index: index + 1, total: 4, files: [], cases: 0 }))
-  const ordered = [...selection.regular].sort((a, b) => selection.regularFileCases[b] - selection.regularFileCases[a] || a.localeCompare(b, 'en'))
+  validateWeights()
+  const shards = Array.from({ length: DEFAULT_SHARDS }, (_, index) => ({ index: index + 1, total: DEFAULT_SHARDS, files: [], cases: 0, weight: 0 }))
+  const ordered = [...selection.regular].sort(
+    (a, b) => fileWeight(b) - fileWeight(a) || selection.regularFileCases[b] - selection.regularFileCases[a] || a.localeCompare(b, 'en'),
+  )
   for (const file of ordered) {
-    const shard = [...shards].sort((a, b) => a.cases - b.cases || a.index - b.index)[0]
+    const shard = [...shards].sort((a, b) => a.weight - b.weight || a.cases - b.cases || a.index - b.index)[0]
     shard.files.push(file)
     shard.cases += selection.regularFileCases[file]
+    shard.weight += fileWeight(file)
   }
   return { mode: 'full', inventoryHash, shards }
 }
 export function shardPlan(value) {
-  if (!/^[1-4]\/4$/u.test(value)) throw Error('Expected shard INDEX/4, with INDEX between 1 and 4')
-  return plan().shards[Number(value[0]) - 1]
+  const match = typeof value === 'string' ? /^([1-9]\d*)\/([1-9]\d*)$/u.exec(value) : null
+  const index = match ? Number(match[1]) : NaN
+  const total = match ? Number(match[2]) : NaN
+  if (!match || total !== DEFAULT_SHARDS || index < 1 || index > DEFAULT_SHARDS)
+    throw Error(`Expected shard INDEX/${DEFAULT_SHARDS}, with INDEX between 1 and ${DEFAULT_SHARDS}`)
+  return plan().shards[index - 1]
 }
 function highImpact(path) {
   return (

@@ -1,7 +1,11 @@
 import { afterAll } from 'vitest'
-import { dropCreatedDatabases } from './postgres.js'
+import { closePostgresControlWorker, dropCreatedDatabases } from './postgres.js'
 
-// Synchronous fixture control uses a bounded subprocess; keep the same cleanup deadline.
-afterAll(() => {
-  dropCreatedDatabases()
+// Persistent fixture control uses a bounded worker thread; drop created DBs and release its client.
+afterAll(async () => {
+  try {
+    dropCreatedDatabases()
+  } finally {
+    await closePostgresControlWorker()
+  }
 }, 60_000)

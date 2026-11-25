@@ -29,6 +29,16 @@ let browser: Browser | undefined
 let runtime: CommunityRuntimeConfig | undefined
 let model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 
+async function lockIdentity(lock: string) {
+  try {
+    const { dev, ino, birthtimeNs } = await lstat(lock, { bigint: true })
+    return `${dev}:${ino}:${birthtimeNs}`
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return undefined
+  }
+}
+
 afterEach(async test => {
   await saveBrowserEvidence(test)
   model?.release()
@@ -207,22 +217,13 @@ it('honors the shutdown grace during administrative restart and startup failure 
       })
     const restart = mode.startsWith('restart-')
     const shared = mode === 'restart-shared'
-    const lockIdentity = async () => {
-      try {
-        const { dev, ino, birthtimeNs } = await lstat(lock, { bigint: true })
-        return `${dev}:${ino}:${birthtimeNs}`
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        return undefined
-      }
-    }
     let predecessorLock: string | undefined
     let predecessorRecord: string | undefined
     if (restart) {
       expect((await operate('start')).status()).toBe(200)
       predecessorRecord = await readFile(lock, 'utf8')
       expect(predecessorRecord).toMatch(/^[1-9][0-9]*\n$/u)
-      predecessorLock = await lockIdentity()
+      predecessorLock = await lockIdentity(lock)
       expect(predecessorLock, mode).toBeDefined()
       await rm(holdAtStartup)
     }
@@ -278,7 +279,7 @@ it('honors the shutdown grace during administrative restart and startup failure 
     else await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(execFileText(podman, ['container', 'exists', target])).rejects.toMatchObject({ code: 1 })
     const lockOutcome = `${mode}, stopped carrier had an exclusive writer claim: ${claimedWriter}`
-    const remaining = await lockIdentity()
+    const remaining = await lockIdentity(lock)
     if (shared) {
       expect(remaining, lockOutcome).toBe(predecessorLock)
       expect(await readFile(lock, 'utf8'), lockOutcome).toBe(predecessorRecord)
@@ -375,6 +376,8 @@ it('recovers a real profile write lock across PID reuse and replies after one lo
   const before = await observe(oldContext, 'force')
   expect(before.committed).toBe('retained')
   expect(await readFile(lock, 'utf8')).toBe(String(before.pid) + '\n')
+  const killedLock = await lockIdentity(lock)
+  expect(killedLock).toBeDefined()
   const committed = await readFile(manifest)
   await execFileText(podman, ['kill', '--signal', 'KILL', oldId])
   await oldContext.close()
@@ -388,7 +391,9 @@ it('recovers a real profile write lock across PID reuse and replies after one lo
   await signInCommunity(page, origin, 'member', 'password')
   expect(await carrier()).not.toBe(oldId)
   expect(await observe(context)).toEqual(before)
-  await expect(readFile(lock)).rejects.toMatchObject({ code: 'ENOENT' })
+  // A freshly started replacement carrier may hold its own transient profile writer lock immediately after entry.
+  expect(await lockIdentity(lock)).not.toBe(killedLock)
+  await expect.poll(() => lockIdentity(lock), { timeout: 15_000 }).toBeUndefined()
   expect(await readFile(manifest)).toEqual(committed)
   const workspace = instanceWorkspacePath(await defaultWorkspacePath(root, 'member'), true)
   await selectCommunityWorkspace(context, page, origin, workspace, true)
@@ -402,8 +407,11 @@ it('recovers a real profile write lock across PID reuse and replies after one lo
 
   const graceful = await observe(context, 'graceful')
   expect(await readFile(lock, 'utf8')).toBe(String(graceful.pid) + '\n')
+  const gracefulLock = await lockIdentity(lock)
+  expect(gracefulLock).toBeDefined()
   const restart = await context.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true }, timeout: 300_000 })
   expect(restart.status()).toBe(200)
   expect(await readFile(join(dshWebProfilePath(home), 'graceful-lock-fixture'), 'utf8')).toBe('released')
-  await expect(readFile(lock)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await lockIdentity(lock)).not.toBe(gracefulLock)
+  await expect.poll(() => lockIdentity(lock), { timeout: 15_000 }).toBeUndefined()
 }, 600_000)

@@ -1,4 +1,9 @@
+import { totalmem } from 'node:os'
 import { defineConfig } from 'vitest/config'
+import { resolveValidationMaxWorkers } from './scripts/fast-check-policy.mjs'
+
+const resolvedWorkers = resolveValidationMaxWorkers(process.env.DSH_PHALANX_VALIDATION_MAX_WORKERS, totalmem())
+const maxWorkers = resolvedWorkers === 'default' ? undefined : Number(resolvedWorkers)
 
 export default defineConfig({
   test: {
@@ -7,8 +12,7 @@ export default defineConfig({
     include: ['tests/**/*.spec.ts'],
     exclude: ['tests/**/*.e2e.ts'],
     testTimeout: 15_000,
-    ...(['1', '2'].includes(process.env.DSH_PHALANX_VALIDATION_MAX_WORKERS ?? '')
-      ? { maxWorkers: Number(process.env.DSH_PHALANX_VALIDATION_MAX_WORKERS) }
-      : {}),
+    maxConcurrency: 4,
+    ...(maxWorkers !== undefined ? { maxWorkers } : {}),
   },
 })

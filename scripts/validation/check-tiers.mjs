@@ -19,7 +19,12 @@ if (
   new Set(selection.regular).size !== 74 ||
   selection.regular.reduce((sum, file) => sum + selection.regularFileCases[file], 0) !== selection.regularCases ||
   selection.regular.some(file => !files.includes(file)) ||
-  selection.smoke.some(file => !selection.regular.includes(file))
+  selection.smoke.some(file => !selection.regular.includes(file)) ||
+  !selection.regularFileWeights ||
+  typeof selection.regularFileWeights !== 'object' ||
+  Array.isArray(selection.regularFileWeights) ||
+  Object.keys(selection.regularFileWeights).length !== selection.regular.length ||
+  selection.regular.some(file => !Number.isSafeInteger(selection.regularFileWeights[file]) || selection.regularFileWeights[file] < 1)
 ) {
   throw new Error('The approved T2 selection is missing, duplicated or inconsistent')
 }

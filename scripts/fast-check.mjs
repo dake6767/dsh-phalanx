@@ -10,7 +10,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { cpus, homedir, totalmem } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { FAST_CHECK_BUDGET_MS, fastCheckConfigurationDigest, fastCheckEvidenceDigest, fastCheckStageDigest } from './fast-check-policy.mjs'
+import {
+  FAST_CHECK_BUDGET_MS,
+  fastCheckConfigurationDigest,
+  fastCheckEvidenceDigest,
+  fastCheckStageDigest,
+  resolveValidationMaxWorkers,
+} from './fast-check-policy.mjs'
 import { trackedEvidenceInputs } from './fast-check-inputs.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -43,9 +49,6 @@ const run = async (args, environment = {}) =>
   })
 
 const started = Date.now()
-const runDirectory = join(stateRoot, 'fast-check', 'runs', `${started}-${process.pid}`)
-await mkdir(runDirectory, { recursive: true, mode: 0o700 })
-const unitReport = join(runDirectory, 'unit.json')
 const commit = git(['rev-parse', 'HEAD'])
 const clean = commit !== undefined && git(['status', '--porcelain']) === ''
 const imageReference = process.env.DSH_PHALANX_CONTAINER_IMAGE
@@ -59,12 +62,16 @@ const imageId =
         if (result.status !== 0 || result.stdout.trim() === '') throw new Error('fast-check image identity is unavailable')
         return result.stdout.trim()
       })()
+const maxWorkers = resolveValidationMaxWorkers(process.env.DSH_PHALANX_VALIDATION_MAX_WORKERS, totalmem())
 const configurationDigest = fastCheckConfigurationDigest({
   nodeVersion: process.version,
   platform: process.platform,
   arch: process.arch,
-  maxWorkers: process.env.DSH_PHALANX_VALIDATION_MAX_WORKERS ?? 'default',
+  maxWorkers,
 })
+const runDirectory = join(stateRoot, 'fast-check', 'runs', `${started}-${process.pid}`)
+await mkdir(runDirectory, { recursive: true, mode: 0o700 })
+const unitReport = join(runDirectory, 'unit.json')
 const currentEvidenceInputs = () => ({
   ...trackedEvidenceInputs(root),
   imageId,
@@ -79,6 +86,7 @@ const record = {
   clean,
   inputDigest,
   imageId,
+  maxWorkers,
   configurationDigest,
   directory: runDirectory,
   status: 'running',
@@ -124,7 +132,10 @@ for (const [name, args] of STAGES) {
   }
   const stageStarted = Date.now()
   process.stdout.write(`[fast-check] ${name} started\n`)
-  const result = await run(name === 'unit' ? [...args, '--reporter=default', '--reporter=json', '--outputFile=' + unitReport] : args)
+  const result = await run(
+    name === 'unit' ? [...args, '--reporter=default', '--reporter=json', '--outputFile=' + unitReport] : args,
+    name === 'unit' && maxWorkers !== 'default' ? { DSH_PHALANX_VALIDATION_MAX_WORKERS: maxWorkers } : {},
+  )
   let code = result.code,
     confirmation
   if (

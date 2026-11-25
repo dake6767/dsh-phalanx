@@ -3,14 +3,24 @@ import { expect, it } from 'vitest'
 import inventory from '../scripts/validation/t2-selection.json' with { type: 'json' }
 
 const invoke = (...args: string[]) => spawnSync(process.execPath, ['scripts/validation/t2-plan.mjs', ...args], { encoding: 'utf8' })
-it('distributes every installed case once over four independent runners', () => {
+
+it('distributes every installed case once over eight duration-balanced independent runners', () => {
   const run = invoke()
   expect(run.status, run.stderr).toBe(0)
-  const plan = JSON.parse(run.stdout)
+  const plan = JSON.parse(run.stdout) as {
+    mode: string
+    shards: { index: number; total: number; files: string[]; cases: number; weight: number }[]
+  }
   expect(plan.mode).toBe('full')
-  expect(plan.shards).toHaveLength(4)
-  expect(plan.shards.flatMap((row: { files: string[] }) => row.files).sort()).toEqual([...inventory.regular].sort())
-  expect(plan.shards.map((row: { cases: number }) => row.cases)).toEqual([26, 26, 25, 25])
+  expect(plan.shards).toHaveLength(8)
+  expect(plan.shards.map(row => row.index)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+  expect(plan.shards.every(row => row.total === 8 && row.files.length > 0 && row.weight > 0)).toBe(true)
+  expect(plan.shards.flatMap(row => row.files).sort()).toEqual([...inventory.regular].sort())
+  expect(plan.shards.reduce((sum, row) => sum + row.cases, 0)).toBe(inventory.regularCases)
+  const expectedWeightSum = inventory.regular.reduce((sum, file) => sum + inventory.regularFileWeights[file as keyof typeof inventory.regularFileWeights], 0)
+  expect(plan.shards.reduce((sum, row) => sum + row.weight, 0)).toBe(expectedWeightSum)
+  const weights = plan.shards.map(row => row.weight)
+  expect(Math.max(...weights) - Math.min(...weights)).toBeLessThanOrEqual(30)
   expect(invoke().stdout).toBe(run.stdout)
 })
 
@@ -24,9 +34,11 @@ it('keeps explicit subsets on one runner and rejects invalid inventory and mixed
   for (const files of ['', 'tests/not-listed.e2e.ts', 'tests/installed-candidate.e2e.ts,tests/installed-candidate.e2e.ts'])
     expect(invoke('--files', files).status).not.toBe(0)
   for (const args of [
-    ['--smoke', '--shard', '1/4'],
-    ['--files', 'tests/installed-candidate.e2e.ts', '--shard', '1/4'],
-    ['--shard', '0/4'],
+    ['--smoke', '--shard', '1/8'],
+    ['--files', 'tests/installed-candidate.e2e.ts', '--shard', '1/8'],
+    ['--shard', '0/8'],
+    ['--shard', '9/8'],
+    ['--shard', '1/4'],
     ['--shard', '1/3'],
   ]) {
     const run = spawnSync(process.execPath, ['scripts/validation/t2.mjs', ...args, '/tmp/results'], { encoding: 'utf8' })

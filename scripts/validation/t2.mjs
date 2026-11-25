@@ -22,7 +22,7 @@ const shardIndex = args.indexOf('--shard')
 const shard = shardIndex < 0 ? undefined : shardPlan(args.splice(shardIndex, 2)[1])
 if (shard && (smoke || files)) throw Error('Shard, smoke and file subset modes are mutually exclusive')
 if (shard) files = shard.files
-if (args.length !== 1) throw new Error('Usage: node scripts/validation/t2.mjs [--smoke | --files FILE,FILE | --shard INDEX/4] RESULTS_DIRECTORY')
+if (args.length !== 1) throw new Error('Usage: node scripts/validation/t2.mjs [--smoke | --files FILE,FILE | --shard INDEX/8] RESULTS_DIRECTORY')
 if (process.platform !== 'linux' || process.getuid() === 0) throw new Error('Run T2 as the rootless Linux test identity')
 for (const key of ['DSH_PHALANX_CONTAINER_IMAGE', 'DSH_PHALANX_PRECHECK_IMAGE', 'DSH_PHALANX_INSTALL_ROOT', 'DSH_PHALANX_CANDIDATE_SHA']) {
   if (!process.env[key]) throw new Error(`T2 requires ${key}; no missing-input skips are permitted`)

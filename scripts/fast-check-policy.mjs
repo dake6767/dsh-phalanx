@@ -1,6 +1,62 @@
 import { createHash } from 'node:crypto'
+import { relative } from 'node:path'
 
 export const FAST_CHECK_BUDGET_MS = 10 * 60 * 1000
+export const LOW_MEMORY_THRESHOLD_BYTES = 16 * 2 ** 30
+
+function parsePositiveWorkerCount(value, label) {
+  if (typeof value !== 'string') throw new Error(`invalid ${label}: ${String(value)}`)
+  const trimmed = value.trim()
+  if (!/^[1-9]\d*$/u.test(trimmed)) throw new Error(`invalid ${label}: ${value}`)
+  const parsed = Number(trimmed)
+  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`invalid ${label}: ${value}`)
+  return String(parsed)
+}
+
+/** Resolve effective unit-test worker count; <=16 GiB hosts default to 2 to avoid swap pressure. */
+export function resolveValidationMaxWorkers(envValue, totalMemoryBytes) {
+  if (typeof totalMemoryBytes !== 'number' || !Number.isFinite(totalMemoryBytes) || totalMemoryBytes <= 0) {
+    throw new Error(`invalid totalMemoryBytes: ${String(totalMemoryBytes)}`)
+  }
+  if (envValue !== undefined && envValue !== '') {
+    return parsePositiveWorkerCount(envValue, 'DSH_PHALANX_VALIDATION_MAX_WORKERS')
+  }
+  if (totalMemoryBytes <= LOW_MEMORY_THRESHOLD_BYTES) {
+    return '2'
+  }
+  return 'default'
+}
+
+/** Resolve effective local controlled-browser worker count; defaults to 2 isolated workers. */
+export function resolveBrowserMaxWorkers(envValue) {
+  if (envValue !== undefined && envValue !== '') {
+    return parsePositiveWorkerCount(envValue, 'DSH_PHALANX_VALIDATION_BROWSER_MAX_WORKERS')
+  }
+  return '2'
+}
+
+/** Verify a Vitest JSON report covers every expected file cleanly before caching pass evidence. */
+export function verifyBrowserReportCompleteness(report, expectedFiles, root) {
+  if (!report || typeof report !== 'object' || !Array.isArray(report.testResults)) {
+    return { complete: false, reason: 'missing testResults in browser report' }
+  }
+  if (report.success !== true) return { complete: false, reason: 'browser report success is not true' }
+  if ((report.numRuntimeErrorTestSuites ?? 0) > 0) {
+    return { complete: false, reason: `browser report recorded ${report.numRuntimeErrorTestSuites} runtime error suite(s)` }
+  }
+  const byFile = new Map()
+  for (const entry of report.testResults) {
+    if (!entry || typeof entry.name !== 'string') return { complete: false, reason: 'browser report contains unnamed test suite' }
+    const normalized = relative(root, entry.name).replaceAll('\\', '/')
+    byFile.set(normalized, entry)
+    if (entry.status !== 'passed') return { complete: false, reason: `browser suite did not pass: ${normalized}` }
+  }
+  for (const expected of expectedFiles) {
+    const normalized = expected.replaceAll('\\', '/')
+    if (!byFile.has(normalized)) return { complete: false, reason: `browser report missing expected file: ${normalized}` }
+  }
+  return { complete: true }
+}
 
 /** A file-scoped evidence key; unrelated tests and documentation never enter it. */
 export function evidenceInputDigest(inputs, files) {
@@ -48,7 +104,13 @@ export function fastCheckConfigurationDigest({ nodeVersion, platform, arch, maxW
 export function evidenceFileGroups(paths) {
   const groups = { product: [], runner: [], sharedTests: [], unitTests: [], e2eTests: [] }
   for (const path of paths) {
-    if (path.startsWith('docs/') || (path.endsWith('.md') && !path.includes('/'))) continue
+    if (
+      path.startsWith('docs/') ||
+      (path.endsWith('.md') && !path.includes('/')) ||
+      /^releases\/notes\/[^/]+\.md$/u.test(path) ||
+      path.startsWith('releases/acceptance/')
+    )
+      continue
     if (path.startsWith('tests/')) {
       if (path.endsWith('.e2e.ts')) groups.e2eTests.push(path)
       else if (path.endsWith('.spec.ts')) groups.unitTests.push(path)

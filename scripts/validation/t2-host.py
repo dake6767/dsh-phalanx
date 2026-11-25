@@ -188,7 +188,7 @@ def main():
     parser.add_argument('--source-preset', choices=['official', 'mainland'], default='official')
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--files', help='Comma-separated regular T2 inventory subset')
-    parser.add_argument('--shard', help='Full inventory shard INDEX/4')
+    parser.add_argument('--shard', help='Full inventory shard INDEX/8')
     parser.add_argument('--manual-retries', action='store_true')
     parser.add_argument('--separate-scratch', action='store_true', help='Keep test workspaces outside uploaded results')
     parser.add_argument('--identity', help='Verified bundle identity JSON')

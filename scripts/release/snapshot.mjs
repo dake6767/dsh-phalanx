@@ -29,9 +29,6 @@ if (notes.match(/^#\s+v?(\d+\.\d+\.\d+)\s*$/mu)?.[1] !== version || /\bcodex\/|\
 const branch = `refs/heads/candidate/${version}`
 run('git', ['fetch', '--no-tags', 'public', 'refs/heads/main'])
 const parent = run('git', ['rev-parse', 'FETCH_HEAD'])
-const policy = JSON.parse(await readFile('release-policy.json', 'utf8')).acceptancePolicy
-const installerChanged = run('git', ['diff', '--name-only', parent, head, '--', 'install.sh', 'scripts/install']) !== ''
-if (installerChanged && !policy.checks.includes('cleanInstall')) throw Error('Installer changes require cleanInstall in the blocking policy')
 if (run('git', ['rev-parse', 'HEAD']) !== head || run('git', ['status', '--porcelain'])) throw Error('Release tree changed during snapshot preparation')
 const previous = run('git', ['ls-remote', 'public', branch]).split(/\s/u)[0]
 const tree = run('git', ['rev-parse', `${head}^{tree}`])
