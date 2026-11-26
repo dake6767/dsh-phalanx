@@ -31,7 +31,7 @@ export default function CommunityGroupPlugins({
   const list = (native: boolean) => {
     const rows = data.plugins.map(plugin => ({
       id: plugin.packageName,
-      name: plugin.title,
+      name: plugin.localizedTitles?.[locale] ?? plugin.title,
       meta: `${plugin.packageName} · ${plugin.version ?? t('Precheck failed')}`,
       tags: !plugin.available ? (
         <Chip size="sm" variant="soft" color="danger">

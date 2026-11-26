@@ -49,6 +49,7 @@ export interface CommunityMcpCatalogSource {
   readonly id: string
   readonly version: string
   readonly contentHash?: string
+  readonly credentialOptional?: true
   readonly status: 'preparing' | 'testing' | 'ready' | 'failed'
 }
 export interface CommunityMcpCatalogEntry {
@@ -59,6 +60,7 @@ export interface CommunityMcpCatalogEntry {
   readonly description: Readonly<Record<'en' | 'zh-CN', string>>
   readonly location: 'remote' | 'shared' | 'member'
   readonly credentialLabel?: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly credentialOptional?: true
   readonly documentation: string
   readonly imported: number
 }
@@ -88,6 +90,8 @@ export interface CommunityMcpCatalogUpdatePreview {
   readonly currentVersion: string
   readonly version: string
   readonly credentialRequired: boolean
+  readonly credentialOptional?: true
+  readonly credentialWillBeDropped?: true
   readonly changes: readonly { readonly field: string; readonly before: string; readonly after: string }[]
 }
 export interface CommunityMcpSecretStatus {
@@ -106,6 +110,7 @@ export interface CommunityMcpSettings extends Omit<CommunityMcpService, 'run'> {
   readonly catalogUpdate?: { readonly version: string; readonly status: 'preparing' | 'testing' | 'failed' | 'applied' }
 
   readonly catalog?: CommunityMcpCatalogSource
+  readonly catalogCredentialSlot?: true
   readonly preparation?: {
     readonly isolated?: boolean
     readonly stage: 'preparing' | 'ready' | 'failed'

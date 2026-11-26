@@ -1,5 +1,5 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
-import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
@@ -8,10 +8,12 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { declaredRuntimeRevision } from '../src/adapters/runtime-revision.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { PlatformProcessHost } from '../src/adapters/platform-process-host.js'
+import { ContainerPluginPreparer } from '../src/adapters/plugin-preparer.js'
+import { PostgresPluginLibraryStore } from '../src/adapters/postgres-plugin-library.js'
 import { PluginPreparationError } from '../src/domain/plugin-library.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
-import { createCommunityApplication } from './support/community-application.js'
+import { createCommunityApplication, openTestDatabase } from './support/community-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 let app: CommunityApplication | undefined
 let browser: Browser | undefined
@@ -38,16 +40,21 @@ it('shows library empty, preparing, failed and available states with retry, deta
   })
   let calls = 0,
     failUploaded = true
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="orange"/></svg>'
+  const icon = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`
+  const runtime = {
+    command: '/unavailable-dsh',
+    args: [],
+    dataRoot: root,
+    defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } },
+  }
+  const frozenReader = new ContainerPluginPreparer(runtime)
+  const artifact = 'artifacts/sidebar-fixture'
   app = createCommunityApplication(
     {
       listen: { host: '127.0.0.1', port: 0 },
       sessionSecret: 'plugins-fixture-session-secret-32-bytes',
-      runtime: {
-        command: '/unavailable-dsh',
-        args: [],
-        dataRoot: root,
-        defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } },
-      },
+      runtime,
     },
     {
       pluginArchiveInspector: {
@@ -57,6 +64,7 @@ it('shows library empty, preparing, failed and available states with retry, deta
         },
       },
       pluginPreparer: {
+        readDisplayMetadata: plugin => frozenReader.readDisplayMetadata(plugin),
         prepare: async (input, progress, signal) => {
           calls++
           progress('installing')
@@ -72,9 +80,12 @@ it('shows library empty, preparing, failed and available states with retry, deta
             ...input,
             integrity: input.upload?.integrity ?? `sha512-${'A'.repeat(86)}==`,
             runtimeRevision: declaredRuntimeRevision(),
-            artifact: 'private/artifact',
+            artifact: input.upload ? 'private/artifact' : artifact,
             title: input.upload ? 'Private plugin' : 'Useful sidebar',
             description: 'Read files in a sidebar.',
+            meta: input.upload
+              ? { icon: 'data:image/png;base64,AAAA' }
+              : { title: { en: 'Useful sidebar', zh: '侧栏阅读器' }, description: { en: 'Read files in a sidebar.', zh: '在侧栏阅读文件。' }, icon },
             bundlePatch: '[{"insert":[{"id":"sidebar","name":"example-sidebar"}]}]',
             dependencies: {},
           }
@@ -129,6 +140,11 @@ it('shows library empty, preparing, failed and available states with retry, deta
   await adding.waitFor({ state: 'detached' })
   await page.getByRole('status').getByText('Available', { exact: true }).waitFor()
   await page.getByText('Read files in a sidebar.', { exact: true }).waitFor()
+  const sidebarCard = page.locator('.plugin-library-card').filter({ has: page.getByRole('button', { name: 'View plugin example-sidebar', exact: true }) })
+  await sidebarCard.getByText('example-sidebar', { exact: true }).waitFor()
+  const displayedIcon = sidebarCard.locator('img')
+  expect(await displayedIcon.getAttribute('src')).toBe(icon)
+  await expect.poll(() => displayedIcon.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(16)
   const resource = await page.request.post(origin + '/admin/api/runtime-dependencies', {
     headers: { origin },
     data: { action: 'create', input: { name: '文档.sdk-v1', type: 'resource', prepareCommand: 'printf sdk > "$RD_OUT/sdk.txt"', pathDirectories: [] } },
@@ -143,6 +159,7 @@ it('shows library empty, preparing, failed and available states with retry, deta
   const titleBox = (await page.getByRole('heading', { name: 'Useful sidebar', exact: true }).boundingBox())!
   await page.mouse.click(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2)
   await page.getByRole('dialog', { name: 'Useful sidebar', exact: true }).waitFor()
+  expect(await page.getByRole('dialog', { name: 'Useful sidebar', exact: true }).locator('img').getAttribute('src')).toBe(icon)
   await page.getByRole('tab', { name: 'Runtime dependencies', exact: true }).click()
   await page.getByText('文档.sdk-v1', { exact: true }).click()
   expect(await page.getByRole('checkbox', { name: '文档.sdk-v1', exact: true }).isChecked()).toBe(true)
@@ -214,6 +231,8 @@ it('shows library empty, preparing, failed and available states with retry, deta
     )
     .toBe('available')
   await page.getByRole('button', { name: 'View plugin @example/private', exact: true }).waitFor()
+  const privateCard = page.locator('.plugin-library-card').filter({ has: page.getByRole('button', { name: 'View plugin @example/private', exact: true }) })
+  await privateCard.locator('.plugin-card-icon svg').waitFor()
   await page.getByText('Uploaded archive', { exact: true }).waitFor()
   await upload('private-fixture')
   await page.getByRole('dialog', { name: 'Upload plugin archive', exact: true }).waitFor({ state: 'detached' })
@@ -226,7 +245,29 @@ it('shows library empty, preparing, failed and available states with retry, deta
   await page.getByRole('button', { name: /Platform language/ }).click()
   await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
   await page.getByRole('heading', { name: '插件库', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '侧栏阅读器', exact: true }).waitFor()
+  await page.getByText('在侧栏阅读文件。', { exact: true }).waitFor()
   await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).waitFor({ state: 'detached' })
+  const directory = join(root, 'plugins', artifact, 'prepared', declaredRuntimeRevision(), 'node_modules/example-sidebar')
+  await mkdir(join(directory, 'locale'), { recursive: true })
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'example-sidebar', version: '1.0.0', icon: 'icon.svg' }))
+  await writeFile(join(directory, 'locale/en.json'), '{"meta":{"title":"Restored sidebar"}}')
+  await writeFile(join(directory, 'locale/zh.json'), '{"meta":{"title":"制品侧栏阅读器","description":"从制品恢复插件介绍。"}}')
+  await writeFile(join(directory, 'icon.svg'), svg)
+  const database = await openTestDatabase(root)
+  try {
+    const store = new PostgresPluginLibraryStore(database)
+    const sidebar = (await store.list()).find(plugin => plugin.packageName === 'example-sidebar')!
+    const { meta: _newField, ...legacyPreparation } = sidebar.current!
+    void _newField
+    await store.save({ ...sidebar, current: legacyPreparation })
+  } finally {
+    await database.close()
+  }
+  await page.reload()
+  await page.getByRole('heading', { name: '制品侧栏阅读器', exact: true }).waitFor()
+  await page.getByText('从制品恢复插件介绍。', { exact: true }).waitFor()
+  expect(await page.locator('.plugin-library-card').filter({ hasText: '制品侧栏阅读器' }).locator('img').getAttribute('src')).toBe(icon)
   await page.getByRole('button', { name: /按发布状态筛选/ }).click()
   await page.getByRole('option', { name: '已上线平台应用中心', exact: true }).click()
   await page.getByText('没有符合筛选条件的插件。', { exact: true }).waitFor()

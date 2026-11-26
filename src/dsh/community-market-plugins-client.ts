@@ -2,6 +2,12 @@ import { featureVisible } from '../domain/release-visibility.js'
 
 /** The panel observes accepted background work; closing it never cancels installation. */
 export const nativePluginsTab = `
+function PluginArtwork({src}) {
+ const [failedSource, setFailedSource] = React.useState();
+ return h('span', { className: 'phalanx-market-icon', 'aria-hidden': true },
+  src && src !== failedSource ? h('img', { src, width: 36, height: 36, alt: '', onError: () => setFailedSource(src) }) : h(PluginArtworkDefault, { size: 36 }));
+}
+
 function PluginsPanel({ setupOnly = false } = {}) {
  const locale = React.useSyncExternalStore(subscribe, snapshot) === 'zh' ? 'zh-CN' : 'en';
  const text = marketText(locale);
@@ -18,6 +24,13 @@ function PluginsPanel({ setupOnly = false } = {}) {
  const mounted = React.useRef(false);
  const observing = React.useRef();
  const request = options => marketRequest(setupOnly ? '/market/api/plugins/setup' : '/market/api/plugins', options);
+ const title = row => row.localizedTitles?.[locale] || row.title || row.packageName;
+ const titleKey = value => value.replace(/[ \\t\\n\\f\\r]+/gu, ' ').trim();
+ const titleCounts = new Map();
+ for (const plugin of plugins ?? []) {
+  const name = titleKey(title(plugin));
+  titleCounts.set(name, (titleCounts.get(name) ?? 0) + 1);
+ }
 
  React.useEffect(() => {
   mounted.current = true;
@@ -177,6 +190,8 @@ function PluginsPanel({ setupOnly = false } = {}) {
  }
 
  function row(plugin) {
+  const name = title(plugin);
+  const description = plugin.localizedDescriptions?.[locale] ?? plugin.description;
   const running = plugin.job?.status === 'running';
   const state = plugin.incompleteInstallation ? 'Installation interrupted. Uninstall before installing the current version.' : {
    native: 'Installed on the native plugin page',
@@ -185,14 +200,15 @@ function PluginsPanel({ setupOnly = false } = {}) {
   }[plugin.status] ?? 'Installed';
   const updateLabel = plugin.update?.kind === 'content' ? 'Content update available' : 'Update available';
   return h('li', { key: plugin.packageName, className: 'phalanx-market-row' },
-   h('span', { className: 'phalanx-market-icon', 'aria-hidden': true }, h(IconPluginPinwheelOutlineRegular, { size: 24 })),
+   h(PluginArtwork, { src: plugin.icon }),
    h('div', { className: 'phalanx-market-main' },
     h('div', { className: 'phalanx-market-title' },
-     h('h3', null, plugin.title),
+     h('h3', null, name),
      h(Tag, { tone: 'quiet' }, text(plugin.installedVersion ? 'Installed version' : 'Version') + ' ' + (plugin.installedVersion ?? plugin.version)),
      plugin.status === 'managed' ? h(Tag, { tone: 'quiet' }, text('Platform controlled, cannot uninstall')) : null,
      plugin.sharedCredential ? h(Tag, { tone: 'quiet' }, text('Platform shared KEY')) : null),
-    h('p', { className: 'phalanx-market-description' }, plugin.description || plugin.packageName),
+    titleCounts.get(titleKey(name)) > 1 ? h('p', { className: 'phalanx-market-status' }, plugin.packageName) : null,
+    description ? h('p', { className: 'phalanx-market-description' }, description) : null,
     ${featureVisible('contributions')} && plugin.contribution ? h('p', { className: 'phalanx-market-description' },
      text(plugin.contribution.anonymous ? 'Contributed anonymously' : 'Contributed by {name}', { name: plugin.contribution.name })) : null,
     h('p', { className: 'phalanx-market-status' }, text(state)),
@@ -213,17 +229,19 @@ function PluginsPanel({ setupOnly = false } = {}) {
     onClick: () => setRevision(value => value + 1), icon: h(IconRefreshOutlineRegular, { size: 16 }),
    })),
   h(MarketFailure, { error, locale }),
-  unlisted.map(({ packageName, job }) => h('div', { key: packageName, className: 'phalanx-market-notice' }, h('h3', null, packageName), operation(job))),
-  nativeServices.filter(({ packageName }) => !plugins?.some(row => row.packageName === packageName)).map(({ packageName }) =>
-   h('div', { key: 'services-' + packageName, className: 'phalanx-market-notice' }, h('h3', null, packageName), serviceStatus(packageName))),
-  preinstallFailures.map(({ packageName, restartRequired }) =>
-   h('div', { key: 'preinstall-' + packageName, className: 'phalanx-market-notice' },
-    h('h3', null, packageName),
+  unlisted.map(row => h('div', { key: row.packageName, className: 'phalanx-market-notice' }, h('h3', null, title(row)), operation(row.job))),
+  nativeServices.filter(({ packageName }) => !plugins?.some(row => row.packageName === packageName)).map(row =>
+   h('div', { key: 'services-' + row.packageName, className: 'phalanx-market-notice' }, h('h3', null, title(row)), serviceStatus(row.packageName))),
+  preinstallFailures.map(row => {
+   const { packageName, restartRequired } = row;
+   return h('div', { key: 'preinstall-' + packageName, className: 'phalanx-market-notice' },
+    h('h3', null, title(row)),
     h('p', { role: 'status' }, text(restartRequired ? 'Preinstalled plugin needs the next startup to finish setup.' : 'Preinstalled plugin is not ready.')),
     restartRequired ? h('a', { href: '/recovery?restart=1' }, text('Restart DSH instance')) :
      h(Button, { variant: 'outline', size: 'sm', disabled: busy !== undefined,
       onClick: () => void change(packageName, 'retry-preinstall'),
-     }, text('Retry installation')))),
+     }, text('Retry installation')));
+  }),
   showNotice ? h('div', { role: 'status', className: 'phalanx-market-notice' },
    h('p', { className: 'phalanx-market-status' }, text(notice === 'applied' ? 'Selection saved.' : 'Changes take effect after restarting your instance.')),
    notice === 'restart-required' ? h('a', { href: '/recovery?restart=1' }, text('Restart DSH instance')) : null) : null,

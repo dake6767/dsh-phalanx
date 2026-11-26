@@ -3,7 +3,7 @@ import type { CommunityPluginImpact, CommunityPluginView } from '../domain/admin
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
-import { administratorLibraryVersion, completeAdministratorPluginSource } from '../domain/library-contribution.js'
+import { completeAdministratorPluginSource } from '../domain/library-contribution.js'
 import {
   assertPluginIdentity,
   assertPluginSource,
@@ -39,6 +39,8 @@ import { PluginLibraryRemoval } from './plugin-library-removal.js'
 import { PluginLibraryCatalog } from './plugin-library-catalog.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
 import { KeyedOperations } from './support/keyed-operations.js'
+import { backfillPluginCatalogDefaults, backfillPluginMetadata } from './support/plugin-display-backfill.js'
+import type { SuiteCatalogEntry } from '../domain/suite-catalog.js'
 
 /** Owns durable additions and their in-flight preparation, including shutdown. */
 export class PluginLibrary {
@@ -106,13 +108,17 @@ export class PluginLibrary {
         await this.store.save({ ...row, replacement: { ...row.replacement, stage: 'failed', failureCode: 'plugin-job-interrupted' } })
 
     await this.preparer.recover?.()
+    await backfillPluginMetadata(this.store, this.preparer, this.operations)
     await this.uploads?.recover?.(
       (await this.store.list()).flatMap(row => [row.upload?.archive, row.replacement?.upload?.archive].filter((path): path is string => path !== undefined)),
     )
   }
   async list(actor: CommunityAccountActor): Promise<readonly CommunityPluginView[]> {
     await this.assertAdmin(actor)
-    return (await this.store.list()).map(row => pluginLibraryView(row))
+    return (await backfillPluginMetadata(this.store, this.preparer, this.operations)).map(pluginLibraryView)
+  }
+  rememberCatalogDisplays(entries: readonly SuiteCatalogEntry[]): Promise<void> {
+    return backfillPluginCatalogDefaults(this.store, this.operations, entries)
   }
   async contributionAdopted(packageName: string, integrity: string, receipt?: ContributionReceipt): Promise<boolean> {
     return (await this.store.list()).some(
@@ -133,6 +139,9 @@ export class PluginLibrary {
   }
   setMaintainer(...args: Parameters<PluginLibraryAdministration['setMaintainer']>): ReturnType<PluginLibraryAdministration['setMaintainer']> {
     return this.administration.setMaintainer(...args)
+  }
+  setDisplay(...args: Parameters<PluginLibraryAdministration['setDisplay']>): ReturnType<PluginLibraryAdministration['setDisplay']> {
+    return this.administration.setDisplay(...args)
   }
   admitInitial(...args: Parameters<PluginLibraryAdministration['admitInitial']>): ReturnType<PluginLibraryAdministration['admitInitial']> {
     return this.administration.admitInitial(...args)
@@ -165,6 +174,7 @@ export class PluginLibrary {
         ...(existing
           ? {
               ...(existing.provenance ? { provenance: existing.provenance } : {}),
+              ...(existing.display ? { display: existing.display } : {}),
               ...(existing.pendingAdministrator ? { pendingAdministrator: existing.pendingAdministrator } : {}),
               ...(existing.contributionReceipt ? { contributionReceipt: existing.contributionReceipt } : {}),
               identities: pluginIdentities(existing),
@@ -246,31 +256,7 @@ export class PluginLibrary {
     return pluginLibraryView(await this.required(input.packageName))
   }
   async select(actor: CommunityAccountActor, packageName: string, revision: string): Promise<CommunityPluginView> {
-    return await this.operations.run(packageName, async () => {
-      await this.assertAdmin(actor)
-      const row = await this.required(packageName)
-      const replacement = row.replacement
-      if (row.removing || !replacement?.prepared || replacement.stage !== 'available')
-        throw new BusinessRuleError('conflict', 'Precheck the replacement version first.', 'plugin-candidate-unavailable')
-      this.assertIdle(packageName)
-      await this.assertWritable(packageName)
-      await this.confirm(actor, packageName, revision)
-      const next: LibraryPlugin = {
-        packageName,
-        source: row.source,
-        runtimeDependencies: row.runtimeDependencies ?? [],
-        version: replacement.version,
-        ...(replacement.upload ? { upload: replacement.upload } : {}),
-        provenance: administratorLibraryVersion(row.provenance, replacement.version, replacement.prepared.integrity, actor, Date.now()),
-        current: replacement.prepared,
-        stage: 'available',
-        published: row.published || row.restorePublication === true,
-        ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}),
-        identities: pluginIdentities(row),
-      }
-      await this.store.save(next)
-      return pluginLibraryView(next)
-    })
+    return this.administration.select(actor, packageName, revision)
   }
   async remove(actor: CommunityAccountActor, packageName: string, revision: string): Promise<void> {
     return await this.operations.run(packageName, async () => {
@@ -442,17 +428,11 @@ export class PluginLibrary {
         }),
       )
     } catch (error) {
+      const code = error instanceof PluginPreparationError ? error.code : undefined
       await persist({
         ...row,
         stage: 'failed',
-        failureCode:
-          error instanceof PluginPreparationError && error.code === 'plugin-cleanup-failed'
-            ? error.code
-            : signal.aborted
-              ? 'plugin-job-interrupted'
-              : error instanceof PluginPreparationError
-                ? error.code
-                : 'plugin-precheck-failed',
+        failureCode: code === 'plugin-cleanup-failed' ? code : signal.aborted ? 'plugin-job-interrupted' : (code ?? 'plugin-precheck-failed'),
       })
     }
   }

@@ -5,6 +5,7 @@ import CommunitySuitesPage from './CommunitySuitesPage'
 import CommunitySuiteUninstallDialog from './CommunitySuiteUninstallDialog'
 import { useSuiteOriginName } from './useSuiteOriginName'
 import CommunityPluginDependencies from './CommunityPluginDependencies'
+import CommunityPluginDisplaySettings from './CommunityPluginDisplaySettings'
 import CommunityLibraryMaintenance from './CommunityLibraryMaintenance'
 import CommunityContributions from './CommunityContributions'
 import CommunityPluginAdvancedSettings from './CommunityPluginAdvancedSettings'
@@ -19,7 +20,9 @@ import { Card } from '@heroui/react/card'
 import { Chip } from '@heroui/react/chip'
 import { Tabs } from '@heroui/react/tabs'
 import CommunityIcon from './CommunityIcon'
+import CommunityPluginIcon from './CommunityPluginIcon'
 import type { CommunityPluginView, CommunitySuiteCatalogView } from '../../src/domain/admin-contract'
+import { resolvePluginDisplay } from '../../src/domain/plugin-display'
 import { platformError } from '../../src/domain/platform-copy'
 import { suiteInstallOrigin } from '../../src/domain/suite-install'
 import { retryCommunityPlugin, communityPlugins, request } from './community-api'
@@ -36,18 +39,25 @@ export default function CommunityPluginsPage() {
   const originName = useSuiteOriginName(locale, plugins?.some(row => Boolean(row.suiteOrigin)) ?? false)
   const [publicationFilter, setPublicationFilter] = useState('all')
   const visiblePlugins =
-    plugins?.filter(plugin => publicationFilter === 'all' || (publicationFilter === 'published' ? plugin.published : !plugin.published)) ?? []
+    plugins
+      ?.filter(plugin => publicationFilter === 'all' || (publicationFilter === 'published' ? plugin.published : !plugin.published))
+      .map(plugin => ({ ...plugin, ...resolvePluginDisplay(plugin, locale) })) ?? []
   const [uploading, setUploading] = useState(false)
   const [adding, setAdding] = useState(false)
   const accessCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined)
   const dependencyCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined)
+  const displayCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined)
   const [serviceDraft, setServiceDraft] = useState({ dirty: false, busy: false })
   const [serviceReset, setServiceReset] = useState(0)
   const onServiceDraft = useCallback((_key: string, dirty: boolean, busy: boolean) => setServiceDraft({ dirty, busy }), [])
   const serviceGuard = useDraftGuard(serviceDraft.dirty, undefined, () => setServiceReset(value => value + 1), serviceDraft.busy)
   const guarded = (close: () => void) => {
     if (serviceDraft.busy) return
-    const service = () => serviceGuard.request(close)
+    const display = () => {
+      if (displayCloseGuard.current) displayCloseGuard.current(close)
+      else close()
+    }
+    const service = () => serviceGuard.request(display)
     const access = () => {
       if (accessCloseGuard.current) accessCloseGuard.current(service)
       else service()
@@ -143,7 +153,8 @@ export default function CommunityPluginsPage() {
       setRetrying(undefined)
     }
   }
-  const detail = plugins?.find(plugin => plugin.packageName === selected)
+  const selectedPlugin = plugins?.find(plugin => plugin.packageName === selected)
+  const detail = selectedPlugin ? { ...selectedPlugin, ...resolvePluginDisplay(selectedPlugin, locale) } : undefined
   const stageText = (plugin: CommunityPluginView) =>
     t(
       plugin.incompatible
@@ -260,11 +271,13 @@ export default function CommunityPluginsPage() {
                   <Card key={plugin.packageName} className="plugin-library-card">
                     <Card.Header>
                       <div className="library-card-heading">
+                        <CommunityPluginIcon icon={plugin.icon} />
                         <Card.Title>{plugin.title}</Card.Title>
                         <CommunityIcon name="chevron" size={14} />
                       </div>
                       <p className="plugin-summary-meta">
-                        <span>{pluginSourceLabel(plugin, t)}</span> · <span>{pluginVersionLabel(plugin.version, plugin.sourceCommit)}</span>
+                        <span>{plugin.packageName}</span> · <span>{pluginSourceLabel(plugin, t)}</span> ·{' '}
+                        <span>{pluginVersionLabel(plugin.version, plugin.sourceCommit)}</span>
                       </p>
                       {plugin.suiteOrigin ? (
                         <Chip size="sm" variant="soft" color="accent">
@@ -350,7 +363,7 @@ export default function CommunityPluginsPage() {
           }}
         />
       ) : null}
-      {detail ? (
+      {detail && selectedPlugin ? (
         <CommunityDialog
           drawer
           drawerClassName="plugin-drawer compact-detail-drawer"
@@ -360,9 +373,7 @@ export default function CommunityPluginsPage() {
         >
           {serviceGuard.dialog}
           <div className="drawer-identity plugin-identity">
-            <span className="plugin-card-icon" aria-hidden="true">
-              <CommunityIcon name="plugins" size={22} />
-            </span>
+            <CommunityPluginIcon icon={detail.icon} />
             <div>
               <strong>{detail.packageName}</strong>
               <span>
@@ -455,6 +466,15 @@ export default function CommunityPluginsPage() {
               </Tabs.Panel>
               <Tabs.Panel id="basic" className="plugin-settings-panel" shouldForceMount>
                 <CommunityPluginPublication plugin={detail} onChanged={refresh} onRequest={guarded} />
+                <CommunityPluginDisplaySettings
+                  key={detail.packageName}
+                  plugin={selectedPlugin}
+                  onChanged={refresh}
+                  onSaveFailed={() => setDetailTab('basic')}
+                  onCloseGuard={guard => {
+                    displayCloseGuard.current = guard
+                  }}
+                />
                 {detail.suiteOrigin ? (
                   <>
                     <p className="plugin-catalog-origin">

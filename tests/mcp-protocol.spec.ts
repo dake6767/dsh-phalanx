@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { inspectMcpRequest, filterMcpResponse, mcpCredentialTarget } from '../src/domain/mcp-protocol.js'
+import { inspectMcpRequest, filterMcpResponse, mcpCredentialTarget, mcpSecrets } from '../src/domain/mcp-protocol.js'
 it('rejects disabled tool calls including batches and filters every list response while retaining pagination', () => {
   const blocked = ['write_file']
   expect(
@@ -35,6 +35,36 @@ it('keeps credential templates platform-side and masks secrets in structured ups
       'test secret/+key',
     ),
   ).toEqual({ jsonrpc: '2.0', id: 1, result: { content: [{ text: '[redacted]' }, { text: '[redacted]' }] } })
+})
+it('omits remote header and query templates with any missing credential', () => {
+  const service = {
+    url: 'https://docs.example.test/mcp?scope=read&key=obsolete',
+    credentials: { available: 'fixture-value', empty: '' },
+    headers: [
+      { name: 'Authorization', value: 'Bearer {credential}' },
+      { name: 'X-Partial', value: '{credential:available}/{credential:empty}' },
+      { name: 'X-Configured', value: 'Prefix {credential:available}' },
+      { name: 'X-Static', value: 'remote' },
+    ],
+    query: [
+      { name: 'key', value: 'prefix-{credential}' },
+      { name: 'named', value: '{credential:absent}' },
+      { name: 'mode', value: 'public' },
+    ],
+  }
+  const target = mcpCredentialTarget(service)
+  expect([...new URL(target.baseUrl).searchParams]).toEqual([
+    ['scope', 'read'],
+    ['mode', 'public'],
+  ])
+  expect(target.headers).toEqual([
+    { name: 'X-Configured', value: 'Prefix fixture-value' },
+    { name: 'X-Static', value: 'remote' },
+  ])
+  const secrets = mcpSecrets(service)
+  expect(secrets).toEqual(expect.arrayContaining(['Prefix fixture-value', 'remote', 'public']))
+  expect(secrets).not.toContain('Bearer ')
+  expect(secrets).not.toContain('prefix-')
 })
 it('rejects malformed RPC and does not retain parameters in the audit projection', () => {
   expect(() =>

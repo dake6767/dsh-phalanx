@@ -1,12 +1,11 @@
 import type { CommunityGroupView } from './admin-contract.js'
+import type { PluginNameFields } from './plugin-display.js'
 
 export interface CommunityManagedGroupView {
   readonly group: CommunityGroupView
   readonly revision: string
   readonly preinstallIncompleteMembers: number
-  readonly plugins: readonly {
-    packageName: string
-    title: string
+  readonly plugins: readonly (PluginNameFields & {
     version: string | null
     granted: boolean
     preinstalled: boolean
@@ -15,7 +14,7 @@ export interface CommunityManagedGroupView {
     incompatible?: boolean
     failures: readonly { username: string; code: 'plugin-managed-load-failed' }[]
     readonly checking?: readonly string[]
-  }[]
+  })[]
   readonly pendingMembers: readonly string[]
 }
 export interface CatalogPluginDistributionIdentity {

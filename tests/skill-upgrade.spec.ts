@@ -23,6 +23,7 @@ it('opens an empty skill library without changing existing PostgreSQL plugin fac
     runtimeRevision: declaredRuntimeRevision(),
     title: 'Existing plugin',
     description: 'Retain me',
+    meta: {},
     bundlePatch: JSON.stringify([{ insert: [{ id: 'example', name: 'example-plugin' }] }]),
     dependencies: {},
   }

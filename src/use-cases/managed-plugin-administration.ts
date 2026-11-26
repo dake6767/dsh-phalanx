@@ -8,6 +8,7 @@ import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community
 import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
 import { samePluginAccessSnapshot } from '../domain/plugin-access.js'
 import { assertPluginGroupConfiguration } from '../domain/plugin-group-configuration.js'
+import { pluginNameFields } from '../domain/plugin-library.js'
 import { usesSharedPluginCredential } from '../domain/plugin-upstream.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
@@ -46,8 +47,7 @@ export class ManagedPluginAdministration {
       preinstallIncompleteMembers: (await this.preinstalls?.incompleteMembers(id)) ?? 0,
       plugins: await Promise.all(
         (await this.library.list()).map(async row => ({
-          packageName: row.packageName,
-          title: row.current?.title ?? row.packageName,
+          ...pluginNameFields(row),
           version: row.current?.version ?? null,
           ...(row.incompatible ? { incompatible: true } : {}),
           granted: grants.has(row.packageName),

@@ -6,6 +6,53 @@ import { expect, it } from 'vitest'
 import type { LibraryPlugin } from '../src/domain/plugin-library.js'
 import { PluginLibrary } from '../src/use-cases/plugin-library.js'
 
+it('edits and clears display overrides without changing catalog ownership or plugin state', async () => {
+  const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0 }
+  const catalogDefaults = { title: { en: 'Catalog plugin', 'zh-CN': '广场插件' } }
+  const original: LibraryPlugin = {
+    source: { kind: 'npm' },
+    packageName: 'example',
+    version: '1.0.0',
+    stage: 'failed',
+    current: null,
+    published: false,
+    suiteOrigin: 'suite:fixture',
+    runtimeDependencies: ['tool'],
+    display: { catalogDefaults },
+  }
+  let row = original
+  let admin = true
+  const library = new PluginLibrary(
+    { get: async () => ({ ...actor, admin, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
+    {
+      list: async () => [row],
+      save: async value => {
+        row = value
+      },
+      remove: async () => {},
+    },
+    {
+      prepare: async () => {
+        throw Error('A display edit does not prepare a plugin')
+      },
+    },
+  )
+  await expect(library.setDisplay(actor, 'example', { name: 'x'.repeat(201) })).rejects.toMatchObject({ code: 'plugin-display-invalid' })
+  await expect(library.setDisplay(actor, 'example', { description: 'x'.repeat(4001) })).rejects.toMatchObject({ code: 'plugin-display-invalid' })
+  await expect(library.setDisplay(actor, 'example', { catalogDefaults: {} })).rejects.toMatchObject({ code: 'plugin-display-invalid' })
+  expect(row).toEqual(original)
+  admin = false
+  await expect(library.setDisplay(actor, 'example', { name: 'Denied' })).rejects.toMatchObject({ code: 'admin-required' })
+  admin = true
+  expect(await library.setDisplay(actor, 'example', { name: ' Team plugin ', description: ' Team description ' })).toMatchObject({
+    suiteOrigin: 'suite:fixture',
+    display: { name: 'Team plugin', description: 'Team description', catalogDefaults },
+  })
+  expect(await library.setDisplay(actor, 'example', { name: ' ' })).toMatchObject({ display: { description: 'Team description', catalogDefaults } })
+  await library.setDisplay(actor, 'example', { description: '' })
+  expect(row).toEqual(original)
+})
+
 it('rejects an environment binding when its declared dependency is removed', async () => {
   const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0 }
   let row: LibraryPlugin = {

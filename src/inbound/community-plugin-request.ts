@@ -11,6 +11,13 @@ function invalid(): CommunityRequestError {
   return new CommunityRequestError(400, 'Invalid plugin action', 'plugin-action-invalid')
 }
 
+export function communityPluginDisplayInput(value: unknown): { readonly packageName: string; readonly display: unknown } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid()
+  const input = value as Record<string, unknown>
+  if (typeof input.packageName !== 'string' || Object.keys(input).some(key => !['packageName', 'display'].includes(key))) throw invalid()
+  return { packageName: input.packageName, display: input.display }
+}
+
 export function communityPluginChangeInput(value: unknown): CommunityPluginChangeAction {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw invalid()
   const input = value as Record<string, unknown>

@@ -1,5 +1,6 @@
 import type { CommunityGroupRecord } from './community-group.js'
 import type { ExpertInput, ExpertView, ExpertModelChoice } from './expert.js'
+import type { PluginNameFields } from './plugin-display.js'
 
 export interface CommunityExpertMarket {
   readonly experts: readonly {
@@ -25,7 +26,7 @@ export interface CommunityExpertLibrary {
   readonly models: readonly ExpertModelChoice[]
   readonly experts: readonly ExpertView[]
   readonly revision: string
-  readonly plugins: readonly { readonly packageName: string; readonly title: string; readonly eligible: boolean }[]
+  readonly plugins: readonly (PluginNameFields & { readonly eligible: boolean })[]
   readonly mcp: readonly { readonly name: string; readonly description: string }[]
 }
 export interface CommunityExpertImpact {

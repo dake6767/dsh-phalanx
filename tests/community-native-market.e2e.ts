@@ -40,6 +40,10 @@ it('renders the platform market with native DSH controls, theme and locale while
     let fail = false
     let empty = false
     let block = false
+    let showPluginPresentation = false
+    const sidebarIcon =
+      'data:image/svg+xml;base64,' +
+      Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="36" height="36" fill="#4d6bfe"/></svg>').toString('base64')
     let entered!: () => void
     const pendingPost = new Promise<void>(resolve => {
       entered = resolve
@@ -72,10 +76,51 @@ it('renders the platform market with native DSH controls, theme and locale while
           pending: restartPending,
           plugins: empty
             ? []
-            : [{ packageName: 'example-sidebar', title: 'Useful sidebar', description: 'Read files in a sidebar.', version: '1.0.0', status, job }],
+            : [
+                {
+                  packageName: 'example-sidebar',
+                  title: 'Useful sidebar',
+                  description: 'Read files in a sidebar.',
+                  version: '1.0.0',
+                  status,
+                  job,
+                  localizedTitles: { en: 'Useful sidebar', 'zh-CN': '实用侧栏' },
+                  localizedDescriptions: { en: 'Read files in a sidebar.', 'zh-CN': '在侧栏读取文件。' },
+                  icon: sidebarIcon,
+                },
+                ...(showPluginPresentation
+                  ? [
+                      {
+                        packageName: 'example-other',
+                        title: 'Useful  sidebar',
+                        localizedTitles: { en: 'Useful  sidebar', 'zh-CN': '另一款侧栏' },
+                        description: '',
+                        version: '1.0.0',
+                        status: 'native',
+                        icon: 'data:image/png;base64,YmFk',
+                      },
+                      { packageName: 'example-unnamed', title: 'example-unnamed', description: '', version: '1.0.0', status: 'native' },
+                    ]
+                  : []),
+              ],
+          ...(showPluginPresentation
+            ? {
+                unlistedUpdates: [
+                  {
+                    packageName: 'old-example',
+                    title: 'Retired app',
+                    localizedTitles: { en: 'Retired app', 'zh-CN': '退役应用' },
+                    job: { requestId: 'retired-update', action: 'update', status: 'succeeded', phase: 'complete' },
+                  },
+                ],
+                nativeServices: [{ packageName: 'native-example', title: 'Platform setup', bindings: [{ slot: 'chat', status: 'failed' }] }],
+                preinstallFailures: [{ packageName: 'preinstall-example', title: 'Preinstalled app', restartRequired: false }],
+              }
+            : {}),
         },
       })
     })
+    await page.route('**/market/api/plugins/setup', route => route.fulfill({ json: {} }))
     await page.route('**/market/api/mcp', route =>
       route.fulfill({
         json: [
@@ -276,6 +321,12 @@ it('renders the platform market with native DSH controls, theme and locale while
     await page.keyboard.press('Home')
     await expect.poll(() => market.getByRole('tab', { name: 'Plugins', exact: true }).getAttribute('aria-selected')).toBe('true')
     await market.getByRole('heading', { name: 'Useful sidebar', exact: true }).waitFor()
+    const sidebar = market.getByRole('listitem').filter({ has: page.getByText('Read files in a sidebar.', { exact: true }) })
+    await sidebar.waitFor()
+    expect(await sidebar.getByText('example-sidebar', { exact: true }).count()).toBe(0)
+    const image = sidebar.locator('.phalanx-market-icon img')
+    await expect.poll(() => image.evaluate(node => (node as HTMLImageElement).naturalWidth), { timeout: 5000 }).toBeGreaterThan(0)
+    expect(await image.getAttribute('width')).toBe('36')
     expect(await market.locator('iframe').count()).toBe(0)
     const button = market.getByRole('button', { name: 'Install', exact: true })
     expect(await button.getAttribute('class')).toMatch(/outline/)
@@ -327,6 +378,26 @@ it('renders the platform market with native DSH controls, theme and locale while
     restartPending = false
     await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
     await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
+    showPluginPresentation = true
+    await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
+    await expect.poll(() => market.getByRole('heading', { name: 'Useful sidebar', exact: true }).count()).toBe(2)
+    await sidebar.getByText('example-sidebar', { exact: true }).waitFor()
+    const other = market.getByRole('listitem').filter({ has: page.getByText('example-other', { exact: true }) })
+    await other.locator('.phalanx-market-icon svg').waitFor()
+    expect(await other.locator('img').count()).toBe(0)
+    const unnamed = market.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'example-unnamed', exact: true }) })
+    await unnamed.locator('.phalanx-market-icon svg').waitFor()
+    expect(await unnamed.getByText('example-unnamed', { exact: true }).count()).toBe(1)
+    for (const name of ['Retired app', 'Platform setup', 'Preinstalled app']) await market.getByRole('heading', { name, exact: true }).waitFor()
+    for (const [label, action, packageName] of [
+      ['Retry service setup', 'retry-settings', 'native-example'],
+      ['Retry installation', 'retry-preinstall', 'preinstall-example'],
+    ] as const) {
+      const request = page.waitForRequest(row => new URL(row.url()).pathname === '/market/api/plugins/setup' && row.method() === 'POST')
+      await market.getByRole('button', { name: label, exact: true }).click()
+      expect((await request).postDataJSON()).toEqual({ packageName, action })
+    }
+    await page.setViewportSize({ width: 1440, height: 900 })
     const light = await market.evaluate(element => getComputedStyle(element).color)
     await page.emulateMedia({ colorScheme: 'dark' })
     await expect.poll(() => market.evaluate(element => getComputedStyle(element).color)).not.toBe(light)
@@ -344,6 +415,11 @@ it('renders the platform market with native DSH controls, theme and locale while
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
       await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-display-native-zh.png'), fullPage: true, animations: 'disabled' })
     await chineseMarket.getByRole('tab', { name: '插件', exact: true }).click()
+    await chineseMarket.getByRole('heading', { name: '实用侧栏', exact: true }).waitFor()
+    await chineseMarket.getByRole('heading', { name: '另一款侧栏', exact: true }).waitFor()
+    await chineseMarket.getByText('在侧栏读取文件。', { exact: true }).waitFor()
+    await chineseMarket.getByRole('heading', { name: '退役应用', exact: true }).waitFor()
+    for (const name of ['example-sidebar', 'example-other']) expect(await chineseMarket.getByText(name, { exact: true }).count()).toBe(0)
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) {
       await mkdir(evidence, { recursive: true })
@@ -356,8 +432,10 @@ it('renders the platform market with native DSH controls, theme and locale while
     await page.locator('[data-sidebar-toggle]').click()
     await expect.poll(() => page.locator('[data-sidebar-drawer][data-sidebar-collapsed]').count()).toBe(1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    expect(await chineseMarket.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
     if (evidence) await page.screenshot({ path: join(evidence, 'native-market-mobile.png'), fullPage: true, animations: 'disabled' })
     empty = true
+    showPluginPresentation = false
     await page.getByRole('button', { name: '重新加载插件', exact: true }).click()
     await page.getByText('暂无已发布的插件', { exact: true }).waitFor()
     await openNativeSettings(page, 'zh')

@@ -23,6 +23,58 @@ async function listen(server: Server) {
   if (!address || typeof address === 'string') throw Error('missing address')
   return `http://127.0.0.1:${address.port}`
 }
+it('reserves declared remote headers even when the platform credential is empty', async () => {
+  const received: (string | undefined)[] = []
+  const upstream = await listen(
+    createServer(async (request, response) => {
+      await new Promise<void>(resolve => {
+        request.once('end', resolve)
+        request.resume()
+      })
+      const value = request.headers['x-service-key']
+      const key = typeof value === 'string' ? value : undefined
+      received.push(key)
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { echo: key ?? 'anonymous' } }))
+    }),
+  )
+  let key = ''
+  const handle = createMcpGateway({
+    authorization: modelAuthority(async () => 'member'),
+    services: mcpPolicy({
+      effective: async () => [
+        {
+          name: 'p-docs',
+          generation: 1,
+          description: '',
+          url: upstream,
+          credentials: { token: key },
+          headers: [{ name: 'X-Service-Key', value: '{credential:token}' }],
+        },
+      ],
+    }),
+    transport: new NodePluginUpstreamTransport('idle'),
+    wire: new McpHttpWire(),
+    connections: { track: () => {}, untrack: () => {} },
+  })
+  const origin = await listen(
+    createServer((request, response) => {
+      void handle(request, response)
+    }),
+  )
+  const call = async () => {
+    const response = await fetch(origin + '/mcp/p-docs', {
+      method: 'POST',
+      headers: { authorization: 'Bearer member', 'content-type': 'application/json', 'x-service-key': 'member-fallback' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+    })
+    expect(response.status).toBe(200)
+    return response.json()
+  }
+  expect(await call()).toMatchObject({ result: { echo: 'anonymous' } })
+  key = 'fixture-named-platform-key'
+  expect(await call()).toMatchObject({ result: { echo: '[redacted]' } })
+  expect(received).toEqual([undefined, 'fixture-named-platform-key'])
+})
 it('admits expert-only MCP acquisition, rejects its immediate withdrawal and duplicate tokens, and preserves streaming', async () => {
   const received: { url: string | undefined; headers: import('node:http').IncomingHttpHeaders }[] = []
   let enabled = true,

@@ -57,6 +57,15 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await page.waitForURL(`${origin}/admin`)
     await prepareAndConfirmNpmPluginInBrowser(page.request, origin, 'shared-sidebar@1.0.0')
     for (const packageName of ['shared-helper', 'credential-sidebar']) await prepareAndConfirmNpmPluginInBrowser(page.request, origin, `${packageName}@1.0.0`)
+    const helperName = 'Team setup helper'
+    expect(
+      (
+        await page.request.post(origin + '/admin/api/plugins/display', {
+          headers: { origin },
+          data: { packageName: 'shared-helper', display: { name: helperName } },
+        })
+      ).status(),
+    ).toBe(200)
     expect(
       (
         await page.request.post(origin + '/admin/api/plugins/upstreams?packageName=credential-sidebar', {
@@ -66,6 +75,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
       ).status(),
     ).toBe(200)
     const experts = await (await page.request.get(origin + '/admin/api/experts')).json()
+    expect(experts.plugins).toContainEqual(expect.objectContaining({ packageName: 'shared-helper', title: helperName }))
     expect(
       (
         await page.request.post(origin + '/admin/api/experts', {
@@ -109,7 +119,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await cancelled.getByRole('button', { name: 'Cancel', exact: true }).click()
     expect(await save.isDisabled()).toBe(true)
     expect(await row('shared-sidebar').count()).toBe(0)
-    await add('Platform controlled', ['Shared sidebar', 'Shared helper', 'Credential sidebar'])
+    await add('Platform controlled', ['Shared sidebar', helperName, 'Credential sidebar'])
     expect(posts).toBe(0)
     expect((await current()).plugins.every((plugin: { granted: boolean }) => !plugin.granted)).toBe(true)
     await save.click()
@@ -130,10 +140,11 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await revoke.getByText('Members lose this plugin after restarting their instances.', { exact: true }).waitFor()
     await revoke.getByRole('button', { name: 'Confirm action', exact: true }).click()
     const beforeMove = posts
-    await add('Preinstalled plugins', ['Shared helper'])
+    await add('Preinstalled plugins', [helperName])
     expect(posts).toBe(beforeMove)
     expect(await nativeModal.count()).toBe(0)
     expect(await row('shared-helper').count()).toBe(1)
+    expect(await row('shared-helper').getByText(helperName, { exact: true }).count()).toBe(1)
     expect(await drawer.getByText('Version at preinstallation; members can upgrade it themselves.', { exact: true }).count()).toBe(1)
     await save.click()
     const move = page.getByRole('dialog', { name: 'Confirm plugin configuration change', exact: true })
@@ -164,7 +175,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await removal.getByRole('button', { name: 'Confirm action', exact: true }).click()
     await drawer.getByRole('tab', { name: 'Platform controlled', exact: true }).click()
     expect(await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).count()).toBe(0)
-    await add('Platform controlled', ['Shared helper'])
+    await add('Platform controlled', [helperName])
     await save.click()
     await move.getByText('Moving to platform control discards members’ setting changes after restart.', { exact: true }).waitFor()
     await move.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -197,7 +208,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).getByRole('button', { name: 'Discard changes', exact: true }).click()
     await page.getByRole('row').filter({ hasText: 'Administrators' }).getByRole('button', { name: 'Details', exact: true }).click()
     await add('Platform controlled', ['Shared sidebar'])
-    await add('Preinstalled plugins', ['Shared helper'])
+    await add('Preinstalled plugins', [helperName])
     await save.click()
     await expect.poll(() => save.isDisabled()).toBe(true)
     await drawer.getByRole('button', { name: 'Close group details', exact: true }).last().click()

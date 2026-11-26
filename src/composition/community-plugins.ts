@@ -27,7 +27,7 @@ import { PostgresPluginSelections } from '../adapters/postgres-plugin-selections
 import { PostgresPluginUpstreams } from '../adapters/postgres-plugin-upstreams.js'
 import { PostgresSessionKey } from '../adapters/postgres-session-key.js'
 import { PostgresUnitOfWork } from '../adapters/postgres-unit-of-work.js'
-import { declaredRuntimeRevision, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
+import { declaredRuntimeRevision, pluginCompatibilityPredecessors, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
 import { systemClock } from '../adapters/system-clock.js'
 import { type CommunityConfig } from '../domain/community-config.js'
 import type { Clock } from '../ports/clock.js'
@@ -101,7 +101,13 @@ export function createCommunityPlugins(input: {
     memberUpstreams,
   )
   const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime, false, downloads, canDiscardArtifacts)
-  const compatibility: PluginCompatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
+  const compatibilityTarget = pluginCompatibilityTarget()
+  const compatibility: PluginCompatibility = new PluginCompatibility(
+    pluginStore,
+    preparer,
+    compatibilityTarget,
+    pluginCompatibilityPredecessors(compatibilityTarget),
+  )
   const uploads = new FilePluginUpload(dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime), canDiscardArtifacts)
   const plugins: PluginLibrary = new PluginLibrary(
     accounts,
@@ -109,7 +115,7 @@ export function createCommunityPlugins(input: {
     preparer,
     uploads,
     new PluginLibraryMembership(accounts, pluginGrants, selections),
-    pluginCompatibilityTarget(),
+    compatibilityTarget,
     { access: accessStore, upstreams: upstreamStore },
     runtimeDependencies,
     pluginOperations,

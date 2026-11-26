@@ -105,14 +105,37 @@ export function mcpCredentialTarget(service: {
 }) {
   const url = new URL(service.url),
     credential = service.credential ?? ''
-  for (const row of service.query ?? []) url.searchParams.set(row.name, mcpTemplateValue(row.value, service))
-  return { baseUrl: url.href, credential, headers: (service.headers ?? []).map(row => ({ ...row, value: mcpTemplateValue(row.value, service) })) }
+  for (const row of service.query ?? []) {
+    const value = mcpRemoteTemplate(row.value, service)
+    if (value === undefined) url.searchParams.delete(row.name)
+    else url.searchParams.set(row.name, value)
+  }
+  const headers = (service.headers ?? []).flatMap(row => {
+    const value = mcpRemoteTemplate(row.value, service)
+    return value === undefined ? [] : [{ ...row, value }]
+  })
+  return { baseUrl: url.href, credential, headers }
 }
 
-export function mcpTemplateValue(value: string, service: { credential?: string; credentials?: Readonly<Record<string, string>> }): string {
-  return value.replace(/\{credential(?::([A-Za-z][A-Za-z0-9_-]{0,63}))?\}/gu, (_match, name: string | undefined) =>
-    name ? (service.credentials && Object.hasOwn(service.credentials, name) ? service.credentials[name]! : '') : (service.credential ?? ''),
-  )
+type McpCredentials = Pick<McpService, 'credential' | 'credentials'>
+const credentialTemplate = /\{credential(?::([A-Za-z][A-Za-z0-9_-]{0,63}))?\}/gu
+
+function mcpCredentialValue(service: McpCredentials, name: string | undefined): string {
+  if (name === undefined) return service.credential ?? ''
+  return service.credentials && Object.hasOwn(service.credentials, name) ? service.credentials[name]! : ''
+}
+
+function mcpRemoteTemplate(value: string, service: McpCredentials): string | undefined {
+  for (const match of value.matchAll(credentialTemplate)) if (!mcpCredentialValue(service, match[1])) return undefined
+  return mcpTemplateValue(value, service)
+}
+
+export function hasMcpDefaultCredentialSlot(service: Pick<McpService, 'headers' | 'query' | 'run'>): boolean {
+  return [...(service.headers ?? []), ...(service.query ?? []), ...(service.run?.env ?? [])].some(row => row.value.includes('{credential}'))
+}
+
+export function mcpTemplateValue(value: string, service: McpCredentials): string {
+  return value.replace(credentialTemplate, (_match, name: string | undefined) => mcpCredentialValue(service, name))
 }
 export function mcpSecrets(
   service: Partial<
@@ -134,7 +157,7 @@ export function mcpSecrets(
         ...(service.protectedValues ?? []),
         ...(service.protectedCredentials ?? []),
         ...query,
-        ...templates.flatMap(row => [row.value, mcpTemplateValue(row.value, service)]),
+        ...templates.flatMap(row => [row.value, service.run ? mcpTemplateValue(row.value, service) : (mcpRemoteTemplate(row.value, service) ?? '')]),
         ...(service.catalogUpdate?.candidate ? mcpSecrets(service.catalogUpdate.candidate) : []),
       ].filter(Boolean),
     ),

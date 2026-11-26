@@ -56,7 +56,7 @@ import type {
 import type { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
 import { receiveCommunityPluginUpload } from './community-plugin-upload.js'
 import type { PluginLibrary } from '../use-cases/plugin-library.js'
-import { communityPluginInput, communityPluginChangeInput } from './community-plugin-request.js'
+import { communityPluginInput, communityPluginChangeInput, communityPluginDisplayInput } from './community-plugin-request.js'
 import type { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
 import { communitySystemUpdateInput } from './community-system-update-request.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -264,6 +264,12 @@ export function createCommunityAdminRoute(deps: {
         }
         sendCommunityJson(response, 200, await deps.plugins.impact(caller, url.searchParams.get('packageName') ?? ''))
         return
+      }
+      if (url.pathname === '/admin/api/plugins/display') {
+        if (request.method !== 'POST') return sendCommunityJson(response, 405, { code: 'method-not-allowed' })
+        assertCommunityOrigin(request, deps.origin())
+        const { packageName, display } = communityPluginDisplayInput(await readCommunityJson(request))
+        return sendCommunityJson(response, 200, await deps.plugins.setDisplay(caller, packageName, display))
       }
       if (url.pathname === '/admin/api/plugins/change') {
         if (request.method !== 'POST') {

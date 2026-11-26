@@ -135,6 +135,7 @@ export type CommunityErrorCode =
   | 'plugin-source-conflict'
   | 'plugin-up-to-date'
   | 'plugin-action-invalid'
+  | 'plugin-display-invalid'
   | 'plugin-cleanup-failed'
   | 'plugin-registry-unavailable'
   | 'plugin-registry-metadata-invalid'

@@ -109,7 +109,11 @@ export default function CommunityMcpCatalog({
                   {entry.description[locale].trim() !== entry.title[locale].trim() ? <Card.Description>{entry.description[locale]}</Card.Description> : null}
                 </Card.Header>
                 <Card.Footer className="plugin-card-status">
-                  <span className="mcp-catalog-credential">{entry.credentialLabel?.[locale] ?? t('No credential required')}</span>
+                  <span className="mcp-catalog-credential">
+                    {entry.credentialLabel
+                      ? t(entry.credentialOptional ? '{label} (Optional)' : '{label} (Required)', { label: entry.credentialLabel[locale] })
+                      : t('No credential required')}
+                  </span>
                   {count ? (
                     <Chip size="sm" variant="soft" color="success">
                       {t('{count} imported services', { count })}
@@ -166,6 +170,7 @@ function CatalogImport({
   const [display, setDisplay] = useState<CommunityMcpCatalogInput['display']>()
   const [requestId] = useState(communityRequestId),
     pending = useRef(false)
+  const credentialRequired = Boolean(entry.credentialLabel && !entry.credentialOptional)
   const ready = imports?.filter(status => status === 'ready').length ?? 0
   const activity = imports?.includes('preparing') ? 'Preparing dependencies…' : imports?.includes('testing') ? 'Testing imported service…' : undefined
   const failed = imports?.includes('failed')
@@ -180,7 +185,7 @@ function CatalogImport({
             label: imports === undefined && entry.imported ? t('{count} imported services', { count: entry.imported }) : t('Not installed'),
           } as const)
   const submit = async () => {
-    if (pending.current) return
+    if (pending.current || (credentialRequired && !credential.trim())) return
     pending.current = true
     setBusy(true)
     setError(undefined)
@@ -214,7 +219,7 @@ function CatalogImport({
           <Button variant="tertiary" isDisabled={busy} onPress={onClose}>
             {t('Cancel')}
           </Button>
-          <Button type="submit" form={id} isDisabled={busy || Boolean(entry.credentialLabel && !credential.trim())}>
+          <Button type="submit" form={id} isDisabled={busy || (credentialRequired && !credential.trim())}>
             {t('Import MCP service')}
           </Button>
         </>
@@ -292,7 +297,8 @@ function CatalogImport({
               onChange={setCredential}
               type="password"
               autoComplete="new-password"
-              required
+              required={credentialRequired}
+              description={entry.credentialOptional ? t('You can import without a credential and add one later in Access settings.') : undefined}
               disabled={busy}
             />
           ) : (

@@ -15,7 +15,13 @@ import { createCommunityApplication } from './support/community-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 it('keeps accepted native work alive, retries failures and preserves shared-key restart/publication behavior', async () => {
   const root = await mkdtemp(join(tmpdir(), 'market-ui-'))
-  const native = createServer((_req, res) => {
+  let catalogReads = 0
+  const native = createServer((req, res) => {
+    if (req.url === '/offline-catalog.json') {
+      catalogReads++
+      res.writeHead(503).end()
+      return
+    }
     res.writeHead(303, { 'set-cookie': 'native=fixture' })
     res.end()
   })
@@ -63,11 +69,13 @@ it('keeps accepted native work alive, retries failures and preserves shared-key 
     },
     {
       runtime,
+      suiteCatalog: { address: `http://127.0.0.1:${address.port}/offline-catalog.json`, trustedKeys: [] },
       pluginPreparer: {
         prepare: async input => ({
           ...input,
           title: 'Useful plugin',
           description: 'A shared plugin.',
+          meta: { title: { en: 'Useful plugin', zh: '实用插件' }, description: { en: 'A shared plugin.', 'zh-CN': '共享插件简介' } },
           artifact: 'artifacts/fixture',
           integrity: 'sha512-fixture',
           runtimeRevision: declaredRuntimeRevision(),
@@ -134,6 +142,17 @@ it('keeps accepted native work alive, retries failures and preserves shared-key 
       ).status(),
     ).toBe(403)
     const memberMarket = async () => await (await market.request.get(origin + '/market/api/plugins')).json()
+    const catalogReadsBeforeMarket = catalogReads
+    expect((await memberMarket()).plugins).toMatchObject([
+      {
+        packageName: 'useful-plugin',
+        title: 'Useful plugin',
+        description: 'A shared plugin.',
+        localizedTitles: { 'zh-CN': '实用插件' },
+        localizedDescriptions: { 'zh-CN': '共享插件简介' },
+      },
+    ])
+    expect(catalogReads).toBe(catalogReadsBeforeMarket)
     const action = (action: 'install' | 'uninstall', requestId: string) =>
       market.request.post(origin + '/market/api/plugins', { headers: { origin }, data: { packageName: 'useful-plugin', action, requestId } })
     const accepted = await action('install', 'install-1')

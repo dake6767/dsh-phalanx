@@ -1,5 +1,8 @@
 import type { LibraryPlugin, PluginCandidate, UploadedPlugin, PreparedPlugin } from '../domain/plugin-library.js'
 import type { CommunityPluginStage } from '../domain/admin-contract.js'
+import type { PluginDisplayMetadata } from '../domain/plugin-display.js'
+
+export type FrozenPluginPreparation = Pick<PreparedPlugin, 'artifact' | 'packageName' | 'version' | 'preparationId' | 'runtimeRevision'>
 
 export interface PluginLibraryStorePort {
   list(): Promise<readonly LibraryPlugin[]>
@@ -8,6 +11,7 @@ export interface PluginLibraryStorePort {
 }
 export interface PluginPreparerPort {
   recover?(): Promise<void>
+  readDisplayMetadata?(plugin: FrozenPluginPreparation): Promise<PluginDisplayMetadata>
   prepare(
     input: PluginCandidate,
     progress: (stage: Exclude<CommunityPluginStage, 'available' | 'failed'>) => Promise<void>,

@@ -3,6 +3,7 @@ import { registryDependenciesAllowed } from '../domain/plugin-library.js'
 import { containerWebCommand } from './cli.js'
 import { excludedContributionFile, scanContributionCredentials } from '../domain/contribution-checks.js'
 import { mergePluginConfig } from './managed-plugin-access.js'
+import { pluginDisplayMetadataReader } from './plugin-display-metadata.js'
 
 /** Official CLI and profile seam for isolated plugin preparation. */
 export const pluginPreparationHome = '/prepare/home'
@@ -18,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { readFile, writeFile, mkdir, cp, realpath, readdir, lstat, symlink, readlink, rm } from 'node:fs/promises';
 import { dirname, join, resolve, relative } from 'node:path';
+${pluginDisplayMetadataReader}
 const input = JSON.parse(await readFile('/control/input.json', 'utf8'));
 const fail = code => { throw Object.assign(Error(code), { preparationCode: code }); };
 process.on('uncaughtException', async error => { await writeFile('/prepare/failure.json', JSON.stringify({ code: error.preparationCode ?? 'plugin-precheck-failed' })); process.exit(42); });
@@ -135,9 +137,10 @@ if (process.argv[2] === 'upload') {
   await symlink('/artifact/node_modules', join(checkProfile, 'node_modules'));
   const identity = JSON.parse(await readFile('/prepare/identity.json', 'utf8'));
   const { installDefaults, ...artifactInput } = input;
+  const meta = await readPluginDisplayMetadata(profile, input.packageName, input.version, manifest).catch(() => ({}));
   await writeFile(join(prepared, 'manifest.json'), JSON.stringify({ ...artifactInput, ...identity,
     title: typeof manifest.displayName === 'string' ? manifest.displayName.slice(0, 256) : manifest.name,
-    description: typeof manifest.description === 'string' ? manifest.description.slice(0, 4096) : '',
+    description: typeof manifest.description === 'string' ? manifest.description.slice(0, 4096) : '', meta,
     dependencies: manifest.dependencies ?? {}, optionalDependencies: manifest.optionalDependencies ?? {}, peerDependencies: manifest.peerDependencies ?? {}, bundlePatch, runtimePeers: peers }));
   const yaml = runtime('js-yaml');
   const schema = yaml.JSON_SCHEMA.extend(new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', construct: value => ({ __jsExpr: value }) }));

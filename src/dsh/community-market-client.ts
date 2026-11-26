@@ -158,6 +158,7 @@ body[data-ds-dark-theme] .phalanx-market [role=tab][aria-selected=true]{color:va
 .phalanx-market-list{display:flex;flex-direction:column;gap:2px;list-style:none;padding:0;margin:0}
 .phalanx-market-row{display:flex;align-items:center;gap:14px;padding:8px 0;min-width:0}
 .phalanx-market-icon{display:grid;place-items:center;flex:none;width:48px;height:48px;border:0.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);color:var(--dsw-alias-label-secondary)}
+.phalanx-market-icon img{object-fit:contain}
 .phalanx-market-main{flex:1;min-width:0}
 .phalanx-market-title{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .phalanx-market h3{margin:0;font-size:14px;line-height:20px;font-weight:500;overflow-wrap:anywhere}

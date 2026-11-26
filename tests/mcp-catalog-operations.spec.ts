@@ -83,6 +83,43 @@ async function ready(f: ReturnType<typeof fixture>, importInput = input) {
     configuration: { ...f.presets[0]!.configuration, url: 'https://old.example.test/v2' },
   }
 }
+it('keeps optional credentials editable and preserves anonymous updates and grants', async () => {
+  const f = fixture()
+  f.presets[0] = { ...f.presets[0]!, entry: { ...f.presets[0]!.entry, credentialOptional: true } }
+  await ready(f, { ...input, credential: '' })
+  await f.service.publish(f.actor, input.name, true)
+  expect(await f.service.catalogUpdatePreview(f.actor, input.name)).toMatchObject({ credentialRequired: false, credentialOptional: true })
+  const anonymous = await f.service.beginCatalogUpdate(f.actor, update)
+  expect(await f.service.diagnostic('admin', anonymous.name)).not.toHaveProperty('credential')
+  await f.service.testCatalogUpdate(f.actor, anonymous.name)
+  await f.service.finishCatalogUpdate(f.actor, anonymous.name, [])
+  const save = async (change: { credential?: string; clearCredential?: true }) => {
+    const [row] = await f.service.list(f.actor)
+    await f.service.save(f.actor, { ...mcpWriteInput(row!), ...change })
+    expect((await f.service.list(f.actor))[0]).toMatchObject({ published: true, testStatus: 'passed', catalog: { status: 'ready' } })
+  }
+  await save({ credential: 'optional-fixture-key' })
+  expect((await f.service.effective('member'))[0]?.credential).toBe('optional-fixture-key')
+  await save({ clearCredential: true })
+  expect((await f.service.effective('member'))[0]).toMatchObject({ name: input.name, credential: '' })
+  await save({ credential: 'optional-fixture-key' })
+  f.presets[0] = {
+    entry: { ...f.presets[0]!.entry, version: '3' },
+    configuration: { description: 'Fixture', url: 'https://new.example.test', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] },
+  }
+  const changed = await f.service.catalogUpdatePreview(f.actor, input.name)
+  expect(changed).toMatchObject({ credentialRequired: false, credentialOptional: true, credentialWillBeDropped: true })
+  expect(JSON.stringify(changed)).not.toContain('optional-fixture-key')
+  const keyed = await f.service.beginCatalogUpdate(f.actor, { ...update, version: '3', credential: 'new-fixture-key', requestId: 'optional-key-replacement' })
+  expect((await f.service.diagnostic('admin', keyed.name)).credential).toBe('new-fixture-key')
+  await f.service.failCatalogUpdate(keyed.name)
+  const replacement = await f.service.beginCatalogUpdate(f.actor, { ...update, version: '3', requestId: 'optional-credential-change' })
+  expect(await f.service.diagnostic('admin', replacement.name)).not.toHaveProperty('credential')
+  await f.service.testCatalogUpdate(f.actor, replacement.name)
+  await f.service.finishCatalogUpdate(f.actor, replacement.name, [])
+  expect((await f.service.effective('member'))[0]).toMatchObject({ name: input.name, url: 'https://new.example.test', published: true })
+  expect((await f.service.effective('member'))[0]).not.toHaveProperty('credential')
+})
 it('keeps the adopted remote service until candidate validation passes, then preserves current management state', async () => {
   const f = fixture()
   await ready(f)

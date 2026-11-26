@@ -9,6 +9,7 @@ import officeInputs from './fixtures/office-inputs.json' with { type: 'json' }
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { loopbackPort } from '../src/adapters/loopback-port.js'
 import { PostgresCatalogInstalls } from '../src/adapters/postgres-catalog-records.js'
+import { PostgresPluginLibraryStore } from '../src/adapters/postgres-plugin-library.js'
 import { withSuiteCatalogContentHash } from '../src/domain/suite-catalog-document.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { documentSuiteCatalogFixture } from './fixtures/suite-catalog-server.js'
@@ -331,6 +332,25 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
           return rows.find(row => row.packageName === '@fixture/editor')?.published
         })
         .toBe(!zh)
+      const installedDisplay = async () => {
+        const rows = (await (await page.request.get(origin + '/admin/api/plugins')).json()) as { packageName: string; display?: unknown }[]
+        return rows.find(row => row.packageName === '@fixture/editor')?.display
+      }
+      expect(await installedDisplay()).toMatchObject({ catalogDefaults: { title: localized, description: localized } })
+      if (!zh) {
+        const database = await openTestDatabase(root)
+        try {
+          const store = new PostgresPluginLibraryStore(database)
+          const { display: _addedInNewVersion, ...legacy } = (await store.list()).find(row => row.packageName === '@fixture/editor')!
+          void _addedInNewVersion
+          await store.save(legacy)
+        } finally {
+          await database.close()
+        }
+        expect(await installedDisplay()).toBeUndefined()
+        expect((await page.request.get(origin + '/admin/api/suites')).ok()).toBe(true)
+        expect(await installedDisplay()).toMatchObject({ catalogDefaults: { title: localized, description: localized } })
+      }
       if (zh) {
         const groups = (await (await page.request.get(origin + '/admin/api/groups')).json()) as { id: string; kind: string }[]
         const group = groups.find(row => row.kind !== 'admin')!
@@ -395,6 +415,31 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
         await page.getByRole('tab', { name: 'Plugins', exact: true }).click()
         const openPlugin = page.getByRole('button', { name: 'View plugin @fixture/editor', exact: true })
         await openPlugin.click()
+        await page.getByRole('dialog', { name: 'Fixture editor', exact: true }).getByText('Fixture editor', { exact: true }).nth(1).waitFor()
+        const displaySection = page.getByRole('region', { name: 'Display information', exact: true })
+        const displayName = displaySection.getByRole('textbox', { name: 'Display name', exact: true })
+        const basic = page.getByRole('tabpanel', { name: 'Basic settings', exact: true })
+        expect(await basic.getByRole('heading').first().textContent()).toBe('Platform App Center')
+        expect(await displayName.getAttribute('placeholder')).toBe('Fixture editor')
+        await displayName.fill('x'.repeat(201))
+        await page.getByRole('tab', { name: 'Access settings', exact: true }).click()
+        await page.getByRole('button', { name: 'Close plugin details', exact: true }).click()
+        await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).getByRole('button', { name: 'Save changes', exact: true }).click()
+        await displaySection.getByRole('alert').getByText('Invalid plugin display information.', { exact: true }).waitFor()
+        expect(await displayName.inputValue()).toBe('x'.repeat(201))
+        await displayName.fill('Team editor')
+        await displaySection.getByRole('textbox', { name: 'Function description', exact: true }).fill('Team editing workflow')
+        await displaySection.getByRole('button', { name: 'Save display information', exact: true }).click()
+        await page.getByRole('dialog', { name: 'Team editor', exact: true }).getByRole('paragraph').filter({ hasText: 'Team editing workflow' }).waitFor()
+        expect(await installedDisplay()).toMatchObject({ name: 'Team editor', description: 'Team editing workflow', catalogDefaults: { title: localized } })
+        const edited = (await (await page.request.get(origin + '/admin/api/plugins')).json()).find(
+          (row: { packageName: string }) => row.packageName === '@fixture/editor',
+        )
+        expect(edited.suiteOrigin).toBe('suite:fixture-editor')
+        await displaySection.getByRole('button', { name: 'Restore defaults', exact: true }).click()
+        await page.getByRole('dialog', { name: 'Fixture editor', exact: true }).waitFor()
+        expect(await displayName.inputValue()).toBe('')
+        expect(await installedDisplay()).not.toHaveProperty('name')
         await page.getByRole('button', { name: 'Uninstall', exact: true }).click()
         const offlineUninstall = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Confirm uninstall', exact: true }) })
         await offlineUninstall.getByText('This will remove:', { exact: true }).waitFor()
@@ -453,6 +498,14 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
               })
             ).ok(),
           ).toBe(false)
+          expect(
+            (
+              await member.request.post(origin + '/admin/api/plugins/display', {
+                headers: { origin },
+                data: { packageName: '@fixture/editor', display: { name: 'Unprivileged edit' } },
+              })
+            ).status(),
+          ).toBe(403)
         } finally {
           await member.close()
         }

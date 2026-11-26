@@ -39,7 +39,7 @@ export default function CommunityExpertEditor({
   onPublish?: (published: boolean) => Promise<unknown>
   onRemove?: () => void
 }) {
-  const { t, errorText } = usePlatformLanguage()
+  const { t, locale, errorText } = usePlatformLanguage()
   const initial: CommunityExpertInput = expert
     ? {
         name: expert.name,
@@ -78,10 +78,10 @@ export default function CommunityExpertEditor({
     return () => controller.abort()
   }, [])
   const pluginOptions = [
-    ...plugins,
+    ...plugins.map(row => ({ id: row.packageName, name: row.localizedTitles?.[locale] ?? row.title, meta: row.packageName, locked: !row.eligible })),
     ...(draft.plugins ?? [])
       .filter(name => !plugins.some(row => row.packageName === name))
-      .map(packageName => ({ packageName, title: t('Unavailable saved entry'), eligible: false })),
+      .map(packageName => ({ id: packageName, name: packageName, meta: t('Unavailable saved entry'), locked: true })),
   ]
   const mcpOptions = [
     ...mcp,
@@ -253,7 +253,7 @@ export default function CommunityExpertEditor({
             description={t('Unavailable plugins and plugins that change core entries cannot be included in an expert.')}
           >
             <CommunityGrantList
-              rows={pluginOptions.map(row => ({ id: row.packageName, name: row.packageName, meta: row.title, locked: !row.eligible }))}
+              rows={pluginOptions}
               selected={draft.plugins ?? []}
               onChange={next => setDraft({ ...draft, plugins: [...next] })}
               busy={busy}

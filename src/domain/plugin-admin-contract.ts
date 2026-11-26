@@ -1,7 +1,13 @@
 /** Management wire types owned by this domain; exported through admin-contract. */
 import type { CommunityApiErrorBody, CommunityErrorCode } from './admin-error-contract.js'
+import type { PlatformLocale } from './platform-language.js'
+import type { PluginDisplayFields, PluginDisplayOverride, PluginNameFields } from './plugin-display.js'
 export type CommunityPluginStage = 'resolving' | 'downloading' | 'installing' | 'prechecking' | 'available' | 'failed'
 export type CommunityPluginChangeResult = CommunityPluginView | { readonly removed: string }
+export interface CommunityPluginDisplayInput {
+  readonly packageName: string
+  readonly display: PluginDisplayOverride
+}
 export interface CommunityPluginImpact {
   readonly experts: readonly { readonly id: string; readonly name: string }[]
   readonly groups: number
@@ -26,7 +32,7 @@ export interface CommunityPluginUpdateCheck {
   /** GitHub: the default-branch head found by this check. */
   readonly latestCommit?: string
 }
-export interface CommunityPluginView {
+export interface CommunityPluginView extends PluginDisplayFields {
   readonly runtimeDependencies?: readonly string[]
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly maintenanceRevision?: string
@@ -47,11 +53,8 @@ export interface CommunityPluginView {
   readonly repository?: string
   /** GitHub sources: the full commit of the current version. */
   readonly sourceCommit?: string
-  readonly packageName: string
   readonly version: string
   readonly currentVersion: string | null
-  readonly title: string
-  readonly description: string
   readonly stage: CommunityPluginStage
   readonly published: boolean
   readonly integrity?: string
@@ -77,11 +80,11 @@ export interface CommunityPluginUpdateChoice {
   readonly version: string
   readonly target: string
 }
-export interface CommunityMarketPluginView {
+export interface CommunityMarketPluginView extends PluginNameFields {
   readonly contribution?: { readonly name?: string; readonly anonymous: boolean }
-  readonly packageName: string
-  readonly title: string
   readonly description: string
+  readonly localizedDescriptions?: Readonly<Record<PlatformLocale, string>>
+  readonly icon?: string
   readonly version: string
   readonly status: 'install' | 'selected' | 'managed' | 'native' | 'installed' | 'unknown'
   readonly sharedCredential?: true
@@ -97,12 +100,13 @@ export interface CommunityNativeServiceBindingView {
   readonly nextStart?: true
   readonly refresh?: true
 }
-export interface CommunityMarketNativeServiceView {
+interface CommunityMarketPluginNotice extends Partial<PluginNameFields> {
   readonly packageName: string
+}
+export interface CommunityMarketNativeServiceView extends CommunityMarketPluginNotice {
   readonly bindings: readonly CommunityNativeServiceBindingView[]
 }
-export interface CommunityMarketPreinstallFailure {
-  readonly packageName: string
+export interface CommunityMarketPreinstallFailure extends CommunityMarketPluginNotice {
   readonly restartRequired: boolean
 }
 export interface CommunityMarketPageData {
@@ -110,7 +114,7 @@ export interface CommunityMarketPageData {
   readonly pending: boolean
   readonly nativeServices?: readonly CommunityMarketNativeServiceView[]
   readonly preinstallFailures?: readonly CommunityMarketPreinstallFailure[]
-  readonly unlistedUpdates?: readonly { readonly packageName: string; readonly job: CommunityNativePluginJob }[]
+  readonly unlistedUpdates?: readonly (CommunityMarketPluginNotice & { readonly job: CommunityNativePluginJob })[]
 }
 export interface CommunityPluginPublishAction {
   readonly expected?: import('./plugin-group-contract.js').CatalogPluginDistributionIdentity

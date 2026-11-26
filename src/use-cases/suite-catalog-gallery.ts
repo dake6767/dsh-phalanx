@@ -17,6 +17,7 @@ export interface SuiteCatalogGalleryInput {
   readonly downloads: DownloadSourceReaderPort
   readonly installs: () => Promise<readonly SuiteInstallRecord[]>
   readonly fetcher: SuiteCatalogFetchPort
+  readonly rememberPluginDisplays?: (entries: readonly SuiteCatalogEntry[]) => Promise<void>
   /** Diagnostics sink; the composition root wires it to console.warn. */
   readonly log?: (line: string) => void
 }
@@ -57,7 +58,9 @@ export class SuiteCatalogGallery {
    * signal keeps a private request, so aborting it cannot poison the other waiters.
    */
   async load(signal?: AbortSignal): Promise<CommunitySuiteCatalogSourceView> {
-    return (await this.loadSnapshot(signal)).source
+    const snapshot = await this.loadSnapshot(signal)
+    if (snapshot.source.status === 'ok') await this.input.rememberPluginDisplays?.(snapshot.entries)
+    return snapshot.source
   }
   mcpCatalog(): Promise<McpCatalogSnapshot> {
     return this.loadSnapshot()

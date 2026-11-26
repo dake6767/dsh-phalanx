@@ -3,6 +3,52 @@ import { PluginCompatibility } from '../src/use-cases/plugin-compatibility.js'
 import { PluginLibrary } from '../src/use-cases/plugin-library.js'
 import { PluginPreparationError, type LibraryPlugin, type PreparedPlugin } from '../src/domain/plugin-library.js'
 
+it.each([
+  ['previous', false],
+  ['older', true],
+] as const)('carries forward a verified %s preparation with equivalent checks', async (version, failedCandidate) => {
+  const current: PreparedPlugin = {
+    packageName: 'plugin',
+    version: '1.0.0',
+    artifact: 'artifacts/existing',
+    integrity: 'existing-integrity',
+    runtimeRevision: 'same-runtime',
+    title: 'Plugin',
+    description: '',
+    bundlePatch: '[]',
+    dependencies: {},
+  }
+  let row: LibraryPlugin = {
+    packageName: current.packageName,
+    version: current.version,
+    source: { kind: 'npm' },
+    checkedFor: `${version}/same-runtime`,
+    stage: 'available',
+    current,
+    published: true,
+    ...(failedCandidate ? { replacement: { packageName: current.packageName, version: '2.0.0', stage: 'failed' as const, prepared: null } } : {}),
+  }
+  const compatibility = new PluginCompatibility(
+    {
+      list: async () => [row],
+      save: async next => {
+        row = next
+      },
+      remove: async () => {},
+    },
+    {
+      prepare: async () => {
+        throw new Error('The verified artifact must be reused')
+      },
+    },
+    'current/same-runtime',
+    ['older/same-runtime', 'previous/same-runtime'],
+  )
+  await compatibility.recover()
+  expect(row).toMatchObject({ current, checkedFor: 'current/same-runtime', stage: 'available', published: true })
+  if (failedCandidate) expect(row.replacement).toMatchObject({ stage: 'failed', prepared: null })
+})
+
 it('rechecks retained bytes once per platform/runtime upgrade, isolates failures, and restores publication on compatible replacement', async () => {
   const prepared: PreparedPlugin = {
     packageName: 'compatible',

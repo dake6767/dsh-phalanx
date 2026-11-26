@@ -7,6 +7,8 @@ export type VerifiedMcpPreset = McpPreset & { readonly entry: McpPreset['entry']
 
 const baseFields = ['kind', 'id', 'version', 'engines', 'contentHash', 'adapters', 'title', 'description', 'source', 'documentation']
 const sharedFields = ['repository', 'commit', 'sha256', 'script']
+const credentialFields = ['label', 'in', 'name', 'template'] as const
+type CatalogSettings = { configuration: McpPreset['configuration'] } & Pick<McpPreset['entry'], 'credentialLabel' | 'credentialOptional'>
 
 /** Compile data into the same settings the service owner validates for local configuration. */
 export function compileMcpCatalogDeclaration(entry: SuiteCatalogDocumentReservedEntry, raw: Record<string, unknown>): VerifiedMcpPreset | undefined {
@@ -15,7 +17,7 @@ export function compileMcpCatalogDeclaration(entry: SuiteCatalogDocumentReserved
   if (['title', 'description', 'source'].some(field => !catalogLabel(raw[field]))) return
   if (entry.adapters.length !== 1 || !Array.isArray(raw.adapters) || !exactRecord(raw.adapters[0], ['name', 'params'])) return
   const { name, params } = entry.adapters[0]!
-  let settings: { configuration: McpPreset['configuration']; credentialLabel?: SuiteCatalogLocalized }
+  let settings: CatalogSettings
   if (name === 'mcp-remote-http') {
     const remote = remoteSettings(params)
     if (!remote) return
@@ -44,24 +46,22 @@ export function compileMcpCatalogDeclaration(entry: SuiteCatalogDocumentReserved
       location: configuration.run ? 'shared' : 'remote',
       imported: 0,
       ...(settings.credentialLabel ? { credentialLabel: settings.credentialLabel } : {}),
+      ...(settings.credentialOptional ? { credentialOptional: true } : {}),
     },
     configuration,
   }
 }
 
-function remoteSettings(params: Readonly<Record<string, unknown>>):
-  | {
-      configuration: McpPreset['configuration']
-      credentialLabel?: SuiteCatalogLocalized
-    }
-  | undefined {
+function remoteSettings(params: Readonly<Record<string, unknown>>): CatalogSettings | undefined {
   const url = httpsUrl(params.url)
   if (!url || new URL(url).search) return
   const base = { description: '', url, run: null, headers: [], query: [] }
   if (exactRecord(params, ['url'])) return { configuration: base }
   if (!exactRecord(params, ['url', 'credential'])) return
   const binding = params.credential
-  if (!exactRecord(binding, ['label', 'in', 'name', 'template'])) return
+  if (!exactRecord(binding, credentialFields) && !exactRecord(binding, [...credentialFields, 'optional'])) return
+  const optional = 'optional' in binding
+  if (optional && binding.optional !== true) return
   const { label, in: placement, name, template } = binding
   if (
     !catalogLabel(label) ||
@@ -71,7 +71,7 @@ function remoteSettings(params: Readonly<Record<string, unknown>>):
     !/^[^{}]*\{credential\}[^{}]*$/u.test(template)
   )
     return
-  return { configuration: { ...base, [placement]: [{ name, value: template }] }, credentialLabel: label }
+  return { configuration: { ...base, [placement]: [{ name, value: template }] }, credentialLabel: label, ...(optional ? { credentialOptional: true } : {}) }
 }
 
 function sharedRunner(params: Readonly<Record<string, unknown>>): CommunityMcpInput['run'] | undefined {

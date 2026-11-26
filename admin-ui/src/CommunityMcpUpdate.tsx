@@ -35,7 +35,7 @@ export default function CommunityMcpUpdate({
     return () => controller.abort()
   }, [service.name])
   const submit = async () => {
-    if (!preview || pending.current) return
+    if (!preview || pending.current || (preview.credentialRequired && !credential.trim())) return
     pending.current = true
     setBusy(true)
     setError(undefined)
@@ -45,7 +45,7 @@ export default function CommunityMcpUpdate({
         version: preview.version,
         requestId,
         ...(preview.contentHash ? { contentHash: preview.contentHash } : {}),
-        ...(credential ? { credential } : {}),
+        ...(credential.trim() ? { credential } : {}),
       })
       setCredential('')
       onStarted(rows)
@@ -99,15 +99,22 @@ export default function CommunityMcpUpdate({
               <pre className="plugin-preparation-log">{change.after}</pre>
             </section>
           ))}
-          {preview.credentialRequired ? (
+          {preview.credentialRequired || preview.credentialOptional ? (
             <CommunityField
               label={t('Platform credential')}
               type="password"
               value={credential}
               onChange={setCredential}
-              required
+              required={preview.credentialRequired}
               disabled={busy}
               autoComplete="new-password"
+              description={
+                preview.credentialWillBeDropped
+                  ? t('The saved credential cannot be reused with the updated connection. Leave blank to continue without it.')
+                  : preview.credentialOptional
+                    ? t(service.credentialConfigured ? 'Leave blank to keep the saved credential.' : 'Leave blank to continue without a credential.')
+                    : undefined
+              }
             />
           ) : null}
         </form>

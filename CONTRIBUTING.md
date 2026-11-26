@@ -804,6 +804,11 @@ loading requires a trusted Ed25519 signature. Each adapter entry declares its
 compatible platform range. Tag-only changes stay outside per-entry hashes.
 Maintain concrete entries and tags in the catalog repository.
 
+Remote HTTP MCP entries that support anonymous access can set `optional` to
+`true` on their `credential` binding. The declared platform range must start
+at a version that supports optional credentials. A binding without `optional`
+requires a credential at import.
+
 Catalog CI runs suite equivalence tests against its actual output. For the
 initial MCP migration, run the migration-specific test from the platform
 checkout with its frozen dependencies installed.

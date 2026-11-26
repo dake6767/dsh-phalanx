@@ -22,6 +22,12 @@ export const en = {
 
   'Platform catalog': 'Platform catalog',
   'No credential required': 'No credential required',
+  '{label} (Optional)': '{label} (Optional)',
+  '{label} (Required)': '{label} (Required)',
+  'You can import without a credential and add one later in Access settings.': 'You can import without a credential and add one later in Access settings.',
+  'The saved credential cannot be reused with the updated connection. Leave blank to continue without it.':
+    'The saved credential cannot be reused with the updated connection. Leave blank to continue without it.',
+  'Leave blank to continue without a credential.': 'Leave blank to continue without a credential.',
   'Testing imported service…': 'Testing imported service…',
   'Import failed': 'Import failed',
   'Import ready': 'Import ready',
@@ -161,6 +167,12 @@ export const zhCN: Record<keyof typeof en, string> = {
 
   'Platform catalog': '平台广场',
   'No credential required': '无需凭据',
+  '{label} (Optional)': '{label}（可选）',
+  '{label} (Required)': '{label}（必填）',
+  'You can import without a credential and add one later in Access settings.': '可先无凭据引入，后续在接入配置中补填。',
+  'The saved credential cannot be reused with the updated connection. Leave blank to continue without it.':
+    '现有凭据无法用于更新后的连接。留空即可继续以无凭据模式使用。',
+  'Leave blank to continue without a credential.': '留空即可继续以无凭据模式使用。',
   'Testing imported service…': '正在测试引入的服务…',
   'Import failed': '引入失败',
   'Import ready': '引入完成',

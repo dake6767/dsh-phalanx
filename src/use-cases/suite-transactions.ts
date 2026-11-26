@@ -142,6 +142,7 @@ export class SuiteTransactions {
             ...plan.plugin.item.catalogDependencies.map(catalogDependencyName),
           ]
           const plugin = await writeSuitePlugin(rows, origin, plan.plugin, dependencies, 'update', {
+            catalogDisplay: entry,
             serviceIdentity: installedCatalogIdentity(entry),
             ...this.pluginWiring,
           })
@@ -367,6 +368,7 @@ export class SuiteTransactions {
             ]
             const takeover = unit.replacement?.plugins?.find(row => row.row.packageName === unit.plugin!.item.packageName)
             await writeSuitePlugin(rows, origin, unit.plugin, dependencies, 'install', {
+              catalogDisplay: entry,
               serviceIdentity: installedCatalogIdentity(entry),
               ...this.pluginWiring,
               ...(entry.id === choices.id ? { accessSettings: choices } : {}),

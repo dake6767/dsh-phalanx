@@ -183,6 +183,7 @@ export async function writeSuitePlugin(
   dependencies: readonly string[],
   mode: 'install' | 'update',
   policy: SuitePluginWiring & {
+    readonly catalogDisplay?: Pick<import('../domain/suite-catalog.js').SuiteCatalogSuiteEntry, 'title' | 'description'>
     readonly serviceIdentity?: InstalledServiceIdentity
     readonly takeover?: { readonly row: LibraryPlugin; readonly revision: string }
     readonly accessSettings?: InstallAccessSettings
@@ -270,6 +271,9 @@ export async function writeSuitePlugin(
     throw new BusinessRuleError('conflict', 'Keep the locked resource bindings while replacing a catalog plugin archive.', 'plugin-impact-changed')
   const row: LibraryPlugin = {
     ...metadata,
+    ...(policy.catalogDisplay
+      ? { display: { ...current?.display, catalogDefaults: { title: policy.catalogDisplay.title, description: policy.catalogDisplay.description } } }
+      : {}),
     packageName: item.packageName,
     version: item.version,
     source: item.archive ? uploadPluginSource : npmPluginSource,

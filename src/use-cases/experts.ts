@@ -8,7 +8,7 @@ import type { ExpertStorePort, ExpertSnapshot, ExpertSkillsPort, ExpertMcpPort, 
 import type { SkillLibraryStorePort } from '../ports/skill-library.js'
 import type { SkillPackStorePort } from '../ports/skill-packs.js'
 import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
-import type { LibraryPlugin, PreparedPlugin } from '../domain/plugin-library.js'
+import { pluginNameFields, type LibraryPlugin, type PreparedPlugin } from '../domain/plugin-library.js'
 
 /** Expert definitions and current ownership; running preset snapshots are owned by the runtime. */
 export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPort {
@@ -60,8 +60,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
       experts,
       revision: state.publicRevision,
       plugins: ((await this.pluginSource?.list()) ?? []).map(row => ({
-        packageName: row.packageName,
-        title: row.current?.title ?? row.packageName,
+        ...pluginNameFields(row),
         eligible: Boolean(!row.removing && !row.incompatible && row.stage === 'available' && row.current && this.pluginSource?.eligible(row.current)),
       })),
       mcp: await this.mcpLibrary(),

@@ -34,6 +34,7 @@ it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)(
       type: 'module',
       main: './index.js',
       description: 'Private uploaded plugin',
+      exports: { '.': './index.js', './locale/*.json': './locale/*.json', './icon': './icon.svg' },
       dsh: { bundle: { patch: './cordis.patch.yml' } },
     }
     let serial = 0
@@ -48,6 +49,13 @@ it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)(
     }
     try {
       await mkdir(directory)
+      await mkdir(join(directory, 'locale'))
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>'
+      await writeFile(join(directory, 'icon.svg'), svg)
+      await writeFile(join(directory, 'large.svg'), Buffer.alloc(256 * 1024 + 1))
+      await writeFile(join(directory, 'locale/en.json'), '{"meta":{"title":"Private editor"}}')
+      await writeFile(join(directory, 'locale/zh-CN.json'), '{"meta":{"title":"私有编辑器","description":"插件简介"}}')
+      await writeFile(join(directory, 'locale/ja.json'), '{broken')
       await writeFile(
         join(directory, 'index.js'),
         `import { writeFileSync } from 'node:fs'; export const name = 'private-upload-fixture'; export function apply() { writeFileSync(${JSON.stringify(sentinel)}, 'container only'); }`,
@@ -69,6 +77,32 @@ it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)(
       )
       expect(result.integrity).toBe(uploaded.integrity)
       expect(result.description).toBe('Private uploaded plugin')
+      const text = { title: { en: 'Private editor', 'zh-cn': '私有编辑器' }, description: { 'zh-cn': '插件简介' } }
+      const meta = { ...text, icon: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}` }
+      expect(result.meta).toEqual(meta)
+      expect(
+        JSON.parse(await readFile(join(config.dataRoot, 'plugins', result.artifact, 'prepared', result.preparationId!, 'manifest.json'), 'utf8')).meta,
+      ).toEqual(meta)
+      const images = [
+        ['png', 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mO47m0CAANTAVftzg2gAAAAAElFTkSuQmCC'],
+        [
+          'jpeg',
+          '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AP//Z',
+        ],
+        ['webp', 'UklGRjoAAABXRUJQVlA4IC4AAADQAQCdASoBAAEAAUAmJaACdLoB+AADsAD+5fo/+QXLC65Gv/aWfrQ/rQ/5cAAA'],
+      ] as const
+      const checkIcon = async (path: string, expected?: string) => {
+        const candidate = await pack({ ...manifest, icon: path })
+        const upload = await uploads.accept('plugin-icon.tgz', createReadStream(candidate), new AbortController().signal)
+        const prepared = await preparer.prepare({ ...upload, upload }, async () => {}, new AbortController().signal)
+        expect(prepared.meta).toEqual(expected ? { ...text, icon: expected } : text)
+      }
+      for (const [format, bytes] of images) {
+        const path = `icon.${format}`
+        await writeFile(join(directory, path), Buffer.from(bytes, 'base64'))
+        await checkIcon(path, `data:image/${format};base64,${bytes}`)
+      }
+      for (const path of ['./large.svg', '../outside.svg']) await checkIcon(path)
       expect(await readFile(join(config.dataRoot, 'plugins', result.artifact, 'original.tgz'))).toEqual(await readFile(archive))
       await expect(stat(sentinel)).rejects.toMatchObject({ code: 'ENOENT' })
       for (const dependency of ['file:../outside', 'link:../outside', 'git+https://example.test/repo.git', 'https://example.test/plugin.tgz']) {

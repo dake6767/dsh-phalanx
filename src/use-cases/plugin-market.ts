@@ -5,7 +5,8 @@ import { matchesPendingInstallDefaults } from '../domain/native-install-defaults
 import { nativeUpdateChoice, nativeUpdatePrevious } from '../domain/member-plugin-update.js'
 import type { NativePluginArchiveFacts } from '../domain/plugin-preinstall.js'
 import type { InstalledMarketPlugin } from '../ports/plugin-market.js'
-import type { PreparedPlugin } from '../domain/plugin-library.js'
+import { resolvePluginDisplay } from '../domain/plugin-display.js'
+import { pluginDisplayFields, pluginNameFields, type LibraryPlugin, type PreparedPlugin } from '../domain/plugin-library.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
@@ -110,10 +111,12 @@ export class PluginMarket {
     const instance = await this.runtime.ensure(actor.username, origin.href)
     const installed = await this.manager.list(instance, origin, signal)
     const account = await this.current(actor)
-    const granted = new Set(await this.managed.granted(actor.username)),
-      selected = new Set(await this.selections.get(account.spaceId))
+    const selected = new Set(await this.selections.get(account.spaceId)),
+      granted = new Set(await this.managed.granted(actor.username))
+    const library = new Map((await this.library.list()).map(row => [row.packageName, row]))
     const plugins = await Promise.all(
-      (await this.available(actor.username)).map(async plugin => {
+      this.availableRows([...library.values()], granted).map(async row => {
+        const plugin = row.current
         const actual = installed.find(row => row.packageName === plugin.packageName),
           shared = await this.sharedChoice(plugin.packageName, selected.has(plugin.packageName))
         const resumable = actual?.installDefaultsPending !== undefined && matchesPendingInstallDefaults(plugin, actual)
@@ -128,7 +131,7 @@ export class PluginMarket {
                   ? ('installed' as const)
                   : ('native' as const)
               : ('install' as const)
-        const contribution = libraryContributionCredit((await this.library.list()).find(row => row.packageName === plugin.packageName)?.provenance)
+        const contribution = libraryContributionCredit(row.provenance)
         const candidate = await this.native?.get(actor, plugin.packageName, instance, actual)
         const retryReceipt = status === 'installed' && actual && !actual.installDefaultsPending && this.native?.canRetryReceipt(actor, instance, plugin, actual)
         const choice = status === 'installed' && actual && !actual.installDefaultsPending ? await this.updateChoice(actor, actual, plugin) : undefined
@@ -140,10 +143,14 @@ export class PluginMarket {
           (candidate?.action === 'update' && candidate.status === 'failed')
             ? candidate
             : undefined
+        const display = pluginDisplayFields(row)
+        const en = resolvePluginDisplay(display, 'en'),
+          zh = resolvePluginDisplay(display, 'zh-CN')
         return {
           packageName: plugin.packageName,
-          title: plugin.title,
-          description: plugin.description,
+          ...en,
+          ...(en.title === zh.title ? {} : { localizedTitles: { en: en.title, 'zh-CN': zh.title } }),
+          ...(en.description === zh.description ? {} : { localizedDescriptions: { en: en.description, 'zh-CN': zh.description } }),
           version: plugin.version,
           status,
           ...(status === 'installed' && actual?.installDefaultsPending ? { incompleteInstallation: true as const } : {}),
@@ -157,11 +164,11 @@ export class PluginMarket {
       }),
     )
     const unlistedUpdates = await this.native?.unlistedUpdates(actor, new Set(plugins.map(plugin => plugin.packageName)), instance, installed)
-    const { nativeServices, preinstallFailures } = await this.setupState(actor, instance)
+    const { nativeServices, preinstallFailures } = await this.setupState(actor, instance, library)
     return {
       ...(nativeServices ? { nativeServices } : {}),
       ...(preinstallFailures ? { preinstallFailures } : {}),
-      ...(unlistedUpdates?.length ? { unlistedUpdates } : {}),
+      ...(unlistedUpdates?.length ? { unlistedUpdates: unlistedUpdates.map(row => ({ ...row, ...this.noticeName(row.packageName, library) })) } : {}),
       pending:
         (await this.pending(
           actor.username,
@@ -181,14 +188,20 @@ export class PluginMarket {
     const status = this.runtime.status?.(actor.username)
     return status?.state === 'ready' ? await this.setupState(actor, status.instance) : {}
   }
-  private async setupState(actor: CommunityAccountActor, instance: CommunityUserInstance) {
+  private noticeName(packageName: string, library: ReadonlyMap<string, LibraryPlugin>) {
+    const row = library.get(packageName)
+    return row ? pluginNameFields(row) : { packageName, title: packageName }
+  }
+  private async setupState(actor: CommunityAccountActor, instance: CommunityUserInstance, library?: ReadonlyMap<string, LibraryPlugin>) {
     const [nativeServices, preinstallFailures] = await Promise.all([
       this.serviceSettings?.list(actor, instance),
       this.preinstalls?.listFailures(actor, instance),
     ])
+    if (!nativeServices?.length && !preinstallFailures?.length) return {}
+    const rows = library ?? new Map((await this.library.list()).map(row => [row.packageName, row]))
     return {
-      ...(nativeServices?.length ? { nativeServices } : {}),
-      ...(preinstallFailures?.length ? { preinstallFailures } : {}),
+      ...(nativeServices?.length ? { nativeServices: nativeServices.map(row => ({ ...row, ...this.noticeName(row.packageName, rows) })) } : {}),
+      ...(preinstallFailures?.length ? { preinstallFailures: preinstallFailures.map(row => ({ ...row, ...this.noticeName(row.packageName, rows) })) } : {}),
     }
   }
   async retryNativeSetup(actor: CommunityAccountActor, packageName: string, origin: URL, action: 'retry-settings' | 'retry-preinstall') {
@@ -368,18 +381,20 @@ export class PluginMarket {
   }
   private async available(username: string) {
     const granted = new Set(await this.managed.granted(username))
-    return (await this.library.list()).flatMap(row =>
-      !row.removing &&
-      !row.incompatible &&
-      (row.published || granted.has(row.packageName)) &&
-      row.stage === 'available' &&
-      row.current?.runtimeRevision === this.runtimeRevision
-        ? [
-            row.contributionReceipt
-              ? { ...row.current, title: redactContributionContent(row.current.title), description: redactContributionContent(row.current.description) }
-              : row.current,
-          ]
-        : [],
+    return this.availableRows(await this.library.list(), granted).map(row =>
+      row.contributionReceipt
+        ? { ...row.current, title: redactContributionContent(row.current.title), description: redactContributionContent(row.current.description) }
+        : row.current,
+    )
+  }
+  private availableRows(rows: readonly LibraryPlugin[], granted: ReadonlySet<string>) {
+    return rows.filter(
+      (row): row is LibraryPlugin & { readonly current: PreparedPlugin } =>
+        !row.removing &&
+        !row.incompatible &&
+        (row.published || granted.has(row.packageName)) &&
+        row.stage === 'available' &&
+        row.current?.runtimeRevision === this.runtimeRevision,
     )
   }
   private async verifyArchive(instance: CommunityUserInstance, actual: InstalledMarketPlugin, signal: AbortSignal) {

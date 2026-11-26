@@ -1,4 +1,5 @@
 import { mergeMcpDisplay } from './mcp-display.js'
+import { hasMcpDefaultCredentialSlot } from './mcp-protocol.js'
 import type { CommunityMcpCatalogEntry, CommunityMcpCatalogInput, CommunityMcpInput } from './admin-contract.js'
 import { BusinessRuleError } from './business-error.js'
 
@@ -16,7 +17,7 @@ export function catalogInput(input: CommunityMcpCatalogInput, presets: readonly 
     typeof input.requestId !== 'string' ||
     !/^[A-Za-z0-9_-]{16,128}$/u.test(input.requestId) ||
     typeof input.credential !== 'string' ||
-    (preset.entry.credentialLabel ? !input.credential.trim() : Boolean(input.credential))
+    (preset.entry.credentialLabel ? !preset.entry.credentialOptional && !input.credential.trim() : Boolean(input.credential))
   )
     throw new BusinessRuleError('invalid', 'Invalid MCP market input.', 'mcp-service-invalid')
   return {
@@ -28,7 +29,7 @@ export function catalogInput(input: CommunityMcpCatalogInput, presets: readonly 
     display: mergeMcpDisplay(input.display, {
       defaults: { name: structuredClone(preset.entry.title), description: structuredClone(preset.entry.description) },
     })!,
-    ...(preset.entry.credentialLabel ? { credential: input.credential } : {}),
+    ...(input.credential.trim() ? { credential: input.credential } : {}),
   }
 }
 export function assertCatalogConfiguration(previous: import('./mcp-service.js').McpService, input: CommunityMcpInput): void {
@@ -40,8 +41,7 @@ export function assertCatalogConfiguration(previous: import('./mcp-service.js').
     (input.headers !== undefined && JSON.stringify(input.headers) !== JSON.stringify(previous.headers ?? [])) ||
     (input.query !== undefined && JSON.stringify(input.query) !== JSON.stringify(previous.query ?? [])) ||
     (input.credentials !== undefined && JSON.stringify(input.credentials) !== JSON.stringify(previous.credentials ?? {})) ||
-    (![...(previous.headers ?? []), ...(previous.query ?? []), ...(previous.run?.env ?? [])].some(row => row.value.includes('{credential}')) &&
-      Boolean(input.credential))
+    (!hasMcpDefaultCredentialSlot(previous) && Boolean(input.credential))
   if (changed) throw new BusinessRuleError('invalid', 'MCP market connection settings are maintained by the platform.', 'mcp-catalog-locked')
 }
 

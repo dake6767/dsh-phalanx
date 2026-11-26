@@ -3,7 +3,7 @@ import { MAX_EXECUTION_TIMEOUT_SECONDS } from './execution-control.js'
 import type { CommunityMcpService, CommunityMcpInput, CommunityMcpTemplate, CommunityMcpTool, CommunityMcpSettings } from './admin-contract.js'
 import { HOP_HEADERS } from './plugin-upstream.js'
 import { BusinessRuleError } from './business-error.js'
-import { mcpSecrets, redactMcpValue } from './mcp-protocol.js'
+import { hasMcpDefaultCredentialSlot, mcpSecrets, redactMcpValue } from './mcp-protocol.js'
 import { mcpPlatformCredentials, referencedMcpSecrets, retainedMcpSecrets } from './mcp-protected-values.js'
 
 export interface McpService extends CommunityMcpService {
@@ -73,6 +73,7 @@ export function mcpSettings(service: McpService): CommunityMcpSettings {
   return {
     ...(service.catalogUpdate ? { catalogUpdate: { version: service.catalogUpdate.version, status: service.catalogUpdate.status } } : {}),
     ...(service.catalog ? { catalog: service.catalog } : {}),
+    ...(service.catalog && hasMcpDefaultCredentialSlot(service) ? { catalogCredentialSlot: true } : {}),
     ...(service.display ? { display: redactMcpValue(service.display, known) as NonNullable<McpService['display']> } : {}),
     generation: service.generation,
     protectedFields,

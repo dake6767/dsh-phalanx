@@ -67,6 +67,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
             ...input,
             title: 'Shared plugin',
             description: '',
+            ...(input.version === '2.0.0' ? { meta: { title: { en: 'New package defaults' } } } : {}),
             artifact: 'artifacts/fixture',
             integrity: `sha512-${input.version}`,
             runtimeRevision: declaredRuntimeRevision(),
@@ -116,6 +117,9 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     await page.getByRole('link', { name: 'Plugin library', exact: true }).click()
     await page.getByRole('button', { name: 'View plugin plugin', exact: true }).click()
     await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()
+    await page.getByRole('textbox', { name: 'Display name', exact: true }).fill('Team versioned plugin')
+    await page.getByRole('button', { name: 'Save display information', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Team versioned plugin', exact: true }).waitFor()
     await page.getByRole('button', { name: 'Change npm version', exact: true }).click()
     await page.getByLabel('Exact version', { exact: true }).fill('2.0.0')
     await page.getByRole('button', { name: 'Start precheck', exact: true }).click()
@@ -127,6 +131,8 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     await confirmation.getByText('This affects 1 groups and 1 members.', { exact: true }).waitFor()
     await confirmation.getByRole('button', { name: 'Confirm', exact: true }).click()
     await expect.poll(async () => (await list())[0]?.currentVersion).toBe('2.0.0')
+    expect((await list())[0]).toMatchObject({ display: { name: 'Team versioned plugin' }, meta: { title: { en: 'New package defaults' } } })
+    await expect.poll(() => page.getByRole('textbox', { name: 'Display name', exact: true }).getAttribute('placeholder')).toBe('New package defaults')
     const details = await (await page.request.get(origin + `/admin/api/groups/${group.id}/plugins`)).json()
     expect(details.pendingMembers).toEqual(['member'])
     expect((await (await page.request.get(origin + '/market/api/plugins')).json()).plugins[0].status).toBe('native')

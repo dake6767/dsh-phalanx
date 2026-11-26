@@ -279,6 +279,8 @@ export class McpServices implements MemberMcpPort {
         JSON.stringify(merged.query) !== JSON.stringify(previous.query ?? [])
       const displayUpdate = input.display === undefined ? undefined : mcpDisplayUpdate(previous, merged, connectionChanged)
       if (displayUpdate) return this.store.update(state, { ...state, services: state.services.map(row => (row === previous ? displayUpdate : row)) })
+      // The catalog locks the target and binding. Updating its optional key leaves a tested service available.
+      const recheck = connectionChanged && !(previous?.catalog?.credentialOptional && previous.catalog.status === 'ready' && !previous.run)
       const previousFields = { ...previous }
       delete previousFields.protectedValues
       delete previousFields.protectedCredentials
@@ -301,9 +303,9 @@ export class McpServices implements MemberMcpPort {
         headers: merged.headers ?? [],
         query: merged.query ?? [],
         disabledTools: merged.disabledTools ?? previous?.disabledTools ?? [],
-        testStatus: connectionChanged ? 'untested' : (previous?.testStatus ?? 'untested'),
+        testStatus: recheck ? 'untested' : (previous?.testStatus ?? 'untested'),
       }
-      if (previous?.catalog && (connectionChanged || ['testing', 'preparing'].includes(previous.catalog.status))) {
+      if (previous?.catalog && (recheck || ['testing', 'preparing'].includes(previous.catalog.status))) {
         Object.assign(row, { catalog: { ...previous.catalog, status: 'failed' } })
       }
       const rename = (name: string) => (name === previous?.name ? row.name : name)

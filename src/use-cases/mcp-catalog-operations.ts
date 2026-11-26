@@ -73,11 +73,15 @@ export class McpCatalogOperations {
     if (target === 'current' && service.catalog.version !== preset.entry.version)
       throw new BusinessRuleError('conflict', 'MCP settings changed during the test.', 'mcp-test-stale')
     const fields = ['description', 'url', 'run', 'headers', 'query'] as const
+    const reusable = reusableMcpCatalogCredential(service, preset)
+    const { credentialLabel, credentialOptional } = preset.entry
     return {
       currentVersion: service.catalog.version,
       version: preset.entry.version,
       ...(preset.entry.contentHash ? { contentHash: preset.entry.contentHash } : {}),
-      credentialRequired: Boolean(preset.entry.credentialLabel && !reusableMcpCatalogCredential(service, preset)),
+      credentialRequired: Boolean(credentialLabel && !credentialOptional && !reusable),
+      ...(credentialOptional ? { credentialOptional } : {}),
+      ...(credentialOptional && service.credential && !reusable ? { credentialWillBeDropped: true } : {}),
       changes: fields.flatMap(field => {
         const before = JSON.stringify(mcpSettings(service)[field] ?? null),
           after = JSON.stringify(mcpSettings({ ...preset.configuration, name: service.name, generation: service.generation })[field] ?? null)
@@ -136,7 +140,13 @@ export class McpCatalogOperations {
           ...(previous.dependencyName ? { dependencyTarget: previous.dependencyName } : {}),
           preparationName: `catalog-update:${generation}`,
           generation,
-          catalog: { id: previous.catalog.id, version: input.version, ...(preset.entry.contentHash ? { contentHash: preset.entry.contentHash } : {}), status },
+          catalog: {
+            id: previous.catalog.id,
+            version: input.version,
+            ...(preset.entry.contentHash ? { contentHash: preset.entry.contentHash } : {}),
+            ...(preset.entry.credentialOptional ? { credentialOptional: true } : {}),
+            status,
+          },
           testStatus: 'untested',
         }
         const catalogUpdate = { name, requestId: input.requestId, version: input.version, baseGeneration: previous.generation, actor, status, candidate }
@@ -282,6 +292,7 @@ export class McpCatalogOperations {
           id: input.presetId,
           version: preset.entry.version,
           ...(preset.entry.contentHash ? { contentHash: preset.entry.contentHash } : {}),
+          ...(preset.entry.credentialOptional ? { credentialOptional: true } : {}),
           status: settings.run ? 'preparing' : 'testing',
         },
       }

@@ -1,6 +1,130 @@
 import { expect, it } from 'vitest'
 import { pluginSourceAbortCode, type LibraryPlugin } from '../src/domain/plugin-library.js'
 import { PluginLibrary } from '../src/use-cases/plugin-library.js'
+import { resolvePluginDisplay } from '../src/domain/plugin-display.js'
+import { BusinessRuleError } from '../src/domain/business-error.js'
+
+it('recovers old display resources from installed preparations without repeatedly scanning empty packages', async () => {
+  const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
+  const rows = new Map<string, LibraryPlugin>()
+  for (const packageName of ['localized-plugin', 'plain-plugin']) {
+    const identity = { packageName, version: '1.0.0' }
+    rows.set(packageName, {
+      ...identity,
+      source: { kind: 'npm' },
+      stage: 'available',
+      published: true,
+      current: {
+        ...identity,
+        integrity: `integrity-${packageName}`,
+        artifact: `artifacts/${packageName}`,
+        runtimeRevision: 'old-runtime',
+        title: packageName,
+        description: '',
+        dependencies: {},
+        bundlePatch: '',
+      },
+    })
+  }
+  const recovered: string[] = []
+  let failedRead = false
+  const library = new PluginLibrary(
+    { get: async () => ({ ...actor, admin: true, groupId: 'admin', email: '', disabled: false, createdAt: 0, updatedAt: 0 }) },
+    {
+      list: async () => [...rows.values()],
+      save: async row => void rows.set(row.packageName, row),
+      remove: async name => void rows.delete(name),
+    },
+    {
+      prepare: async () => {
+        throw new Error('Display recovery must not prepare again')
+      },
+      readDisplayMetadata: async plugin => {
+        recovered.push(plugin.packageName)
+        if (plugin.packageName === 'plain-plugin' && !failedRead) {
+          failedRead = true
+          throw new Error('Temporary fixture read failure')
+        }
+        return plugin.packageName === 'localized-plugin' ? { title: { zh: '存量插件' } } : {}
+      },
+    },
+  )
+  await library.recover()
+  const views = await library.list(actor)
+  expect(views.map(view => resolvePluginDisplay(view, 'zh-CN').title)).toEqual(['存量插件', 'plain-plugin'])
+  expect(views.every(view => view.published && view.currentVersion === '1.0.0')).toBe(true)
+  await library.recover()
+  await library.list(actor)
+  expect(recovered).toEqual(['localized-plugin', 'plain-plugin', 'plain-plugin'])
+  await library.stop()
+})
+
+it('keeps an in-progress settings write and the metadata backfill on the same plugin revision chain', async () => {
+  const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
+  const identity = { packageName: 'plugin', version: '1.0.0' }
+  let row: LibraryPlugin = {
+    ...identity,
+    revision: 1,
+    source: { kind: 'npm' },
+    stage: 'available',
+    published: true,
+    current: {
+      ...identity,
+      integrity: 'original',
+      artifact: 'artifacts/plugin',
+      runtimeRevision: 'same',
+      title: 'Plugin',
+      description: '',
+      bundlePatch: '[]',
+      dependencies: {},
+    },
+  }
+  let started!: () => void
+  let release!: () => void
+  const writing = new Promise<void>(resolve => {
+    started = resolve
+  })
+  const hold = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const library = new PluginLibrary(
+    { get: async () => ({ ...actor, admin: true, groupId: 'admin', email: '', disabled: false, createdAt: 0, updatedAt: 0 }) },
+    {
+      list: async () => [row],
+      save: async next => {
+        if (next.revision !== row.revision) throw new BusinessRuleError('conflict', 'Fixture revision changed', 'platform-configuration-conflict')
+        row = { ...next, revision: row.revision! + 1 }
+      },
+      remove: async () => {},
+    },
+    {
+      prepare: async () => {
+        throw Error('Unexpected preparation')
+      },
+      readDisplayMetadata: async () => ({ title: { zh: '已装插件' } }),
+    },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      readReady: async () => {
+        started()
+        await hold
+        return []
+      },
+    },
+  )
+  const save = library.setRuntimeDependencies(actor, identity.packageName, ['shared-resource'])
+  await writing
+  const list = library.list(actor)
+  await new Promise<void>(resolve => setImmediate(resolve))
+  release()
+  const [settings, [view]] = await Promise.all([save, list])
+  expect(settings.runtimeDependencies).toEqual(['shared-resource'])
+  expect(view).toMatchObject({ runtimeDependencies: ['shared-resource'], meta: { title: { zh: '已装插件' } } })
+  await library.stop()
+})
 
 it('adds a fixed npm version once, exposes progress and publishes only the prepared metadata', async () => {
   const rows = new Map<string, LibraryPlugin>()
@@ -93,9 +217,12 @@ it('retains failed additions for explicit retry and rechecks the admitted admini
   await service.add(actor, { packageName: '@example/tool', version: '1.0.0-beta.1' })
   await service.drain()
   expect(attempts).toBe(1)
+  const display = { name: 'Example tool', description: 'Team workflow' }
+  await service.setDisplay(actor, '@example/tool', display)
   await service.add(actor, { packageName: '@example/tool', version: '1.0.0-beta.1' }, true)
   await service.drain()
   expect(attempts).toBe(2)
+  expect((await service.list(actor))[0]).toMatchObject({ stage: 'failed', display })
   admin = false
   await expect(service.list(actor)).rejects.toThrow(expect.objectContaining({ code: 'admin-required' }))
   await expect(service.add(actor, { packageName: 'other', version: '1.0.0' })).rejects.toThrow(expect.objectContaining({ code: 'admin-required' }))

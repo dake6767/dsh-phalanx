@@ -2,6 +2,7 @@ import { completeAdministratorPluginSource } from '../domain/library-contributio
 import {
   assertPreparedPlugin,
   PluginPreparationError,
+  type PluginReplacement,
   withSourceCommit,
   type LibraryPlugin,
   type PluginCandidate,
@@ -29,11 +30,22 @@ export class PluginCompatibility {
     private readonly store: PluginLibraryStorePort,
     private readonly preparer: PluginPreparerPort,
     private readonly target: string,
+    private readonly verifiedPredecessors: readonly string[] = [],
   ) {}
   private async run(): Promise<void> {
     for (const original of await this.store.list()) {
       this.controller.signal.throwIfAborted()
       if (original.removing || original.checkedFor === this.target) continue
+      if (this.canReuseCurrent(original)) {
+        const replacement = original.replacement
+        const requiresCheck = replacement?.stage === 'available' && replacement.prepared?.runtimeRevision !== this.target.split('/').at(-1)
+        await this.store.save({
+          ...original,
+          ...(requiresCheck ? { replacement: await this.checkReplacement(replacement, original.identities) } : {}),
+          checkedFor: this.target,
+        })
+        continue
+      }
       const row = { ...original }
       delete row.failureCode
       // Save intent before asynchronous work. An interrupted check is repeated on startup.
@@ -58,27 +70,28 @@ export class PluginCompatibility {
         next = { ...next, stage: 'failed', incompatible: true, failureCode: 'plugin-incompatible' }
       }
       if (row.replacement) {
-        try {
-          const prepared = withSourceCommit(
-            await this.check(row.replacement, row.replacement.prepared, row.replacement.prepared?.integrity ?? next.identities?.[row.replacement.version]),
-            row.replacement.prepared,
-          )
-          next = {
-            ...next,
-            replacement: {
-              packageName: prepared.packageName,
-              version: prepared.version,
-              ...(row.replacement.upload ? { upload: row.replacement.upload } : {}),
-              stage: 'available',
-              prepared,
-            },
-          }
-        } catch (error) {
-          this.rethrowFatal(error)
-          next = { ...next, replacement: { ...row.replacement, stage: 'failed', prepared: null, failureCode: 'plugin-incompatible' } }
-        }
+        next = { ...next, replacement: await this.checkReplacement(row.replacement, next.identities) }
       }
       await this.store.save(completeAdministratorPluginSource({ ...next, checkedFor: this.target }))
+    }
+  }
+  private canReuseCurrent(row: LibraryPlugin): boolean {
+    return (
+      row.checkedFor !== undefined &&
+      this.verifiedPredecessors.includes(row.checkedFor) &&
+      row.stage === 'available' &&
+      !row.incompatible &&
+      row.current?.runtimeRevision === this.target.split('/').at(-1)
+    )
+  }
+  private async checkReplacement(replacement: PluginReplacement, identities: LibraryPlugin['identities']): Promise<PluginReplacement> {
+    try {
+      const { prepared, version, upload } = replacement
+      const checked = withSourceCommit(await this.check(replacement, prepared, prepared?.integrity ?? identities?.[version]), prepared)
+      return { packageName: checked.packageName, version: checked.version, ...(upload ? { upload } : {}), stage: 'available', prepared: checked }
+    } catch (error) {
+      this.rethrowFatal(error)
+      return { ...replacement, stage: 'failed', prepared: null, failureCode: 'plugin-incompatible' }
     }
   }
   private rethrowFatal(error: unknown): void {

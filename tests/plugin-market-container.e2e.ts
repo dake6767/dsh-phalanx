@@ -77,6 +77,7 @@ it.skipIf(!runtimeSettings.containerImage)(
     page.on('pageerror', error => errors.push(error.message))
     const packageName = 'dsh-better-sidebar',
       version = '0.28.0',
+      displayName = 'Better Sidebar for members',
       rpc = createRealDshRpc()
     let restoreProxy = () => {}
     let primaryFailure: unknown
@@ -239,6 +240,7 @@ it.skipIf(!runtimeSettings.containerImage)(
           packageName,
           version,
         })
+        expect((await post('plugins/display', { packageName, display: { name: displayName } })).status()).toBe(200)
       }
       mark('initial-preparation')
       await prepare()
@@ -248,7 +250,8 @@ it.skipIf(!runtimeSettings.containerImage)(
       const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
       const openMarket = async () => {
         await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
-        await market.getByRole('heading', { name: packageName, exact: true }).waitFor()
+        await market.getByRole('heading', { name: displayName, exact: true }).waitFor()
+        expect(await market.getByText(packageName, { exact: true }).count()).toBe(0)
       }
       const data = async () => (await (await page.request.get(origin + '/market/api/plugins')).json()) as CommunityMarketPageData
       const call = async <T>(method: string, input: object) => rpc.remoteRpc<T>(origin, await cookieHeader(page.context(), origin), method, input)

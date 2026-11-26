@@ -350,7 +350,11 @@ it('commits prepared plugin bytes, protected template settings and catalog recei
     await f.database.query('DROP TRIGGER reject_plugin ON dsh_phalanx.catalog_installs')
     await unit.install(f.actor, units, options, request)
     expect((await storage.installs.get(entry.id))?.record.entries).toEqual([{ kind: 'plugin', name: plan.item.packageName }])
-    expect((await storage.work.run(rows => rows.plugins.list()))[0]).toMatchObject({ version: '1.0.0', current: plan.prepared })
+    expect((await storage.work.run(rows => rows.plugins.list()))[0]).toMatchObject({
+      version: '1.0.0',
+      current: plan.prepared,
+      display: { catalogDefaults: { title: entry.title, description: entry.description } },
+    })
     expect(await storage.work.run(async rows => rows.pluginAccess.get(plan.item.packageName))).toMatchObject({ environment: plan.item.access.environment })
     const raw = await f.database.query<{ configuration: Record<string, unknown> }>(
       'SELECT configuration FROM dsh_phalanx.plugin_access_settings WHERE package_name=$1',
@@ -365,6 +369,10 @@ it('commits prepared plugin bytes, protected template settings and catalog recei
     ])
     expect(JSON.stringify(await storage.installs.get(entry.id))).not.toContain(imageSettings.credential)
     expect(JSON.stringify(await storage.requests.get(options.requestId))).not.toContain(imageSettings.credential)
+    await storage.work.run(async rows => {
+      const installed = (await rows.plugins.list())[0]!
+      await rows.plugins.save({ ...installed, display: { ...installed.display, name: 'Team catalog editor' } })
+    })
     const before = await storage.work.run(async rows => ({ plugin: await rows.plugins.list(), access: await rows.pluginAccess.get(plan.item.packageName) }))
     await unit.install(f.actor, units, options, request)
     expect(await storage.work.run(async rows => ({ plugin: await rows.plugins.list(), access: await rows.pluginAccess.get(plan.item.packageName) }))).toEqual(
@@ -376,22 +384,24 @@ it('commits prepared plugin bytes, protected template settings and catalog recei
       item: { ...update.item, archive: { url: 'https://github.com/fixture/editor/releases/download/v2.0.0/editor.tgz' } },
     }
     const previous = (await storage.installs.get(entry.id))!
+    const updatedEntry = { ...entry, version: '2', title: { en: 'Updated editor', 'zh-CN': '新版编辑器' }, items: [next.item] }
     await f.database.query(
       "CREATE TRIGGER reject_plugin AFTER UPDATE ON dsh_phalanx.catalog_installs FOR EACH ROW WHEN (NEW.state='installed') EXECUTE FUNCTION dsh_phalanx.reject_plugin()",
     )
-    await expect(
-      unit.update(f.actor, { installed: previous, entry: { ...entry, version: '2', items: [next.item] }, runtime: [], skills: [], plugin: next }),
-    ).rejects.toMatchObject({ sqlState: '23503' })
+    await expect(unit.update(f.actor, { installed: previous, entry: updatedEntry, runtime: [], skills: [], plugin: next })).rejects.toMatchObject({
+      sqlState: '23503',
+    })
     expect(await storage.work.run(async rows => ({ plugin: await rows.plugins.list(), access: await rows.pluginAccess.get(plan.item.packageName) }))).toEqual(
       before,
     )
     expect(await storage.installs.get(entry.id)).toEqual(previous)
     await f.database.query('DROP TRIGGER reject_plugin ON dsh_phalanx.catalog_installs')
-    await unit.update(f.actor, { installed: previous, entry: { ...entry, version: '2', items: [next.item] }, runtime: [], skills: [], plugin: next })
+    await unit.update(f.actor, { installed: previous, entry: updatedEntry, runtime: [], skills: [], plugin: next })
     expect((await storage.work.run(rows => rows.plugins.list()))[0]).toMatchObject({
       version: '2.0.0',
       source: { kind: 'upload' },
       current: { ...next.prepared, catalogArchiveUrl: next.item.archive.url },
+      display: { name: 'Team catalog editor', catalogDefaults: { title: updatedEntry.title, description: updatedEntry.description } },
     })
     expect((await storage.work.run(async rows => rows.pluginAccess.get(plan.item.packageName)))?.environment).toEqual(next.item.access.environment)
   } finally {

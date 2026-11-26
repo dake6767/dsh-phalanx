@@ -144,6 +144,7 @@ export const enErrorMessages = {
   'plugin-source-conflict': 'This plugin was added from another source. Remove it from the library before adding it again.',
   'plugin-up-to-date': 'This plugin already uses the latest version from its recorded source.',
   'plugin-action-invalid': 'Invalid plugin action.',
+  'plugin-display-invalid': 'Invalid plugin display information.',
   'plugin-registry-unavailable': 'The npm registry could not be reached or rejected the request. Check the package name and download source, then retry.',
   'plugin-registry-metadata-invalid':
     'The npm registry did not provide a valid exact version for this package. Use an exact version or check the package source.',
@@ -366,6 +367,7 @@ export const zhErrorMessages = {
   'plugin-source-conflict': '该插件来自其他来源。请先从插件库移除，再重新添加。',
   'plugin-up-to-date': '该插件已是其来源的最新版本。',
   'plugin-action-invalid': '插件操作无效。',
+  'plugin-display-invalid': '插件展示信息无效。',
   'plugin-registry-unavailable': '无法访问 npm 包源或包源拒绝了请求，请检查包名与下载源后重试。',
   'plugin-registry-metadata-invalid': 'npm 包源未提供此包的有效精确版本，请填写精确版本或检查包源。',
   'plugin-precheck-failed': '插件安装或离线 DSH 预检失败，请检查包兼容性与包源连接后重试。',

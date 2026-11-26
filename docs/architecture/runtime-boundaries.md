@@ -149,6 +149,10 @@ The MCP gateway checks current member identity and effective grants before forwa
 and again before releasing response headers. It shares HTTP header stripping and
 streaming transport with plugin upstreams, but uses idle timeout only and forwards
 the configured endpoint and locked query templates without following redirects.
+For remote HTTP, a template with any missing credential slot omits its entire
+header or query parameter. Declared header names belong to the platform, so a
+member request cannot supply a value for an omitted header. Shared process
+environment templates substitute missing credentials with empty strings.
 Platform credentials stay outside member mounts and management replies. Each request
 uses current templates and tool policy; JSON and incremental SSE list replies omit
 disabled tools, and a batch containing a disabled call is rejected before forwarding.
@@ -157,6 +161,9 @@ initializes an MCP session and follows tool-list pagination, then closes the ses
 Its generation-checked snapshot cannot overwrite concurrent settings changes. A
 failed test preserves the previous tool snapshot and records failure; UI discovery
 runs on explicit test or reopening a tested service, without background polling.
+Editing an optional remote credential keeps a tested service available. A manual
+test probes the saved settings while the service remains available and then
+records the result against that configuration generation.
 
 Catalog updates keep the active service and a private candidate in the same MCP
 store transaction. `McpServices` owns activation and checks the originating actor
@@ -227,8 +234,11 @@ removal intent, which excludes the package from selection and distribution, then
 clears all grants and deletes the library row. Startup resumes interrupted removals
 before accepting requests. Immutable artifacts remain available to running mounts.
 `PluginCompatibility` gates startup on checks for the platform-version/runtime pair.
-It reuses retained original bytes, rechecks current and candidate versions, and
-persists publication intent before asynchronous work. Incompatible plugins retain
+For releases that declare an equivalent predecessor, an available current version
+verified on that predecessor keeps its preparation ID and publication when its
+runtime matches. Candidate compatibility is evaluated separately. Other upgrades
+recheck versions from retained original bytes and persist publication intent before
+asynchronous work on the current version. Incompatible plugins retain
 grants and their previous artifact, but leave managed selection and the market.
 Selecting a compatible replacement restores intended publication; administrators
 can cancel that intent. Each successful check receives an immutable preparation ID,

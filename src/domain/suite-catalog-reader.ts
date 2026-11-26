@@ -126,8 +126,10 @@ function readCheckedSuiteCatalog(raw: Record<string, unknown>, platformVersion: 
         rejected.push({ ...identity, reason: 'needs-platform-upgrade', detail: entry.engines.platform })
       else {
         const preset = compileMcpCatalogDeclaration(entry, rawMcp)
-        if (preset) mcp.push(preset)
-        else rejected.push({ ...identity, reason: 'invalid-adapter-params', detail: 'Invalid MCP declaration.' })
+        if (!preset) rejected.push({ ...identity, reason: 'invalid-adapter-params', detail: 'Invalid MCP declaration.' })
+        else if (preset.entry.credentialOptional && !requiresCatalogExtensionPlatform(entry.engines.platform, '0.1.44'))
+          rejected.push({ ...identity, reason: 'invalid-entry', detail: 'Optional MCP credentials require engines.platform >=0.1.44.' })
+        else mcp.push(preset)
       }
       return
     }

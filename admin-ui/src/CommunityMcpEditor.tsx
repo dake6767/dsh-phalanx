@@ -152,7 +152,9 @@ export default function McpEditor({
       }
       if (testing) {
         setTab('tools')
-        const next = settings?.catalog ? (await retryCommunityMcp(draft.name)).find(row => row.name === draft.name)! : await testCommunityMcp(draft.name)
+        const catalog = settings?.catalog
+        const retryImport = catalog && (!catalog.credentialOptional || catalog.status !== 'ready')
+        const next = retryImport ? (await retryCommunityMcp(draft.name)).find(row => row.name === draft.name)! : await testCommunityMcp(draft.name)
         setSettings(next)
         onRefreshed(next)
       } else onClose()
@@ -418,81 +420,79 @@ export default function McpEditor({
               </McpEditorSection>
             </Tabs.Panel>
             <Tabs.Panel id="access" className="plugin-settings-panel mcp-editor-panel" shouldForceMount data-editor-tab="access">
-              <McpEditorSection title={t('Platform credential')}>
-                <p className="upstream-editor-description">{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
-                {settings?.catalog?.id !== '12306' ? (
-                  <>
-                    <Chip size="sm" variant="soft">
-                      {t(settings?.credentialConfigured ? 'Credential configured' : 'Credential not configured')}
-                      {settings?.credential.last4 ? ` ••••${settings.credential.last4}` : ''}
-                    </Chip>
-                    <CommunityField
-                      label={t('Platform credential')}
-                      type="password"
-                      value={credential}
-                      onChange={next => {
-                        setCredential(next)
-                        setClearCredential(false)
+              {!settings?.catalog || settings.catalogCredentialSlot ? (
+                <McpEditorSection title={t('Platform credential')}>
+                  <p className="upstream-editor-description">{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
+                  <Chip size="sm" variant="soft">
+                    {t(settings?.credentialConfigured ? 'Credential configured' : 'Credential not configured')}
+                    {settings?.credential.last4 ? ` ••••${settings.credential.last4}` : ''}
+                  </Chip>
+                  <CommunityField
+                    label={t('Platform credential')}
+                    type="password"
+                    value={credential}
+                    onChange={next => {
+                      setCredential(next)
+                      setClearCredential(false)
+                    }}
+                    disabled={busy}
+                    autoComplete="new-password"
+                    description={t(
+                      settings?.credentialConfigured ? 'Leave blank to keep the saved credential.' : 'Enter the credential used by this upstream.',
+                    )}
+                  />
+                  {settings?.credentialConfigured ? (
+                    <Button
+                      variant="secondary"
+                      isDisabled={busy}
+                      onPress={() => {
+                        setClearCredential(!clearCredential)
+                        setCredential('')
                       }}
-                      disabled={busy}
-                      autoComplete="new-password"
-                      description={t(
-                        settings?.credentialConfigured ? 'Leave blank to keep the saved credential.' : 'Enter the credential used by this upstream.',
-                      )}
-                    />
-                    {settings?.credentialConfigured ? (
+                    >
+                      {t(clearCredential ? 'Keep saved credential' : 'Clear saved credential')}
+                    </Button>
+                  ) : null}
+                  {clearCredential ? <p role="status">{t('The credential will be cleared when you save.')}</p> : null}
+                  {Array.from(new Set([...(settings?.credentialNames ?? []), ...Object.keys(credentials)])).map(name => (
+                    <div key={name}>
+                      <CommunityField
+                        key={name}
+                        label={t('Platform credential {name}', { name })}
+                        type="password"
+                        value={credentials[name] ?? ''}
+                        disabled={busy}
+                        onChange={value => {
+                          setCredentials({ ...credentials, [name]: value })
+                          setDraft({ ...draft, removeCredentials: draft.removeCredentials?.filter(row => row !== name) })
+                        }}
+                        placeholder={settings?.credentials[name]?.configured ? `••••${settings.credentials[name].last4}` : undefined}
+                        description={t('Leave blank to keep the saved credential.')}
+                      />
                       <Button
                         variant="secondary"
                         isDisabled={busy}
                         onPress={() => {
-                          setClearCredential(!clearCredential)
-                          setCredential('')
+                          setCredentials({ ...credentials, [name]: '' })
+                          setDraft({
+                            ...draft,
+                            removeCredentials: draft.removeCredentials?.includes(name)
+                              ? draft.removeCredentials.filter(row => row !== name)
+                              : [...(draft.removeCredentials ?? []), name],
+                          })
                         }}
                       >
-                        {t(clearCredential ? 'Keep saved credential' : 'Clear saved credential')}
+                        {t(draft.removeCredentials?.includes(name) ? 'Keep saved credential' : 'Clear saved credential')}
                       </Button>
-                    ) : null}
-                    {clearCredential ? <p role="status">{t('The credential will be cleared when you save.')}</p> : null}
-                    {Array.from(new Set([...(settings?.credentialNames ?? []), ...Object.keys(credentials)])).map(name => (
-                      <div key={name}>
-                        <CommunityField
-                          key={name}
-                          label={t('Platform credential {name}', { name })}
-                          type="password"
-                          value={credentials[name] ?? ''}
-                          disabled={busy}
-                          onChange={value => {
-                            setCredentials({ ...credentials, [name]: value })
-                            setDraft({ ...draft, removeCredentials: draft.removeCredentials?.filter(row => row !== name) })
-                          }}
-                          placeholder={settings?.credentials[name]?.configured ? `••••${settings.credentials[name].last4}` : undefined}
-                          description={t('Leave blank to keep the saved credential.')}
-                        />
-                        <Button
-                          variant="secondary"
-                          isDisabled={busy}
-                          onPress={() => {
-                            setCredentials({ ...credentials, [name]: '' })
-                            setDraft({
-                              ...draft,
-                              removeCredentials: draft.removeCredentials?.includes(name)
-                                ? draft.removeCredentials.filter(row => row !== name)
-                                : [...(draft.removeCredentials ?? []), name],
-                            })
-                          }}
-                        >
-                          {t(draft.removeCredentials?.includes(name) ? 'Keep saved credential' : 'Clear saved credential')}
-                        </Button>
-                      </div>
-                    ))}
-                  </>
-                ) : (
-                  <p>{t('No credential required')}</p>
-                )}
-                {draft.run?.location === 'member' ? (
-                  <p>{t('Member container run cannot use platform credentials. Clear credentials and their templates first.')}</p>
-                ) : null}
-              </McpEditorSection>
+                    </div>
+                  ))}
+                  {draft.run?.location === 'member' ? (
+                    <p>{t('Member container run cannot use platform credentials. Clear credentials and their templates first.')}</p>
+                  ) : null}
+                </McpEditorSection>
+              ) : (
+                <p>{t('No credential required')}</p>
+              )}
               {!settings?.catalog && !draft.run ? (
                 <McpEditorSection title={t('Request configuration')}>
                   <p>{t('Use {credential} for the saved secret. Fixed values replace member headers.')}</p>

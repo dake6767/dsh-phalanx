@@ -8,6 +8,7 @@ import {
   type LibraryContributionAdoption,
 } from '../domain/library-contribution.js'
 import { assertPluginDependencyTemplate } from '../domain/plugin-access.js'
+import { pluginDisplayOverride } from '../domain/plugin-display.js'
 import {
   assertPluginIdentity,
   assertPluginSource,
@@ -143,6 +144,7 @@ export class PluginLibraryAdministration {
         ...(existing?.revision !== undefined ? { revision: existing.revision } : {}),
         runtimeDependencies: existing?.runtimeDependencies ?? [],
         ...(provenance ? { provenance } : {}),
+        ...(existing?.display ? { display: existing.display } : {}),
         contributionReceipt: { id: contribution.id, revision: contribution.revision },
         current: prepared,
         stage: 'available',
@@ -162,6 +164,44 @@ export class PluginLibraryAdministration {
         await this.store.save(row, existing?.revision ?? 'none')
         notify()
       }
+    })
+  }
+  async setDisplay(actor: CommunityAccountActor, packageName: string, value: unknown): Promise<CommunityPluginView> {
+    return await this.operations.run(packageName, async () => {
+      await this.owner.assertAdmin(actor)
+      this.owner.assertIdle(packageName)
+      const { display: previous, ...row } = await this.owner.required(packageName)
+      const display = pluginDisplayOverride(value, previous)
+      if (display?.name !== previous?.name || display?.description !== previous?.description) await this.store.save({ ...row, ...(display ? { display } : {}) })
+      return pluginLibraryView(await this.owner.required(packageName))
+    })
+  }
+  async select(actor: CommunityAccountActor, packageName: string, revision: string): Promise<CommunityPluginView> {
+    return await this.operations.run(packageName, async () => {
+      await this.owner.assertAdmin(actor)
+      const row = await this.owner.required(packageName)
+      const replacement = row.replacement
+      if (row.removing || !replacement?.prepared || replacement.stage !== 'available')
+        throw new BusinessRuleError('conflict', 'Precheck the replacement version first.', 'plugin-candidate-unavailable')
+      this.owner.assertIdle(packageName)
+      await this.owner.assertWritable(packageName)
+      await this.owner.confirm(actor, packageName, revision)
+      const next: LibraryPlugin = {
+        packageName,
+        source: row.source,
+        runtimeDependencies: row.runtimeDependencies ?? [],
+        version: replacement.version,
+        ...(replacement.upload ? { upload: replacement.upload } : {}),
+        ...(row.display ? { display: row.display } : {}),
+        provenance: administratorLibraryVersion(row.provenance, replacement.version, replacement.prepared.integrity, actor, Date.now()),
+        current: replacement.prepared,
+        stage: 'available',
+        published: row.published || row.restorePublication === true,
+        ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}),
+        identities: pluginIdentities(row),
+      }
+      await this.store.save(next, row.revision)
+      return pluginLibraryView(next)
     })
   }
   async setRuntimeDependencies(actor: CommunityAccountActor, packageName: string, names: readonly string[]): Promise<CommunityPluginView> {

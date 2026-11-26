@@ -45,6 +45,7 @@ export function createSuiteApplication(input: {
     downloads: input.downloads,
     installs: async () => (await storage.installs.list()).map(row => row.record),
     fetcher: new HttpSuiteCatalogFetch(),
+    rememberPluginDisplays: entries => input.plugins.rememberCatalogDisplays(entries),
     log: line => console.warn(line),
   })
   const suites = new SuiteCatalog(

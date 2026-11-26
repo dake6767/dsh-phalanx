@@ -4,13 +4,15 @@ import { pluginOfflinePrecheck } from '../dsh/plugin-precheck.js'
 import { pluginServiceObserver } from '../dsh/plugin-service-observer.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { join, resolve, sep } from 'node:path'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { PluginPreparationError, type PluginCandidate, type PreparedPlugin, type PluginPreparationFailureCode } from '../domain/plugin-library.js'
-import type { PluginPreparerPort } from '../ports/plugin-library.js'
+import type { FrozenPluginPreparation, PluginPreparerPort } from '../ports/plugin-library.js'
+import type { PluginDisplayMetadata } from '../domain/plugin-display.js'
 import type { CommunityPluginStage } from '../domain/admin-contract.js'
 import { pluginAddCommand, pluginArtifactPreparation, pluginDefaultCheckFiles, pluginPreparationHome } from '../dsh/plugin-preparation.js'
+import { pluginDisplayMetadataReader, pluginDisplayResolutionFlag } from '../dsh/plugin-display-metadata.js'
 import { rootlessContainerUser } from '../dsh/container.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
 import { outboundProxyEnvironment, preparationProxyBootstrap } from './outbound-proxy.js'
@@ -26,6 +28,26 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
     private readonly downloads: DownloadSourceReaderPort = { current: () => resolveDownloadSources({ preset: 'official' }) },
     private readonly canDiscard: () => boolean = () => true,
   ) {}
+  async readDisplayMetadata(plugin: FrozenPluginPreparation): Promise<PluginDisplayMetadata> {
+    const library = join(await realpath(this.config.dataRoot), 'plugins')
+    const preparation = await realpath(join(library, plugin.artifact, 'prepared', plugin.preparationId ?? plugin.runtimeRevision))
+    if (!preparation.startsWith(join(library, 'artifacts') + sep)) throw new Error('Plugin preparation is outside its artifact store')
+    const output = await execFileText(
+      process.execPath,
+      [
+        pluginDisplayResolutionFlag,
+        '--input-type=module',
+        '-e',
+        `${pluginDisplayMetadataReader}\nconsole.log(JSON.stringify(await readPluginDisplayMetadata(...process.argv.slice(1))));`,
+        '--',
+        preparation,
+        plugin.packageName,
+        plugin.version,
+      ],
+      { timeout: 5000, maxBuffer: 8 * 1024 * 1024, reportOutputOnFailure: false },
+    )
+    return JSON.parse(output) as PluginDisplayMetadata
+  }
   async recover(): Promise<void> {
     const container = this.config.container
     if (!container) return
@@ -198,7 +220,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       const pinned = JSON.parse(await readFile(join(work, 'identity.json'), 'utf8')) as { integrity: string }
       await progress('installing')
       await run(pluginAddCommand(), true)
-      await run(['node', '/control/prepare.mjs', 'inspect'], false)
+      await run(['node', pluginDisplayResolutionFlag, '/control/prepare.mjs', 'inspect'], false)
       if (this.contribution) {
         const checks = JSON.parse(
           await readFile(join(work, 'contribution.json'), 'utf8'),

@@ -2,7 +2,7 @@ import { createMcpMemberConfiguration } from './mcp-member-configuration.js'
 import type { McpService } from '../domain/mcp-service.js'
 import type { UsageMember } from '../domain/usage-record.js'
 import type { UsagePolicy } from '../use-cases/usage-policy.js'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import { CommunityModelAccessError } from '../domain/community-model.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { PluginUpstreamTransportError } from '../domain/plugin-upstream.js'
@@ -139,9 +139,11 @@ export function createMcpGateway(deps: {
         }
       } else methods = [{ method: request.method! }]
       if (!service) throw new CommunityModelAccessError('forbidden')
-      const headers = { ...request.headers, 'content-type': 'application/json', 'accept-encoding': 'identity' }
+      const headers: IncomingHttpHeaders = { ...request.headers, 'content-type': 'application/json', 'accept-encoding': 'identity' }
       delete headers['content-length']
       if (service.run?.location === 'shared') delete headers.origin
+      // Declared headers belong to the platform even when an anonymous request omits the corresponding template.
+      else for (const row of service.headers ?? []) delete headers[row.name.toLowerCase()]
       const target = service.run?.location === 'shared' ? await deps.shared?.connect(username!, service, diagnostic) : { name, ...mcpCredentialTarget(service) }
       if (!target) throw new CommunityModelAccessError('forbidden')
       const admitted = await authorize()

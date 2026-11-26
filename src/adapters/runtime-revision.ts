@@ -17,3 +17,10 @@ export function pluginCompatibilityTarget(): string {
   const value = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }
   return `${value.version}/${declaredRuntimeRevision()}`
 }
+
+/** This release changes display extraction while retaining the preceding preparation and runtime contract. */
+export function pluginCompatibilityPredecessors(target: string): readonly string[] {
+  const [version, revision] = target.split('/')
+  if (version !== '0.1.44' || revision !== declaredRuntimeRevision()) return []
+  return ['0.1.39', '0.1.40', '0.1.41', '0.1.42', '0.1.43'].map(previous => `${previous}/${revision}`)
+}

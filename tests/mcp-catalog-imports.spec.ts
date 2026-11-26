@@ -1,6 +1,8 @@
 import type { McpCatalogSnapshot, McpPreset } from '../src/domain/mcp-catalog.js'
 import { signedMcpEntries } from './fixtures/mcp-catalog-online.js'
 import { compileMcpCatalogDeclaration } from '../src/domain/mcp-catalog-declaration.js'
+import { withSuiteCatalogContentHash } from '../src/domain/suite-catalog-document.js'
+import { checkUnsignedSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
 import { mcpPresets } from './fixtures/legacy-mcp-catalog.js'
 import { asyncMcpFacts } from './fixtures/async-mcp-facts.js'
 import { mcpWriteInput } from '../src/domain/mcp-service.js'
@@ -48,6 +50,35 @@ function fixture(synchronize: () => Promise<void> = async () => {}, runtime?: im
   return { service: create(), create, actor: { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }, accounts, stored: store.read }
 }
 const input = { presetId: 'amap', name: 'p-map', credential: 'fixture-map-key', requestId: 'test-import-request-0001' }
+it('admits only the declared optional MCP credential and requires its platform floor', async () => {
+  const [base] = signedMcpEntries()
+  if (base?.kind !== 'mcp') throw new Error('Invalid fixture')
+  const binding = { label: { en: 'API key', 'zh-CN': '密钥' }, in: 'headers', name: 'Authorization', template: 'Bearer {credential}' }
+  const read = (fields: Record<string, unknown>, platform = '>=0.1.44', version = '0.1.44') => {
+    const entry = withSuiteCatalogContentHash({
+      ...base,
+      engines: { platform },
+      adapters: [{ name: 'mcp-remote-http', params: { url: 'https://docs.example.test/mcp', credential: { ...binding, ...fields } } }],
+    })
+    const result = checkUnsignedSuiteCatalog({ format: 1, publishedAt: '2026-11-25T00:00:00Z', entries: [entry] }, version)
+    if (result.status !== 'ok') throw new Error('Invalid catalog fixture')
+    return result
+  }
+  const optional = read({ optional: true })
+  expect(optional.mcp?.[0]?.entry).toMatchObject({ credentialOptional: true, credentialLabel: binding.label })
+  expect(read({}).mcp?.[0]?.entry).not.toHaveProperty('credentialOptional')
+  for (const fields of [{ optional: false }, { optional: 'true' }, { optional: true, extra: true }]) {
+    expect(read(fields).rejected).toMatchObject([{ reason: 'invalid-adapter-params' }])
+  }
+  expect(read({ optional: true }, '>=0.1.37').rejected).toMatchObject([{ reason: 'invalid-entry' }])
+  expect(read({ optional: true }, '>=0.1.44', '0.1.43').rejected).toMatchObject([{ reason: 'needs-platform-upgrade' }])
+  const { create, actor, stored } = fixture()
+  const service = create(optional.mcp!)
+  const preset = optional.mcp![0]!.entry
+  await service.importCatalog(actor, { ...input, version: preset.version, contentHash: preset.contentHash, credential: '' })
+  expect(stored().services[0]).not.toHaveProperty('credential')
+  expect((await service.list(actor))[0]).toMatchObject({ credentialConfigured: false, catalogCredentialSlot: true, catalog: { credentialOptional: true } })
+})
 it('imports a private preset once across refresh and restart, allows explicit copies and keeps deleted requests retired', async () => {
   const { service, create, actor } = fixture()
   await service.importCatalog(actor, input)

@@ -7,6 +7,7 @@ import type { LibraryPlugin, PreparedPlugin } from '../src/domain/plugin-library
 it('records shared-credential selections without native installation, projects restart state and protects native and granted plugins', async () => {
   const admin = { username: 'admin', spaceId: 'a', sessionEpoch: 0, admin: true, groupId: 'admins', email: '', disabled: false, createdAt: 0, updatedAt: 0 }
   const member = { ...admin, username: 'member', spaceId: 'm', admin: false, groupId: 'members' }
+  const icon = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64')
   const plugin = {
     packageName: 'plugin',
     version: '1.0.0',
@@ -15,10 +16,18 @@ it('records shared-credential selections without native installation, projects r
     artifact: 'artifacts/hash',
     title: 'Plugin',
     description: '',
+    meta: { title: { en: 'Package plugin', zh: '包内插件' }, description: { 'zh-CN': '包内介绍' }, icon },
     bundlePatch: '[]',
     dependencies: {},
   }
-  let row: LibraryPlugin = { source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: true }
+  let row: LibraryPlugin = {
+    source: { kind: 'npm' },
+    ...plugin,
+    display: { catalogDefaults: { description: { en: 'Offline catalog summary', 'zh-CN': '广场介绍' } } },
+    current: plugin,
+    stage: 'available',
+    published: true,
+  }
   let installed: readonly { packageName: string; version: string; retainedArchive?: true }[] = [],
     granted: string[] = [],
     selected: string[] = [],
@@ -26,7 +35,8 @@ it('records shared-credential selections without native installation, projects r
     accessSnapshot: string[] = [],
     startupAccess: string[] = [],
     credential = '',
-    removalFails = false
+    removalFails = false,
+    revokeOnSelectionRead = false
   const market = new PluginMarket(
     { get: async username => (username === 'admin' ? admin : member), list: async () => [admin, member] },
     {
@@ -48,7 +58,10 @@ it('records shared-credential selections without native installation, projects r
       }),
     },
     {
-      get: async () => selected,
+      get: async () => {
+        if (revokeOnSelectionRead) granted = []
+        return selected
+      },
       set: async (_, names) => {
         selected = [...names]
       },
@@ -63,11 +76,42 @@ it('records shared-credential selections without native installation, projects r
     'revision',
     { snapshot: async () => accessSnapshot },
     { list: () => [{ name: 'upstream', baseUrl: 'https://example.test', credential, headers: [] }] },
+    undefined,
+    undefined,
+    undefined,
+    { list: async () => [{ packageName: 'plugin', bindings: [{ slot: 'chat', status: 'failed' }] }], apply: async () => [] },
+    {
+      listFailures: async () => [
+        { packageName: 'plugin', restartRequired: false },
+        { packageName: 'removed-plugin', restartRequired: true },
+      ],
+      retry: async () => {},
+    },
   )
   const origin = new URL('http://localhost'),
     signal = new AbortController().signal
   const list = () => market.list(member, origin, signal)
-  expect((await list()).plugins[0]?.status).toBe('install')
+  expect(await list()).toMatchObject({
+    plugins: [
+      {
+        packageName: 'plugin',
+        status: 'install',
+        title: 'Package plugin',
+        description: 'Offline catalog summary',
+        localizedTitles: { en: 'Package plugin', 'zh-CN': '包内插件' },
+        localizedDescriptions: { en: 'Offline catalog summary', 'zh-CN': '包内介绍' },
+        icon,
+      },
+    ],
+    nativeServices: [{ packageName: 'plugin', title: 'Package plugin', localizedTitles: { 'zh-CN': '包内插件' } }],
+    preinstallFailures: [
+      { packageName: 'plugin', title: 'Package plugin' },
+      { packageName: 'removed-plugin', title: 'removed-plugin' },
+    ],
+  })
+  row = { ...row, display: { ...row.display, name: 'Team plugin', description: 'Team summary' } }
+  expect((await list()).plugins[0]).toMatchObject({ packageName: 'plugin', title: 'Team plugin', description: 'Team summary', icon })
+  expect((await list()).nativeServices?.[0]).toMatchObject({ title: 'Team plugin' })
   installed = [{ packageName: 'plugin', version: '0.9.0' }]
   expect((await list()).plugins[0]?.status).toBe('native')
   await expect(market.install(member, 'plugin', origin, signal)).rejects.toThrow()
@@ -105,7 +149,10 @@ it('records shared-credential selections without native installation, projects r
   await expect(market.publish(admin, 'plugin', false)).rejects.toThrow()
   await market.publish(admin, 'plugin', false, { confirmed: true, selectedMembers: 1 })
   expect(selected).toEqual([])
+  granted = ['plugin']
+  revokeOnSelectionRead = true
   expect((await list()).plugins).toEqual([])
+  revokeOnSelectionRead = false
   expect((await list()).pending).toBe(true)
   await expect(market.publish(member, 'plugin', true)).rejects.toThrow()
   await market.publish(admin, 'plugin', true, { confirmed: true })

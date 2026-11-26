@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import type { CommunityPluginStage, CommunityPluginView } from './admin-contract.js'
 import { BusinessRuleError } from './business-error.js'
-import { redactContributionContent } from './contribution-checks.js'
+import { redactContributionContent, redactContributionDeclaration } from './contribution-checks.js'
+import { resolvePluginDisplay, type PluginDisplay, type PluginDisplayFields, type PluginDisplayMetadata, type PluginNameFields } from './plugin-display.js'
 
 export interface PluginIdentity {
   readonly packageName: string
@@ -89,6 +90,8 @@ export interface PreparedPlugin extends PluginIdentity {
   readonly runtimeRevision: string
   readonly title: string
   readonly description: string
+  /** An empty object records that this immutable preparation has no display resources. */
+  readonly meta?: PluginDisplayMetadata
   readonly bundlePatch: string
   readonly expertEligible?: boolean
   readonly services?: readonly string[]
@@ -103,6 +106,7 @@ export interface PluginReplacement extends PluginCandidate {
 }
 export interface LibraryPlugin extends PluginCandidate {
   readonly source: PluginSource
+  readonly display?: PluginDisplay
   /** Opaque repository revision carried by a loaded row; absent on a new intent. */
   readonly revision?: number
   readonly runtimeDependencies?: readonly string[]
@@ -223,6 +227,7 @@ export function pluginIdentities(row?: LibraryPlugin): Readonly<Record<string, s
 }
 export function pluginLibraryView(row: LibraryPlugin): CommunityPluginView {
   return {
+    ...pluginDisplayFields(row),
     ...(row.suiteOrigin ? { suiteOrigin: row.suiteOrigin } : {}),
     runtimeDependencies: row.runtimeDependencies ?? [],
     ...(row.provenance ? { provenance: row.provenance } : {}),
@@ -242,16 +247,36 @@ export function pluginLibraryView(row: LibraryPlugin): CommunityPluginView {
     source: row.source.kind,
     ...(row.source.kind === 'github' ? { repository: row.source.repository } : {}),
     ...(row.current?.sourceCommit ? { sourceCommit: row.current.sourceCommit } : {}),
-    packageName: row.packageName,
     version: row.version,
     currentVersion: row.current?.version ?? null,
-    title: row.contributionReceipt ? redactContributionContent(row.current?.title ?? row.packageName) : (row.current?.title ?? row.packageName),
-    description: row.contributionReceipt ? redactContributionContent(row.current?.description ?? '') : (row.current?.description ?? ''),
     stage: row.stage,
     published: row.published,
     ...(row.current ? { integrity: row.current.integrity } : {}),
     ...(row.failureCode ? { failureCode: row.failureCode } : {}),
   }
+}
+
+export function pluginDisplayFields(row: LibraryPlugin): PluginDisplayFields {
+  const { icon, ...translations } = row.current?.meta ?? {}
+  const redact = row.contributionReceipt ? redactContributionContent : (value: string) => value
+  const text = row.contributionReceipt ? redactContributionDeclaration(translations) : translations
+  const defaults = row.display?.catalogDefaults
+  return {
+    packageName: row.packageName,
+    title: redact(row.current?.title ?? row.packageName),
+    description: redact(row.current?.description ?? ''),
+    ...(row.current?.meta ? { meta: { ...text, ...(icon ? { icon } : {}) } } : {}),
+    ...(row.display
+      ? { display: { ...row.display, ...(defaults && row.contributionReceipt ? { catalogDefaults: redactContributionDeclaration(defaults) } : {}) } }
+      : {}),
+  }
+}
+
+export function pluginNameFields(row: LibraryPlugin): PluginNameFields {
+  const display = pluginDisplayFields(row)
+  const en = resolvePluginDisplay(display, 'en').title
+  const zh = resolvePluginDisplay(display, 'zh-CN').title
+  return { packageName: row.packageName, title: en, ...(en !== zh ? { localizedTitles: { en, 'zh-CN': zh } } : {}) }
 }
 export function pluginMaintenanceRevision(row: LibraryPlugin) {
   return JSON.stringify([row.current?.integrity, row.provenance?.maintainer ?? null, row.provenance?.anonymous ?? false])
