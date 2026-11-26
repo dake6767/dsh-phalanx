@@ -8,6 +8,9 @@ import secrets
 import shlex
 import urllib.parse
 import tempfile
+from installer_compatibility import DOWNLOAD_SOURCE_OPTIONS, DOWNLOAD_SOURCE_PREFIXES  # embedded-compatibility
+from installer_questions import InstallerQuestions, apply_source_choice, validate_ip, validate_port, Cancelled  # embedded-questions
+from installer_progress import operator_text  # embedded-progress
 
 VERIFIED_HOSTS = frozenset((('ubuntu', '24.04'), ('ubuntu', '26.04')))
 MINIMUM_PODMAN = (4, 9, 3)
@@ -56,32 +59,26 @@ def distribution_facts(text):
 DOWNLOAD_SOURCE_PRESETS = json.loads("{\n  \"official\": {\n    \"npm\": \"https://registry.npmjs.org\",\n    \"pypi\": \"https://pypi.org/simple\",\n    \"containerMirror\": \"\",\n    \"ghcrMirror\": \"\",\n    \"githubAssets\": \"\",\n    \"browser\": \"https://cdn.playwright.dev\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"\"\n  },\n  \"mainland\": {\n    \"npm\": \"https://registry.npmmirror.com\",\n    \"pypi\": \"https://pypi.tuna.tsinghua.edu.cn/simple\",\n    \"containerMirror\": \"https://docker.m.daocloud.io/\",\n    \"ghcrMirror\": \"https://ghcr.nju.edu.cn/\",\n    \"githubAssets\": \"https://ghfast.top/\",\n    \"browser\": \"https://registry.npmmirror.com/-/binary/playwright\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"https://gh-proxy.org/\"\n  },\n  \"bootstrap\": {\n    \"official\": {\n      \"nodePrefix\": \"https://nodejs.org/dist/\",\n      \"ubuntuPrefix\": \"https://cloud-images.ubuntu.com/\"\n    },\n    \"mainland\": {\n      \"nodePrefix\": \"https://npmmirror.com/mirrors/node/\",\n      \"ubuntuPrefix\": \"https://mirrors.nju.edu.cn/ubuntu-cloud-images/\"\n    }\n  }\n}\n")
 # END GENERATED DOWNLOAD SOURCE PRESETS
 
-DOWNLOAD_SOURCE_OPTIONS = {
-    'npm_registry': 'npm', 'pypi_index': 'pypi', 'container_mirror': 'containerMirror',
-    'ghcr_mirror': 'ghcrMirror', 'github_proxy_prefix': 'githubAssets',
-    'github_api_proxy_prefix': 'githubApi', 'browser_download_host': 'browser',
-    'chromium_arm64_download_host': 'browserChromiumArm64',
-}
-
-DOWNLOAD_SOURCE_PREFIXES = ('containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi')
-
 
 def download_source_selection(value):
     failure = 'Choose a download preset and HTTP(S) addresses without credentials, queries or fragments.'
     if not isinstance(value, dict) or set(value) - {'preset', 'overrides'} or value.get('preset') not in ('official', 'mainland'):
         raise ValueError(failure)
     overrides = value.get('overrides', {})
-    if not isinstance(overrides, dict): raise ValueError(failure)
+    if not isinstance(overrides, dict):
+        raise ValueError(failure)
     normalized = {}
     for key, address in overrides.items():
         if key not in DOWNLOAD_SOURCE_PRESETS['official'] or not isinstance(address, str) or len(address) > 2048 or re.search(r'[\s\x00-\x1f\x7f]', address):
             raise ValueError(failure)
         if address == '' and key in DOWNLOAD_SOURCE_PREFIXES:
-            normalized[key] = ''; continue
+            normalized[key] = ''
+            continue
         parsed = urllib.parse.urlsplit(address)
         if (key in ('containerMirror', 'ghcrMirror') and parsed.scheme != 'https') or not re.match(r'^https?://', address, re.I) or parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or '\\' in address:
             raise ValueError(failure)
-        if parsed.port is not None and not 0 < parsed.port < 65536: raise ValueError(failure)
+        if parsed.port is not None and not 0 < parsed.port < 65536:
+            raise ValueError(failure)
         normalized[key] = address.rstrip('/') + ('/' if key in DOWNLOAD_SOURCE_PREFIXES else '')
     return {'preset': value['preset'], **({'overrides': normalized} if normalized else {})}
 
@@ -100,22 +97,28 @@ def executor_facts(host, values, fact, *, source=None, schemas=('dsh_phalanx',))
     """A bounded read-only adapter; the selected source owns its connection and key interpretation."""
     target=Path(source) if source is not None else host.path('/opt/dsh-phalanx/current').resolve()
     config=host.path(values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'))
-    if 'DSH_PHALANX_DATA_ROOT' not in values or not (target/'start').exists() or fact=='download-sources' and not config.exists():return None
+    if 'DSH_PHALANX_DATA_ROOT' not in values or not (target/'start').exists() or fact=='download-sources' and not config.exists():
+        return None
     with tempfile.TemporaryDirectory(prefix='dsh-phalanx-facts-') as temporary:
-        program=Path(temporary)/'executor-facts.mjs';request=Path(temporary)/'request.json'
-        program.write_text(EXECUTOR_FACTS_PROGRAM);program.chmod(0o600)
-        request.write_text(json.dumps({'fact':fact,'configFile':str(config),'dataRoot':str(host.path(values['DSH_PHALANX_DATA_ROOT'])),'schemas':list(schemas)}));request.chmod(0o600)
+        program=Path(temporary)/'executor-facts.mjs'
+        request=Path(temporary)/'request.json'
+        program.write_text(EXECUTOR_FACTS_PROGRAM)
+        program.chmod(0o600)
+        request.write_text(json.dumps({'fact':fact,'configFile':str(config),'dataRoot':str(host.path(values['DSH_PHALANX_DATA_ROOT'])),'schemas':list(schemas)}))
+        request.chmod(0o600)
         result=host.run(['timeout','--signal=TERM','--kill-after=5s','20s',str(target/'node/bin/node'),str(program),str(target)],input_file=request,check=False)
     if result.returncode==2:
         host.tell('The platform database did not answer; using the local record instead of ' + fact)
         return None
-    if result.returncode!=0:raise ValueError('The installed platform could not report ' + fact)
+    if result.returncode!=0:
+        raise ValueError('The installed platform could not report ' + fact)
     return json.loads(result.stdout)
 
 
 def platform_facts(host, values, fact):
     """Read narrow download facts; other diagnostics use the installed CLI."""
-    if fact=='download-sources':return executor_facts(host,values,fact)
+    if fact=='download-sources':
+        return executor_facts(host,values,fact)
     start = host.path('/opt/dsh-phalanx/current/start')
     database = host.path(values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'))
     # No selected database yet (for example an interrupted installation): nothing can have been saved there.
@@ -149,11 +152,13 @@ def download_source_choice(values, args=None, saved=None):
     selection = download_source_selection(selection)
     if args is not None:
         preset = getattr(args, 'download_source_preset', None)
-        if preset is not None: selection = {'preset': preset}
+        if preset is not None:
+            selection = {'preset': preset}
         overrides = {**selection.get('overrides', {})}
         for option, category in DOWNLOAD_SOURCE_OPTIONS.items():
             value = getattr(args, option, None)
-            if value is not None: overrides[category] = value
+            if value is not None:
+                overrides[category] = value
         selection = download_source_selection({**selection, 'overrides': overrides})
     return selection
 
@@ -165,9 +170,12 @@ def download_source_environment(sources, architecture):
             **({'PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST': sources['browserChromiumArm64']} if architecture == 'arm64' else {})}
 
 
+ACCOUNT = 'dsh-phalanx'
 CONFIG = '/etc/dsh-phalanx/environment'
 STATE = '/etc/dsh-phalanx/install-state.json'
 HOME_DIR = '/var/lib/dsh-phalanx'
+CURRENT = '/opt/dsh-phalanx/current'
+UNIT = HOME_DIR + '/.config/systemd/user/dsh-phalanx.service'
 UNINSTALL_STATE = '/etc/dsh-phalanx/uninstall-state.json'
 
 
@@ -246,8 +254,10 @@ def outbound_proxy_environment(values, environment=None):
     if proxy:
         try:
             url=urllib.parse.urlsplit(proxy)
-            if url.scheme not in ('http','https') or not url.hostname or url.path not in ('','/') or url.query or url.fragment or url.port==0:raise ValueError()
-        except ValueError as error:raise ConfigurationError('HTTPS_PROXY must be a valid HTTP(S) proxy URL') from error
+            if url.scheme not in ('http','https') or not url.hostname or url.path not in ('','/') or url.query or url.fragment or url.port==0:
+                raise ValueError()
+        except ValueError as error:
+            raise ConfigurationError('HTTPS_PROXY must be a valid HTTP(S) proxy URL') from error
     if not isinstance(bypass,str) or len(bypass)>8192 or re.search(r'[\x00-\x1f\x7f]',bypass):
         raise ConfigurationError('NO_PROXY must be a comma-separated host exclusion list')
     bypass=','.join(dict.fromkeys([*(part.strip() for part in bypass.split(',') if part.strip()),'localhost','.localhost','127.0.0.1','::1']))
@@ -345,9 +355,9 @@ def validate_storage(host, values):
 
 
 def check_ports(host, args, values, successful, interactive):
-    from installer_questions import InstallerQuestions, validate_port  # embedded-questions
     endpoints = [('PORT', values['DSH_PHALANX_HOST'], '--port'), ('CONTAINER_GATEWAY_PORT', '127.0.0.1', '--gateway-port')]
-    if values.get('DSH_PHALANX_PREVIEW_PORT'):endpoints.append(('PREVIEW_PORT', values['DSH_PHALANX_HOST'], '--preview-port'))
+    if values.get('DSH_PHALANX_PREVIEW_PORT'):
+        endpoints.append(('PREVIEW_PORT', values['DSH_PHALANX_HOST'], '--preview-port'))
     for name, address, flag in endpoints:
         key = 'DSH_PHALANX_'+name
         while True:
@@ -381,8 +391,6 @@ def check_ports(host, args, values, successful, interactive):
 
 
 def configuration(host, args, *, target_version, entry_url, access_candidate):
-    from installer_progress import operator_text  # embedded-progress
-    from installer_questions import InstallerQuestions, apply_source_choice, validate_ip, Cancelled  # embedded-questions
     # The release selector has already verified this manifest version.
     release = tuple(map(int, target_version.split('.')))
     protected_secrets = release >= (0, 1, 25)
@@ -400,8 +408,10 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
         values.pop('DSH_PHALANX_MODEL_UPSTREAM_API_KEY', None)
     proxy=outbound_proxy_environment(previous)
     for name in ('HTTPS_PROXY','NO_PROXY'):
-        if name in proxy:values[name]=proxy[name]
-    values.pop('https_proxy',None);values.pop('no_proxy',None)
+        if name in proxy:
+            values[name]=proxy[name]
+    values.pop('https_proxy',None)
+    values.pop('no_proxy',None)
     args.gateway_chosen = 'DSH_PHALANX_CONTAINER_GATEWAY_PORT' in previous
     for option, key in OPTIONS.items():
         value = getattr(args, option, None)
@@ -467,12 +477,15 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
             config['server_ip'] = config['server_ip'] or previous_ip
             dialogue.automatic_origin = previous_ip is not None and config['origin'] == entry_url(config['port'], previous_ip)
         supplied = set()
-        if args.public_origin is not None: supplied.update(('server_ip', 'origin'))
+        if args.public_origin is not None:
+            supplied.update(('server_ip', 'origin'))
         if getattr(args, 'server_ip', None) is not None:
             config['server_ip'] = validate_ip(args.server_ip)
             supplied.add('server_ip')
-        if args.port is not None: supplied.add('port')
-        if args.host_public_addresses is not None: supplied.add('mapping')
+        if args.port is not None:
+            supplied.add('port')
+        if args.host_public_addresses is not None:
+            supplied.add('mapping')
         dialogue.edit_common(config, supplied)
         if dialogue.choose('展开高级设置？y/n', 'Open advanced settings? y/n', ('y', 'n'), 'n') == 'y':
             dialogue.edit_advanced(config)
@@ -502,7 +515,8 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
                 continue
             dialogue.summary({**config, 'data': config['data'] or effective_user_data_root(values)})
             action = dialogue.choose('摘要：install 安装 / edit 修改 / cancel 取消', 'Summary: install / edit / cancel', ('install', 'edit', 'cancel'), 'install')
-            if action == 'install': break
+            if action == 'install':
+                break
             if action == 'cancel':
                 raise Cancelled(dialogue.tr('安装已取消；保留已准备的依赖及现有数据。', 'Installation cancelled; prepared dependencies and existing data are retained.'))
             section = dialogue.choose('修改：source 下载源 / common 常用 / advanced 高级', 'Edit: source / common / advanced', ('source', 'common', 'advanced'), 'common')
@@ -510,10 +524,13 @@ def configuration(host, args, *, target_version, entry_url, access_candidate):
                 dialogue.edit_source(config)
                 apply_source_choice(args, config)
                 host.download_sources = resolve_download_sources({'preset': config['source'], 'overrides': config['overrides']})
-                if getattr(host, 'recheck_release', None) is not None: host.recheck_release()
+                if getattr(host, 'recheck_release', None) is not None:
+                    host.recheck_release()
                 dialogue.tell('已按新下载源重新核对版本。', 'Release rechecked using the new source.')
-            elif section == 'common': dialogue.edit_common(config)
-            else: dialogue.edit_advanced(config)
+            elif section == 'common':
+                dialogue.edit_common(config)
+            else:
+                dialogue.edit_advanced(config)
     values.setdefault('DSH_PHALANX_PUBLIC_ORIGIN', entry_url(values['DSH_PHALANX_PORT'], values['DSH_PHALANX_HOST']))
     values['DSH_PHALANX_DOWNLOAD_SOURCES'] = json.dumps(configured_download_sources(host, values, args), separators=(',', ':'))
     validate_configuration(host, values)

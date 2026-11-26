@@ -1,47 +1,29 @@
 """Debian-family installation command. Host owns filesystem and operating-system I/O."""
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
-import platform
-import subprocess
 import sys
-import re
-import shlex
 import tempfile
 import tarfile
-import secrets
-import time
-import getpass
+import time as time
 import ipaddress
 import urllib.request
 import urllib.error
 import urllib.parse
 import fcntl
-import contextlib
-import shutil
-import socket
-import errno
 from installer_database import prepare_builtin_database, database_backup_notice  # embedded-database
 from installer_config import configuration, installed_state, validate_storage, environment_text, read_configuration, uninstall_record, UNINSTALL_STATE  # embedded-config
 from installer_upgrade_host import plugin_startup_timeout  # embedded-upgrade-host
-from installer_host import Host, InstallError, entry_url, PACKAGES  # embedded-host
+from installer_host import Host, InstallError, entry_url  # embedded-host
 from installer_progress import Progress  # embedded-progress
 from installer_questions import InstallerQuestions, Cancelled, apply_source_choice  # embedded-questions
 from installer_executor_install import install_executor  # embedded-executor-install
 from installer_upgrade_cli import upgrade_command  # embedded-upgrade-cli
 from installer_uninstall import uninstall_command, Uninstall  # embedded-uninstall
-from installer_config import DOWNLOAD_SOURCE_OPTIONS, DOWNLOAD_SOURCE_PRESETS, configured_download_sources, resolve_download_sources  # embedded-config
+from installer_config import ACCOUNT, HOME_DIR, CONFIG, STATE, CURRENT, UNIT, DOWNLOAD_SOURCE_OPTIONS, DOWNLOAD_SOURCE_PRESETS, configured_download_sources, resolve_download_sources  # embedded-config
 
-ACCOUNT = "dsh-phalanx"
-HOME_DIR = "/var/lib/dsh-phalanx"
-CONFIG = "/etc/dsh-phalanx/environment"
-STATE = "/etc/dsh-phalanx/install-state.json"
-CURRENT = "/opt/dsh-phalanx/current"
-UNIT = HOME_DIR+"/.config/systemd/user/dsh-phalanx.service"
-
-from installer_release import IMAGE, ASSETS, release_channel, installed_channel, asset_names, select_release, acquire, digest, verify_manifest, supply_image, stage_platform  # embedded-release
+from installer_release import ASSETS as ASSETS, release_channel, installed_channel, asset_names, select_release, acquire, digest, verify_manifest as verify_manifest, supply_image, stage_platform  # embedded-release
 
 
 
@@ -63,7 +45,8 @@ def access_candidate(host, values):
 
 def options(arguments):
     class Parser(argparse.ArgumentParser):
-        def error(self, message): raise InstallError(message)
+        def error(self, message):
+            raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Debian-family Linux amd64")
     parser.add_argument("--version", default="latest")
     parser.add_argument("--language", choices=("zh-CN", "en"), default="zh-CN")
@@ -242,8 +225,10 @@ def main(arguments=None, host=None):
     arguments = list(arguments)
     language = 'zh-CN'
     for index, argument in enumerate(arguments):
-        if argument == '--language' and index+1 < len(arguments): language = arguments[index+1]
-        elif argument.startswith('--language='): language = argument.split('=', 1)[1]
+        if argument == '--language' and index+1 < len(arguments):
+            language = arguments[index+1]
+        elif argument.startswith('--language='):
+            language = argument.split('=', 1)[1]
     explicit_language = any(argument == '--language' or argument.startswith('--language=') for argument in arguments)
     if not explicit_language and '--non-interactive' not in arguments and host.terminal_available():
         chooser = InstallerQuestions('zh-CN', host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
@@ -252,8 +237,10 @@ def main(arguments=None, host=None):
             language = chooser.choose('语言 / Language: zh-CN 简体中文 / en English', 'Language: zh-CN / en', ('zh-CN', 'en'), 'zh-CN')
             arguments += ['--language', language]
         except (ValueError, EOFError, KeyboardInterrupt):
-            if output == 'json': print(json.dumps({'status':'cancelled','phase':'Language'}))
-            else: print('已取消 / Cancelled')
+            if output == 'json':
+                print(json.dumps({'status':'cancelled','phase':'Language'}))
+            else:
+                print('已取消 / Cancelled')
             return 0
     try:
         report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=False, language=language)
@@ -265,9 +252,11 @@ def main(arguments=None, host=None):
     try:
         with report.stage('Preflight',phase_code='install.preflight'):
             args = options(arguments)
-            if args.purge and not args.uninstall:raise InstallError('--purge requires --uninstall')
+            if args.purge and not args.uninstall:
+                raise InstallError('--purge requires --uninstall')
             if args.uninstall:
-                if args.upgrade:raise InstallError('--uninstall cannot be combined with --upgrade')
+                if args.upgrade:
+                    raise InstallError('--uninstall cannot be combined with --upgrade')
                 return uninstall_command(host,args)
             host.non_interactive = args.non_interactive
             args.dialogue = InstallerQuestions(args.language, host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS, automatic_origin=args.public_origin is None)
@@ -277,10 +266,12 @@ def main(arguments=None, host=None):
                 args.dialogue.project_info()
             host.image_reuse_rehearsal = args.dev_image_reuse_rehearsal
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
-            if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
+            if args.dev_arm64 and not host.development_arm64:
+                raise InstallError('Development arm64 requires an aarch64 host')
             if host.system != 'Linux' or (host.machine != 'x86_64' and not host.development_arm64):
                 raise InstallError('Installation requires a Linux amd64 host')
-            if host.uid != 0: raise InstallError('Run the installer with sudo')
+            if host.uid != 0:
+                raise InstallError('Run the installer with sudo')
             host.distribution()
             host.configure_proxy()
             report.start_log()
@@ -290,7 +281,9 @@ def main(arguments=None, host=None):
             with report.stage('Installation lock',phase_code='install.lock'):
                 announced_wait = False
                 while True:
-                    try: fcntl.flock(file, fcntl.LOCK_EX|fcntl.LOCK_NB); break
+                    try:
+                        fcntl.flock(file, fcntl.LOCK_EX|fcntl.LOCK_NB)
+                        break
                     except BlockingIOError:
                         report.emit(message='Waiting for another installer to release the installation lock', milestone=not announced_wait)
                         announced_wait = True
@@ -309,8 +302,10 @@ def main(arguments=None, host=None):
                 apply_source_choice(args, source_config)
                 selection = {'preset': source_config['source'], 'overrides': source_config['overrides']}
             host.download_sources = resolve_download_sources(selection)
-            if args.upgrade:return upgrade_command(host,args,temporary)
-            if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
+            if args.upgrade:
+                return upgrade_command(host,args,temporary)
+            if host.path('/etc/dsh-phalanx/maintenance').exists():
+                raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
             with report.stage('Release selection',phase_code='install.release-selection'):
                 selected=select_release(host,args,Path(temporary))
             proposed=selected[1]
@@ -335,13 +330,16 @@ def main(arguments=None, host=None):
                     return upgrade_command(host,args,temporary,{'version':selected[2],'channel':release_channel(selected[2]),'manifest':proposed,'manifestSha256':digest(selected[0]/'manifest.json')})
             with report.stage('Download and verification',phase_code='install.download'):
                 directory,manifest=acquire(host,args,Path(temporary),selected=selected)
-            if manifest.get('schema')==2:values['DSH_PHALANX_MAINTENANCE_FILE']='/etc/dsh-phalanx/maintenance'
+            if manifest.get('schema')==2:
+                values['DSH_PHALANX_MAINTENANCE_FILE']='/etc/dsh-phalanx/maintenance'
             values['DSH_PHALANX_CONTAINER_IMAGE']=manifest['image']['reference']
             if state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest']:
                 with report.stage('Existing installation',phase_code='install.existing-installation'):
-                    account=host.run(['getent','passwd',ACCOUNT]).stdout.split(':'); uid,gid=int(account[2]),int(account[3])
+                    account=host.run(['getent','passwd',ACCOUNT]).stdout.split(':')
+                    uid,gid=int(account[2]),int(account[3])
                     active=host.user(uid,['systemctl','--user','is-active','--quiet','dsh-phalanx.service'],check=False).returncode==0
-                    if not active: raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
+                    if not active:
+                        raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
                     host.check_capabilities(uid)
                     previous='/'+str(host.path(CURRENT).resolve().relative_to(host.root))
                     if host.path(CURRENT+'/.artifact-sha256').read_text()!=state['platformSha256']:
@@ -350,7 +348,8 @@ def main(arguments=None, host=None):
                     values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
                     values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
                     host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
-                    if manifest.get('schema')==2:install_executor(host,uid,gid,host.path(previous),manifest['commit'],activate=True,repair=True)
+                    if manifest.get('schema')==2:
+                        install_executor(host,uid,gid,host.path(previous),manifest['commit'],activate=True,repair=True)
                     database_info=prepare_builtin_database(host,uid,gid,previous,values,manifest)
                     receipt=activate(host,uid,gid,previous,values,manifest,state['version'],
                                      database_changed=bool(database_info and database_info['unitChanged']), preserve_configuration=bool(retained))
@@ -358,10 +357,13 @@ def main(arguments=None, host=None):
                 with report.stage('Dependencies',phase_code='install.dependencies'):
                     dependencies(host)
                     host.check_capabilities()
-                if state is None and not retained: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
+                if state is None and not retained:
+                    host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
                 with report.stage('Identity and directories',phase_code='install.identity-storage'):
-                    uid,gid=identity(host); prepare_user_storage(host,uid,gid,values)
-                with report.stage('Platform verification and staging',phase_code='install.staging'): target=stage_platform(host,directory,manifest)
+                    uid,gid=identity(host)
+                    prepare_user_storage(host,uid,gid,values)
+                with report.stage('Platform verification and staging',phase_code='install.staging'):
+                    target=stage_platform(host,directory,manifest)
                 with report.stage('Runtime image',phase_code='install.runtime-image'):
                     command=supply_image(host,uid,directory,manifest,args.bundle_dir is not None)
                     values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
@@ -369,7 +371,8 @@ def main(arguments=None, host=None):
                 with report.stage('Platform database',phase_code='install.database'):
                     database_info=prepare_builtin_database(host,uid,gid,target,values,manifest)
                 if manifest.get('schema')==2:
-                    with report.stage('Update executor',phase_code='install.executor'):install_executor(host,uid,gid,host.path(target),manifest['commit'],activate=True)
+                    with report.stage('Update executor',phase_code='install.executor'):
+                        install_executor(host,uid,gid,host.path(target),manifest['commit'],activate=True)
                 with report.stage('Service activation',phase_code='install.activation'):
                     receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'],
                                      database_changed=bool(database_info and database_info['unitChanged']), preserve_configuration=bool(retained))
@@ -391,4 +394,5 @@ def main(arguments=None, host=None):
         return 1
 
 
-if __name__ == '__main__': sys.exit(main())
+if __name__ == '__main__':
+    sys.exit(main())

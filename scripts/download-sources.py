@@ -32,12 +32,15 @@ def main():
     args = parser.parse_args()
     values = build_environment(args.preset, 'arm64' if platform.machine() in ('arm64', 'aarch64') else 'amd64')
     if args.github_env:
-        if args.command: parser.error('Choose environment output or a command')
+        if args.command:
+            parser.error('Choose environment output or a command')
         print('\n'.join(key+'='+value for key, value in values.items()))
     else:
         command = args.command[1:] if args.command[:1] == ['--'] else args.command
-        if not command: parser.error('Provide a command after --')
+        if not command:
+            parser.error('Provide a command after --')
         os.execvpe(command[0], command, {**os.environ, **values})
 
 
-if __name__ == '__main__': main()
+if __name__ == '__main__':
+    main()

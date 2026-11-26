@@ -1,6 +1,5 @@
 """Conservative disposal of release resources with protected installation receipts."""
 import json
-import os
 from pathlib import Path
 import re
 import shutil
@@ -9,15 +8,17 @@ import uuid
 from installer_host import InstallError  # embedded-host
 from installer_release import asset_names,IMAGE,digest,image_identity,image_matches  # embedded-release
 from installer_compatibility import candidate_identity,candidate_image_tag  # embedded-compatibility
-from installer_upgrade_core import ACTIVE,TERMINAL  # embedded-upgrade-core
+from installer_upgrade_core import TERMINAL  # embedded-upgrade-core
 from installer_config import default_storage_root  # embedded-config
 
 
-def release_identity(manifest):return (manifest['commit'],manifest['files'][asset_names(manifest)[0]],manifest['image']['digest'])
+def release_identity(manifest):
+    return (manifest['commit'],manifest['files'][asset_names(manifest)[0]],manifest['image']['digest'])
 
 
 def known_manifest(value):
-    if not isinstance(value,dict):return False
+    if not isinstance(value,dict):
+        return False
     try:
         image_identity(value)
         return (candidate_identity(value) and
@@ -26,14 +27,18 @@ def known_manifest(value):
                 re.fullmatch('sha256:[a-f0-9]{64}',value['image']['digest']) and
                 value['image']['reference']==IMAGE+'@'+value['image']['digest'] and
                 value['image']['name']==IMAGE and value['image']['tag']==candidate_image_tag(value['tag']))
-    except (KeyError,TypeError,InstallError):return False
+    except (KeyError,TypeError,InstallError):
+        return False
 
 
 def receipt_manifest(source):
-    if not isinstance(source,dict) or not known_manifest(source.get('manifest')):return None
-    manifest=source['manifest'];receipt=source.get('receipt',{})
+    if not isinstance(source,dict) or not known_manifest(source.get('manifest')):
+        return None
+    manifest=source['manifest']
+    receipt=source.get('receipt',{})
     if (receipt.get('version') in (manifest['tag'],'v'+manifest['targetVersion']) and receipt.get('candidate')==manifest['tag'] and receipt.get('commit')==manifest['commit'] and
-            receipt.get('platformSha256')==manifest['files'][asset_names(manifest)[0]] and receipt.get('imageDigest')==manifest['image']['digest']):return manifest
+            receipt.get('platformSha256')==manifest['files'][asset_names(manifest)[0]] and receipt.get('imageDigest')==manifest['image']['digest']):
+        return manifest
     return None
 
 
@@ -41,78 +46,115 @@ def allocation(paths):
     """Only candidate inodes, deduplicated across shared image layers and links."""
     entries={}
     def visit(path):
-        try:info=path.lstat()
-        except FileNotFoundError:return
+        try:
+            info=path.lstat()
+        except FileNotFoundError:
+            return
         key=(info.st_dev,info.st_ino)
-        if key in entries:entries[key]['paths'].add(str(path));return
+        if key in entries:
+            entries[key]['paths'].add(str(path))
+            return
         entries[key]={'paths':{str(path)},'bytes':info.st_blocks*512,'links':info.st_nlink,'directory':stat.S_ISDIR(info.st_mode)}
         if stat.S_ISDIR(info.st_mode):
-            for child in path.iterdir():visit(child)
-    for path in paths:visit(Path(path))
+            for child in path.iterdir():
+                visit(child)
+    for path in paths:
+        visit(Path(path))
     return entries
 
 
 def released(before):
     total=0
     for (device,inode),entry in before.items():
-        if not entry['directory'] and entry['links']>len(entry['paths']):continue
+        if not entry['directory'] and entry['links']>len(entry['paths']):
+            continue
         retained=False
         for name in entry['paths']:
             try:
                 info=Path(name).lstat()
-                if (info.st_dev,info.st_ino)==(device,inode):retained=True;break
-            except FileNotFoundError:pass
-        if not retained:total+=entry['bytes']
+                if (info.st_dev,info.st_ino)==(device,inode):
+                    retained=True
+                    break
+            except FileNotFoundError:
+                pass
+        if not retained:
+            total+=entry['bytes']
     return total
 
 
 class UpgradeCleanup:
-    def __init__(self,host,journal):self.host=host;self.journal=Path(journal)
+    def __init__(self,host,journal):
+        self.host=host
+        self.journal=Path(journal)
 
     def inventory(self,source):
         current=receipt_manifest(source)
-        if current is None:raise InstallError('Cannot verify current installation ownership')
-        known={release_identity(current):current};protected={release_identity(current):'current version'};successes=[];records=[]
+        if current is None:
+            raise InstallError('Cannot verify current installation ownership')
+        known={release_identity(current):current}
+        protected={release_identity(current):'current version'}
+        successes=[]
+        records=[]
         owner=self.journal.stat().st_uid
         for directory in self.journal.iterdir():
-            if not directory.is_dir() and not directory.is_symlink():continue
-            if directory.is_symlink():raise InstallError('Unverified update journal; keep resources for recovery')
+            if not directory.is_dir() and not directory.is_symlink():
+                continue
+            if directory.is_symlink():
+                raise InstallError('Unverified update journal; keep resources for recovery')
             file=directory/'operation.json'
-            if file.is_symlink() or not file.is_file():raise InstallError('Incomplete update journal; keep resources for recovery')
+            if file.is_symlink() or not file.is_file():
+                raise InstallError('Incomplete update journal; keep resources for recovery')
             info=file.stat()
-            if info.st_uid!=owner or info.st_mode & 0o022:raise InstallError('Unverified update journal ownership')
-            try:record=json.loads(file.read_text())
-            except (OSError,ValueError) as error:raise InstallError('Unreadable update journal; keep resources for recovery') from error
-            if not isinstance(record,dict) or record.get('id')!=directory.name:raise InstallError('Inconsistent update journal identity')
+            if info.st_uid!=owner or info.st_mode & 0o022:
+                raise InstallError('Unverified update journal ownership')
+            try:
+                record=json.loads(file.read_text())
+            except (OSError,ValueError) as error:
+                raise InstallError('Unreadable update journal; keep resources for recovery') from error
+            if not isinstance(record,dict) or record.get('id')!=directory.name:
+                raise InstallError('Inconsistent update journal identity')
             records.append((info.st_mtime_ns,record))
         for _,record in sorted(records,key=lambda row:row[0]):
-            old=receipt_manifest(record.get('source'));new=record.get('target',{}).get('manifest')
-            if old is None or record.get('source',{}).get('uid')!=source['uid']:raise InstallError('Unverified historical installation receipt')
-            known[release_identity(old)]=old;successes.append(old)
+            old=receipt_manifest(record.get('source'))
+            new=record.get('target',{}).get('manifest')
+            if old is None or record.get('source',{}).get('uid')!=source['uid']:
+                raise InstallError('Unverified historical installation receipt')
+            known[release_identity(old)]=old
+            successes.append(old)
             if known_manifest(new):
                 known[release_identity(new)]=new
-                if record.get('committed') or record.get('phase')=='succeeded':successes.append(new)
+                if record.get('committed') or record.get('phase')=='succeeded':
+                    successes.append(new)
             if record.get('phase') not in TERMINAL or record.get('phase')=='recovery-failed':
                 protected[release_identity(old)]='unfinished update or recovery'
-                if known_manifest(new):protected[release_identity(new)]='prepared or unfinished target'
+                if known_manifest(new):
+                    protected[release_identity(new)]='prepared or unfinished target'
         for manifest in reversed(successes):
-            if release_identity(manifest)!=release_identity(current):protected.setdefault(release_identity(manifest),'most recent successful previous version');break
+            if release_identity(manifest)!=release_identity(current):
+                protected.setdefault(release_identity(manifest),'most recent successful previous version')
+                break
         return known,protected
 
     def container_references(self,uid):
         rows=json.loads(self.host.user(uid,['podman','ps','--all','--format','json']).stdout)
-        if not isinstance(rows,list):raise InstallError('Cannot inspect all container references')
-        refs=set();mounts=set()
+        if not isinstance(rows,list):
+            raise InstallError('Cannot inspect all container references')
+        refs=set()
+        mounts=set()
         for row in rows:
             container=row.get('Id',row.get('ID'))
-            if not isinstance(container,str) or not re.fullmatch('[a-f0-9]{12,64}',container):raise InstallError('Container identity is unavailable')
+            if not isinstance(container,str) or not re.fullmatch('[a-f0-9]{12,64}',container):
+                raise InstallError('Container identity is unavailable')
             facts=json.loads(self.host.user(uid,['podman','container','inspect',container]).stdout)
-            if not isinstance(facts,list) or len(facts)!=1:raise InstallError('Container references are unavailable')
+            if not isinstance(facts,list) or len(facts)!=1:
+                raise InstallError('Container references are unavailable')
             value=facts[0].get('Image')
-            if not isinstance(value,str) or not re.fullmatch('(sha256:)?[a-f0-9]{64}',value):raise InstallError('Container image reference is unavailable')
+            if not isinstance(value,str) or not re.fullmatch('(sha256:)?[a-f0-9]{64}',value):
+                raise InstallError('Container image reference is unavailable')
             refs.add(value.removeprefix('sha256:'))
             for mount in facts[0].get('Mounts',[]):
-                if mount.get('Source'):mounts.add(Path(mount['Source']).resolve())
+                if mount.get('Source'):
+                    mounts.add(Path(mount['Source']).resolve())
         return {'images':refs,'mounts':mounts}
 
     def mounted(self,path,uid):
@@ -122,19 +164,24 @@ class UpgradeCleanup:
         # Root reads all processes; disappearing processes are harmless, unreadable
         # process state is not evidence that a program is unused.
         for process in self.host.path('/proc').iterdir():
-            if not process.name.isdecimal():continue
+            if not process.name.isdecimal():
+                continue
             try:
                 links=[process/'cwd',process/'exe']
                 descriptors=process/'fd'
-                if descriptors.exists():links.extend(descriptors.iterdir())
+                if descriptors.exists():
+                    links.extend(descriptors.iterdir())
                 for link in links:
-                    if link.is_symlink() and link.resolve().is_relative_to(path):return True
+                    if link.is_symlink() and link.resolve().is_relative_to(path):
+                        return True
                 maps=process/'maps'
                 if maps.exists():
                     for line in maps.read_text().splitlines():
                         parts=line.split(None,5)
-                        if len(parts)==6 and parts[5].startswith('/') and Path(parts[5].removesuffix(' (deleted)')).is_relative_to(path):return True
-            except FileNotFoundError:continue
+                        if len(parts)==6 and parts[5].startswith('/') and Path(parts[5].removesuffix(' (deleted)')).is_relative_to(path):
+                            return True
+            except FileNotFoundError:
+                continue
         return False
 
     def remove_image(self,uid,image_id,facts):
@@ -144,20 +191,27 @@ class UpgradeCleanup:
             # container reference or recursively prunes a parent/shared layer.
             self.host.user(uid,['podman','untag',image_id,*tags])
             changed=json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]
-            if changed.get('RepoTags') or changed.get('Digest')!=facts.get('Digest'):raise InstallError('Image names changed during cleanup')
-        if image_id in self.container_references(uid)['images']:raise InstallError('A container now references this image')
+            if changed.get('RepoTags') or changed.get('Digest')!=facts.get('Digest'):
+                raise InstallError('Image names changed during cleanup')
+        if image_id in self.container_references(uid)['images']:
+            raise InstallError('A container now references this image')
         self.host.user(uid,['podman','rmi','--no-prune',image_id])
 
     def image_paths(self,facts,graph):
-        driver=facts.get('GraphDriver',{});data=driver.get('Data',{})
+        driver=facts.get('GraphDriver',{})
+        data=driver.get('Data',{})
         values=[data.get('UpperDir',''),*data.get('LowerDir','').split(':')]
         paths=[]
-        if driver.get('Name')!='overlay':raise InstallError('Cannot measure this image storage driver safely')
+        if driver.get('Name')!='overlay':
+            raise InstallError('Cannot measure this image storage driver safely')
         for value in filter(None,values):
             path=self.host.path(value).resolve()
-            if not path.is_relative_to(graph) or path==graph:raise InstallError('Image layer is outside managed storage')
-            if path not in paths:paths.append(path)
-        if not paths:raise InstallError('Image layer allocation is unavailable')
+            if not path.is_relative_to(graph) or path==graph:
+                raise InstallError('Image layer is outside managed storage')
+            if path not in paths:
+                paths.append(path)
+        if not paths:
+            raise InstallError('Image layer allocation is unavailable')
         return paths
 
     def run(self,source,job,persist):
@@ -174,113 +228,171 @@ class UpgradeCleanup:
         data_roots.append(self.host.path('/opt/dsh-phalanx/updaters').resolve())
         previous=job.get('cleanup',{})
         result={'status':'running','discardBackup':previous.get('discardBackup',False),'reclaimedBytes':previous.get('reclaimedBytes',0),'items':[]}
-        job['cleanup']=result;persist()
+        job['cleanup']=result
+        persist()
         try:
             def record(kind,name,status,reason,bytes_=0):
                 result['items']=[item for item in result['items'] if (item['kind'],item['name'])!=(kind,name)]
                 result['items'].append({'kind':kind,'name':name,'status':status,'reason':reason,'reclaimedBytes':bytes_})
-                result['reclaimedBytes']+=bytes_;persist()
+                result['reclaimedBytes']+=bytes_
+                persist()
             def dispose(kind,name,paths,check,remove):
                 protected_roots=[*data_roots,*([] if kind=='backup' else [self.journal.resolve()])]
                 if any(Path(path).resolve().is_relative_to(root) or root.is_relative_to(Path(path).resolve()) for path in paths for root in protected_roots):
-                    record(kind,name,'retained','user and platform data');return
+                    record(kind,name,'retained','user and platform data')
+                    return
                 record(kind,name,'pending','verified owned resource')
                 try:
-                    check();before=allocation(paths)
+                    check()
+                    before=allocation(paths)
                     devices={}
                     for path in paths:
-                        path=Path(path);device=path.stat().st_dev
+                        path=Path(path)
+                        device=path.stat().st_dev
                         devices.setdefault(device,(path.parent,shutil.disk_usage(path).free))
                     remove()
                     observed=0
                     for parent,free in devices.values():
-                        while not parent.exists():parent=parent.parent
+                        while not parent.exists():
+                            parent=parent.parent
                         observed+=max(0,shutil.disk_usage(parent).free-free)
                     record(kind,name,'removed','unused owned resource',min(released(before),observed))
-                except Exception as error:record(kind,name,'failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cleanup failed; retry')
+                except Exception as error:
+                    record(kind,name,'failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cleanup failed; retry')
             def discard_backup(directory,*,completed=False):
                 backup=directory/'backup'
-                if not backup.exists() and not backup.is_symlink():return
+                if not backup.exists() and not backup.is_symlink():
+                    return
                 def verified():
                     pointer=self.journal/'current'
-                    if pointer.is_symlink() or not pointer.is_file():raise InstallError('Upgrade backup pointer is unavailable')
+                    if pointer.is_symlink() or not pointer.is_file():
+                        raise InstallError('Upgrade backup pointer is unavailable')
                     selected=pointer.read_text().strip()
-                    if (selected==directory.name)!=completed:raise InstallError('The current backup must remain available for recovery')
-                    file=directory/'operation.json';owner=self.journal.stat().st_uid
+                    if (selected==directory.name)!=completed:
+                        raise InstallError('The current backup must remain available for recovery')
+                    file=directory/'operation.json'
+                    owner=self.journal.stat().st_uid
                     for path in (directory,backup,file):
-                        if path.is_symlink() or path.stat().st_uid!=owner or path.stat().st_mode&0o022:raise InstallError('Upgrade backup ownership changed')
-                    if not directory.is_dir() or not backup.is_dir() or not file.is_file():raise InstallError('Invalid upgrade backup paths')
+                        if path.is_symlink() or path.stat().st_uid!=owner or path.stat().st_mode&0o022:
+                            raise InstallError('Upgrade backup ownership changed')
+                    if not directory.is_dir() or not backup.is_dir() or not file.is_file():
+                        raise InstallError('Invalid upgrade backup paths')
                     record=json.loads(file.read_text())
                     if (record.get('id')!=directory.name or receipt_manifest(record.get('source')) is None or
                             record['source'].get('uid')!=uid or (not isinstance(record.get('backup'),dict) and record.get('backupLifecycle')!=2)):
                         raise InstallError('Unverified upgrade backup receipt')
                     if completed and (record.get('phase') not in ('succeeded','restored') or directory.name!=job['id']):
                         raise InstallError('The active upgrade still needs its backup')
-                    if self.mounted(backup,uid) or self.process_reference(backup):raise InstallError('The backup is referenced by a container or running process')
+                    if self.mounted(backup,uid) or self.process_reference(backup):
+                        raise InstallError('The backup is referenced by a container or running process')
                 dispose('backup',str(backup),[backup],verified,lambda:shutil.rmtree(backup))
-            if result['discardBackup'] and job['phase'] in ('succeeded','restored'):discard_backup(self.journal/job['id'],completed=True)
-            try:known,protected=self.inventory(source)
+            if result['discardBackup'] and job['phase'] in ('succeeded','restored'):
+                discard_backup(self.journal/job['id'],completed=True)
+            try:
+                known,protected=self.inventory(source)
             except Exception as error:
                 record('journal','update history','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot verify installation history')
-                result['status']='failed';persist();return result
-            releases=self.host.path('/opt/dsh-phalanx/releases');cache=self.host.path('/var/cache/dsh-phalanx')
+                result['status']='failed'
+                persist()
+                return result
+            releases=self.host.path('/opt/dsh-phalanx/releases')
+            cache=self.host.path('/var/cache/dsh-phalanx')
             by_name={manifest['tag']+'-'+manifest['files'][asset_names(manifest)[0]][:16]:(key,manifest) for key,manifest in known.items()}
             for path in releases.iterdir():
                 pair=by_name.get(path.name)
-                if path.is_symlink() or not path.is_dir() or pair is None:record('program',str(path),'retained','ownership is unknown');continue
+                if path.is_symlink() or not path.is_dir() or pair is None:
+                    record('program',str(path),'retained','ownership is unknown')
+                    continue
                 key,manifest=pair
-                if key in protected:record('program',str(path),'retained',protected[key]);continue
-                if self.process_reference(path):record('program',str(path),'retained','referenced by a running process');continue
-                if self.mounted(path,uid):record('program',str(path),'retained','referenced by a container mount');continue
+                if key in protected:
+                    record('program',str(path),'retained',protected[key])
+                    continue
+                if self.process_reference(path):
+                    record('program',str(path),'retained','referenced by a running process')
+                    continue
+                if self.mounted(path,uid):
+                    record('program',str(path),'retained','referenced by a container mount')
+                    continue
                 def verified(path=path,manifest=manifest):
-                    if path.is_symlink() or not path.is_dir() or (path/'.artifact-sha256').read_text()!=manifest['files'][asset_names(manifest)[0]] or json.loads((path/'build-info.json').read_text())['commit']!=manifest['commit']:raise InstallError('Program ownership changed')
-                    if path.resolve()==self.host.path('/opt/dsh-phalanx/current').resolve():raise InstallError('Program is now current')
-                    if self.process_reference(path):raise InstallError('A process now references this program')
-                    if self.mounted(path,uid):raise InstallError('A container now references this program')
+                    if path.is_symlink() or not path.is_dir() or (path/'.artifact-sha256').read_text()!=manifest['files'][asset_names(manifest)[0]] or json.loads((path/'build-info.json').read_text())['commit']!=manifest['commit']:
+                        raise InstallError('Program ownership changed')
+                    if path.resolve()==self.host.path('/opt/dsh-phalanx/current').resolve():
+                        raise InstallError('Program is now current')
+                    if self.process_reference(path):
+                        raise InstallError('A process now references this program')
+                    if self.mounted(path,uid):
+                        raise InstallError('A container now references this program')
                 dispose('program',str(path),[path],verified,lambda path=path:shutil.rmtree(path))
             by_sha={manifest['files'][asset_names(manifest)[0]]:(key,manifest) for key,manifest in known.items()}
             if cache.exists():
                 for path in cache.iterdir():
                     pair=by_sha.get(path.name.removesuffix('.tar.gz')) if path.name.endswith('.tar.gz') else None
-                    if path.is_symlink() or not path.is_file() or pair is None:record('cache',str(path),'retained','ownership is unknown');continue
+                    if path.is_symlink() or not path.is_file() or pair is None:
+                        record('cache',str(path),'retained','ownership is unknown')
+                        continue
                     key,manifest=pair
-                    if key in protected:record('cache',str(path),'retained',protected[key]);continue
-                    if self.mounted(path,uid):record('cache',str(path),'retained','referenced by a container mount');continue
-                    if self.process_reference(path):record('cache',str(path),'retained','referenced by a running process');continue
+                    if key in protected:
+                        record('cache',str(path),'retained',protected[key])
+                        continue
+                    if self.mounted(path,uid):
+                        record('cache',str(path),'retained','referenced by a container mount')
+                        continue
+                    if self.process_reference(path):
+                        record('cache',str(path),'retained','referenced by a running process')
+                        continue
                     def verified(path=path,manifest=manifest):
-                        if path.is_symlink() or not path.is_file() or digest(path)!=manifest['files'][asset_names(manifest)[0]]:raise InstallError('Cached archive ownership changed')
-                        if self.mounted(path,uid) or self.process_reference(path):raise InstallError('The cached archive is now referenced')
+                        if path.is_symlink() or not path.is_file() or digest(path)!=manifest['files'][asset_names(manifest)[0]]:
+                            raise InstallError('Cached archive ownership changed')
+                        if self.mounted(path,uid) or self.process_reference(path):
+                            raise InstallError('The cached archive is now referenced')
                     dispose('cache',str(path),[path],verified,lambda path=path:path.unlink())
             try:
-                store=json.loads(self.host.user(uid,['podman','info','--format','json']).stdout)['store'];graph=self.host.path(store['graphRoot']).resolve()
+                store=json.loads(self.host.user(uid,['podman','info','--format','json']).stdout)['store']
+                graph=self.host.path(store['graphRoot']).resolve()
                 ids={value.removeprefix('sha256:') for value in self.host.user(uid,['podman','images','--no-trunc','--format','{{.ID}}']).stdout.split()}
                 for image_id in sorted(ids):
-                    if not re.fullmatch('[a-f0-9]{64}',image_id):raise InstallError('Image identity is unavailable')
+                    if not re.fullmatch('[a-f0-9]{64}',image_id):
+                        raise InstallError('Image identity is unavailable')
                     facts=json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]
                     matches=[(key,manifest) for key,manifest in known.items() if image_matches(facts,manifest)]
-                    if not matches:record('image',image_id,'retained','ownership is unknown');continue
+                    if not matches:
+                        record('image',image_id,'retained','ownership is unknown')
+                        continue
                     reason=next((protected[key] for key,_ in matches if key in protected),None)
-                    if image_id in self.container_references(uid)['images']:reason='referenced by a running or stopped container'
+                    if image_id in self.container_references(uid)['images']:
+                        reason='referenced by a running or stopped container'
                     tags=facts.get('RepoTags') or []
                     allowed={IMAGE+':'+value for _,manifest in matches for value in (candidate_image_tag(manifest['tag']),manifest['targetVersion'])}
-                    if any(tag not in allowed for tag in tags):reason='has an unowned image name'
-                    if reason:record('image',image_id,'retained',reason);continue
+                    if any(tag not in allowed for tag in tags):
+                        reason='has an unowned image name'
+                    if reason:
+                        record('image',image_id,'retained',reason)
+                        continue
                     paths=self.image_paths(facts,graph)
                     def verified(image_id=image_id,facts=facts):
-                        if image_id in self.container_references(uid)['images']:raise InstallError('A container now references this image')
-                        if json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]!=facts:raise InstallError('Image references or identity changed')
+                        if image_id in self.container_references(uid)['images']:
+                            raise InstallError('A container now references this image')
+                        if json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]!=facts:
+                            raise InstallError('Image references or identity changed')
                     dispose('image',image_id,paths,verified,lambda image_id=image_id,facts=facts:self.remove_image(uid,image_id,facts))
-            except Exception as error:record('image','rootless storage','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot inspect image ownership')
+            except Exception as error:
+                record('image','rootless storage','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot inspect image ownership')
             pointer=self.journal/'current'
-            if pointer.is_symlink() or not pointer.is_file():raise InstallError('Current operation pointer is unavailable')
+            if pointer.is_symlink() or not pointer.is_file():
+                raise InstallError('Current operation pointer is unavailable')
             selected=pointer.read_text().strip()
             for path in self.journal.iterdir():
-                if not path.is_dir() or path.is_symlink() or not (path/'backup').exists():continue
-                if path.name==selected:record('backup',str(path/'backup'),'retained','current operation backup')
-                elif self.mounted(path/'backup',uid):record('backup',str(path/'backup'),'retained','referenced by a container mount')
-                else:discard_backup(path)
+                if not path.is_dir() or path.is_symlink() or not (path/'backup').exists():
+                    continue
+                if path.name==selected:
+                    record('backup',str(path/'backup'),'retained','current operation backup')
+                elif self.mounted(path/'backup',uid):
+                    record('backup',str(path/'backup'),'retained','referenced by a container mount')
+                else:
+                    discard_backup(path)
             record('data',source['values']['DSH_PHALANX_DATA_ROOT'],'retained','user and platform data')
-            result['status']='failed' if any(item['status']=='failed' for item in result['items']) else 'succeeded';persist()
+            result['status']='failed' if any(item['status']=='failed' for item in result['items']) else 'succeeded'
+            persist()
             return result
         except Exception as error:
             result['status']='failed'

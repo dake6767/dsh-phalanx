@@ -1,5 +1,4 @@
 """Verified fixed project releases, archive staging and rootless image I/O."""
-from installer_progress import update_error_code  # embedded-progress
 import hashlib
 import http.client
 import socket
@@ -15,9 +14,8 @@ import tarfile
 import tempfile
 import urllib.parse
 import urllib.error
-from installer_host import InstallError,install_failure,ACCOUNT  # embedded-host
-from installer_config import installed_state,HOME_DIR  # embedded-config
-from installer_compatibility import CANDIDATE, STABLE, validate_contract, candidate_identity, candidate_image_tag, version_parts  # embedded-compatibility
+from installer_compatibility import CANDIDATE, STABLE, InstallError, install_failure, update_error_code, validate_contract, candidate_identity, candidate_image_tag, version_parts  # embedded-compatibility
+from installer_config import ACCOUNT, HOME_DIR, installed_state  # embedded-config
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
 RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx/releases"
@@ -43,7 +41,8 @@ def installed_channel(state):
 
 def asset_names(manifest):
     architecture = {'linux/amd64': 'amd64', 'linux/arm64': 'arm64'}.get(manifest.get('platform'))
-    if architecture is None: raise InstallError('Unsupported artifact platform',code='release.metadata-invalid')
+    if architecture is None:
+        raise InstallError('Unsupported artifact platform',code='release.metadata-invalid')
     return (f'dsh-phalanx-linux-{architecture}.tar.gz', f'dsh-phalanx-dsh-linux-{architecture}.oci.tar')
 
 
@@ -61,7 +60,8 @@ def digest(path):
 
 
 def image_identity(manifest):
-    if 'imageIdentity' not in manifest:return None
+    if 'imageIdentity' not in manifest:
+        return None
     value=manifest['imageIdentity']
     if (not isinstance(value,dict) or
             not isinstance(value.get('inputHash'),str) or not re.fullmatch('[a-f0-9]{64}',value['inputHash']) or
@@ -74,11 +74,13 @@ def image_identity(manifest):
 def verify_manifest(directory, version, archive=True, *, assets=True, platform='linux/amd64'):
     try:
         manifest = json.loads((directory / "manifest.json").read_text())
-        if not isinstance(manifest,dict):raise InstallError("Invalid release manifest",code='release.metadata-invalid')
+        if not isinstance(manifest,dict):
+            raise InstallError("Invalid release manifest",code='release.metadata-invalid')
         names = asset_names(manifest)
         image = manifest.get("image", {})
         files = manifest.get("files", {})
-        if not isinstance(image,dict) or not isinstance(files,dict) or not isinstance(manifest.get("toolchain"),dict):raise InstallError("Invalid release manifest",code='release.metadata-invalid')
+        if not isinstance(image,dict) or not isinstance(files,dict) or not isinstance(manifest.get("toolchain"),dict):
+            raise InstallError("Invalid release manifest",code='release.metadata-invalid')
         if (not candidate_identity(manifest) or
                 manifest.get("platform") != platform or
                 not re.fullmatch(r"[a-f0-9]{40}", manifest.get("commit", "")) or
@@ -119,7 +121,8 @@ def release_location(args):
 
 
 @install_failure('download.failed')
-def download(host,url,**options):return host.request(url,**options)
+def download(host,url,**options):
+    return host.request(url,**options)
 
 
 def metadata(host, url):
@@ -132,7 +135,8 @@ def metadata(host, url):
 def json_metadata(body):
     try:
         value = json.loads(body)
-        if not isinstance(value, dict): raise ValueError()
+        if not isinstance(value, dict):
+            raise ValueError()
         return value
     except (ValueError, UnicodeError) as error:
         raise InstallError('Invalid release metadata; check the release asset prefix and retry a completed release',code='release.metadata-invalid') from error
@@ -140,15 +144,18 @@ def json_metadata(body):
 
 def metadata_missing(error):
     while error is not None:
-        if isinstance(error,urllib.error.HTTPError) and error.code==404:return True
+        if isinstance(error,urllib.error.HTTPError) and error.code==404:
+            return True
         error=error.__cause__
     return False
 
 
 def candidate_channel(host):
     value=json_metadata(metadata(host,CANDIDATE_CHANNEL_URL))
-    if type(value.get('schema')) is not int or value['schema']!=1:raise InstallError('Unsupported candidate channel metadata',code='release.metadata-invalid')
-    if value.get('candidate') is None:raise InstallError('No candidate release is currently available',code='release.metadata-invalid')
+    if type(value.get('schema')) is not int or value['schema']!=1:
+        raise InstallError('Unsupported candidate channel metadata',code='release.metadata-invalid')
+    if value.get('candidate') is None:
+        raise InstallError('No candidate release is currently available',code='release.metadata-invalid')
     if (not isinstance(value['candidate'],str) or not value['candidate'].startswith('run-') or not CANDIDATE.fullmatch(value['candidate']) or
             not isinstance(value.get('commit'),str) or not re.fullmatch('[a-f0-9]{40}',value['commit']) or
             not isinstance(value.get('manifestSha256'),str) or not re.fullmatch('[a-f0-9]{64}',value['manifestSha256'])):
@@ -197,9 +204,11 @@ def verify_candidate_assets(host, base, manifest, manifest_bytes):
 def select_release(host,args,destination):
     release_base = release_location(args)
     if args.bundle_dir is not None:
-        if not CANDIDATE.fullmatch(args.version):raise InstallError('Private archive handoff requires an explicit candidate version',code='release.metadata-invalid')
+        if not CANDIDATE.fullmatch(args.version):
+            raise InstallError('Private archive handoff requires an explicit candidate version',code='release.metadata-invalid')
         return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False,platform=selected_platform(host)),args.version
-    if selected_platform(host) != 'linux/amd64':raise InstallError('Development arm64 requires a local bundle',code='release.metadata-invalid')
+    if selected_platform(host) != 'linux/amd64':
+        raise InstallError('Development arm64 requires a local bundle',code='release.metadata-invalid')
     if args.version!='latest' and not STABLE.fullmatch(args.version) and not CANDIDATE.fullmatch(args.version):
         raise InstallError('Specify latest, a stable version, or an explicit candidate tag',code='release.metadata-invalid')
     pointer = json_metadata(metadata(host, release_base+'/latest/download/release.json')) if args.version == 'latest' else None
@@ -224,23 +233,31 @@ def select_release(host,args,destination):
 
 def acquire(host,args,destination,check_manifest=None,*,selected=None):
     directory,manifest,version=selected if selected is not None else select_release(host,args,destination)
-    if check_manifest:check_manifest(directory,manifest,version)
+    if check_manifest:
+        check_manifest(directory,manifest,version)
     if args.bundle_dir is not None:
-        if host.progress:host.progress.emit(message='Verifying release checksums', milestone=True)
+        if host.progress:
+            host.progress.emit(message='Verifying release checksums', milestone=True)
         return directory,verify_manifest(directory,version,platform=selected_platform(host))
     state=installed_state(host)
     same=state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest'] and state['platformSha256']==manifest['files'][ASSETS[0]]
     if not same:
-        sha=manifest['files'][ASSETS[0]]; cached=host.path('/var/cache/dsh-phalanx/'+sha+'.tar.gz')
+        sha=manifest['files'][ASSETS[0]]
+        cached=host.path('/var/cache/dsh-phalanx/'+sha+'.tar.gz')
         if cached.is_file() and not cached.is_symlink() and digest(cached)==sha:
-            shutil.copyfile(cached,directory/ASSETS[0]); host.tell('Reusing checksum-verified platform download.')
+            shutil.copyfile(cached,directory/ASSETS[0])
+            host.tell('Reusing checksum-verified platform download.')
         else:
             base=release_location(args)+'/download/'+version+'/'
             (directory/ASSETS[0]).write_bytes(download(host,base+ASSETS[0]))
-        if host.progress:host.progress.emit(message='Verifying platform checksum', milestone=True)
+        if host.progress:
+            host.progress.emit(message='Verifying platform checksum', milestone=True)
         manifest=verify_manifest(directory,version,archive=False)
-        cache=host.mkdir('/var/cache/dsh-phalanx',0o700)/(sha+'.tar.gz'); temporary=cache.with_suffix('.next')
-        shutil.copyfile(directory/ASSETS[0],temporary); temporary.chmod(0o600); os.replace(temporary,cache)
+        cache=host.mkdir('/var/cache/dsh-phalanx',0o700)/(sha+'.tar.gz')
+        temporary=cache.with_suffix('.next')
+        shutil.copyfile(directory/ASSETS[0],temporary)
+        temporary.chmod(0o600)
+        os.replace(temporary,cache)
     return directory,manifest
 
 
@@ -280,7 +297,8 @@ def supply_image(host, uid, directory, manifest, archive):
 
 def image_command(image,manifest):
     identity=image_identity(manifest)
-    config=image.get('Config') or {};labels=config.get('Labels') or {}
+    config=image.get('Config') or {}
+    labels=config.get('Labels') or {}
     label_matches=(labels.get('dsh.input.sha256')==identity['inputHash'] if identity else
                    labels.get('org.opencontainers.image.revision')==manifest['commit'])
     if (image.get('Digest')!=manifest['image']['digest'] or image.get('Architecture')!=manifest['platform'].split('/')[1] or
@@ -293,8 +311,11 @@ def image_command(image,manifest):
 
 
 def image_matches(image,manifest):
-    try:image_command(image,manifest);return True
-    except (InstallError,KeyError,TypeError,AttributeError,IndexError):return False
+    try:
+        image_command(image,manifest)
+        return True
+    except (InstallError,KeyError,TypeError,AttributeError,IndexError):
+        return False
 
 
 def verify_image(host,uid,manifest):
@@ -303,7 +324,8 @@ def verify_image(host,uid,manifest):
 
 
 def stage_platform(host, directory, manifest):
-    if host.progress:host.progress.emit(message='Staging verified platform', milestone=True)
+    if host.progress:
+        host.progress.emit(message='Staging verified platform', milestone=True)
     sha = manifest["files"][asset_names(manifest)[0]]
     target = f'/opt/dsh-phalanx/releases/{manifest["tag"]}-{sha[:16]}'
     host.mkdir("/opt/dsh-phalanx")
@@ -335,9 +357,11 @@ def stage_platform(host, directory, manifest):
     paths=(root,*root.rglob('*'))
     for path in paths:
         if path.is_file() and not path.is_symlink():
-            with path.open('rb') as file:os.fsync(file.fileno())
+            with path.open('rb') as file:
+                os.fsync(file.fileno())
     for path in reversed(paths):
-        if path.is_dir() and not path.is_symlink():host.sync_directory(path)
+        if path.is_dir() and not path.is_symlink():
+            host.sync_directory(path)
     host.sync_directory(releases)
     return target
 
@@ -346,73 +370,111 @@ def stage_platform(host, directory, manifest):
 def release_notes(host,version):
     if isinstance(version,str) and version.startswith('run-') and CANDIDATE.fullmatch(version):
         return 'Candidate release: '+CANDIDATE_RELEASE_BASE+'/tag/'+version
-    if not STABLE.fullmatch(version):raise InstallError('Formal release notes require a stable version',code='release.metadata-invalid')
+    if not STABLE.fullmatch(version):
+        raise InstallError('Formal release notes require a stable version',code='release.metadata-invalid')
     release = json_metadata(metadata(host, RELEASE_BASE+'/download/'+version+'/release.json'))
-    if release.get('version') != version[1:]:raise InstallError('Release notes identity changed',code='release.metadata-invalid')
+    if release.get('version') != version[1:]:
+        raise InstallError('Release notes identity changed',code='release.metadata-invalid')
     body = release.get('releaseNotes', 'Release notes: https://github.com/dake6767/dsh-phalanx/releases/tag/'+version)
-    if not isinstance(body,str):raise InstallError('Invalid release notes',code='release.metadata-invalid')
+    if not isinstance(body,str):
+        raise InstallError('Invalid release notes',code='release.metadata-invalid')
     return body.encode('utf-8')[:32768].decode('utf-8',errors='ignore')
 
 
 def release_versions(host,current,latest,target_version=None):
     """Discover names from Release assets only; every version still verifies its own assets."""
     candidate=isinstance(latest,str) and latest.startswith('run-') and CANDIDATE.fullmatch(latest)
-    if not candidate and (not isinstance(latest,str) or not STABLE.fullmatch(latest)):raise InstallError('Invalid channel version listing',code='release.metadata-invalid')
-    if candidate:version_parts(target_version)
+    if not candidate and (not isinstance(latest,str) or not STABLE.fullmatch(latest)):
+        raise InstallError('Invalid channel version listing',code='release.metadata-invalid')
+    if candidate:
+        version_parts(target_version)
     release=json_metadata(metadata(host,RELEASE_BASE+('/latest/download/release.json' if candidate else '/download/'+latest+'/release.json')))
     formal_latest='v'+str(release.get('version','')) if candidate else latest
-    if not STABLE.fullmatch(formal_latest) or release.get('version')!=formal_latest[1:]:raise InstallError('Release version listing identity changed',code='release.metadata-invalid')
+    if not STABLE.fullmatch(formal_latest) or release.get('version')!=formal_latest[1:]:
+        raise InstallError('Release version listing identity changed',code='release.metadata-invalid')
     rows=release.get('versions')
-    if rows is None and version_parts(formal_latest[1:])<(0,1,27):rows=[formal_latest]
-    if not isinstance(rows,list) or not rows or rows[-1]!=formal_latest:raise InstallError('Invalid release version listing',code='release.metadata-invalid')
-    previous=None;names=[]
+    if rows is None and version_parts(formal_latest[1:])<(0,1,27):
+        rows=[formal_latest]
+    if not isinstance(rows,list) or not rows or rows[-1]!=formal_latest:
+        raise InstallError('Invalid release version listing',code='release.metadata-invalid')
+    previous=None
+    names=[]
     for tag in rows:
-        if not isinstance(tag,str) or not STABLE.fullmatch(tag):raise InstallError('Invalid release version listing',code='release.metadata-invalid')
+        if not isinstance(tag,str) or not STABLE.fullmatch(tag):
+            raise InstallError('Invalid release version listing',code='release.metadata-invalid')
         version=version_parts(tag[1:])
-        if previous is not None and version<=previous:raise InstallError('Invalid ordered release version listing',code='release.metadata-invalid')
+        if previous is not None and version<=previous:
+            raise InstallError('Invalid ordered release version listing',code='release.metadata-invalid')
         previous=version
-        if version_parts(current)<=version and (not candidate or version<=version_parts(target_version)):names.append(tag)
+        if version_parts(current)<=version and (not candidate or version<=version_parts(target_version)):
+            names.append(tag)
     return names+[latest] if candidate else names if latest in names else [latest]
 
 
 class ImageConnection(http.client.HTTPConnection):
     def __init__(self,path,authorize):
-        super().__init__('localhost',timeout=3);self.path=path;self.authorize=authorize
+        super().__init__('localhost',timeout=3)
+        self.path=path
+        self.authorize=authorize
     def connect(self):
-        self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(3)
-        try:self.sock.connect(self.path);self.authorize(self.sock)
-        except BaseException:self.close();raise
+        self.sock=socket.socket(socket.AF_UNIX)
+        self.sock.settimeout(3)
+        try:
+            self.sock.connect(self.path)
+            self.authorize(self.sock)
+        except BaseException:
+            self.close()
+            raise
 
 
 class UnixImageInspector:
     """Transport reuse only: every request obtains a fresh official Libpod inspect result."""
-    def __init__(self,path,authorize):self.connection=ImageConnection(path,authorize)
+    def __init__(self,path,authorize):
+        self.connection=ImageConnection(path,authorize)
     def inspect(self,reference):
         try:
-            if self.connection.sock:self.connection.authorize(self.connection.sock)
+            if self.connection.sock:
+                self.connection.authorize(self.connection.sock)
             self.connection.request('GET','/v4.0.0/libpod/images/'+urllib.parse.quote(reference,safe='')+'/json')
-            response=self.connection.getresponse();body=response.read(2*1024*1024+1)
-            if response.status!=200 or len(body)>2*1024*1024:raise InstallError('The instance image is unavailable from its owned inspection service')
+            response=self.connection.getresponse()
+            body=response.read(2*1024*1024+1)
+            if response.status!=200 or len(body)>2*1024*1024:
+                raise InstallError('The instance image is unavailable from its owned inspection service')
             value=json.loads(body)
-            if not isinstance(value,dict):raise ValueError('Invalid image inspection result')
+            if not isinstance(value,dict):
+                raise ValueError('Invalid image inspection result')
             return value
-        except BaseException:self.close();raise
-    def close(self):self.connection.close()
+        except BaseException:
+            self.close()
+            raise
+    def close(self):
+        self.connection.close()
 
 
 class OwnedImageInspector:
     """One executor owns this independent rootless service, peer proof and runtime directory."""
     def __init__(self,host,uid):
-        self.host=host;self.uid=uid;self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None
-    def stamp(self,pid):return self.host.path('/proc/'+str(pid)+'/stat').read_text().rsplit(')',1)[1].split()[19]
+        self.host=host
+        self.uid=uid
+        self.process=None
+        self.directory=None
+        self.reader=None
+        self.peer=None
+        self.socket_inode=None
+        self.context=None
+        self.path=None
+    def stamp(self,pid):
+        return self.host.path('/proc/'+str(pid)+'/stat').read_text().rsplit(')',1)[1].split()[19]
     def configuration(self):
         roots=[self.host.path(p) for p in ('/usr/share/containers','/etc/containers',HOME_DIR+'/.config/containers')]
         paths=[p/name for p in roots for name in ('storage.conf','containers.conf')]+[p for root in roots for p in (root/'containers.conf.d').glob('*.conf')]
         result=[]
         for path in sorted(paths):
             try:
-                info=path.stat();fact=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
-            except FileNotFoundError:fact=None
+                info=path.stat()
+                fact=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+            except FileNotFoundError:
+                fact=None
             result.append((str(path),fact))
         return result
     def authorize(self,connection):
@@ -427,52 +489,87 @@ class OwnedImageInspector:
         self.peer=proof
     def start(self):
         account=self.host.run(['getent','passwd',ACCOUNT]).stdout.strip().split(':')
-        if len(account)!=7 or int(account[2])!=self.uid or account[5]!=HOME_DIR:raise InstallError('Invalid image inspection identity')
-        self.gid=int(account[3]);parent=self.host.path('/run/dsh-phalanx-updater');info=parent.lstat()
+        if len(account)!=7 or int(account[2])!=self.uid or account[5]!=HOME_DIR:
+            raise InstallError('Invalid image inspection identity')
+        self.gid=int(account[3])
+        parent=self.host.path('/run/dsh-phalanx-updater')
+        info=parent.lstat()
         if parent.is_symlink() or not parent.is_dir() or info.st_uid!=0 or info.st_gid!=self.gid or info.st_mode&0o027:
             raise InstallError('Invalid owned image inspection runtime')
-        self.context=self.configuration();self.directory=Path(tempfile.mkdtemp(prefix='image-',dir=parent));self.directory_inode=self.directory.stat().st_ino
-        self.directory.chmod(0o700);os.chown(self.directory,self.uid,self.gid);self.path=self.directory/'api.sock';self.uri='unix://'+str(self.path)
+        self.context=self.configuration()
+        self.directory=Path(tempfile.mkdtemp(prefix='image-',dir=parent))
+        self.directory_inode=self.directory.stat().st_ino
+        self.directory.chmod(0o700)
+        os.chown(self.directory,self.uid,self.gid)
+        self.path=self.directory/'api.sock'
+        self.uri='unix://'+str(self.path)
         self.process=subprocess.Popen(['runuser','-u',ACCOUNT,'--','podman','system','service','--time','0',self.uri],
             env=self.host.user_environment(self.uid),cwd=self.host.path(HOME_DIR),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-        self.wrapper_started=self.stamp(self.process.pid);self.reader=UnixImageInspector(str(self.path),self.authorize)
+        self.wrapper_started=self.stamp(self.process.pid)
+        self.reader=UnixImageInspector(str(self.path),self.authorize)
         deadline=self.host.clock()+10
         while True:
-            if self.path.exists():self.socket_inode=self.path.lstat().st_ino
-            try:self.reader.connection.connect();break
+            if self.path.exists():
+                self.socket_inode=self.path.lstat().st_ino
+            try:
+                self.reader.connection.connect()
+                break
             except (ConnectionRefusedError,FileNotFoundError):
-                if self.process.poll() is not None or self.host.clock()>=deadline:raise InstallError('The owned image inspection service did not start') from None
+                if self.process.poll() is not None or self.host.clock()>=deadline:
+                    raise InstallError('The owned image inspection service did not start') from None
                 self.host.pause(.02)
-        if self.context!=self.configuration():raise InstallError('Image inspection configuration changed during startup')
+        if self.context!=self.configuration():
+            raise InstallError('Image inspection configuration changed during startup')
     def inspect(self,reference):
-        if self.process is not None and (self.process.poll() is not None or self.context!=self.configuration()):self.close()
-        if self.process is None:self.start()
+        if self.process is not None and (self.process.poll() is not None or self.context!=self.configuration()):
+            self.close()
+        if self.process is None:
+            self.start()
         return self.reader.inspect(reference)
     def close(self):
-        if self.reader:self.reader.close()
+        if self.reader:
+            self.reader.close()
         if self.process:
-            if self.process.poll() is None:self.process.terminate()
-            try:self.process.wait(timeout=5)
+            if self.process.poll() is None:
+                self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 if self.peer:
                     pid,ticks,_,_=self.peer
                     try:
-                        if self.stamp(pid)==ticks and os.getpgid(pid)==self.process.pid:os.kill(pid,signal.SIGKILL)
-                    except (ProcessLookupError,FileNotFoundError):pass
-                self.process.kill();self.process.wait(timeout=5)
+                        if self.stamp(pid)==ticks and os.getpgid(pid)==self.process.pid:
+                            os.kill(pid,signal.SIGKILL)
+                    except (ProcessLookupError,FileNotFoundError):
+                        pass
+                self.process.kill()
+                self.process.wait(timeout=5)
             if self.peer:
                 try:
-                    if self.stamp(self.peer[0])==self.peer[1]:raise InstallError('The owned image inspection peer did not stop')
-                except FileNotFoundError:pass
+                    if self.stamp(self.peer[0])==self.peer[1]:
+                        raise InstallError('The owned image inspection peer did not stop')
+                except FileNotFoundError:
+                    pass
         if self.directory:
             if self.path is not None and self.path.exists():
                 with socket.socket(socket.AF_UNIX) as probe:
-                    try:probe.connect(str(self.path))
-                    except (ConnectionRefusedError,FileNotFoundError):pass
-                    else:raise InstallError('The image inspection socket is still active')
+                    try:
+                        probe.connect(str(self.path))
+                    except (ConnectionRefusedError,FileNotFoundError):
+                        pass
+                    else:
+                        raise InstallError('The image inspection socket is still active')
                 info=self.path.lstat()
-                if self.path.is_symlink() or info.st_ino!=self.socket_inode or info.st_uid!=self.uid:raise InstallError('The owned image inspection socket changed')
+                if self.path.is_symlink() or info.st_ino!=self.socket_inode or info.st_uid!=self.uid:
+                    raise InstallError('The owned image inspection socket changed')
                 self.path.unlink()
-            if self.directory.is_symlink() or self.directory.stat().st_ino!=self.directory_inode:raise InstallError('The owned image inspection directory changed')
+            if self.directory.is_symlink() or self.directory.stat().st_ino!=self.directory_inode:
+                raise InstallError('The owned image inspection directory changed')
             self.directory.rmdir()
-        self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None
+        self.process=None
+        self.directory=None
+        self.reader=None
+        self.peer=None
+        self.socket_inode=None
+        self.context=None
+        self.path=None

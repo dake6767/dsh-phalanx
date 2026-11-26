@@ -225,3 +225,66 @@ actual filesystem, including Podman image-copy staging, and fails closed before
 download or stop. The public bootstrap path validates exact-commit module hashes
 and replaces only the root updater bank; the current platform stays running.
 Legacy executors reject this protocol before acquiring platform archives.
+
+## Python installer architecture
+
+The Python installer, upgrade executor and deployment CLI under `scripts/install/`
+and `scripts/download-sources.py` run with root host privileges and follow an
+explicit four-layer dependency model enforced as an acyclic DAG by
+`scripts/check-python-architecture.py`:
+
+| Layer | Modules | Dependency and boundary constraints |
+| --- | --- | --- |
+| **L0 Standalone** | `installer_upgrade_gate.py` | Must import zero other `installer_*` modules so it runs standalone after being copied to `/opt/dsh-phalanx/maintenance/gate.py` for root boot admission |
+| **L1 Pure / Core** | `installer_compatibility.py`, `installer_questions.py`, `installer_upgrade_core.py`, `installer_executor_protocol.py` | Pure values, compatibility and protocol logic; forbidden to import OS/network I/O modules (`subprocess`, `socket`, `urllib.request`, `http.client`, `fcntl`, `shutil`, `tempfile`, `os`, `pathlib`, etc.) or call `open`/`__import__`; may import L1 only |
+| **L2 Host & Adapters** | `installer_host.py`, `installer_config.py`, `installer_progress.py`, `installer_storage.py`, `installer_release.py`, `installer_upgrade_backup.py`, `installer_executor_install.py`, `installer_cleanup.py`, `installer_database.py`, `installer_upgrade_host.py`, `installer_operations.py`, `installer_deployment.py`, `installer_uninstall.py`, `installer_executor_bootstrap.py` | Host and operational adapters; may import L0, L1 and L2; forbidden to import L3 |
+| **L3 Entry / Inbound** | `installer_executor_server.py`, `installer_executor.py`, `installer_upgrade_cli.py`, `installer_deployment_cli.py`, `installer.py`, `updater.py`, `preview.py`, `scripts/download-sources.py` | CLI and Unix HTTP entry wiring; may import L0–L3 without cycles |
+
+Every `.py` module under `scripts/install/` must be registered in this layer
+table; unregistered files fail lint.
+
+- **Standalone `install.sh` concatenation and global namespace uniqueness.**
+  `scripts/install/build-installer.mjs` concatenates standalone installer
+  modules in topological order into one shared Python namespace and strips
+  single-line `from installer_* import ... # embedded-*` lines. The static gate
+  verifies that concatenation order satisfies every `# embedded-*` dependency,
+  every stripped import carries the exact trailing `# embedded-*` marker without
+  renaming, every imported symbol is exported by an earlier concatenated module,
+  no concatenated module imports a non-concatenated local installer module, and
+  top-level function, class and constant definitions are globally unique across
+  concatenated modules (one owning module per shared constant).
+- **Structured executor inventory whitelist.** `installer_executor_install.py`
+  (`executor_package`) validates the release-bound `updater/` directory by
+  structural invariants rather than hardcoded historical module lists:
+  `executor-files.json` must be a non-empty deduplicated list of strings that
+  includes `updater.py` with every remaining entry matching
+  `^installer_[a-z_]+\.py$`; the `manifest.json` `files` key set,
+  `set(declared) | {'updater.service.in', 'executor-files.json'}`, and the
+  actual directory entries (excluding `manifest.json`) must match exactly; total
+  inventory files in `manifest.json` may not exceed 64 while preserving the 16 KiB
+  `manifest['updater']` and 4 MiB `updater.json` size bounds; every entry must
+  be a regular non-symlink file matching its SHA-256 checksum, and every `.py`
+  file must compile cleanly. `installer_executor_bootstrap.py`
+  (`bootstrap_executor`) checks internal manifest and hash consistency of the
+  selected release-bound `updater.json` and delegates package verification to
+  `executor_package`, retaining official release SHA-256 and exact-commit trust.
+- **Law 3 error-code branching.** Business control flow in Python delivery
+  modules branches on `InstallError.code`, `update_error_code` or typed
+  exception subclasses rather than inspecting stringified exception text
+  (`str(err)`, `err.args`, `.message` or `.failure`). Only the two explicitly
+  declared operator display localization mappers
+  (`installer_progress.operator_text` and
+  `installer_deployment_cli.reason_text`) are exempted from this check.
+- **Tiered zero-dependency static gate.** `scripts/check-python-architecture.py`
+  (with `scripts/check-python-ast.py`) uses only the Python 3 standard library
+  (`ast`, `tokenize`) and runs inside `pnpm lint` alongside
+  `node scripts/install/build-installer.mjs --check`. Product delivery files
+  (`scripts/install/*.py` and `scripts/download-sources.py`) enforce all seven
+  rule groups (syntax/scope/unused symbols, zero-exception ban on semicolons and
+  inline compound statements, 500-line code limit with executor-only ratchet in
+  `architecture-exemptions.json`, four-layer DAG, Law 3, `install.sh`
+  concatenation/namespace uniqueness, and catalog/wording boundaries).
+  Development scripts (`scripts/dev/*.py`) enforce syntax/scope/unused symbols,
+  zero-exception ban on semicolons and inline compound statements, and the
+  500-line limit with zero exemptions. Test fixtures (`tests/fixtures/*.py`)
+  require clean `ast.parse` and `compile` syntax verification.

@@ -134,65 +134,19 @@ if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt
   trap - EXIT INT TERM
 fi
 python3 - "$@" <<'DSH_PHALANX_INSTALLER_PYTHON'
-EXECUTOR_MODULES = ["updater.py","installer_executor.py","installer_executor_protocol.py","installer_executor_server.py","installer_executor_install.py","installer_deployment.py","installer_deployment_cli.py","installer_uninstall.py","installer_questions.py","installer_config.py","installer_progress.py","installer_host.py","installer_compatibility.py","installer_release.py","installer_upgrade_core.py","installer_upgrade_backup.py","installer_upgrade_gate.py","installer_upgrade_host.py","installer_upgrade_cli.py","installer_storage.py","installer_executor_bootstrap.py","installer_cleanup.py","installer_operations.py"]
-UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport hashlib\nimport signal\nimport math\nimport re\nimport socket\nimport threading\nimport stat\nimport json\nimport os\nfrom pathlib import Path, PurePosixPath\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\nimport base64\nimport array\nimport secrets\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\ndef protected_ports(values):\n    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]\n    if values.get('DSH_PHALANX_PREVIEW_PORT'):\n        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})\n    return endpoints\n\n\nclass AdmissionGateError(Exception):\n    code='admission.failed'\n\n\n\ndef maintenance_pages(target):\n    target=Path(target)\n    if target.is_symlink() or (target/'dist').is_symlink():raise AdmissionGateError('Invalid installed maintenance page directory')\n    pages={}\n    for locale in ('en','zh-CN'):\n        path=target/'dist'/('maintenance.'+locale+'.html')\n        try:descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)\n        except FileNotFoundError:continue\n        except OSError as error:raise AdmissionGateError('Installed maintenance page is unavailable') from error\n        with os.fdopen(descriptor,'rb') as file:\n            info=os.fstat(file.fileno())\n            if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0,os.geteuid()) or info.st_mode&0o022:\n                raise AdmissionGateError('Invalid installed maintenance page ownership')\n            page=file.read(262145)\n            if not page or len(page)>262144:raise AdmissionGateError('Invalid installed maintenance page size')\n            try:page.decode('utf-8')\n            except UnicodeError as error:raise AdmissionGateError('Invalid installed maintenance page encoding') from error\n            pages[locale]=page\n    if pages and len(pages)!=2:raise AdmissionGateError('Installed maintenance pages are incomplete')\n    return pages or None\n\n\ndef maintenance_locale(value):\n    languages=[]\n    for part in value.split(','):\n        fields=part.strip().split(';');tag=fields[0].lower()\n        try:quality=1 if len(fields)==1 else float(fields[1].strip().removeprefix('q='))\n        except ValueError:continue\n        if math.isfinite(quality) and 0<quality<=1:languages.append((tag,quality))\n    languages.sort(key=lambda item:item[1],reverse=True)\n    preferred=languages[0][0] if languages else 'en'\n    return 'zh-CN' if preferred=='zh' or preferred.startswith('zh-') else 'en'\n\n\nclass MaintenanceListener:\n    \"\"\"Owns only the temporary HTTP socket; close finishes before its port can be handed off.\"\"\"\n    def __init__(self,pages,address,port):\n        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n        family=socket.AF_INET6 if ipaddress.ip_address(address).version==6 else socket.AF_INET\n        class Handler(BaseHTTPRequestHandler):\n            protocol_version='HTTP/1.1'\n            def setup(handler):\n                super().setup();handler.connection.settimeout(3)\n            def log_message(handler,*args):pass\n            def respond(handler):\n                body=pages[maintenance_locale(handler.headers.get('Accept-Language','en'))]\n                handler.send_response_only(503)\n                for key,value in [('Content-Type','text/html; charset=utf-8'),('Content-Length',str(len(body))),('Retry-After','3'),('Cache-Control','no-store'),('Connection','close'),('Content-Security-Policy',\"frame-ancestors 'none'\"),('X-Content-Type-Options','nosniff')]:handler.send_header(key,value)\n                handler.end_headers();handler.close_connection=True\n                if handler.command!='HEAD':handler.wfile.write(body)\n            do_GET=do_HEAD=do_POST=do_PUT=do_PATCH=do_DELETE=do_OPTIONS=do_CONNECT=do_TRACE=respond\n        class Server(ThreadingHTTPServer):\n            address_family=family;allow_reuse_address=True;daemon_threads=True;block_on_close=False\n            def server_bind(server):\n                if family==socket.AF_INET6:server.socket.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,0)\n                super().server_bind()\n        self.server=Server((address,port),Handler);self.port=self.server.server_address[1];self.closed=False\n        self.thread=threading.Thread(target=self.server.serve_forever,name='dsh-phalanx-maintenance-http',daemon=True)\n        try:self.thread.start()\n        except BaseException:self.server.server_close();raise\n\n    def close(self):\n        if self.closed:return\n        self.server.shutdown();self.thread.join();self.server.server_close();self.closed=True\n\n\ndef process_started(path):return path.read_text().rsplit(')',1)[1].split()[19]\n\n\ndef maintenance_token(job,key):\n    used=job.setdefault('maintenanceTokens',[])\n    if not isinstance(used,list) or len(used)>4096 or any(type(value) is not int or not 0<value<2**32 or value==MARK for value in used):\n        raise AdmissionGateError('Invalid maintenance connection history')\n    previous=job.get(key)\n    if isinstance(previous,dict):\n        token=previous.get('token')\n        if type(token) is not int or not 0<token<2**32 or token==MARK:raise AdmissionGateError('Invalid maintenance connection identity')\n        if token not in used:used.append(token)\n        return token\n    token=secrets.randbits(32)\n    while token in (0,MARK) or token in used:token=secrets.randbits(32)\n    used.append(token);return token\n\n\nclass ManagedMaintenanceSocket:\n    \"\"\"PID1 keeps the exact listener bound independently of either serving process.\"\"\"\n    def __init__(self,host,job,role,key):\n        self.host=host;self.job=job;self.key=key\n        if str(uuid.UUID(job['id']))!=job['id']:raise AdmissionGateError('Invalid maintenance operation identity')\n        self.unit='dsh-phalanx-upgrade-'+role+'-'+job['id']+'.service';self.cgroup='/system.slice/'+self.unit\n        self.endpoint=protected_ports(job['source']['values'])[0]\n        self.program=str(host.path('/opt/dsh-phalanx/maintenance/gate.py'));self.role=role\n\n    def fdname(self):return self.role+'-'+self.job['id']+'-'+str(self.intent()['token'])\n\n    def stored(self,fields):\n        if fields.get('NFileDescriptorStore')!='1':raise AdmissionGateError('The maintenance listener is not pinned by PID1')\n        rows=json.loads(self.host.run(['systemd-analyze','--json=short','fdstore',self.unit]).stdout)\n        if not isinstance(rows,list) or len(rows)!=1:raise AdmissionGateError('Unexpected maintenance descriptor inventory')\n        row=rows[0];inode=row.get('inode')\n        if (type(inode) is not int or inode<=0 or row.get('fdname')!=self.fdname() or\n                type(row.get('type')) is not int or not stat.S_ISSOCK(row['type']) or row.get('path')!='socket:['+str(inode)+']'):\n            raise AdmissionGateError('Maintenance descriptor differs from its owner')\n        expected=self.intent().get('listener',{}).get('inode')\n        if expected is not None and expected!=inode:raise AdmissionGateError('A different platform listener was pinned')\n        result=self.host.run(['/usr/bin/python3','-I',self.program,'--inspect-listener',str(inode),self.endpoint['address'],str(self.endpoint['port'])])\n        if json.loads(result.stdout)!={'inode':inode,'address':self.endpoint['address'],'port':self.endpoint['port']}:\n            raise AdmissionGateError('Pinned maintenance endpoint differs from its owner')\n        return inode\n\n    def facts(self):\n        properties='LoadState,MainPID,Transient,User,Type,NotifyAccess,KillMode,Restart,ExecStart,ControlGroup,RemainAfterExit,FileDescriptorStoreMax,FileDescriptorStorePreserve,NFileDescriptorStore,CollectMode,ActiveState,Job'\n        result=self.host.run(['systemctl','show',self.unit,'--property='+properties],check=False)\n        fields=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)\n        if fields.get('LoadState')=='not-found':return None\n        if result.returncode!=0 or fields.get('LoadState')!='loaded':raise AdmissionGateError('Maintenance unit state is unavailable')\n        return fields\n\n    def verify(self,fields,*,listener=False):\n        intent=self.intent()\n        if intent is None or self.job.get(self.key)!=intent:raise AdmissionGateError('Maintenance unit is not owned by this operation')\n        for key,value in [('Transient','yes'),('User','root'),('Type','notify'),('NotifyAccess','main'),('KillMode','control-group'),('Restart','no'),('RemainAfterExit','yes'),('FileDescriptorStoreMax','1'),('FileDescriptorStorePreserve','yes'),('CollectMode','inactive')]:\n            if fields.get(key)!=value:raise AdmissionGateError('Maintenance unit configuration differs from its owner')\n        command=re.fullmatch(r'\\{ path=([^ ;]+) ; argv\\[\\]=([^;]+) ; ignore_errors=no ;[^{}]*\\}',fields.get('ExecStart',''))\n        if command is None or command[1]!='/usr/bin/python3' or command[2].split()!=self.arguments:\n            raise AdmissionGateError('Maintenance unit command differs from its owner')\n        raw_pid=fields.get('MainPID','')\n        if not raw_pid.isdecimal():raise AdmissionGateError('Invalid maintenance listener process')\n        pid=int(raw_pid);group=fields.get('ControlGroup','')\n        if group not in ('',self.cgroup) or pid and group!=self.cgroup:raise AdmissionGateError('Maintenance unit cgroup differs from its owner')\n        if pid:\n            process=self.host.path('/proc/'+str(pid))\n            actual=[item for item in (process/'cmdline').read_bytes().split(b'\\0') if item]\n            if (actual!=[os.fsencode(item) for item in self.arguments] or\n                    (process/'exe').resolve()!=self.host.path('/usr/bin/python3').resolve() or\n                    '0::'+self.cgroup not in (process/'cgroup').read_text().splitlines()):\n                raise AdmissionGateError('Maintenance listener process differs from its owner')\n        if fields.get('NFileDescriptorStore') not in ('0','1'):raise AdmissionGateError('Invalid maintenance descriptor count')\n        if fields['NFileDescriptorStore']=='1':self.stored(fields)\n        if listener and (fields['NFileDescriptorStore']!='1' or not pid or not self.host.pid_owns_listener(pid,self.endpoint['port'],ipaddress.ip_address(self.endpoint['address']))):\n            raise AdmissionGateError('Maintenance service does not own its expected listener')\n        return pid\n\n    def start(self):\n        if self.intent() is None:return None\n        fields=self.facts()\n        if fields is None:\n            if self.job.get(self.key)!=self.intent():raise AdmissionGateError('Save maintenance ownership before starting its listener')\n            self.host.run(['systemd-run','--unit='+self.unit,'--slice=system.slice',\n                           '--property=Type=notify','--property=NotifyAccess=main','--property=User=root',\n                           '--property=KillMode=control-group','--property=Restart=no','--property=WorkingDirectory=/',\n                           '--property=RemainAfterExit=yes','--property=FileDescriptorStoreMax=1',\n                           '--property=FileDescriptorStorePreserve=yes','--property=CollectMode=inactive',\n                           '--',*self.arguments])\n            fields=self.facts()\n        if fields is None:raise AdmissionGateError('Maintenance listener exited before admission could be verified')\n        self.verify(fields,listener=True)\n        return self.socket_cgroup\n\n    def stop(self):\n        fields=self.facts()\n        if fields is None:return\n        self.verify(fields)\n        result=self.host.run(['systemctl','stop',self.unit],check=False)\n        after=self.facts()\n        if after is not None:\n            if result.returncode!=0 or self.verify(after):raise AdmissionGateError('Maintenance listener did not stop')\n            if after.get('Job',''):raise AdmissionGateError('Maintenance listener still has a pending job')\n            if after.get('ActiveState')=='failed':\n                self.host.run(['systemctl','reset-failed',self.unit]);after=self.facts()\n            if after is not None:\n                self.verify(after)\n                if after.get('ActiveState')!='inactive' or after.get('Job',''):raise AdmissionGateError('Maintenance listener is not inactive')\n                self.host.run(['systemctl','clean','--what=fdstore',self.unit]);after=self.facts()\n                if after is not None and (self.verify(after) or after['NFileDescriptorStore']!='0'):\n                    raise AdmissionGateError('Maintenance descriptor was not released')\n        events=self.host.path('/sys/fs/cgroup'+self.cgroup+'/cgroup.events')\n        if events.exists() and dict(line.split() for line in events.read_text().splitlines()).get('populated')!='0':\n            raise AdmissionGateError('Maintenance unit still has active processes')\n\n\nclass MaintenanceUnit(ManagedMaintenanceSocket):\n    def __init__(self,host,job):\n        super().__init__(host,job,'page','maintenancePage');self.target=Path(job['source']['target']);self.token=None\n        self.socket_cgroup=self.cgroup\n    def intent(self):\n        pages=maintenance_pages(self.target)\n        if pages is None:return None\n        if self.token is None:self.token=maintenance_token(self.job,self.key)\n        return {'unit':self.unit,'source':str(self.target),'pages':{locale:hashlib.sha256(body).hexdigest() for locale,body in pages.items()},'token':self.token}\n    @property\n    def arguments(self):\n        return ['/usr/bin/python3','-I',self.program,'--serve-page',self.job['id'],str(self.target),self.endpoint['address'],str(self.endpoint['port']),str(self.intent()['token'])]\n\n\nclass ListenerPinUnit(ManagedMaintenanceSocket):\n    def __init__(self,host,job):\n        super().__init__(host,job,'listener','maintenanceListener')\n    def intent(self):\n        value=self.job.get(self.key)\n        if value is None:return None\n        if not isinstance(value,dict) or value.get('unit')!=self.unit or not isinstance(value.get('listener'),dict):\n            raise AdmissionGateError('Invalid platform listener ownership')\n        maintenance_token(self.job,self.key)\n        return {'unit':self.unit,'listener':value['listener'],'token':value['token']}\n    @property\n    def arguments(self):\n        value=self.intent();encoded=base64.urlsafe_b64encode(json.dumps(value['listener'],sort_keys=True,separators=(',',':')).encode()).decode()\n        return ['/usr/bin/python3','-I',self.program,'--pin-listener',self.job['id'],encoded,str(value['token'])]\n    @property\n    def socket_cgroup(self):return self.intent()['listener']['cgroup']\n\n\ndef duplicate_listener(value):\n    if sys.platform!='linux' or os.uname().machine not in ('x86_64','aarch64'):raise AdmissionGateError('Listener pinning requires the supported Linux host')\n    import ctypes,fcntl\n    pid=value['pid'];process=Path('/proc')/str(pid)\n    if process_started(process/'stat')!=value['started']:raise AdmissionGateError('Listener process identity changed')\n    descriptor=os.pidfd_open(pid)\n    try:\n        library=ctypes.CDLL(None,use_errno=True);copied=library.syscall(438,descriptor,value['fd'],0)\n        if copied<0:raise OSError(ctypes.get_errno(),'pidfd_getfd')\n    finally:os.close(descriptor)\n    try:\n        if os.fstat(copied).st_ino!=value['inode']:raise AdmissionGateError('Listener descriptor identity changed')\n        flags=fcntl.fcntl(copied,fcntl.F_GETFL);listener=socket.socket(fileno=copied);copied=None\n        try:\n            if fcntl.fcntl(listener.fileno(),fcntl.F_GETFL)!=flags:\n                fcntl.fcntl(listener.fileno(),fcntl.F_SETFL,flags);raise AdmissionGateError('Listener status flags must remain unchanged')\n            actual=listener.getsockname();address=ipaddress.ip_address(value['address'])\n            valid=(ipaddress.ip_address(actual[0])==address and actual[1]==value['port'] and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_TYPE)==socket.SOCK_STREAM and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_ACCEPTCONN)==1 and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT)==0 and\n                not (address.version==6 and address.is_unspecified and listener.getsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY)!=0))\n            if not valid:raise AdmissionGateError('Invalid exclusive maintenance listener')\n        except BaseException:listener.close();raise\n        return listener\n    finally:\n        if copied is not None:os.close(copied)\n\n\ndef inspect_listener(inode,address,port):\n    if not inode.isdecimal() or not port.isdecimal():raise AdmissionGateError('Invalid stored listener')\n    for path in Path('/proc/1/fd').iterdir():\n        try:link=os.readlink(path)\n        except FileNotFoundError:continue\n        if link=='socket:['+inode+']':\n            with duplicate_listener({'pid':1,'fd':int(path.name),'inode':int(inode),'started':process_started(Path('/proc/1/stat')),'address':address,'port':int(port)}):\n                print(json.dumps({'inode':int(inode),'address':address,'port':int(port)}));return\n    raise AdmissionGateError('PID1 no longer holds the listener')\n\n\ndef notify_listener(descriptor,name):\n    path=os.environ.get('NOTIFY_SOCKET')\n    if not path:raise AdmissionGateError('Maintenance listener requires its managed unit')\n    with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as notification:\n        notification.connect('\\0'+path[1:] if path.startswith('@') else path)\n        notification.sendmsg([('FDSTORE=1\\nFDPOLL=0\\nFDNAME='+name+'\\nREADY=1').encode()],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[descriptor]))])\n\n\ndef stopped_event():\n    stopped=threading.Event()\n    for name in (signal.SIGTERM,signal.SIGINT):signal.signal(name,lambda *_:stopped.set())\n    return stopped\n\n\ndef pin_listener(operation,encoded,token):\n    if str(uuid.UUID(operation))!=operation or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:\n        raise AdmissionGateError('Invalid listener pin request')\n    value=json.loads(base64.urlsafe_b64decode(encoded));process=Path('/proc')/str(value['pid'])\n    uid=int(next(line for line in (process/'status').read_text().splitlines() if line.startswith('Uid:')).split()[1])\n    if (uid!=value['uid'] or (process/'exe').resolve()!=Path(value['executable']).resolve() or\n            (process/'cwd').resolve()!=Path(value['directory']) or '0::'+value['cgroup'] not in (process/'cgroup').read_text().splitlines()):\n        raise AdmissionGateError('Platform listener differs from its verified source')\n    stopped=stopped_event()\n    with duplicate_listener(value) as listener:\n        notify_listener(listener.fileno(),'listener-'+operation+'-'+token);stopped.wait()\n\n\ndef maintenance_serve(operation,target,address,port,token):\n    if str(uuid.UUID(operation))!=operation or not port.isdecimal() or not 1<=int(port)<=65535 or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:\n        raise AdmissionGateError('Invalid maintenance listener request')\n    pages=maintenance_pages(Path(target))\n    if pages is None:raise AdmissionGateError('Installed source has no maintenance pages')\n    stopped=stopped_event()\n    listener=MaintenanceListener(pages,address,int(port))\n    try:\n        notify_listener(listener.server.socket.fileno(),'page-'+operation+'-'+token)\n        stopped.wait()\n    finally:listener.close()\n\nclass LinuxAdmissionGate:\n    def __init__(self, host=None):\n        self.host = host\n\n    def run(self,args,**kwargs):\n        command = ['nft', *args]\n        result = self.host.run(command, check=False, **kwargs) if self.host else subprocess.run(command,capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing,*,page_cgroup=None,page_token=None):\n        if not isinstance(ports,list) or len(ports) not in (2,3):raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[];public=[]\n        for index,endpoint in enumerate(ports):\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selected=[destination+' tcp dport '+str(endpoint['port'])]\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:selected.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n            selectors.extend(selected)\n            if index==0:public=selected\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        pages=''\n        if page_cgroup is not None:\n            if type(page_token) is not int or not 0<page_token<2**32 or page_token==MARK:raise AdmissionGateError('Invalid maintenance connection identity')\n            if (not isinstance(page_cgroup,str) or page_cgroup=='/' or not re.fullmatch(r'/[a-zA-Z0-9_@./-]+',page_cgroup) or\n                    str(PurePosixPath(page_cgroup))!=page_cgroup or any(part in ('.','..') for part in page_cgroup.split('/')[1:])):\n                raise AdmissionGateError('Invalid maintenance socket cgroup')\n            group=page_cgroup[1:];level=len(group.split('/'))\n            if level>=255:raise AdmissionGateError('Maintenance socket cgroup is too deep')\n            for selected in public:\n                pages+='  '+selected+' ct mark != '+str(MARK)+' tcp flags & (syn | ack) == syn ct mark set 0\\n'\n                owner=selected+' ct mark != '+str(MARK)+' socket cgroupv2 level '+str(level)+' '+json.dumps(group)\n                # Missing next ancestors break this rule; existing descendants cannot be the root cgroup.\n                pages+='  '+owner+' socket cgroupv2 level '+str(level+1)+' != \"/\" counter reject with tcp reset\\n'\n                pages+='  '+owner+' tcp flags & (syn | ack) == syn ct mark set '+str(page_token)+' counter accept\\n'\n                pages+='  '+selected+' ct mark '+str(page_token)+' counter accept\\n'\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{pages}{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):\n        existing=self.table_exists()\n        self.batch(self.rules(ports,existing),check=True)\n        # Validate the supported socket expression without granting a live exception.\n        self.batch(self.rules(ports,existing,page_cgroup='/system.slice',page_token=1),check=True)\n    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))\n    def show_page(self,ports,cgroup,token):self.batch(self.rules(ports,self.table_exists(),page_cgroup=cgroup,page_token=token))\n    def open(self):\n        if self.table_exists():self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid,program=None):\n        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER); gate=LinuxAdmissionGate()\n    if path.exists() or path.is_symlink():\n        value=protected_json(path)\n        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports']); return\n    # Platform operations share the same admission owner and survive the window\n    # between durable intent and marker publication.\n    operations=Path('/var/lib/dsh-phalanx-updater/maintenance-operation.json')\n    if operations.exists() or operations.is_symlink():\n        root=operations.parent\n        info=root.lstat()\n        if root.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid platform operation owner')\n        job=protected_json(operations)\n        if job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):\n            raise AdmissionGateError('Unknown platform operation admission protocol')\n        if job['phase'] not in ('succeeded','restored'):\n            value=json.loads(job['marker'])\n            if value.get('schema')!=1 or value.get('operation')!=job['id']:raise AdmissionGateError('Invalid platform operation marker')\n            gate.close(value['ports']);return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close(protected_ports(values)); return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:\n        if len(sys.argv)==1:restore_boot_admission()\n        elif len(sys.argv)==7 and sys.argv[1]=='--serve-page':maintenance_serve(*sys.argv[2:])\n        elif len(sys.argv)==5 and sys.argv[1]=='--inspect-listener':inspect_listener(*sys.argv[2:])\n        elif len(sys.argv)==5 and sys.argv[1]=='--pin-listener':pin_listener(*sys.argv[2:])\n        else:raise AdmissionGateError('Unknown maintenance entry request')\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
-"""Deployment facts and read-only checks before large downloads or host changes."""
-import ipaddress
-import os
+UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport hashlib\nimport signal\nimport math\nimport re\nimport socket\nimport threading\nimport stat\nimport json\nimport os\nfrom pathlib import Path, PurePosixPath\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\nimport base64\nimport array\nimport secrets\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\ndef protected_ports(values):\n    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]\n    if values.get('DSH_PHALANX_PREVIEW_PORT'):\n        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})\n    return endpoints\n\n\nclass AdmissionGateError(Exception):\n    code='admission.failed'\n\n\n\ndef maintenance_pages(target):\n    target=Path(target)\n    if target.is_symlink() or (target/'dist').is_symlink():\n        raise AdmissionGateError('Invalid installed maintenance page directory')\n    pages={}\n    for locale in ('en','zh-CN'):\n        path=target/'dist'/('maintenance.'+locale+'.html')\n        try:\n            descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)\n        except FileNotFoundError:\n            continue\n        except OSError as error:\n            raise AdmissionGateError('Installed maintenance page is unavailable') from error\n        with os.fdopen(descriptor,'rb') as file:\n            info=os.fstat(file.fileno())\n            if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0,os.geteuid()) or info.st_mode&0o022:\n                raise AdmissionGateError('Invalid installed maintenance page ownership')\n            page=file.read(262145)\n            if not page or len(page)>262144:\n                raise AdmissionGateError('Invalid installed maintenance page size')\n            try:\n                page.decode('utf-8')\n            except UnicodeError as error:\n                raise AdmissionGateError('Invalid installed maintenance page encoding') from error\n            pages[locale]=page\n    if pages and len(pages)!=2:\n        raise AdmissionGateError('Installed maintenance pages are incomplete')\n    return pages or None\n\n\ndef maintenance_locale(value):\n    languages=[]\n    for part in value.split(','):\n        fields=part.strip().split(';')\n        tag=fields[0].lower()\n        try:\n            quality=1 if len(fields)==1 else float(fields[1].strip().removeprefix('q='))\n        except ValueError:\n            continue\n        if math.isfinite(quality) and 0<quality<=1:\n            languages.append((tag,quality))\n    languages.sort(key=lambda item:item[1],reverse=True)\n    preferred=languages[0][0] if languages else 'en'\n    return 'zh-CN' if preferred=='zh' or preferred.startswith('zh-') else 'en'\n\n\nclass MaintenanceListener:\n    \"\"\"Owns only the temporary HTTP socket; close finishes before its port can be handed off.\"\"\"\n    def __init__(self,pages,address,port):\n        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n        family=socket.AF_INET6 if ipaddress.ip_address(address).version==6 else socket.AF_INET\n        class Handler(BaseHTTPRequestHandler):\n            protocol_version='HTTP/1.1'\n            def setup(handler):\n                super().setup()\n                handler.connection.settimeout(3)\n            def log_message(handler,*args):\n                pass\n            def respond(handler):\n                body=pages[maintenance_locale(handler.headers.get('Accept-Language','en'))]\n                handler.send_response_only(503)\n                for key,value in [('Content-Type','text/html; charset=utf-8'),('Content-Length',str(len(body))),('Retry-After','3'),('Cache-Control','no-store'),('Connection','close'),('Content-Security-Policy',\"frame-ancestors 'none'\"),('X-Content-Type-Options','nosniff')]:\n                    handler.send_header(key,value)\n                handler.end_headers()\n                handler.close_connection=True\n                if handler.command!='HEAD':\n                    handler.wfile.write(body)\n            do_GET=do_HEAD=do_POST=do_PUT=do_PATCH=do_DELETE=do_OPTIONS=do_CONNECT=do_TRACE=respond\n        class Server(ThreadingHTTPServer):\n            address_family=family\n            allow_reuse_address=True\n            daemon_threads=True\n            block_on_close=False\n            def server_bind(server):\n                if family==socket.AF_INET6:\n                    server.socket.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,0)\n                super().server_bind()\n        self.server=Server((address,port),Handler)\n        self.port=self.server.server_address[1]\n        self.closed=False\n        self.thread=threading.Thread(target=self.server.serve_forever,name='dsh-phalanx-maintenance-http',daemon=True)\n        try:\n            self.thread.start()\n        except BaseException:\n            self.server.server_close()\n            raise\n\n    def close(self):\n        if self.closed:\n            return\n        self.server.shutdown()\n        self.thread.join()\n        self.server.server_close()\n        self.closed=True\n\n\ndef process_started(path):\n    return path.read_text().rsplit(')',1)[1].split()[19]\n\n\ndef maintenance_token(job,key):\n    used=job.setdefault('maintenanceTokens',[])\n    if not isinstance(used,list) or len(used)>4096 or any(type(value) is not int or not 0<value<2**32 or value==MARK for value in used):\n        raise AdmissionGateError('Invalid maintenance connection history')\n    previous=job.get(key)\n    if isinstance(previous,dict):\n        token=previous.get('token')\n        if type(token) is not int or not 0<token<2**32 or token==MARK:\n            raise AdmissionGateError('Invalid maintenance connection identity')\n        if token not in used:\n            used.append(token)\n        return token\n    token=secrets.randbits(32)\n    while token in (0,MARK) or token in used:\n        token=secrets.randbits(32)\n    used.append(token)\n    return token\n\n\nclass ManagedMaintenanceSocket:\n    \"\"\"PID1 keeps the exact listener bound independently of either serving process.\"\"\"\n    def __init__(self,host,job,role,key):\n        self.host=host\n        self.job=job\n        self.key=key\n        if str(uuid.UUID(job['id']))!=job['id']:\n            raise AdmissionGateError('Invalid maintenance operation identity')\n        self.unit='dsh-phalanx-upgrade-'+role+'-'+job['id']+'.service'\n        self.cgroup='/system.slice/'+self.unit\n        self.endpoint=protected_ports(job['source']['values'])[0]\n        self.program=str(host.path('/opt/dsh-phalanx/maintenance/gate.py'))\n        self.role=role\n\n    def fdname(self):\n        return self.role+'-'+self.job['id']+'-'+str(self.intent()['token'])\n\n    def stored(self,fields):\n        if fields.get('NFileDescriptorStore')!='1':\n            raise AdmissionGateError('The maintenance listener is not pinned by PID1')\n        rows=json.loads(self.host.run(['systemd-analyze','--json=short','fdstore',self.unit]).stdout)\n        if not isinstance(rows,list) or len(rows)!=1:\n            raise AdmissionGateError('Unexpected maintenance descriptor inventory')\n        row=rows[0]\n        inode=row.get('inode')\n        if (type(inode) is not int or inode<=0 or row.get('fdname')!=self.fdname() or\n                type(row.get('type')) is not int or not stat.S_ISSOCK(row['type']) or row.get('path')!='socket:['+str(inode)+']'):\n            raise AdmissionGateError('Maintenance descriptor differs from its owner')\n        expected=self.intent().get('listener',{}).get('inode')\n        if expected is not None and expected!=inode:\n            raise AdmissionGateError('A different platform listener was pinned')\n        result=self.host.run(['/usr/bin/python3','-I',self.program,'--inspect-listener',str(inode),self.endpoint['address'],str(self.endpoint['port'])])\n        if json.loads(result.stdout)!={'inode':inode,'address':self.endpoint['address'],'port':self.endpoint['port']}:\n            raise AdmissionGateError('Pinned maintenance endpoint differs from its owner')\n        return inode\n\n    def facts(self):\n        properties='LoadState,MainPID,Transient,User,Type,NotifyAccess,KillMode,Restart,ExecStart,ControlGroup,RemainAfterExit,FileDescriptorStoreMax,FileDescriptorStorePreserve,NFileDescriptorStore,CollectMode,ActiveState,Job'\n        result=self.host.run(['systemctl','show',self.unit,'--property='+properties],check=False)\n        fields=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)\n        if fields.get('LoadState')=='not-found':\n            return None\n        if result.returncode!=0 or fields.get('LoadState')!='loaded':\n            raise AdmissionGateError('Maintenance unit state is unavailable')\n        return fields\n\n    def verify(self,fields,*,listener=False):\n        intent=self.intent()\n        if intent is None or self.job.get(self.key)!=intent:\n            raise AdmissionGateError('Maintenance unit is not owned by this operation')\n        for key,value in [('Transient','yes'),('User','root'),('Type','notify'),('NotifyAccess','main'),('KillMode','control-group'),('Restart','no'),('RemainAfterExit','yes'),('FileDescriptorStoreMax','1'),('FileDescriptorStorePreserve','yes'),('CollectMode','inactive')]:\n            if fields.get(key)!=value:\n                raise AdmissionGateError('Maintenance unit configuration differs from its owner')\n        command=re.fullmatch(r'\\{ path=([^ ;]+) ; argv\\[\\]=([^;]+) ; ignore_errors=no ;[^{}]*\\}',fields.get('ExecStart',''))\n        if command is None or command[1]!='/usr/bin/python3' or command[2].split()!=self.arguments:\n            raise AdmissionGateError('Maintenance unit command differs from its owner')\n        raw_pid=fields.get('MainPID','')\n        if not raw_pid.isdecimal():\n            raise AdmissionGateError('Invalid maintenance listener process')\n        pid=int(raw_pid)\n        group=fields.get('ControlGroup','')\n        if group not in ('',self.cgroup) or pid and group!=self.cgroup:\n            raise AdmissionGateError('Maintenance unit cgroup differs from its owner')\n        if pid:\n            process=self.host.path('/proc/'+str(pid))\n            actual=[item for item in (process/'cmdline').read_bytes().split(b'\\0') if item]\n            if (actual!=[os.fsencode(item) for item in self.arguments] or\n                    (process/'exe').resolve()!=self.host.path('/usr/bin/python3').resolve() or\n                    '0::'+self.cgroup not in (process/'cgroup').read_text().splitlines()):\n                raise AdmissionGateError('Maintenance listener process differs from its owner')\n        if fields.get('NFileDescriptorStore') not in ('0','1'):\n            raise AdmissionGateError('Invalid maintenance descriptor count')\n        if fields['NFileDescriptorStore']=='1':\n            self.stored(fields)\n        if listener and (fields['NFileDescriptorStore']!='1' or not pid or not self.host.pid_owns_listener(pid,self.endpoint['port'],ipaddress.ip_address(self.endpoint['address']))):\n            raise AdmissionGateError('Maintenance service does not own its expected listener')\n        return pid\n\n    def start(self):\n        if self.intent() is None:\n            return None\n        fields=self.facts()\n        if fields is None:\n            if self.job.get(self.key)!=self.intent():\n                raise AdmissionGateError('Save maintenance ownership before starting its listener')\n            self.host.run(['systemd-run','--unit='+self.unit,'--slice=system.slice',\n                           '--property=Type=notify','--property=NotifyAccess=main','--property=User=root',\n                           '--property=KillMode=control-group','--property=Restart=no','--property=WorkingDirectory=/',\n                           '--property=RemainAfterExit=yes','--property=FileDescriptorStoreMax=1',\n                           '--property=FileDescriptorStorePreserve=yes','--property=CollectMode=inactive',\n                           '--',*self.arguments])\n            fields=self.facts()\n        if fields is None:\n            raise AdmissionGateError('Maintenance listener exited before admission could be verified')\n        self.verify(fields,listener=True)\n        return self.socket_cgroup\n\n    def stop(self):\n        fields=self.facts()\n        if fields is None:\n            return\n        self.verify(fields)\n        result=self.host.run(['systemctl','stop',self.unit],check=False)\n        after=self.facts()\n        if after is not None:\n            if result.returncode!=0 or self.verify(after):\n                raise AdmissionGateError('Maintenance listener did not stop')\n            if after.get('Job',''):\n                raise AdmissionGateError('Maintenance listener still has a pending job')\n            if after.get('ActiveState')=='failed':\n                self.host.run(['systemctl','reset-failed',self.unit])\n                after=self.facts()\n            if after is not None:\n                self.verify(after)\n                if after.get('ActiveState')!='inactive' or after.get('Job',''):\n                    raise AdmissionGateError('Maintenance listener is not inactive')\n                self.host.run(['systemctl','clean','--what=fdstore',self.unit])\n                after=self.facts()\n                if after is not None and (self.verify(after) or after['NFileDescriptorStore']!='0'):\n                    raise AdmissionGateError('Maintenance descriptor was not released')\n        events=self.host.path('/sys/fs/cgroup'+self.cgroup+'/cgroup.events')\n        if events.exists() and dict(line.split() for line in events.read_text().splitlines()).get('populated')!='0':\n            raise AdmissionGateError('Maintenance unit still has active processes')\n\n\nclass MaintenanceUnit(ManagedMaintenanceSocket):\n    def __init__(self,host,job):\n        super().__init__(host,job,'page','maintenancePage')\n        self.target=Path(job['source']['target'])\n        self.token=None\n        self.socket_cgroup=self.cgroup\n    def intent(self):\n        pages=maintenance_pages(self.target)\n        if pages is None:\n            return None\n        if self.token is None:\n            self.token=maintenance_token(self.job,self.key)\n        return {'unit':self.unit,'source':str(self.target),'pages':{locale:hashlib.sha256(body).hexdigest() for locale,body in pages.items()},'token':self.token}\n    @property\n    def arguments(self):\n        return ['/usr/bin/python3','-I',self.program,'--serve-page',self.job['id'],str(self.target),self.endpoint['address'],str(self.endpoint['port']),str(self.intent()['token'])]\n\n\nclass ListenerPinUnit(ManagedMaintenanceSocket):\n    def __init__(self,host,job):\n        super().__init__(host,job,'listener','maintenanceListener')\n    def intent(self):\n        value=self.job.get(self.key)\n        if value is None:\n            return None\n        if not isinstance(value,dict) or value.get('unit')!=self.unit or not isinstance(value.get('listener'),dict):\n            raise AdmissionGateError('Invalid platform listener ownership')\n        maintenance_token(self.job,self.key)\n        return {'unit':self.unit,'listener':value['listener'],'token':value['token']}\n    @property\n    def arguments(self):\n        value=self.intent()\n        encoded=base64.urlsafe_b64encode(json.dumps(value['listener'],sort_keys=True,separators=(',',':')).encode()).decode()\n        return ['/usr/bin/python3','-I',self.program,'--pin-listener',self.job['id'],encoded,str(value['token'])]\n    @property\n    def socket_cgroup(self):\n        return self.intent()['listener']['cgroup']\n\n\ndef duplicate_listener(value):\n    if sys.platform!='linux' or os.uname().machine not in ('x86_64','aarch64'):\n        raise AdmissionGateError('Listener pinning requires the supported Linux host')\n    import ctypes,fcntl\n    pid=value['pid']\n    process=Path('/proc')/str(pid)\n    if process_started(process/'stat')!=value['started']:\n        raise AdmissionGateError('Listener process identity changed')\n    descriptor=os.pidfd_open(pid)\n    try:\n        library=ctypes.CDLL(None,use_errno=True)\n        copied=library.syscall(438,descriptor,value['fd'],0)\n        if copied<0:\n            raise OSError(ctypes.get_errno(),'pidfd_getfd')\n    finally:\n        os.close(descriptor)\n    try:\n        if os.fstat(copied).st_ino!=value['inode']:\n            raise AdmissionGateError('Listener descriptor identity changed')\n        flags=fcntl.fcntl(copied,fcntl.F_GETFL)\n        listener=socket.socket(fileno=copied)\n        copied=None\n        try:\n            if fcntl.fcntl(listener.fileno(),fcntl.F_GETFL)!=flags:\n                fcntl.fcntl(listener.fileno(),fcntl.F_SETFL,flags)\n                raise AdmissionGateError('Listener status flags must remain unchanged')\n            actual=listener.getsockname()\n            address=ipaddress.ip_address(value['address'])\n            valid=(ipaddress.ip_address(actual[0])==address and actual[1]==value['port'] and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_TYPE)==socket.SOCK_STREAM and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_ACCEPTCONN)==1 and\n                listener.getsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT)==0 and\n                not (address.version==6 and address.is_unspecified and listener.getsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY)!=0))\n            if not valid:\n                raise AdmissionGateError('Invalid exclusive maintenance listener')\n        except BaseException:\n            listener.close()\n            raise\n        return listener\n    finally:\n        if copied is not None:\n            os.close(copied)\n\n\ndef inspect_listener(inode,address,port):\n    if not inode.isdecimal() or not port.isdecimal():\n        raise AdmissionGateError('Invalid stored listener')\n    for path in Path('/proc/1/fd').iterdir():\n        try:\n            link=os.readlink(path)\n        except FileNotFoundError:\n            continue\n        if link=='socket:['+inode+']':\n            with duplicate_listener({'pid':1,'fd':int(path.name),'inode':int(inode),'started':process_started(Path('/proc/1/stat')),'address':address,'port':int(port)}):\n                print(json.dumps({'inode':int(inode),'address':address,'port':int(port)}))\n                return\n    raise AdmissionGateError('PID1 no longer holds the listener')\n\n\ndef notify_listener(descriptor,name):\n    path=os.environ.get('NOTIFY_SOCKET')\n    if not path:\n        raise AdmissionGateError('Maintenance listener requires its managed unit')\n    with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as notification:\n        notification.connect('\\0'+path[1:] if path.startswith('@') else path)\n        notification.sendmsg([('FDSTORE=1\\nFDPOLL=0\\nFDNAME='+name+'\\nREADY=1').encode()],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[descriptor]))])\n\n\ndef stopped_event():\n    stopped=threading.Event()\n    for name in (signal.SIGTERM,signal.SIGINT):\n        signal.signal(name,lambda *_:stopped.set())\n    return stopped\n\n\ndef pin_listener(operation,encoded,token):\n    if str(uuid.UUID(operation))!=operation or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:\n        raise AdmissionGateError('Invalid listener pin request')\n    value=json.loads(base64.urlsafe_b64decode(encoded))\n    process=Path('/proc')/str(value['pid'])\n    uid=int(next(line for line in (process/'status').read_text().splitlines() if line.startswith('Uid:')).split()[1])\n    if (uid!=value['uid'] or (process/'exe').resolve()!=Path(value['executable']).resolve() or\n            (process/'cwd').resolve()!=Path(value['directory']) or '0::'+value['cgroup'] not in (process/'cgroup').read_text().splitlines()):\n        raise AdmissionGateError('Platform listener differs from its verified source')\n    stopped=stopped_event()\n    with duplicate_listener(value) as listener:\n        notify_listener(listener.fileno(),'listener-'+operation+'-'+token)\n        stopped.wait()\n\n\ndef maintenance_serve(operation,target,address,port,token):\n    if str(uuid.UUID(operation))!=operation or not port.isdecimal() or not 1<=int(port)<=65535 or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:\n        raise AdmissionGateError('Invalid maintenance listener request')\n    pages=maintenance_pages(Path(target))\n    if pages is None:\n        raise AdmissionGateError('Installed source has no maintenance pages')\n    stopped=stopped_event()\n    listener=MaintenanceListener(pages,address,int(port))\n    try:\n        notify_listener(listener.server.socket.fileno(),'page-'+operation+'-'+token)\n        stopped.wait()\n    finally:\n        listener.close()\n\nclass LinuxAdmissionGate:\n    def __init__(self, host=None):\n        self.host = host\n\n    def run(self,args,**kwargs):\n        command = ['nft', *args]\n        result = self.host.run(command, check=False, **kwargs) if self.host else subprocess.run(command,capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:\n            raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing,*,page_cgroup=None,page_token=None):\n        if not isinstance(ports,list) or len(ports) not in (2,3):\n            raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[]\n        public=[]\n        for index,endpoint in enumerate(ports):\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selected=[destination+' tcp dport '+str(endpoint['port'])]\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:\n                selected.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n            selectors.extend(selected)\n            if index==0:\n                public=selected\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        pages=''\n        if page_cgroup is not None:\n            if type(page_token) is not int or not 0<page_token<2**32 or page_token==MARK:\n                raise AdmissionGateError('Invalid maintenance connection identity')\n            if (not isinstance(page_cgroup,str) or page_cgroup=='/' or not re.fullmatch(r'/[a-zA-Z0-9_@./-]+',page_cgroup) or\n                    str(PurePosixPath(page_cgroup))!=page_cgroup or any(part in ('.','..') for part in page_cgroup.split('/')[1:])):\n                raise AdmissionGateError('Invalid maintenance socket cgroup')\n            group=page_cgroup[1:]\n            level=len(group.split('/'))\n            if level>=255:\n                raise AdmissionGateError('Maintenance socket cgroup is too deep')\n            for selected in public:\n                pages+='  '+selected+' ct mark != '+str(MARK)+' tcp flags & (syn | ack) == syn ct mark set 0\\n'\n                owner=selected+' ct mark != '+str(MARK)+' socket cgroupv2 level '+str(level)+' '+json.dumps(group)\n                # Missing next ancestors break this rule; existing descendants cannot be the root cgroup.\n                pages+='  '+owner+' socket cgroupv2 level '+str(level+1)+' != \"/\" counter reject with tcp reset\\n'\n                pages+='  '+owner+' tcp flags & (syn | ack) == syn ct mark set '+str(page_token)+' counter accept\\n'\n                pages+='  '+selected+' ct mark '+str(page_token)+' counter accept\\n'\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{pages}{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600)\n            file.write(text)\n            file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):\n        existing=self.table_exists()\n        self.batch(self.rules(ports,existing),check=True)\n        # Validate the supported socket expression without granting a live exception.\n        self.batch(self.rules(ports,existing,page_cgroup='/system.slice',page_token=1),check=True)\n    def close(self,ports):\n        self.batch(self.rules(ports,self.table_exists()))\n    def show_page(self,ports,cgroup,token):\n        self.batch(self.rules(ports,self.table_exists(),page_cgroup=cgroup,page_token=token))\n    def open(self):\n        if self.table_exists():\n            self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid,program=None):\n        if program is None:\n            program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:\n            program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:\n        raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER)\n    gate=LinuxAdmissionGate()\n    if path.exists() or path.is_symlink():\n        value=protected_json(path)\n        if value.get('schema')!=1:\n            raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports'])\n        return\n    # Platform operations share the same admission owner and survive the window\n    # between durable intent and marker publication.\n    operations=Path('/var/lib/dsh-phalanx-updater/maintenance-operation.json')\n    if operations.exists() or operations.is_symlink():\n        root=operations.parent\n        info=root.lstat()\n        if root.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:\n            raise AdmissionGateError('Invalid platform operation owner')\n        job=protected_json(operations)\n        if job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):\n            raise AdmissionGateError('Unknown platform operation admission protocol')\n        if job['phase'] not in ('succeeded','restored'):\n            value=json.loads(job['marker'])\n            if value.get('schema')!=1 or value.get('operation')!=job['id']:\n                raise AdmissionGateError('Invalid platform operation marker')\n            gate.close(value['ports'])\n            return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater')\n    pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:\n                raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:\n            raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:\n            raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close(protected_ports(values))\n            return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:\n        if len(sys.argv)==1:\n            restore_boot_admission()\n        elif len(sys.argv)==7 and sys.argv[1]=='--serve-page':\n            maintenance_serve(*sys.argv[2:])\n        elif len(sys.argv)==5 and sys.argv[1]=='--inspect-listener':\n            inspect_listener(*sys.argv[2:])\n        elif len(sys.argv)==5 and sys.argv[1]=='--pin-listener':\n            pin_listener(*sys.argv[2:])\n        else:\n            raise AdmissionGateError('Unknown maintenance entry request')\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
+"""Pure release protocol and source/data compatibility decisions."""
+import functools
 import json
+import math
 import re
-from pathlib import Path
-import secrets
-import shlex
-import urllib.parse
-import tempfile
+import time
+import uuid
 
-VERIFIED_HOSTS = frozenset((('ubuntu', '24.04'), ('ubuntu', '26.04')))
-MINIMUM_PODMAN = (4, 9, 3)
-MINIMUM_PASST_DATE = 20240220
-
-
-def passt_version_date(value):
-    version = re.search(r'\b(?:0\.0~git)?(20\d{2})[-_]?(\d{2})[-_]?(\d{2})\b', value)
-    return int(''.join(version.groups())) if version else None
-
-
-def entry_url(port, listen_address):
-    address = ipaddress.ip_address(listen_address)
-    if address.is_unspecified:
-        address = ipaddress.ip_address("127.0.0.1" if address.version == 4 else "::1")
-    entry = str(address) if address.version == 4 else f"[{address}]"
-    return f"http://{entry}:{port}"
-
-
-def host_version_failure(podman, pasta):
-    podman_version = re.search(r'\b(\d+)\.(\d+)\.(\d+)\b', podman)
-    if podman_version is None or tuple(map(int, podman_version.groups())) < MINIMUM_PODMAN:
-        return 'Podman version '+podman+'; required minimum: '+'.'.join(map(str, MINIMUM_PODMAN))
-    passt_version = passt_version_date(pasta)
-    if passt_version is None or passt_version < MINIMUM_PASST_DATE:
-        return 'passt version '+pasta+'; required minimum: 0.0~git'+str(MINIMUM_PASST_DATE)
-    return None
-
-
-def distribution_facts(text):
-    values = {}
-    try:
-        for line in text.splitlines():
-            key, separator, value = line.partition('=')
-            if separator and key.strip() in ('ID', 'ID_LIKE', 'VERSION_ID'):
-                values[key.strip()] = ' '.join(shlex.split(value, comments=True))
-    except ValueError:
-        values = {}
-    distribution, version = values.get('ID', ''), values.get('VERSION_ID', '')
-    family = bool({'debian', 'ubuntu'} & {distribution, *values.get('ID_LIKE', '').split()})
-    return {'distribution': distribution, 'version': version, 'family': 'debian' if family else 'unsupported',
-            'verified': (distribution, version) in VERIFIED_HOSTS}
-
-# BEGIN GENERATED DOWNLOAD SOURCE PRESETS
-# Generated from src/domain/download-source-presets.json; do not edit this value.
-DOWNLOAD_SOURCE_PRESETS = json.loads("{\n  \"official\": {\n    \"npm\": \"https://registry.npmjs.org\",\n    \"pypi\": \"https://pypi.org/simple\",\n    \"containerMirror\": \"\",\n    \"ghcrMirror\": \"\",\n    \"githubAssets\": \"\",\n    \"browser\": \"https://cdn.playwright.dev\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"\"\n  },\n  \"mainland\": {\n    \"npm\": \"https://registry.npmmirror.com\",\n    \"pypi\": \"https://pypi.tuna.tsinghua.edu.cn/simple\",\n    \"containerMirror\": \"https://docker.m.daocloud.io/\",\n    \"ghcrMirror\": \"https://ghcr.nju.edu.cn/\",\n    \"githubAssets\": \"https://ghfast.top/\",\n    \"browser\": \"https://registry.npmmirror.com/-/binary/playwright\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"https://gh-proxy.org/\"\n  },\n  \"bootstrap\": {\n    \"official\": {\n      \"nodePrefix\": \"https://nodejs.org/dist/\",\n      \"ubuntuPrefix\": \"https://cloud-images.ubuntu.com/\"\n    },\n    \"mainland\": {\n      \"nodePrefix\": \"https://npmmirror.com/mirrors/node/\",\n      \"ubuntuPrefix\": \"https://mirrors.nju.edu.cn/ubuntu-cloud-images/\"\n    }\n  }\n}\n")
-# END GENERATED DOWNLOAD SOURCE PRESETS
+VERSION = r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+LEGACY_CANDIDATE = re.compile('v'+VERSION+r'-rc\.[1-9][0-9]*\Z')
+CANDIDATE = re.compile(r'(?:v'+VERSION+r'-rc\.[1-9][0-9]*|run-[1-9][0-9]*)\Z')
+STABLE = re.compile('v'+VERSION+r'\Z')
 
 DOWNLOAD_SOURCE_OPTIONS = {
     'npm_registry': 'npm', 'pypi_index': 'pypi', 'container_mirror': 'containerMirror',
@@ -204,485 +158,332 @@ DOWNLOAD_SOURCE_OPTIONS = {
 DOWNLOAD_SOURCE_PREFIXES = ('containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi')
 
 
-def download_source_selection(value):
-    failure = 'Choose a download preset and HTTP(S) addresses without credentials, queries or fragments.'
-    if not isinstance(value, dict) or set(value) - {'preset', 'overrides'} or value.get('preset') not in ('official', 'mainland'):
-        raise ValueError(failure)
-    overrides = value.get('overrides', {})
-    if not isinstance(overrides, dict): raise ValueError(failure)
-    normalized = {}
-    for key, address in overrides.items():
-        if key not in DOWNLOAD_SOURCE_PRESETS['official'] or not isinstance(address, str) or len(address) > 2048 or re.search(r'[\s\x00-\x1f\x7f]', address):
-            raise ValueError(failure)
-        if address == '' and key in DOWNLOAD_SOURCE_PREFIXES:
-            normalized[key] = ''; continue
-        parsed = urllib.parse.urlsplit(address)
-        if (key in ('containerMirror', 'ghcrMirror') and parsed.scheme != 'https') or not re.match(r'^https?://', address, re.I) or parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or '\\' in address:
-            raise ValueError(failure)
-        if parsed.port is not None and not 0 < parsed.port < 65536: raise ValueError(failure)
-        normalized[key] = address.rstrip('/') + ('/' if key in DOWNLOAD_SOURCE_PREFIXES else '')
-    return {'preset': value['preset'], **({'overrides': normalized} if normalized else {})}
+class InstallError(Exception):
+    def __init__(self,message,*,code='unknown'):
+        super().__init__(message)
+        self.code=code
 
 
-def resolve_download_sources(selection):
-    selected = download_source_selection(selection)
-    return {**DOWNLOAD_SOURCE_PRESETS[selected['preset']], **selected.get('overrides', {})}
+# BEGIN GENERATED SYSTEM UPDATE CODES
+# Generated from src/domain/system-update-codes.json; do not edit this value.
+SYSTEM_UPDATE_CODES = json.loads("{\n  \"phases\": {\n    \"install.preflight\": {\n      \"en\": \"Checking installation requirements\",\n      \"zh-CN\": \"检查安装条件\"\n    },\n    \"install.lock\": {\n      \"en\": \"Acquiring the installation lock\",\n      \"zh-CN\": \"获取安装锁\"\n    },\n    \"install.release-selection\": {\n      \"en\": \"Selecting a verified release\",\n      \"zh-CN\": \"选择已验证版本\"\n    },\n    \"install.configuration\": {\n      \"en\": \"Reading installation configuration\",\n      \"zh-CN\": \"读取安装配置\"\n    },\n    \"install.download\": {\n      \"en\": \"Downloading and verifying assets\",\n      \"zh-CN\": \"下载并校验制品\"\n    },\n    \"install.existing-installation\": {\n      \"en\": \"Checking the installed release\",\n      \"zh-CN\": \"检查已安装版本\"\n    },\n    \"install.dependencies\": {\n      \"en\": \"Preparing host dependencies\",\n      \"zh-CN\": \"准备主机依赖\"\n    },\n    \"install.identity-storage\": {\n      \"en\": \"Preparing service identity and storage\",\n      \"zh-CN\": \"准备服务身份与存储\"\n    },\n    \"install.staging\": {\n      \"en\": \"Staging the verified platform\",\n      \"zh-CN\": \"暂存已验证平台\"\n    },\n    \"install.runtime-image\": {\n      \"en\": \"Preparing the runtime image\",\n      \"zh-CN\": \"准备运行镜像\"\n    },\n    \"install.database\": {\n      \"en\": \"Preparing the platform database\",\n      \"zh-CN\": \"准备平台数据库\"\n    },\n    \"install.executor\": {\n      \"en\": \"Installing the update executor\",\n      \"zh-CN\": \"安装升级执行器\"\n    },\n    \"install.activation\": {\n      \"en\": \"Starting the managed service\",\n      \"zh-CN\": \"启动托管服务\"\n    },\n    \"update.preparing\": {\n      \"en\": \"Downloading and verifying the update\",\n      \"zh-CN\": \"下载并校验更新\"\n    },\n    \"update.prepared\": {\n      \"en\": \"Ready to apply\",\n      \"zh-CN\": \"可以应用更新\"\n    },\n    \"update.prepare-failed\": {\n      \"en\": \"Download or verification failed\",\n      \"zh-CN\": \"下载或校验失败\"\n    },\n    \"update.stopping\": {\n      \"en\": \"Stopping the service and user instances\",\n      \"zh-CN\": \"停止平台与成员实例\",\n      \"step\": 1,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.backing-up\": {\n      \"en\": \"Backing up platform data\",\n      \"zh-CN\": \"备份平台数据\",\n      \"step\": 2,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.backed-up\": {\n      \"en\": \"Platform backup verified\",\n      \"zh-CN\": \"平台备份已验证\",\n      \"step\": 3,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.switching\": {\n      \"en\": \"Switching to the verified version\",\n      \"zh-CN\": \"切换到已验证版本\",\n      \"step\": 4,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.validating\": {\n      \"en\": \"Checking the new service\",\n      \"zh-CN\": \"检查新版本服务\",\n      \"step\": 5,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.committed\": {\n      \"en\": \"Update verified; reopening the service\",\n      \"zh-CN\": \"更新已验证，正在开放服务\",\n      \"step\": 6,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.succeeded\": {\n      \"en\": \"Update completed successfully\",\n      \"zh-CN\": \"升级成功\"\n    },\n    \"update.apply-failed\": {\n      \"en\": \"Update could not be applied\",\n      \"zh-CN\": \"无法应用更新\"\n    },\n    \"update.restoring\": {\n      \"en\": \"Restoring the previous version\",\n      \"zh-CN\": \"正在恢复旧版本\",\n      \"step\": 1,\n      \"total\": 2,\n      \"mode\": \"recovery\"\n    },\n    \"update.restoration-committed\": {\n      \"en\": \"Previous version verified; reopening the service\",\n      \"zh-CN\": \"旧版本已验证，正在开放服务\",\n      \"step\": 2,\n      \"total\": 2,\n      \"mode\": \"recovery\"\n    },\n    \"update.restored\": {\n      \"en\": \"Update failed; the previous version was restored\",\n      \"zh-CN\": \"升级失败，已恢复旧版本\"\n    },\n    \"update.recovery-failed\": {\n      \"en\": \"Recovery failed; operator action is required\",\n      \"zh-CN\": \"恢复失败，需要管理员处理\"\n    },\n    \"update.bootstrap\": {\n      \"en\": \"Updating the small executor\",\n      \"zh-CN\": \"更新小执行器\"\n    },\n    \"update.cleanup\": {\n      \"en\": \"Cleaning unused installation resources\",\n      \"zh-CN\": \"清理无用安装资源\"\n    },\n    \"deployment.start\": {\n      \"en\": \"Starting the deployment\",\n      \"zh-CN\": \"启动部署\"\n    },\n    \"deployment.stop\": {\n      \"en\": \"Stopping the deployment\",\n      \"zh-CN\": \"停止部署\"\n    },\n    \"deployment.status\": {\n      \"en\": \"Inspecting deployment status\",\n      \"zh-CN\": \"查询部署状态\"\n    }\n  },\n  \"outcomes\": {\n    \"update.available\": {\n      \"en\": \"Update available\",\n      \"zh-CN\": \"有可用更新\"\n    },\n    \"update.current\": {\n      \"en\": \"Already up to date\",\n      \"zh-CN\": \"已是最新版本\"\n    },\n    \"update.breakpoint-required\": {\n      \"en\": \"Update to the required intermediate version first\",\n      \"zh-CN\": \"需要先升级到断点版本\"\n    },\n    \"update.below-floor\": {\n      \"en\": \"The installed version is below the upgrade floor\",\n      \"zh-CN\": \"当前版本低于升级下限\"\n    },\n    \"update.channel-switch\": {\n      \"en\": \"A formal release is available for this candidate\",\n      \"zh-CN\": \"此候选版可以转为正式版\"\n    },\n    \"update.reader-update-required\": {\n      \"en\": \"Update the small executor first\",\n      \"zh-CN\": \"需要先更新小执行器\"\n    }\n  },\n  \"errors\": {\n    \"disk.insufficient\": {\n      \"en\": \"There is not enough disk space\",\n      \"zh-CN\": \"磁盘空间不足\"\n    },\n    \"disk.inspection-failed\": {\n      \"en\": \"Disk capacity could not be checked\",\n      \"zh-CN\": \"无法检查磁盘容量\"\n    },\n    \"database.unavailable\": {\n      \"en\": \"The platform database is unavailable\",\n      \"zh-CN\": \"平台数据库不可用\"\n    },\n    \"database.export-failed\": {\n      \"en\": \"The platform database could not be exported\",\n      \"zh-CN\": \"平台数据库导出失败\"\n    },\n    \"database.restore-failed\": {\n      \"en\": \"The platform database could not be restored\",\n      \"zh-CN\": \"平台数据库恢复失败\"\n    },\n    \"download.failed\": {\n      \"en\": \"The release download failed\",\n      \"zh-CN\": \"发布制品下载失败\"\n    },\n    \"release.metadata-invalid\": {\n      \"en\": \"The release declaration is invalid\",\n      \"zh-CN\": \"发布声明无效\"\n    },\n    \"release.checksum-failed\": {\n      \"en\": \"A release asset failed checksum verification\",\n      \"zh-CN\": \"发布制品校验失败\"\n    },\n    \"release.identity-mismatch\": {\n      \"en\": \"The release or running process identity does not match\",\n      \"zh-CN\": \"发布制品或运行进程身份不匹配\"\n    },\n    \"compatibility.unsupported\": {\n      \"en\": \"This release is incompatible with the installed platform\",\n      \"zh-CN\": \"此版本与已安装平台不兼容\"\n    },\n    \"operation.conflict\": {\n      \"en\": \"Another operation must finish or recover first\",\n      \"zh-CN\": \"需先完成或恢复另一个操作\"\n    },\n    \"operation.invalid\": {\n      \"en\": \"The selected operation or release changed\",\n      \"zh-CN\": \"所选操作或发布身份已变化\"\n    },\n    \"backup.failed\": {\n      \"en\": \"The platform backup failed\",\n      \"zh-CN\": \"平台备份失败\"\n    },\n    \"backup.invalid\": {\n      \"en\": \"The recovery backup is incomplete or damaged\",\n      \"zh-CN\": \"恢复备份不完整或已损坏\"\n    },\n    \"service.stop-failed\": {\n      \"en\": \"The managed service could not be stopped\",\n      \"zh-CN\": \"托管服务停止失败\"\n    },\n    \"service.start-failed\": {\n      \"en\": \"The managed service could not become ready\",\n      \"zh-CN\": \"托管服务未能就绪\"\n    },\n    \"admission.failed\": {\n      \"en\": \"The maintenance admission rule could not be changed\",\n      \"zh-CN\": \"维护准入规则切换失败\"\n    },\n    \"migration.failed\": {\n      \"en\": \"The platform database migration failed\",\n      \"zh-CN\": \"平台数据库迁移失败\"\n    },\n    \"recovery.failed\": {\n      \"en\": \"The previous version could not be restored\",\n      \"zh-CN\": \"旧版本恢复失败\"\n    },\n    \"cleanup.failed\": {\n      \"en\": \"Some installation resources could not be cleaned\",\n      \"zh-CN\": \"部分安装资源清理失败\"\n    },\n    \"operation.interrupted\": {\n      \"en\": \"The operation was interrupted before a result was recorded\",\n      \"zh-CN\": \"操作中断，尚未记录结果\"\n    },\n    \"unknown\": {\n      \"en\": \"An unclassified update error occurred\",\n      \"zh-CN\": \"发生未分类的升级错误\"\n    }\n  }\n}\n")
+# END GENERATED SYSTEM UPDATE CODES
 
 
-# BEGIN GENERATED EXECUTOR FACTS PROGRAM
-EXECUTOR_FACTS_PROGRAM = "// Generated from platform adapters. The source release owns its connection, key and TLS interpretation.\nimport { readFileSync } from 'node:fs';\ntry {\n  const request = JSON.parse(readFileSync(0, 'utf8'));\n  const { readExecutorFacts } = await import(\"data:text/javascript;base64,aW1wb3J0IHsgcGF0aFRvRmlsZVVSTCB9IGZyb20gJ25vZGU6dXJsJzsKaW1wb3J0IHsgbHN0YXRTeW5jLCByZWFkZGlyU3luYyB9IGZyb20gJ25vZGU6ZnMnOwppbXBvcnQgeyBiYXNlbmFtZSwgZGlybmFtZSwgam9pbiB9IGZyb20gJ25vZGU6cGF0aCc7CmNvbnN0IHsgRmlsZVBsYXRmb3JtRGF0YWJhc2VDb25maWcgfSA9IGF3YWl0IGltcG9ydChwYXRoVG9GaWxlVVJMKHByb2Nlc3MuYXJndlsyXSArICcvZGlzdC9hZGFwdGVycy9wbGF0Zm9ybS1kYXRhYmFzZS1jb25maWcuanMnKS5ocmVmKTsKY29uc3QgeyBGaWxlUGxhdGZvcm1TZWNyZXRzIH0gPSBhd2FpdCBpbXBvcnQocGF0aFRvRmlsZVVSTChwcm9jZXNzLmFyZ3ZbMl0gKyAnL2Rpc3QvYWRhcHRlcnMvcGxhdGZvcm0tc2VjcmV0cy5qcycpLmhyZWYpOwpjb25zdCB7IGluc3BlY3RQbGF0Zm9ybURhdGFiYXNlLCBwbGF0Zm9ybURhdGFiYXNlUG9vbCB9ID0gYXdhaXQgaW1wb3J0KHBhdGhUb0ZpbGVVUkwocHJvY2Vzcy5hcmd2WzJdICsgJy9kaXN0L2FkYXB0ZXJzL3BsYXRmb3JtLWRhdGFiYXNlLWluc3BlY3Rpb24uanMnKS5ocmVmKTsKY29uc3QgeyByZWFkUmVnaXN0ZXJlZFNjaGVtYVZlcnNpb25zIH0gPSBhd2FpdCBpbXBvcnQoImRhdGE6dGV4dC9qYXZhc2NyaXB0O2Jhc2U2NCxhVzF3YjNKMElIc2djR0YwYUZSdlJtbHNaVlZTVENCOUlHWnliMjBnSjI1dlpHVTZkWEpzSnpzS1kyOXVjM1FnZXlCUVRFRlVSazlTVFY5VFEwaEZUVUZUTENCelkyaGxiV0ZKWkdWdWRHbG1hV1Z5SUgwZ1BTQmhkMkZwZENCcGJYQnZjblFvSW1SaGRHRTZkR1Y0ZEM5cVlYWmhjMk55YVhCME8ySmhjMlUyTkN4aFZ6RjNZak5LTUVsSWMyZGpSMFl3WVVaU2RsSnRiSE5hVmxaVFZFTkNPVWxIV25saU1qQm5TakkxZGxwSFZUWmtXRXB6U25welMxa3lPWFZqTTFGblpYbENVVlJGUmxWU2F6bFRWRlk1VGxOVlpGTlJWbEpLVkRBMVZFbElNR2RRVTBKb1pESkdjR1JEUW5CaVdFSjJZMjVSYjJOSFJqQmhSbEoyVW0xc2MxcFdWbE5VUTJoM1kyMDVhbHBZVG5wTWJVWjVXak5hWWsxc01HZExlVUZ1VERKU2NHTXpVWFpaVjFKb1kwaFNiR051VFhaalIzaG9aRWRhZG1OdE1IUmpNazV2V2xjeGFFeHRjSHBLZVd0MVlVaEtiRnBwYXpkRGFUaHhTMmxDVldGSFZXZGpTRXAyV2toV2FtUkhiSFppYVVKNldUSm9iR0pYUldkaFZ6VXlXbGMxTUdJelNqVk1RMEo2WVVkR2VWcFhVV2RaYm10bllsZHNibU50UmpCaFZ6bDFURU5DYW1JeU1YZFpXRkp3V1cxc2MyRllValZKUjBaMVdrTkNhVmxYVG5Ka1dFRm5ZMjFXYUZwSFZubGplVFJuUzJrNFMxcFlhSGRpTTBvd1NVZE9kbUp1VGpCSlJrSk5VVlpTUjFReFNrNVlNVTVFVTBWV1RsRldUV2RRVTBKaVpYbENkVmxYTVd4UGFVRnVXa2hPYjFnelFtOVpWM2hvWW01bmJreERRblJoVjJSNVdWaFNjR0l5TlhwUGFVSlJWRVZHVlZKck9WTlVWamxPVTFWa1UxRldVa3BVTURWVVNVZ3haRTkzYjNaTGFXOW5WVzFXYm1GWVRqQmpibXRuWW0xR2RGcFlUV2RaV0Vwc1NVWk9VbFJEUW5CYVIxWjFaRWRzYldGWFZubGplWGRuWW0xV01scFlTV2RaV0VwcFlWaFNlVmxZU2pWSlJrNVNWRU5DZG1OcFFtaEpTRTVzV1ZoS2FtRkdPWGRaV0ZKdlNVZFdOR05JU214ak0wNXdZakkwZFVsRGIzWkRiVlkwWTBjNWVXUkRRbTFrVnpWcVpFZHNkbUpwUW5wWk1taHNZbGRHU2xwSFZuVmtSMnh0WVZkV2VVdEhOV2hpVjFWd1NVaHpTMGxEUVdkSlIyeHRTVU5uYUV3eE5XSlpVekUyV0RFeFlsbFRNVFpOUXpBMVdERXhOMDFEZHpKTmJqQnJURE5WZFdSSFZucGtRMmgxV1ZjeGJFdFRRamhtUTBKMVdWY3hiRXh1VGpCWldFb3dZekZrY0dSSFoyOUtNMEp1V0hsamNFbEllRGhKUnpWb1lsZFZaMUJVTURsSlEyUndZbTFhZG1OdE1XaGtSMngyWW13NWVsa3lhR3hpVjBWdVNVaDRPRWxITldoaVYxVm5VRlF3T1VsRFpIZGtWMHB6WVZkTmJrdFJiMmRKUTBGblNVTkJaMGxJVW05amJUa3pTVVZXZVdOdE9YbExRMlJDU1VoS2JGb3liSHBrUjFaNVdsZFJaMk5IZUdoa1IxcDJZMjB3WjJNeVRtOWFWekZvU1VjeE1XTXpVV2RoUjBZeVdsTkNhRWxIVW5Cak0xSndZbTFPTUVsSE5YWmlhVEY2WlZoT01GcFhNR2RWTVVaTlNVYzFhR0pYVlc1TFZITkxTVU5CWjBsSVNteGtTRlo1WW1sQ1owbHBVamRpYlVaMFdsZ3dhVmxFYzB0bVVXOTJTMmx2WjFGVFFtcGlNakYzWWpOT2NHUkhiSFppYVVKNlpGaENkMkpIYkd4amVVSm9TVWRhY0dWSFZtdEpSMngxWkcxV2RXUkhPWGxsVTBKdFlqTkpaMkl5Tld4SlIxSm9aRWRHYVZsWVRteEpSM2h3V20xV01HRlhNV3hNYVVGeFRIZHdiR1ZJUW5aamJsRm5XbTVXZFZrelVuQmlNalJuWTIxV2JtRllUakJhV0Vwc1drWk9hbUZIVm5SWldFMXZZekpPYjFwWE1XaGplV3RuWlhkdlowbERRV2RoVjFsblMwaE9hbUZIVm5SWldFNWlUVVl3TDB4dE5XaGlWMVZuU1ZRd09VbERaR3RqTW1obVkwZG9hR0pIUm5WbFEyTndRMmxCWjBsRFFXZEpRMEZuWkVkb2VXSXpZMmRTV0VwNVlqTkpiMG94VW05YVUwSjNZa2RHTUZwdE9YbGlVMEpxWWpOS2JFbElUbXBoUjFaMFdWTkNkR1JZVGpCSlIwcHNTVWhLYkZveWJIcGtSMVo1V2xkUloxcHRiSGxqTTFGdVMxUnpTMGxEUVdkSlIwNTJZbTVPTUVsSE5XaGlWMVo2U1VRd1oySnRWak5KUms1c1pFTm5jRTkzYjJkSlEwRm5ZMjFXTUdSWVNuVkpSVGxwWVcxV2FtUkROVzFqYlZac1pXMVZiMk15VG05YVZ6Rm9ZM2sxZEZsWVFXOWpNazV2V2xjeGFFbEVNQ3RKU0hOTFNVTkJaMGxEUVdkSlEwSjZXVEpvYkdKWFJrcGFSMVoxWkVkc2JXRlhWbmxMU0U1cVlVZFdkRmxUTlhWWlZ6RnNTMVJ6UzBsRFFXZEpRMEZuU1VOQ2NGcHBRVzlpYlVaMFdsaE5kV0ZIUm5wTFNFNXFZVWRXZEZsVE5YVlpWekZzUzFOclMwbERRV2RKUTBGblNVTkJaMGxEUVdka1IyaDVZak5qWjFKWVNubGlNMGx2U2pGQ2MxbFlVbTFpTTBwMFNVaE9hbUZIVm5SWlUwSjFXVmN4YkdONVFuUmtXRTR3U1VkS2JFbElWblZoV0VZeFdsTmpjRTkzYjJkSlEwRm5TVU5CWjBsSE5XaGlWMVo2VEcxR2ExcERhSHBaTW1oc1lsZEZkV0p0Um5SYVUyczNRMmxCWjBsRFFXZEpRMEZuWVZkWlowdERSbnBaTW1oc1lsZEZkV0pYYkc1amJVWXdZVmM1ZFdONU5YTmFWelZ1WkVkbloyWklkMmRqTWs1dldsY3hhRXh0TVhCYU0wcG9aRWRzZG1KdVRYVmpNamwwV2xObmIySlhiRzVqYlVZd1lWYzVkVXhEUW5CaWJWSnNaVU5yWjFCVU5HZGlWMnh1WTIxR01HRlhPWFZNYmxwc1kyNU9jR0l5TkdkSlZEQTVTVWRzZFZwSFZqUkpRM05uVFZOcmNFTnBRV2RKUTBGblNVTkJaMGxEUVdkSlNGSnZZMjA1TTBsRlZubGpiVGw1UzBOa1UxcFhaSEJqTTFKc1kyMVdhMGxJVG1waFIxWjBXVk5DZEdGWFpIbFpXRkp3WWpJMWVrbEhNVEZqTTFGbldXMVZaMWt5T1hWa1IyeHVaRmM1TVdONVFtMWpiVGwwU1VoYWJHTnVUbkJpTWpSblRWTmpjRTkzYjJkSlEwRm5TVU5CWjBsSVNteGtTRlo1WW1sQ1VGbHRjR3haTTFGMVdtNUtiRnBZY0d4TFNITm5ZbTFHZEZwVWIyZGpNazV2V2xjeGFFeHROV2hpVjFWelNVY3hjRm96U21oa1IyeDJZbTVOTmtsRk9XbGhiVlpxWkVNMWJXTnRWbXhsYlZWdll6Sk9iMXBYTVdoTWJURndXak5LYUdSSGJIWmliazExWWxkR2QwdEhNWEJhTTBwb1pFZHNkbUpwUVRsUWFVSlFXVzF3YkZrelVYVmFia3BzV2xod2JFdEljMmRNYVRSMVlsZHNibU50UmpCaFZ6bDFTVWd3Y0V0VGEyZG1VMnMzUTJsQlowbERRamxMVTJzM1EyNHdTeUlwT3dvdktpb2dRU0J0YVhOemFXNW5JRzVoYldWemNHRmpaU0J2Y2lCMlpYSnphVzl1SUhSaFlteGxJR2x6SUhabGNuTnBiMjRnZW1WeWJ6c2djbVZoWkdsdVp5QnVaWFpsY2lCd2NtVndZWEpsY3lCcGRDNGdLaThLWlhod2IzSjBJR0Z6ZVc1aklHWjFibU4wYVc5dUlISmxZV1JTWldkcGMzUmxjbVZrVTJOb1pXMWhWbVZ5YzJsdmJuTW9jM0ZzTENCelkyaGxiV0Z6SUQwZ1VFeEJWRVpQVWsxZlUwTklSVTFCVXlrZ2V3b2dJQ0FnWTI5dWMzUWdkbVZ5YzJsdmJuTWdQU0JiWFRzS0lDQWdJR1p2Y2lBb1kyOXVjM1FnYzJOb1pXMWhJRzltSUhOamFHVnRZWE1wSUhzS0lDQWdJQ0FnSUNCamIyNXpkQ0IwWVdKc1pTQTlJR0FrZTNOamFHVnRZVWxrWlc1MGFXWnBaWElvYzJOb1pXMWhMbTVoYldVcGZTNXpZMmhsYldGZmJXbG5jbUYwYVc5dWMyQTdDaUFnSUNBZ0lDQWdZMjl1YzNRZ2NISmxjMlZ1ZENBOUlDaGhkMkZwZENCemNXd3VjWFZsY25rb0oxTkZURVZEVkNCMGIxOXlaV2RqYkdGemN5Z2tNU2s2T25SbGVIUWdRVk1nY21Wc1lYUnBiMjRuTENCYmRHRmliR1ZkS1NrdWNtOTNjMXN3WFM1eVpXeGhkR2x2YmpzS0lDQWdJQ0FnSUNCamIyNXpkQ0IyWlhKemFXOXVJRDBnY0hKbGMyVnVkQ0EvSUU1MWJXSmxjaWdvWVhkaGFYUWdjM0ZzTG5GMVpYSjVLR0JUUlV4RlExUWdRMDlCVEVWVFEwVW9iV0Y0S0habGNuTnBiMjRwTERBcElFRlRJSFpsY25OcGIyNGdSbEpQVFNBa2UzUmhZbXhsZldBcEtTNXliM2R6V3pCZExuWmxjbk5wYjI0cElEb2dNRHNLSUNBZ0lDQWdJQ0IyWlhKemFXOXVjeTV3ZFhOb0tIc2dibUZ0WlRvZ2MyTm9aVzFoTG01aGJXVXNJSFpsY25OcGIyNGdmU2s3Q2lBZ0lDQjlDaUFnSUNCeVpYUjFjbTRnZG1WeWMybHZibk03Q24wSyIpOwpjb25zdCB7IHJlYWRTYXZlZERvd25sb2FkU291cmNlcyB9ID0gYXdhaXQgaW1wb3J0KCJkYXRhOnRleHQvamF2YXNjcmlwdDtiYXNlNjQsYVcxd2IzSjBJSHNnY0dGMGFGUnZSbWxzWlZWU1RDQjlJR1p5YjIwZ0oyNXZaR1U2ZFhKc0p6c0tZMjl1YzNRZ2V5QkNkWE5wYm1WemMxSjFiR1ZGY25KdmNpQjlJRDBnWVhkaGFYUWdhVzF3YjNKMEtIQmhkR2hVYjBacGJHVlZVa3dvY0hKdlkyVnpjeTVoY21kMld6SmRJQ3NnSnk5a2FYTjBMMlJ2YldGcGJpOWlkWE5wYm1WemN5MWxjbkp2Y2k1cWN5Y3BMbWh5WldZcE93cGpiMjV6ZENCN0lHUnZkMjVzYjJGa1UyOTFjbU5sVTJWc1pXTjBhVzl1SUgwZ1BTQmhkMkZwZENCcGJYQnZjblFvY0dGMGFGUnZSbWxzWlZWU1RDaHdjbTlqWlhOekxtRnlaM1piTWwwZ0t5QW5MMlJwYzNRdlpHOXRZV2x1TDJSdmQyNXNiMkZrTFhOdmRYSmpaUzVxY3ljcExtaHlaV1lwT3dwamIyNXpkQ0I3SUZCc1lYUm1iM0p0VTNSdmNtVk1hV1psWTNsamJHVWdmU0E5SUdGM1lXbDBJR2x0Y0c5eWRDaHdZWFJvVkc5R2FXeGxWVkpNS0hCeWIyTmxjM011WVhKbmRsc3lYU0FySUNjdlpHbHpkQzloWkdGd2RHVnljeTl3YkdGMFptOXliUzF6ZEc5eVpTMXNhV1psWTNsamJHVXVhbk1uS1M1b2NtVm1LVHNLTHlvcUlFOXVaU0J5YjNjZ2NtVmhaR1Z5SUhOb1lYSmxaQ0JpZVNCMGFHVWdiR2wyWlNCemRHOXlaU0JoYm1RZ2RHaGxJSEpsWVdRdGIyNXNlU0JsZUdWamRYUnZjaTRnS2k4S1pYaHdiM0owSUdGemVXNWpJR1oxYm1OMGFXOXVJSEpsWVdSVFlYWmxaRVJ2ZDI1c2IyRmtVMjkxY21ObGN5aGtZWFJoWW1GelpTa2dld29nSUNBZ1kyOXVjM1FnVzNKdmQxMGdQU0JoZDJGcGRDQmtZWFJoWW1GelpTNXhkV1Z5ZVNnblUwVk1SVU5VSUhObGJHVmpkR2x2Yml4eVpYWnBjMmx2YmlCR1VrOU5JR1J6YUY5d2FHRnNZVzU0TG1SdmQyNXNiMkZrWDNOdmRYSmpaWE1nVjBoRlVrVWdhV1E5TVNjcE93b2dJQ0FnY21WMGRYSnVJSEp2ZHlBL0lIc2djMlZzWldOMGFXOXVPaUJrYjNkdWJHOWhaRk52ZFhKalpWTmxiR1ZqZEdsdmJpaHliM2N1YzJWc1pXTjBhVzl1S1N3Z2NtVjJhWE5wYjI0NklFNTFiV0psY2loeWIzY3VjbVYyYVhOcGIyNHBJSDBnT2lCMWJtUmxabWx1WldRN0NuMEtMeW9xQ2lBcUlGUm9aU0JrWlhCc2IzbHRaVzUwTFhkcFpHVWdaRzkzYm14dllXUWdZMmh2YVdObExpQlZiblJwYkNCaGJpQmhaRzFwYm1semRISmhkRzl5SUhOaGRtVnpMQ0IwYUdVZ1kyaHZhV05sSUhSb1pRb2dLaUJwYm5OMFlXeHNaWElnY21WamIzSmtaV1FnYVc0Z2RHaGxJR3h2WTJGc0lHTnZibVpwWjNWeVlYUnBiMjRnWVhCd2JHbGxjenNnYjI1alpTQnpZWFpsWkN3Z2RHaGxJR1JoZEdGaVlYTmxDaUFxSUhKdmR5QmtiMlZ6TGlCVWFHVWdkbWxsZHlCcGN5QnlaV2RwYzNSbGNtVmtJR2x1SUdGeVkyaHBkR1ZqZEhWeVpTNXRaRG9nYzNsdVkyaHliMjV2ZFhNZ2NISmxjR0Z5WVhScGIyNGdZMjlrWlFvZ0tpQnlaV0ZrY3lCcGRDd2dZVzVrSUdsMElHbHpJSEpsWm5KbGMyaGxaQ0J2Ym14NUlHRm1kR1Z5SUdWaFkyZ2dZMjl0YldsMGRHVmtJSE5oZG1VdUNpQXFMd3BsZUhCdmNuUWdZMnhoYzNNZ1VHOXpkR2R5WlhORWIzZHViRzloWkZOdmRYSmpaWE1nZXdvZ0lDQWdaR0YwWVdKaGMyVTdDaUFnSUNCcGJuTjBZV3hzWldRN0NpQWdJQ0IyYVdWM093b2dJQ0FnYkdsbVpXTjVZMnhsSUQwZ2JtVjNJRkJzWVhSbWIzSnRVM1J2Y21WTWFXWmxZM2xqYkdVb0owUnZkMjVzYjJGa0lITnZkWEpqWlNCemRHOXlZV2RsSnlrN0NpQWdJQ0JqYjI1emRISjFZM1J2Y2loa1lYUmhZbUZ6WlN3Z2FXNXpkR0ZzYkdWa0tTQjdDaUFnSUNBZ0lDQWdkR2hwY3k1a1lYUmhZbUZ6WlNBOUlHUmhkR0ZpWVhObE93b2dJQ0FnSUNBZ0lIUm9hWE11YVc1emRHRnNiR1ZrSUQwZ2FXNXpkR0ZzYkdWa093b2dJQ0FnZlFvZ0lDQWdhVzVwZEdsaGJHbDZaU2dwSUhzS0lDQWdJQ0FnSUNCeVpYUjFjbTRnZEdocGN5NXNhV1psWTNsamJHVXVhVzVwZEdsaGJHbDZaU2dvS1NBOVBpQjBhR2x6TG14dllXUW9LU2s3Q2lBZ0lDQjlDaUFnSUNCamJHOXpaU2dwSUhzS0lDQWdJQ0FnSUNCeVpYUjFjbTRnZEdocGN5NXNhV1psWTNsamJHVXVZMnh2YzJVb0tDa2dQVDRnS0hSb2FYTXVkbWxsZHlBOUlIVnVaR1ZtYVc1bFpDa3BPd29nSUNBZ2ZRb2dJQ0FnWjJWMEtDa2dld29nSUNBZ0lDQWdJSFJvYVhNdWJHbG1aV041WTJ4bExtRnpjMlZ5ZEU5d1pXNG9LVHNLSUNBZ0lDQWdJQ0JwWmlBb0lYUm9hWE11ZG1sbGR5a0tJQ0FnSUNBZ0lDQWdJQ0FnZEdoeWIzY2dSWEp5YjNJb0owUnZkMjVzYjJGa0lITnZkWEpqWlNCemRHOXlZV2RsSUdseklHNXZkQ0J5WldGa2VTY3BPd29nSUNBZ0lDQWdJSEpsZEhWeWJpQjdJQzR1TG5OMGNuVmpkSFZ5WldSRGJHOXVaU2gwYUdsekxuWnBaWGN1YzJWc1pXTjBhVzl1S1N3Z2MyRjJaV1E2SUhSb2FYTXVkbWxsZHk1eVpYWnBjMmx2YmlBK0lEQWdmVHNLSUNBZ0lIMEtJQ0FnSUhOaGRtVW9hVzV3ZFhRcElIc0tJQ0FnSUNBZ0lDQnlaWFIxY200Z2RHaHBjeTVzYVdabFkzbGpiR1V1ZDNKcGRHVW9ZWE41Ym1NZ0tDa2dQVDRnZXdvZ0lDQWdJQ0FnSUNBZ0lDQmpiMjV6ZENCelpXeGxZM1JwYjI0Z1BTQmtiM2R1Ykc5aFpGTnZkWEpqWlZObGJHVmpkR2x2YmlocGJuQjFkQ2s3Q2lBZ0lDQWdJQ0FnSUNBZ0lIUm9hWE11WjJWMEtDazdJQzh2SUdOc2IzTmxaQ0J2Y2lCdWIzUWdlV1YwSUdsdWFYUnBZV3hwZW1Wa0lHbHpJSEpsY0c5eWRHVmtJR0psWm05eVpTQmhibmtnY1hWbGNua0tJQ0FnSUNBZ0lDQWdJQ0FnWTI5dWMzUWdaWGh3WldOMFpXUWdQU0IwYUdsekxuWnBaWGN1Y21WMmFYTnBiMjQ3Q2lBZ0lDQWdJQ0FnSUNBZ0lHTnZibk4wSUZ0eWIzZGRJRDBnWVhkaGFYUWdkR2hwY3k1a1lYUmhZbUZ6WlM1eGRXVnllU2hnU1U1VFJWSlVJRWxPVkU4Z1pITm9YM0JvWVd4aGJuZ3VaRzkzYm14dllXUmZjMjkxY21ObGN5aHBaQ3h6Wld4bFkzUnBiMjRzY21WMmFYTnBiMjRwSUZaQlRGVkZVeWd4TENReExERXBDaUFnSUNBZ0lDQWdJRTlPSUVOUFRrWk1TVU5VS0dsa0tTQkVUeUJWVUVSQlZFVWdVMFZVSUhObGJHVmpkR2x2YmoxRldFTk1WVVJGUkM1elpXeGxZM1JwYjI0c2NtVjJhWE5wYjI0OVpHOTNibXh2WVdSZmMyOTFjbU5sY3k1eVpYWnBjMmx2YmlzeElGZElSVkpGSUdSdmQyNXNiMkZrWDNOdmRYSmpaWE11Y21WMmFYTnBiMjQ5SkRJS0lDQWdJQ0FnSUNBZ1VrVlVWVkpPU1U1SElISmxkbWx6YVc5dVlDd2dXMHBUVDA0dWMzUnlhVzVuYVdaNUtITmxiR1ZqZEdsdmJpa3NJR1Y0Y0dWamRHVmtYU2s3Q2lBZ0lDQWdJQ0FnSUNBZ0lDOHZJRTV2SUhKdmR5QmlZV05yT2lCMGFHVWdjM1J2Y21Wa0lISmxkbWx6YVc5dUlHMXZkbVZrSUhCaGMzUWdiM1Z5Y3lBb2FXNWpiSFZrYVc1bklHRWdZMjl1WTNWeWNtVnVkQ0JtYVhKemRDQnpZWFpsS1M0S0lDQWdJQ0FnSUNBZ0lDQWdhV1lnS0NGeWIzY3BDaUFnSUNBZ0lDQWdJQ0FnSUNBZ0lDQjBhSEp2ZHlCdVpYY2dRblZ6YVc1bGMzTlNkV3hsUlhKeWIzSW9KMk52Ym1ac2FXTjBKeXdnSjFCc1lYUm1iM0p0SUdOdmJtWnBaM1Z5WVhScGIyNGdZMmhoYm1kbFpDNGdVbVZzYjJGa0lHSmxabTl5WlNCellYWnBibWN1Snl3Z0ozQnNZWFJtYjNKdExXTnZibVpwWjNWeVlYUnBiMjR0WTI5dVpteHBZM1FuS1RzS0lDQWdJQ0FnSUNBZ0lDQWdkR2hwY3k1MmFXVjNJRDBnZXlCelpXeGxZM1JwYjI0c0lISmxkbWx6YVc5dU9pQk9kVzFpWlhJb2NtOTNMbkpsZG1semFXOXVLU0I5T3dvZ0lDQWdJQ0FnSUgwcE93b2dJQ0FnZlFvZ0lDQWdZWE41Ym1NZ2JHOWhaQ2dwSUhzS0lDQWdJQ0FnSUNCMGFHbHpMblpwWlhjZ1BTQW9ZWGRoYVhRZ2NtVmhaRk5oZG1Wa1JHOTNibXh2WVdSVGIzVnlZMlZ6S0hSb2FYTXVaR0YwWVdKaGMyVXBLU0EvUHlCN0lITmxiR1ZqZEdsdmJqb2daRzkzYm14dllXUlRiM1Z5WTJWVFpXeGxZM1JwYjI0b2RHaHBjeTVwYm5OMFlXeHNaV1FwTENCeVpYWnBjMmx2YmpvZ01DQjlPd29nSUNBZ2ZRcDlDZz09Iik7Ci8qKiBPcGFxdWUgZmlsZXN5c3RlbSBmZW5jZTsgY29ubmVjdGlvbiBhbmQga2V5IGludGVycHJldGF0aW9uIHJlbWFpbiB3aXRoIHRoZSBzb3VyY2Ugb3duZXJzLiAqLwpmdW5jdGlvbiBmaWxlSWRlbnRpdHkocGF0aCkgewogICAgY29uc3QgaW5mbyA9IGxzdGF0U3luYyhwYXRoLCB7IGJpZ2ludDogdHJ1ZSB9KTsKICAgIGlmICghaW5mby5pc0ZpbGUoKSkKICAgICAgICB0aHJvdyBFcnJvcignRXhlY3V0b3IgZmFjdHMgcmVxdWlyZSBhbiBpbmRlcGVuZGVudCBwcm90ZWN0ZWQgZmlsZScpOwogICAgcmV0dXJuIHsgcGF0aCwgZGV2aWNlOiBTdHJpbmcoaW5mby5kZXYpLCBpbm9kZTogU3RyaW5nKGluZm8uaW5vKSwgc2l6ZTogU3RyaW5nKGluZm8uc2l6ZSksIG1vZGlmaWVkOiBTdHJpbmcoaW5mby5tdGltZU5zKSwgY2hhbmdlZDogU3RyaW5nKGluZm8uY3RpbWVOcykgfTsKfQpjb25zdCByb3dzID0gKHNxbCkgPT4gKHsKICAgIHF1ZXJ5OiBhc3luYyAodGV4dCwgdmFsdWVzKSA9PiAoYXdhaXQgc3FsLnF1ZXJ5KHRleHQsIHZhbHVlcyA9PT0gdW5kZWZpbmVkID8gdW5kZWZpbmVkIDogWy4uLnZhbHVlc10pKS5yb3dzLAp9KTsKYXN5bmMgZnVuY3Rpb24gY2hlY2tGYWN0cyhzcWwsIHNjaGVtYXMpIHsKICAgIGxldCBzZWxlY3Rpb24sIHZlcnNpb25zID0gbnVsbCwgY2xpZW50OwogICAgdHJ5IHsKICAgICAgICBjbGllbnQgPSBhd2FpdCBzcWwuY29ubmVjdCgpOwogICAgICAgIGF3YWl0IGNsaWVudC5xdWVyeSgnQkVHSU4gSVNPTEFUSU9OIExFVkVMIFJFUEVBVEFCTEUgUkVBRCBSRUFEIE9OTFknKTsKICAgICAgICBhd2FpdCBjbGllbnQucXVlcnkoJ1NFVCBMT0NBTCBzdGF0ZW1lbnRfdGltZW91dD0xMDAwMCcpOwogICAgICAgIGF3YWl0IGNsaWVudC5xdWVyeSgnU0FWRVBPSU5UIGRvd25sb2FkX3NvdXJjZXMnKTsKICAgICAgICB0cnkgewogICAgICAgICAgICBzZWxlY3Rpb24gPSBhd2FpdCByZWFkU2F2ZWREb3dubG9hZFNvdXJjZXMocm93cyhjbGllbnQpKTsKICAgICAgICB9CiAgICAgICAgY2F0Y2ggewogICAgICAgICAgICBhd2FpdCBjbGllbnQucXVlcnkoJ1JPTExCQUNLIFRPIFNBVkVQT0lOVCBkb3dubG9hZF9zb3VyY2VzJyk7CiAgICAgICAgfQogICAgICAgIGF3YWl0IGNsaWVudC5xdWVyeSgnU0FWRVBPSU5UIHNjaGVtYV92ZXJzaW9ucycpOwogICAgICAgIHRyeSB7CiAgICAgICAgICAgIHZlcnNpb25zID0gYXdhaXQgcmVhZFJlZ2lzdGVyZWRTY2hlbWFWZXJzaW9ucyhjbGllbnQsIHNjaGVtYXMubWFwKG5hbWUgPT4gKHsgbmFtZSwgbWlncmF0aW9uczogW10gfSkpKTsKICAgICAgICB9CiAgICAgICAgY2F0Y2ggewogICAgICAgICAgICBhd2FpdCBjbGllbnQucXVlcnkoJ1JPTExCQUNLIFRPIFNBVkVQT0lOVCBzY2hlbWFfdmVyc2lvbnMnKTsKICAgICAgICB9CiAgICAgICAgYXdhaXQgY2xpZW50LnF1ZXJ5KCdDT01NSVQnKTsKICAgIH0KICAgIGNhdGNoIHsKICAgICAgICB2ZXJzaW9ucyA9IG51bGw7CiAgICAgICAgdHJ5IHsKICAgICAgICAgICAgYXdhaXQgY2xpZW50Py5xdWVyeSgnUk9MTEJBQ0snKTsKICAgICAgICB9CiAgICAgICAgY2F0Y2ggewogICAgICAgICAgICAvKiBUaGUgY29ubmVjdGlvbiBtYXkgYWxyZWFkeSBoYXZlIGNsb3NlZC4gKi8KICAgICAgICB9CiAgICB9CiAgICBmaW5hbGx5IHsKICAgICAgICBjbGllbnQ/LnJlbGVhc2UoKTsKICAgIH0KICAgIHJldHVybiB7IHNlbGVjdGlvbjogc2VsZWN0aW9uPy5zZWxlY3Rpb24gPz8gbnVsbCwgc2NoZW1hczogdmVyc2lvbnMgfTsKfQovKiogUmVhZCBzZWxlY3RlZCBzb3VyY2UgZmFjdHMgd2l0aG91dCBwcmVwYXJpbmcgc3RvcmVzLCBtaWdyYXRpb25zIG9yIGEgcGxhdGZvcm0gcnVudGltZS4gKi8KZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIHJlYWRFeGVjdXRvckZhY3RzKGNvbmZpZ0ZpbGUsIGRhdGFSb290LCBmYWN0LCBzY2hlbWFzKSB7CiAgICBjb25zdCBiZWZvcmUgPSBmaWxlSWRlbnRpdHkoY29uZmlnRmlsZSksIHNlbGVjdGVkID0gRmlsZVBsYXRmb3JtRGF0YWJhc2VDb25maWcub3Blbihjb25maWdGaWxlLCBkYXRhUm9vdCksIGtleSA9IGZpbGVJZGVudGl0eShzZWxlY3RlZC5zZWN1cml0eS5tYXN0ZXJLZXlQYXRoKSwgdmVyaWZpZWRLZXkgPSBGaWxlUGxhdGZvcm1TZWNyZXRzLm9wZW4oc2VsZWN0ZWQuc2VjdXJpdHkubWFzdGVyS2V5UGF0aCwgc2VsZWN0ZWQuc2VjdXJpdHkucmVnaXN0cnkpOwogICAgdmVyaWZpZWRLZXkuY2xvc2UoKTsKICAgIGlmIChmYWN0ID09PSAncm90YXRpb24nKQogICAgICAgIHJldHVybiByb3RhdGlvbkZhY3RzKGNvbmZpZ0ZpbGUsIGRhdGFSb290LCBzZWxlY3RlZCwgW2JlZm9yZSwga2V5XSk7CiAgICBjb25zdCBzcWwgPSBwbGF0Zm9ybURhdGFiYXNlUG9vbChzZWxlY3RlZC5jb25uZWN0aW9uKTsKICAgIHRyeSB7CiAgICAgICAgaWYgKGZhY3QgPT09ICdjaGVjaycpIHsKICAgICAgICAgICAgY29uc3QgcmVzdWx0ID0gYXdhaXQgY2hlY2tGYWN0cyhzcWwsIHNjaGVtYXMpOwogICAgICAgICAgICBpZiAoSlNPTi5zdHJpbmdpZnkoYmVmb3JlKSAhPT0gSlNPTi5zdHJpbmdpZnkoZmlsZUlkZW50aXR5KGNvbmZpZ0ZpbGUpKSB8fCBKU09OLnN0cmluZ2lmeShrZXkpICE9PSBKU09OLnN0cmluZ2lmeShmaWxlSWRlbnRpdHkoa2V5LnBhdGgpKSkKICAgICAgICAgICAgICAgIHRocm93IEVycm9yKCdUaGUgc2VsZWN0ZWQgY29ubmVjdGlvbiBvciBrZXkgY2hhbmdlZCBkdXJpbmcgdGhlIHJlcXVlc3QnKTsKICAgICAgICAgICAgcmV0dXJuIHsgLi4ucmVzdWx0LCBpZGVudGl0eTogW2JlZm9yZSwga2V5XSB9OwogICAgICAgIH0KICAgICAgICBhd2FpdCBzcWwucXVlcnkoJ1NFVCBzdGF0ZW1lbnRfdGltZW91dD0xMDAwMCcpOwogICAgICAgIGlmIChmYWN0ID09PSAnc2NoZW1hcycpCiAgICAgICAgICAgIHJldHVybiB7CiAgICAgICAgICAgICAgICBzY2hlbWFzOiBhd2FpdCByZWFkUmVnaXN0ZXJlZFNjaGVtYVZlcnNpb25zKHNxbCwgc2NoZW1hcy5tYXAobmFtZSA9PiAoeyBuYW1lLCBtaWdyYXRpb25zOiBbXSB9KSkpLAogICAgICAgICAgICB9OwogICAgICAgIGNvbnN0IHJvdyA9IGF3YWl0IHJlYWRTYXZlZERvd25sb2FkU291cmNlcyhyb3dzKHNxbCkpOwogICAgICAgIHJldHVybiB7IHNlbGVjdGlvbjogcm93Py5zZWxlY3Rpb24gPz8gbnVsbCB9OwogICAgfQogICAgZmluYWxseSB7CiAgICAgICAgYXdhaXQgc3FsLmVuZCgpOwogICAgfQp9Ci8qKiBBIGxpdmUtc2VydmljZSBwcm9iZSBuZXZlciB0YWtlcyBtYWludGVuYW5jZSBsb2NrcyBvciBwcmVwYXJlcyBzY2hlbWEgb3Iga2V5IGZpbGVzLiAqLwphc3luYyBmdW5jdGlvbiByb3RhdGlvbkZhY3RzKGNvbmZpZ0ZpbGUsIGRhdGFSb290LCBzZWxlY3RlZCwgaWRlbnRpdHkpIHsKICAgIGNvbnN0IGJ1aWx0aW5GaWxlID0gam9pbihkaXJuYW1lKGNvbmZpZ0ZpbGUpLCAnYnVpbHRpbi1kYXRhYmFzZS5qc29uJyk7CiAgICBpZGVudGl0eS5wdXNoKGZpbGVJZGVudGl0eShidWlsdGluRmlsZSkpOwogICAgY29uc3QgYnVpbHRpbiA9IEZpbGVQbGF0Zm9ybURhdGFiYXNlQ29uZmlnLm9wZW4oYnVpbHRpbkZpbGUsIGRhdGFSb290KTsKICAgIGlmICghc2VsZWN0ZWQuZGVwbG95bWVudElkIHx8IGJ1aWx0aW4uZGVwbG95bWVudElkICE9PSBzZWxlY3RlZC5kZXBsb3ltZW50SWQgfHwgYnVpbHRpbi5zZWN1cml0eS5tYXN0ZXJLZXlQYXRoICE9PSBzZWxlY3RlZC5zZWN1cml0eS5tYXN0ZXJLZXlQYXRoKQogICAgICAgIHRocm93IEVycm9yKCdSb3RhdGlvbiByZXF1aXJlcyBtYXRjaGluZyBwcm90ZWN0ZWQgZGVwbG95bWVudCBjb25maWd1cmF0aW9ucycpOwogICAgY29uc3QgY2xlYXIgPSAoKSA9PiB7CiAgICAgICAgZm9yIChjb25zdCBwYXRoIG9mIFtjb25maWdGaWxlLCBidWlsdGluRmlsZSwgc2VsZWN0ZWQuc2VjdXJpdHkubWFzdGVyS2V5UGF0aF0pIHsKICAgICAgICAgICAgY29uc3QgbmFtZSA9IGJhc2VuYW1lKHBhdGgpOwogICAgICAgICAgICBpZiAocmVhZGRpclN5bmMoZGlybmFtZShwYXRoKSkuc29tZShlbnRyeSA9PiBlbnRyeS5zdGFydHNXaXRoKG5hbWUgKyAnLm5leHQtJykgfHwgZW50cnkuc3RhcnRzV2l0aChuYW1lICsgJy50bXAta2V5LScpKSkKICAgICAgICAgICAgICAgIHRocm93IEVycm9yKCdBIHN0YWdlZCBrZXkgb3BlcmF0aW9uIG11c3QgYmUgcmVjb3ZlcmVkIGZpcnN0Jyk7CiAgICAgICAgfQogICAgICAgIGNvbnN0IGVudHJpZXMgPSByZWFkZGlyU3luYyhkaXJuYW1lKGNvbmZpZ0ZpbGUpKTsKICAgICAgICBpZiAoZW50cmllcy5pbmNsdWRlcygncGxhdGZvcm0ta2V5LW9wZXJhdGlvbi5qc29uJykgfHwgZW50cmllcy5pbmNsdWRlcygncGxhdGZvcm0tZGF0YWJhc2Utb3BlcmF0aW9uLmpzb24nKSkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ0EgcHJvZHVjdCBtYWludGVuYW5jZSBqb3VybmFsIG11c3QgYmUgcmVjb3ZlcmVkIGZpcnN0Jyk7CiAgICB9OwogICAgY2xlYXIoKTsKICAgIGxldCByZWFkeSA9IGZhbHNlOwogICAgaWYgKHNlbGVjdGVkLnNlbGVjdGlvbiAhPT0gdW5kZWZpbmVkKSB7CiAgICAgICAgY29uc3QgY2hlY2tlZCA9IGF3YWl0IGluc3BlY3RQbGF0Zm9ybURhdGFiYXNlKHNlbGVjdGVkLmNvbm5lY3Rpb24sIHNlbGVjdGVkLnNlY3VyaXR5LnJlZ2lzdHJ5Lm1hc3RlckZpbmdlcnByaW50LCBzZWxlY3RlZC5kZXBsb3ltZW50SWQpOwogICAgICAgIGlmICghY2hlY2tlZC5vaykKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ1JvdGF0aW9uIHJlYWRpbmVzcyByZXF1aXJlcyBhIHJlYWNoYWJsZSBtYXRjaGluZyBwbGF0Zm9ybSBkYXRhYmFzZScpOwogICAgICAgIHJlYWR5ID0gY2hlY2tlZC5zY2hlbWEgPT09ICdwbGF0Zm9ybSc7CiAgICB9CiAgICBjbGVhcigpOwogICAgaWYgKGlkZW50aXR5LnNvbWUoYmVmb3JlID0+IEpTT04uc3RyaW5naWZ5KGJlZm9yZSkgIT09IEpTT04uc3RyaW5naWZ5KGZpbGVJZGVudGl0eShiZWZvcmUucGF0aCkpKSkKICAgICAgICB0aHJvdyBFcnJvcignVGhlIHByb3RlY3RlZCBjb25maWd1cmF0aW9uIG9yIGtleSBjaGFuZ2VkIGR1cmluZyByb3RhdGlvbiByZWFkaW5lc3MgY2hlY2tzJyk7CiAgICByZXR1cm4gewogICAgICAgIHJlYWR5LAogICAgICAgIGluaXRpYWxpemF0aW9uUGVuZGluZzogIXJlYWR5LAogICAgICAgIGRlcGxveW1lbnRJZDogc2VsZWN0ZWQuZGVwbG95bWVudElkLAogICAgICAgIGZpbmdlcnByaW50OiBzZWxlY3RlZC5zZWN1cml0eS5yZWdpc3RyeS5tYXN0ZXJGaW5nZXJwcmludCwKICAgICAgICBpZGVudGl0eSwKICAgIH07Cn0K\");\n  const result = await readExecutorFacts(request.configFile, request.dataRoot, request.fact, request.schemas);\n  console.log(JSON.stringify(result));\n} catch {\n  console.error('Platform database facts are unavailable; inspect the selected connection and master-key file');\n  process.exitCode = 2;\n}\n"
-# END GENERATED EXECUTOR FACTS PROGRAM
+def update_phase_code(phase):
+    code='update.'+phase
+    return code if code in SYSTEM_UPDATE_CODES['phases'] else 'unknown'
 
 
-def executor_facts(host, values, fact, *, source=None, schemas=('dsh_phalanx',)):
-    """A bounded read-only adapter; the selected source owns its connection and key interpretation."""
-    target=Path(source) if source is not None else host.path('/opt/dsh-phalanx/current').resolve()
-    config=host.path(values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'))
-    if 'DSH_PHALANX_DATA_ROOT' not in values or not (target/'start').exists() or fact=='download-sources' and not config.exists():return None
-    with tempfile.TemporaryDirectory(prefix='dsh-phalanx-facts-') as temporary:
-        program=Path(temporary)/'executor-facts.mjs';request=Path(temporary)/'request.json'
-        program.write_text(EXECUTOR_FACTS_PROGRAM);program.chmod(0o600)
-        request.write_text(json.dumps({'fact':fact,'configFile':str(config),'dataRoot':str(host.path(values['DSH_PHALANX_DATA_ROOT'])),'schemas':list(schemas)}));request.chmod(0o600)
-        result=host.run(['timeout','--signal=TERM','--kill-after=5s','20s',str(target/'node/bin/node'),str(program),str(target)],input_file=request,check=False)
-    if result.returncode==2:
-        host.tell('The platform database did not answer; using the local record instead of ' + fact)
-        return None
-    if result.returncode!=0:raise ValueError('The installed platform could not report ' + fact)
-    return json.loads(result.stdout)
+def update_code(value,default='unknown'):
+    return value if isinstance(value,str) and re.fullmatch(r'[a-z][a-z0-9.-]{0,127}',value) else default
 
 
-def platform_facts(host, values, fact):
-    """Read narrow download facts; other diagnostics use the installed CLI."""
-    if fact=='download-sources':return executor_facts(host,values,fact)
-    start = host.path('/opt/dsh-phalanx/current/start')
-    database = host.path(values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'))
-    # No selected database yet (for example an interrupted installation): nothing can have been saved there.
-    if 'DSH_PHALANX_DATA_ROOT' not in values or not start.exists() or not database.exists():
-        return None
-    account = host.run(['getent', 'passwd', 'dsh-phalanx'], check=False)
-    if account.returncode != 0:
-        return None
-    uid = int(account.stdout.split(':')[2])
-    result = host.user(uid, ['timeout', '--signal=TERM', '--kill-after=5s', '30s', str(start), 'platform-facts', fact,
-                             '--config-file', values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'),
-                             '--data-root', values['DSH_PHALANX_DATA_ROOT']], check=False)
-    if result.returncode == 2:
-        host.tell('The platform database did not answer; using the local record instead of ' + fact)
-        return None
-    if result.returncode != 0:
-        raise ValueError('The installed platform could not report ' + fact)
-    return json.loads(result.stdout)
+def update_error_code(error,default='unknown'):
+    code=update_code(getattr(error,'system_update_code',getattr(error,'code',default)),default)
+    return default if code=='unknown' else code
 
 
-def configured_download_sources(host, values, args=None, *, platform_running=False):
-    # Two stages: the installer's recorded choice applies until an administrator saves one in the platform database.
-    saved = platform_facts(host, values, 'download-sources') if platform_running else None
-    return download_source_choice(values, args, saved)
+def update_time_point():
+    return {'wall':time.time(),'mono':time.monotonic(),'boot':None}
 
 
-def download_source_choice(values, args=None, saved=None):
-    selection = json.loads(values.get('DSH_PHALANX_DOWNLOAD_SOURCES', '{"preset":"official"}'))
-    if saved is not None and saved.get('selection') is not None:
-        selection = saved['selection']
-    selection = download_source_selection(selection)
-    if args is not None:
-        preset = getattr(args, 'download_source_preset', None)
-        if preset is not None: selection = {'preset': preset}
-        overrides = {**selection.get('overrides', {})}
-        for option, category in DOWNLOAD_SOURCE_OPTIONS.items():
-            value = getattr(args, option, None)
-            if value is not None: overrides[category] = value
-        selection = download_source_selection({**selection, 'overrides': overrides})
-    return selection
+def update_seconds(start,end):
+    if not isinstance(start,dict) or not isinstance(end,dict):
+        return 0
+    key='mono' if start.get('boot') and start.get('boot')==end.get('boot') else 'wall'
+    values=[start.get(key),end.get(key)]
+    if any(type(value) not in (int,float) or not math.isfinite(value) for value in values):
+        return 0
+    return round(max(0,values[1]-values[0]),3)
 
 
-def download_source_environment(sources, architecture):
-    return {'NPM_CONFIG_REGISTRY': sources['npm'], 'PNPM_CONFIG_REGISTRY': sources['npm'], 'COREPACK_NPM_REGISTRY': sources['npm'],
-            'PIP_INDEX_URL': sources['pypi'], 'UV_DEFAULT_INDEX': sources['pypi'],
-            'PLAYWRIGHT_DOWNLOAD_HOST': sources['browser'],
-            **({'PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST': sources['browserChromiumArm64']} if architecture == 'arm64' else {})}
+def install_failure(code):
+    """Classify an effect without changing exception types or HTTP fallback status."""
+    def decorate(work):
+        @functools.wraps(work)
+        def perform(*args,**kwargs):
+            try:
+                return work(*args,**kwargs)
+            except Exception as error:
+                if update_error_code(error)!='unknown':
+                    raise
+                if isinstance(error,InstallError):
+                    error.code=code
+                else:
+                    error.system_update_code=code
+                raise
+        return perform
+    return decorate
 
 
-CONFIG = '/etc/dsh-phalanx/environment'
-STATE = '/etc/dsh-phalanx/install-state.json'
-HOME_DIR = '/var/lib/dsh-phalanx'
-UNINSTALL_STATE = '/etc/dsh-phalanx/uninstall-state.json'
-
-
-def uninstall_record(host):
-    path = host.path(UNINSTALL_STATE)
-    if not path.exists() and not path.is_symlink():
-        return None
-    if path.parent.is_symlink() or path.is_symlink() or not path.is_file() or path.stat().st_uid != os.geteuid() or path.stat().st_mode & 0o077:
-        raise ConfigurationError('Uninstall receipt ownership cannot be verified')
-    if path.stat().st_size > 1048576:
-        raise ConfigurationError('Uninstall receipt exceeds its allowed size')
-    value = json.loads(path.read_text())
-    if not isinstance(value, dict) or value.get('schema') != 1 or value.get('phase') not in ('removing', 'retained', 'purging'):
-        raise ConfigurationError('Invalid uninstall receipt')
+def operation_id(value):
+    if not isinstance(value,str) or str(uuid.UUID(value))!=value:
+        raise InstallError('Invalid upgrade operation identity',code='operation.invalid')
     return value
 
 
-def default_storage_root(data_root):
-    return os.path.abspath(data_root)+'.durable'
+def version_parts(value):
+    if not isinstance(value,str) or not re.fullmatch(VERSION,value):
+        raise InstallError('Invalid release version')
+    parts=tuple(map(int,value.split('.')))
+    if any(part>2**53-1 for part in parts):
+        raise InstallError('Invalid release version')
+    return parts
 
 
-def unit_argument(value):
-    return '"'+str(value).replace('\\','\\\\').replace('"','\\"').replace('%','%%')+'"'
+def candidate_image_tag(tag):
+    if not isinstance(tag,str) or not CANDIDATE.fullmatch(tag):
+        raise InstallError('Invalid candidate identity')
+    return tag[1:] if LEGACY_CANDIDATE.fullmatch(tag) else tag
 
 
-def effective_user_data_root(values):
-    return values.get('DSH_PHALANX_USER_DATA_ROOT') or default_storage_root(values['DSH_PHALANX_DATA_ROOT'])+'/users'
+def candidate_identity(manifest):
+    tag=manifest.get('tag')
+    run=manifest.get('runId')
+    if not isinstance(tag,str) or not CANDIDATE.fullmatch(tag):
+        return False
+    try:
+        version_parts(manifest.get('targetVersion'))
+    except InstallError:
+        return False
+    if LEGACY_CANDIDATE.fullmatch(tag):
+        return manifest['targetVersion']==tag.split('-rc.')[0][1:]
+    return manifest.get('schema')==2 and isinstance(run,str) and re.fullmatch(r'[1-9][0-9]*',run) is not None and tag=='run-'+run
 
 
-class ConfigurationError(ValueError):
-    pass
+def positive(value):
+    return type(value) is int and 0<value<=2**53-1
 
 
-class HiddenConfigurationConflict(ConfigurationError):
-    """An existing compatibility listener needs explicit offline maintenance."""
-    pass
+# Capability version: raise only when older executors cannot perform the transaction.
+# Ordinary target releases do not increase this version.
+READER_VERSION = '0.1.38'
+
+class ReaderUpdateRequired(InstallError):
+    def __init__(self,version):
+        self.required_version=version
+        self.selected_version=None
+        super().__init__('This release requires updater '+version+' or newer; update the small executor with the target installer first')
 
 
-OPTIONS = {
-    'model_base_url': 'MODEL_UPSTREAM_BASE_URL', 'model_provider': 'ALLOWED_MODEL_PROVIDER',
-    'model': 'ALLOWED_MODEL', 'listen_address': 'HOST', 'port': 'PORT',
-    'preview_port': 'PREVIEW_PORT', 'preview_origin': 'PREVIEW_ORIGIN',
-    'gateway_port': 'CONTAINER_GATEWAY_PORT', 'public_origin': 'PUBLIC_ORIGIN',
-    'host_public_addresses': 'HOST_PUBLIC_ADDRESSES', 'user_data_root': 'USER_DATA_ROOT',
-    'user_data_mount': 'USER_DATA_MOUNT',
-}
+def require_reader(manifest,reader_version=READER_VERSION):
+    value=manifest.get('compatibility',{})
+    minimum=value.get('minimumReader') if isinstance(value,dict) else None
+    if minimum is not None:
+        if version_parts(reader_version)<version_parts(minimum):
+            raise ReaderUpdateRequired(minimum)
+        return True
+    return False
 
 
-def environment_text(values):
-    return "".join(f'{key}="'+value.replace("\\", "\\\\").replace('"', '\\"')+'"\n' for key, value in sorted(values.items()))
+def supports_capacity(manifest):
+    protocol=manifest.get('compatibility',{}).get('protocol')
+    return type(protocol) is int and protocol>=3
 
 
-def installed_state(host):
-    path = host.path(STATE)
-    if path.is_symlink():
-        raise ConfigurationError('Installation receipt must not be a symbolic link')
-    if not path.exists():
-        return None
-    state = json.loads(path.read_text())
-    if state.get('status') != 'installed':
-        return None
-    if not host.path('/opt/dsh-phalanx/current').is_symlink() or not host.path(CONFIG).is_file():
-        raise ConfigurationError('Successful installation receipt has missing managed files; inspect the existing installation')
-    return state
-
-
-def outbound_proxy_environment(values, environment=None):
-    environment=os.environ if environment is None else environment
-    def selected(upper, lower):
-        source=values if upper in values or lower in values else environment
-        return source.get(lower,source.get(upper,''))
-    proxy=selected('HTTPS_PROXY','https_proxy')
-    bypass=selected('NO_PROXY','no_proxy')
-    if not isinstance(proxy,str) or len(proxy)>8192 or re.search(r'[\s\x00-\x1f\x7f]',proxy):
-        raise ConfigurationError('HTTPS_PROXY must be an HTTP(S) proxy URL without whitespace')
-    if proxy:
-        try:
-            url=urllib.parse.urlsplit(proxy)
-            if url.scheme not in ('http','https') or not url.hostname or url.path not in ('','/') or url.query or url.fragment or url.port==0:raise ValueError()
-        except ValueError as error:raise ConfigurationError('HTTPS_PROXY must be a valid HTTP(S) proxy URL') from error
-    if not isinstance(bypass,str) or len(bypass)>8192 or re.search(r'[\x00-\x1f\x7f]',bypass):
-        raise ConfigurationError('NO_PROXY must be a comma-separated host exclusion list')
-    bypass=','.join(dict.fromkeys([*(part.strip() for part in bypass.split(',') if part.strip()),'localhost','.localhost','127.0.0.1','::1']))
-    return {'HTTPS_PROXY':proxy,'https_proxy':proxy,'HTTP_PROXY':proxy,'http_proxy':proxy,'NO_PROXY':bypass,'no_proxy':bypass}
-
-
-def read_configuration(host):
-    path = host.path(CONFIG)
-    if not path.exists() and host.path('/etc/dsh-phalanx/install-draft').exists():
-        path = host.path('/etc/dsh-phalanx/install-draft')
-    if path.is_symlink():
-        raise ConfigurationError('Managed configuration must not be a symbolic link')
-    values = {}
-    if path.exists():
-        for line in path.read_text().splitlines():
-            key, value = line.split('=', 1)
-            parts = shlex.split(value)
-            if len(parts) != 1:
-                raise ConfigurationError('Invalid protected configuration')
-            values[key] = parts[0]
-    return values
-
-
-def validate_authority(url):
-    hostname = url.hostname
-    if not hostname or '%' in hostname or '\\' in url.netloc:
-        raise ConfigurationError('URL must have a valid host')
-    if ':' in hostname:
-        ipaddress.IPv6Address(hostname)
-    else:
-        ascii_host = hostname.encode('idna').decode('ascii')
-        if not re.fullmatch(r'[A-Za-z0-9_.-]+', ascii_host):
-            raise ConfigurationError('URL must have a valid host')
-    _ = url.port
-
-
-def validate_configuration(host, values):
-    for name in ('ALLOWED_MODEL_PROVIDER', 'ALLOWED_MODEL', 'MODEL_UPSTREAM_BASE_URL'):
-        if not values.get('DSH_PHALANX_'+name, '').strip():
-            raise ConfigurationError(name+' must not be empty')
-    if values['DSH_PHALANX_ALLOWED_MODEL_PROVIDER'] != 'deepseek-official':
-        raise ConfigurationError('Initial legacy model provider must be deepseek-official; configure shared providers in administration after signup')
-    if 'DSH_PHALANX_SESSION_SECRET' in values and len(values['DSH_PHALANX_SESSION_SECRET']) < 32:
-        raise ConfigurationError('Session secret must contain at least 32 characters')
-    for address in filter(None, values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES', '').split(',')):
-        if not ipaddress.IPv4Address(address.strip()).is_global:
-            raise ConfigurationError('Host aliases must be public IPv4 literals')
-    if any('\n' in value or '\r' in value or '\0' in value for value in values.values()):
-        raise ConfigurationError('Invalid deployment configuration')
-    for name in ('PORT', 'CONTAINER_GATEWAY_PORT'):
-        if not 1 <= int(values['DSH_PHALANX_'+name]) <= 65535:
-            raise ConfigurationError(name+' must be between 1 and 65535')
-    if int(values['DSH_PHALANX_PORT']) == int(values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']):
-        raise ConfigurationError('Entry and private gateway ports must differ')
-    ipaddress.ip_address(values['DSH_PHALANX_HOST'])
-    origin = urllib.parse.urlparse(values['DSH_PHALANX_PUBLIC_ORIGIN'])
-    if origin.scheme not in ('http', 'https') or not origin.hostname or origin.username or origin.password or origin.path not in ('', '/') or origin.query or origin.fragment:
-        raise ConfigurationError('Public origin must be an HTTP(S) origin without credentials or path')
-    validate_authority(origin)
-    if values.get('DSH_PHALANX_PREVIEW_PORT') or values.get('DSH_PHALANX_PREVIEW_ORIGIN'):
-        preview = urllib.parse.urlparse(values.get('DSH_PHALANX_PREVIEW_ORIGIN', ''))
-        port = int(values.get('DSH_PHALANX_PREVIEW_PORT', '0'))
-        if not 1 <= port <= 65535 or port in (int(values['DSH_PHALANX_PORT']), int(values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])):
-            raise ConfigurationError('Preview requires a separate listener port')
-        if preview.scheme != origin.scheme or preview.hostname != origin.hostname or (preview.port or (443 if preview.scheme == 'https' else 80)) == (origin.port or (443 if origin.scheme == 'https' else 80)) or preview.username or preview.password or preview.path not in ('', '/') or preview.query or preview.fragment:
-            raise ConfigurationError('Preview origin must use the same host and scheme on a different public port')
-        validate_authority(preview)
-    upstream = urllib.parse.urlparse(values['DSH_PHALANX_MODEL_UPSTREAM_BASE_URL'])
-    if upstream.scheme not in ('http', 'https') or not upstream.hostname or upstream.username or upstream.password or upstream.query or upstream.fragment:
-        raise ConfigurationError('Model upstream must be an HTTP(S) URL without credentials, query or fragment')
-    validate_authority(upstream)
-
-
-def validate_storage(host, values):
-    root_value, mount_value = (values.get('DSH_PHALANX_'+name) for name in ('USER_DATA_ROOT', 'USER_DATA_MOUNT'))
-    if root_value is None and mount_value is None:
+def validate_contract(manifest):
+    if manifest.get('schema')==1 and manifest.get('targetVersion') in ('0.1.0','0.1.1'):
         return
-    if not root_value or not mount_value or not Path(root_value).is_absolute() or not Path(mount_value).is_absolute():
-        raise ConfigurationError('External user storage requires absolute root and mount paths')
-    root, mount = host.path(root_value), host.path(mount_value).resolve(strict=True)
-    platform = host.path(values['DSH_PHALANX_DATA_ROOT']).resolve()
-    canonical = root.resolve()
-    if mount == host.path('/') or not canonical.is_relative_to(mount):
-        raise ConfigurationError('User storage must be inside the declared independent data mount')
-    if canonical.is_relative_to(platform) or platform.is_relative_to(canonical):
-        raise ConfigurationError('Platform and external user storage must not overlap')
-    ancestor = root
-    while not ancestor.exists():
-        ancestor = ancestor.parent
-    facts = json.loads(host.run(['findmnt', '--json', '--target', str(ancestor), '--output', 'TARGET']).stdout)
-    if Path(facts['filesystems'][0]['target']).resolve() != mount:
-        raise ConfigurationError('The declared user data volume is not mounted; no directory was created')
-    if root.is_symlink() or root.exists() and not root.is_dir():
-        raise ConfigurationError('User storage must be a directory, not a symbolic link')
+    declared_reader=require_reader(manifest)
+    value=manifest.get('compatibility')
+    policy=manifest.get('acceptancePolicy')
+    if not isinstance(value,dict) or not isinstance(policy,dict):
+        raise InstallError('Unsupported release compatibility protocol')
+    accounts=value.get('accounts')
+    if not isinstance(accounts,dict) or not isinstance(value.get('source'),dict):
+        raise InstallError('Unsupported release compatibility protocol')
+    checks=policy.get('checks',[])
+    required={'ci','linux','upgrade'} if version_parts(manifest.get('targetVersion'))>=(0,1,24) else {'ci','linux','cleanInstall','upgrade','review'}
+    if (manifest.get('schema')!=2 or not positive(value.get('protocol')) or (value['protocol']>3 and not declared_reader) or not positive(value.get('environmentEpoch')) or
+            not all(positive(accounts.get(key)) for key in ('sourceMin','sourceMax','target')) or
+            accounts['sourceMin']>accounts['sourceMax'] or accounts['target']<accounts['sourceMax'] or
+            not positive(policy.get('ticket')) or not isinstance(checks,list) or
+            not all(isinstance(key,str) and re.fullmatch('[a-z][A-Za-z]*',key) for key in checks) or
+            len(set(checks))!=len(checks) or not required.issubset(checks) or
+            version_parts(manifest['targetVersion'])>=(0,1,24) and not set(checks).issubset({'ci','linux','upgrade','cleanInstall'})):
+        raise InstallError('Unsupported release compatibility protocol')
+    if version_parts(manifest['targetVersion'])>=(0,1,13) and value['protocol']<3:
+        raise InstallError('This release requires capacity-aware upgrade protocol 3')
+    if value['protocol']>=3:
+        sizes=manifest.get('storage',{})
+        if not isinstance(sizes,dict) or not all(positive(sizes.get(key)) for key in ('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')):
+            raise InstallError('Release storage requirements are missing or invalid')
+        if not isinstance(manifest.get('updater'),str) or len(manifest['updater'].encode())>16384:
+            raise InstallError('Release updater inventory is missing or unbounded')
+    revisions=value.get('sourceDshRevisions')
+    if value['protocol']==2 or (value['protocol']>=3 and 'sourceDshRevisions' in value):
+        if (not isinstance(revisions,list) or not revisions or
+                not all(isinstance(revision,str) and re.fullmatch('[a-f0-9]{40}',revision) for revision in revisions) or
+                len(set(revisions))!=len(revisions)):
+            raise InstallError('Runtime transition requires exact source DSH revisions')
+    elif revisions is not None:
+        raise InstallError('Protocol 1 cannot declare a runtime transition')
+    through=value.get('freshInstallThrough')
+    if 'freshInstallThrough' in value and (value['protocol']<3 or version_parts(through)>=version_parts(manifest['targetVersion']) or accounts['sourceMin']<6):
+        raise InstallError('Invalid fresh-install compatibility boundary')
+    if 'schemas' in value:
+        rows=value['schemas']
+        names=set()
+        if not isinstance(rows,list) or not rows or not isinstance(rows[0],dict) or rows[0].get('name')!='dsh_phalanx':
+            raise InstallError('Registered schema compatibility must begin with the platform core')
+        for row in rows:
+            name=row.get('name') if isinstance(row,dict) else None
+            if (not isinstance(name,str) or not re.fullmatch('[a-z_][a-z0-9_]{0,62}',name) or
+                    name.startswith('pg_') or name in ('public','information_schema') or name in names or
+                    type(row.get('sourceMin')) is not int or not 0<=row['sourceMin']<=2**53-1 or
+                    type(row.get('sourceMax')) is not int or not row['sourceMin']<=row['sourceMax']<=2**53-1 or
+                    not positive(row.get('target')) or row['target']<row['sourceMax']):
+                raise InstallError('Invalid registered schema compatibility range')
+            names.add(name)
+        if any(rows[0][key]!=accounts[key] for key in ('sourceMin','sourceMax','target')):
+            raise InstallError('Legacy accounts must match the platform core compatibility range')
+    floor=value.get('upgradeFloor')
+    if 'upgradeFloor' in value and version_parts(floor)>=version_parts(manifest['targetVersion']):
+        raise InstallError('Invalid upgrade floor')
+    if 'breakpoints' in value:
+        points=value['breakpoints']
+        previous=None
+        previous_epoch=0
+        if not isinstance(points,list):
+            raise InstallError('Invalid upgrade breakpoints')
+        for point in points:
+            if not isinstance(point,dict):
+                raise InstallError('Invalid upgrade breakpoint')
+            version=version_parts(point.get('version'))
+            epoch=point.get('environmentEpoch')
+            if (version>version_parts(manifest['targetVersion']) or (floor is not None and version<version_parts(floor)) or
+                    (previous is not None and version<=previous) or not positive(epoch) or epoch<previous_epoch or epoch>value['environmentEpoch']):
+                raise InstallError('Invalid ordered upgrade breakpoints')
+            previous=version
+            previous_epoch=epoch
+    source=value.get('source',{})
+    if version_parts(source.get('min'))>=version_parts(source.get('maxExclusive')) or version_parts(source['min'])>=version_parts(manifest['targetVersion']):
+        raise InstallError('Invalid upgrade source interval')
 
 
-def check_ports(host, args, values, successful, interactive):
-    endpoints = [('PORT', values['DSH_PHALANX_HOST'], '--port'), ('CONTAINER_GATEWAY_PORT', '127.0.0.1', '--gateway-port')]
-    if values.get('DSH_PHALANX_PREVIEW_PORT'):endpoints.append(('PREVIEW_PORT', values['DSH_PHALANX_HOST'], '--preview-port'))
-    for name, address, flag in endpoints:
-        key = 'DSH_PHALANX_'+name
-        while True:
-            number = int(values[key])
-            # A previously accepted port can be occupied only by our actual service.
-            conflict = host.port_conflict(address, number, allow_managed=successful)
-            if conflict is None:
-                break
-            if name == 'CONTAINER_GATEWAY_PORT' and not successful and args.gateway_port is None and not getattr(args, 'gateway_chosen', False):
-                free = number+1
-                while free <= 65535 and (free == int(values['DSH_PHALANX_PORT']) or host.port_conflict(address, free) is not None):
-                    free += 1
-                if free > 65535:
-                    raise ConfigurationError('No free private gateway port; specify --gateway-port')
-                host.tell(f'Private gateway port {number} is occupied; using {free} (saved in configuration).')
-                values[key] = str(free)
-                continue
-            if name == 'PREVIEW_PORT':
-                reason = f'已有兼容监听端口 {number} 不可用，已保留配置；请按服务管理文档处理后重试。' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else f'Existing compatibility listener port {number} is unavailable; configuration retained. Follow service management documentation before retrying.'
-                raise HiddenConfigurationConflict(reason)
-            host.tell(f'{flag} {number} is unavailable: {conflict}. No occupying process was stopped.')
-            if not interactive or successful:
-                raise ConfigurationError(f'Choose a free {flag} and rerun the installer; {conflict}')
-            dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
-            values[key] = dialogue.ask(f'新的 {flag} 值', f'New {flag} value', validate=validate_port)
-            origin = urllib.parse.urlparse(values['DSH_PHALANX_PUBLIC_ORIGIN'])
-            if name == 'PORT' and origin.scheme == 'http' and origin.port == number and (getattr(args, 'dialogue', None) is None or args.dialogue.automatic_origin):
-                values['DSH_PHALANX_PUBLIC_ORIGIN'] = origin._replace(netloc=origin.netloc.rsplit(':', 1)[0]+':'+values[key]).geturl()
-            if not values[key].isdigit() or not 1 <= int(values[key]) <= 65535:
-                raise ConfigurationError('Port must be between 1 and 65535')
+class FreshInstallRequired(InstallError):
+    pass
 
 
-def configuration(host, args, *, target_version, entry_url, access_candidate):
-    # The release selector has already verified this manifest version.
-    release = tuple(map(int, target_version.split('.')))
-    protected_secrets = release >= (0, 1, 25)
-    if protected_secrets and args.model_key_file:
-        raise ConfigurationError('Configure provider credentials in administration after signup; --model-key-file is only for historical releases')
-    modern = release >= (0, 1, 1)
-    if not modern and (args.user_data_root is not None or args.user_data_mount is not None):
-        raise ConfigurationError('External user storage options require 0.1.1 or later')
-    previous = read_configuration(host)
-    successful = installed_state(host) is not None or uninstall_record(host) is not None
-    interactive = host.terminal_available() and not getattr(args, 'non_interactive', False)
-    values = dict(previous)
-    if protected_secrets:
-        values.pop('DSH_PHALANX_SESSION_SECRET', None)
-        values.pop('DSH_PHALANX_MODEL_UPSTREAM_API_KEY', None)
-    proxy=outbound_proxy_environment(previous)
-    for name in ('HTTPS_PROXY','NO_PROXY'):
-        if name in proxy:values[name]=proxy[name]
-    values.pop('https_proxy',None);values.pop('no_proxy',None)
-    args.gateway_chosen = 'DSH_PHALANX_CONTAINER_GATEWAY_PORT' in previous
-    for option, key in OPTIONS.items():
-        value = getattr(args, option, None)
-        if value is not None:
-            name = 'DSH_PHALANX_'+key
-            prior = previous.get(name, '3081' if key == 'CONTAINER_GATEWAY_PORT' else None)
-            if prior is not None and prior != str(value):
-                if successful:
-                    raise ConfigurationError('Existing successful installation configuration differs; use explicit offline configuration/storage maintenance')
-            values[name] = str(value)
-    if getattr(args, 'server_ip', None) is not None:
-        validate_ip(args.server_ip)
-    missing = []
-    if not interactive:
-        if 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
-            missing.append('--host-public-addresses')
-        if modern and 'DSH_PHALANX_PUBLIC_ORIGIN' not in values:
-            missing.append('--public-origin')
-        if not modern and args.model_key_file is None and 'DSH_PHALANX_MODEL_UPSTREAM_API_KEY' not in values:
-            missing.append('--model-key-file')
-        if missing:
-            prefix = '非交互安装缺少参数：' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else 'Missing '
-            example = '。示例：' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else '. Example: '
-            raise ConfigurationError(prefix+', '.join(missing)+example+'sudo bash install.sh --public-origin http://<host>:18080 --host-public-addresses ""'+(' --model-key-file /path/to/protected-key' if not modern else ''))
-    if not modern and 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
-        values['DSH_PHALANX_HOST_PUBLIC_ADDRESSES'] = host.prompt('All public IPv4 host aliases, comma-separated (empty if none): ')
-    if args.model_key_file:
-        path = args.model_key_file
-        if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
-            raise ConfigurationError('Model key file must be a regular protected file (mode 0600)')
-        key = path.read_text().rstrip('\r\n')
-        if successful and values.get('DSH_PHALANX_MODEL_UPSTREAM_API_KEY') != key:
-            raise ConfigurationError('Existing successful model configuration differs')
-        if not key or any(ord(char) < 32 or ord(char) > 126 for char in key):
-            raise ConfigurationError('A nonempty printable upstream credential is required')
-        values['DSH_PHALANX_MODEL_UPSTREAM_API_KEY'] = key
-    elif not modern and 'DSH_PHALANX_MODEL_UPSTREAM_API_KEY' not in values:
-        values['DSH_PHALANX_MODEL_UPSTREAM_API_KEY'] = host.prompt('Model upstream API key: ', secret=True)
-    key = values.get('DSH_PHALANX_MODEL_UPSTREAM_API_KEY')
-    if key is not None and (not key or any(ord(char) < 32 or ord(char) > 126 for char in key)):
-        raise ConfigurationError('A nonempty printable upstream credential is required')
-    defaults = {'HOST': '0.0.0.0' if modern else '127.0.0.1', 'PORT': '18080', 'CONTAINER_GATEWAY_PORT': '3081',
-                'ALLOWED_MODEL_PROVIDER': 'deepseek-official', 'ALLOWED_MODEL': 'deepseek-chat',
-                'MODEL_UPSTREAM_BASE_URL': 'https://api.deepseek.com',
-                'DATA_ROOT': HOME_DIR+'/data', 'CONTAINER_RUNTIME': '/usr/bin/podman', 'REGISTRATION_ENABLED': 'false'}
-    if not protected_secrets:
-        defaults['SESSION_SECRET'] = secrets.token_hex(32)
-    for name, value in defaults.items():
-        values.setdefault('DSH_PHALANX_'+name, value)
-    if interactive and modern and not successful:
-        dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
-        selection = configured_download_sources(host, values, args)
-        config = {'source': selection['preset'], 'overrides': selection.get('overrides', {}),
-                  'server_ip': getattr(args, 'server_ip', None), 'port': values['DSH_PHALANX_PORT'],
-                  'origin': values.get('DSH_PHALANX_PUBLIC_ORIGIN'), 'mapping': values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES'),
-                  'gateway': values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'], 'data': values.get('DSH_PHALANX_USER_DATA_ROOT', ''),
-                  'mount': values.get('DSH_PHALANX_USER_DATA_MOUNT', '')}
-        if config['origin'] and args.public_origin is None:
-            try:
-                previous_ip = str(ipaddress.ip_address(urllib.parse.urlsplit(config['origin']).hostname))
-            except ValueError:
-                previous_ip = None
-            config['server_ip'] = config['server_ip'] or previous_ip
-            dialogue.automatic_origin = previous_ip is not None and config['origin'] == entry_url(config['port'], previous_ip)
-        supplied = set()
-        if args.public_origin is not None: supplied.update(('server_ip', 'origin'))
-        if getattr(args, 'server_ip', None) is not None:
-            config['server_ip'] = validate_ip(args.server_ip)
-            supplied.add('server_ip')
-        if args.port is not None: supplied.add('port')
-        if args.host_public_addresses is not None: supplied.add('mapping')
-        dialogue.edit_common(config, supplied)
-        if dialogue.choose('展开高级设置？y/n', 'Open advanced settings? y/n', ('y', 'n'), 'n') == 'y':
-            dialogue.edit_advanced(config)
-        while True:
-            for name, key in (('port', 'PORT'), ('origin', 'PUBLIC_ORIGIN'), ('gateway', 'CONTAINER_GATEWAY_PORT')):
-                values['DSH_PHALANX_'+key] = config[name]
-            for name, key in (('mapping', 'HOST_PUBLIC_ADDRESSES'), ('data', 'USER_DATA_ROOT'), ('mount', 'USER_DATA_MOUNT')):
-                if config[name] is None or name != 'mapping' and not config[name]:
-                    values.pop('DSH_PHALANX_'+key, None)
-                else:
-                    values['DSH_PHALANX_'+key] = config[name]
-            apply_source_choice(args, config)
-            args.gateway_chosen = args.gateway_chosen or dialogue.gateway_chosen
-            try:
-                validate_configuration(host, values)
-                validate_storage(host, values)
-                check_ports(host, args, values, successful, interactive)
-                config['port'] = values['DSH_PHALANX_PORT']
-                config['gateway'] = values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']
-                config['origin'] = values['DSH_PHALANX_PUBLIC_ORIGIN']
-            except (ValueError, OSError) as error:
-                if isinstance(error, (Cancelled, HiddenConfigurationConflict)) or args.preview_port is not None or args.preview_origin is not None:
-                    raise
-                dialogue.tell('配置未通过校验，请修改后重试：'+operator_text(str(error), 'zh-CN'), 'Configuration validation failed; edit and retry: '+str(error))
-                dialogue.edit_common(config)
-                dialogue.edit_advanced(config)
-                continue
-            dialogue.summary({**config, 'data': config['data'] or effective_user_data_root(values)})
-            action = dialogue.choose('摘要：install 安装 / edit 修改 / cancel 取消', 'Summary: install / edit / cancel', ('install', 'edit', 'cancel'), 'install')
-            if action == 'install': break
-            if action == 'cancel':
-                raise Cancelled(dialogue.tr('安装已取消；保留已准备的依赖及现有数据。', 'Installation cancelled; prepared dependencies and existing data are retained.'))
-            section = dialogue.choose('修改：source 下载源 / common 常用 / advanced 高级', 'Edit: source / common / advanced', ('source', 'common', 'advanced'), 'common')
-            if section == 'source':
-                dialogue.edit_source(config)
-                apply_source_choice(args, config)
-                host.download_sources = resolve_download_sources({'preset': config['source'], 'overrides': config['overrides']})
-                if getattr(host, 'recheck_release', None) is not None: host.recheck_release()
-                dialogue.tell('已按新下载源重新核对版本。', 'Release rechecked using the new source.')
-            elif section == 'common': dialogue.edit_common(config)
-            else: dialogue.edit_advanced(config)
-    values.setdefault('DSH_PHALANX_PUBLIC_ORIGIN', entry_url(values['DSH_PHALANX_PORT'], values['DSH_PHALANX_HOST']))
-    values['DSH_PHALANX_DOWNLOAD_SOURCES'] = json.dumps(configured_download_sources(host, values, args), separators=(',', ':'))
-    validate_configuration(host, values)
-    validate_storage(host, values)
-    check_ports(host, args, values, successful, interactive)
-    validate_configuration(host, values)
-    if not successful:
-        changes = sorted(key.removeprefix('DSH_PHALANX_') for key, value in values.items() if key in previous and previous[key] != value)
-        if modern:
-            if not interactive:
-                dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
-                selection = configured_download_sources(host, values, args)
-                dialogue.summary({'source': selection['preset'], 'overrides': selection.get('overrides', {}), 'server_ip': getattr(args, 'server_ip', None),
-                                  'port': values['DSH_PHALANX_PORT'], 'origin': values['DSH_PHALANX_PUBLIC_ORIGIN'], 'gateway': values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'],
-                                  'mapping': values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES'), 'data': effective_user_data_root(values), 'mount': values.get('DSH_PHALANX_USER_DATA_MOUNT', '')})
-        else:
-            host.tell('Configuration: '+values['DSH_PHALANX_PUBLIC_ORIGIN']+'; entry port '+values['DSH_PHALANX_PORT']+'; private gateway '+values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])
-            host.tell('Platform data: '+values['DSH_PHALANX_DATA_ROOT']+'; user data: '+effective_user_data_root(values))
-        if changes:
-            host.tell('Retry changes: '+', '.join(changes)+'. Existing data will be preserved.')
-        if interactive and not modern and host.prompt('Continue with this configuration? [y/N]: ').lower() != 'y':
-            raise ConfigurationError('Installation cancelled before downloads or deployment changes')
-    return values
+def upgrade_source_boundary(source,target):
+    """The single source-version boundary, usable before invoking any source CLI."""
+    validate_contract(target)
+    value=target.get('compatibility',{})
+    floor=value.get('upgradeFloor')
+    through=value.get('freshInstallThrough')
+    if floor is not None and version_parts(source['targetVersion'])<version_parts(floor):
+        return {'outcomeCode':'update.below-floor','requiredVersion':floor}
+    if through is not None and version_parts(source['targetVersion'])<=version_parts(through):
+        return {'outcomeCode':'update.below-floor','requiredVersion':floor or value['source']['min']}
+    return None
+
+
+def require_upgrade_source(source,target):
+    boundary=upgrade_source_boundary(source,target)
+    if boundary is not None:
+        raise FreshInstallRequired('This version requires a fresh installation; upgrade floor is '+boundary['requiredVersion']+'. Back up the existing deployment and follow https://github.com/dake6767/dsh-phalanx/blob/main/docs/install.md#recoverable-system-updates')
+
+
+def reuse_rehearsal(source,target,account_schema):
+    if isinstance(account_schema,dict):
+        account_schema=account_schema.get('dsh_phalanx')
+    identity=source.get('imageIdentity')
+    return (isinstance(identity,dict) and identity==target.get('imageIdentity') and
+            source.get('imageSelection',{}).get('rehearsal') is True and target.get('imageSelection',{}).get('rehearsal') is True and
+            all(re.fullmatch(r'run-[1-9][0-9]*',value['tag']) for value in (source,target)) and
+            source['runId']!=target['runId'] and source['commit']!=target['commit'] and
+            source['targetVersion']==target['targetVersion'] and source['dshRevision']==target['dshRevision'] and
+            source['compatibility']['accounts']['target']==target['compatibility']['accounts']['target']==account_schema)
+
+
+def upgrade_outcome(source,target,account_schema,*,development_rebuild=False,image_reuse_rehearsal=False,inspect_schema=True,source_channel=None,target_channel=None):
+    try:
+        boundary=upgrade_source_boundary(source,target)
+    except ReaderUpdateRequired as error:
+        return {'outcomeCode':'update.reader-update-required','requiredVersion':error.required_version}
+    if boundary is not None:
+        return boundary
+    if target.get('schema')!=2:
+        raise InstallError('Upgrade target must declare the release compatibility protocol',code='compatibility.unsupported')
+    value=target['compatibility']
+    old=source.get('compatibility')
+    if old is None:
+        if source.get('schema')!=1 or source.get('targetVersion')!='0.1.1':
+            raise InstallError('This legacy deployment must enter 0.1.1 before a protocol upgrade',code='compatibility.unsupported')
+        epoch=1
+    else:
+        validate_contract(source)
+        epoch=old['environmentEpoch']
+    current=version_parts(source['targetVersion'])
+    selected=version_parts(target['targetVersion'])
+    interval=value['source']
+    accounts=value['accounts']
+    for point in value.get('breakpoints',[]):
+        if current<version_parts(point['version'])<selected:
+            return {'outcomeCode':'update.breakpoint-required','requiredVersion':point['version']}
+    local_rebuild=(development_rebuild and source['platform']==target['platform']=='linux/arm64' and current==selected)
+    if image_reuse_rehearsal and not reuse_rehearsal(source,target,account_schema):
+        raise InstallError('Image reuse rehearsal requires distinct marked candidates with the same version, image and account schema',code='compatibility.unsupported')
+    channel_switch=(current==selected and (source_channel or source.get('channel',{})).get('kind')=='candidate' and (target_channel or target.get('channel',{})).get('kind')=='formal')
+    if current>=selected and not (local_rebuild or image_reuse_rehearsal or channel_switch):
+        return {'outcomeCode':'update.current'}
+    if not (local_rebuild or image_reuse_rehearsal or channel_switch) and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
+        raise InstallError('Release does not support this source version; historical downgrade is unavailable',code='compatibility.unsupported')
+    runtime_allowed=(source['dshRevision']==target['dshRevision'] or
+                     (value['protocol']>=2 and source['dshRevision'] in value.get('sourceDshRevisions',[])))
+    epoch_entry=any(version_parts(point['version'])==selected and point['environmentEpoch']==value['environmentEpoch'] and epoch<point['environmentEpoch'] for point in value.get('breakpoints',[]))
+    if source['platform']!=target['platform'] or not runtime_allowed or (epoch!=value['environmentEpoch'] and not epoch_entry):
+        raise InstallError('DSH or user-environment migration is unsupported by this recovery protocol',code='compatibility.unsupported')
+    if not inspect_schema:
+        return {'outcomeCode':'update.channel-switch' if channel_switch else 'update.available'}
+    schemas=value.get('schemas')
+    if schemas is None:
+        recorded=account_schema.get('dsh_phalanx') if isinstance(account_schema,dict) else account_schema
+        if type(recorded) is not int or not accounts['sourceMin']<=recorded<=accounts['sourceMax']:
+            raise InstallError('Account database schema is outside the declared upgrade source range',code='compatibility.unsupported')
+    else:
+        recorded=account_schema if isinstance(account_schema,dict) else {'dsh_phalanx':account_schema}
+        for row in schemas:
+            version=recorded.get(row['name'],0)
+            if type(version) is not int or not row['sourceMin']<=version<=row['sourceMax']:
+                raise InstallError('Database schema '+row['name']+' is outside the declared upgrade source range',code='compatibility.unsupported')
+    return {'outcomeCode':'update.channel-switch' if channel_switch else 'update.available'}
+
+
+def compatible(source,target,account_schema,*,development_rebuild=False,image_reuse_rehearsal=False,source_channel=None,target_channel=None):
+    outcome=upgrade_outcome(source,target,account_schema,development_rebuild=development_rebuild,image_reuse_rehearsal=image_reuse_rehearsal,source_channel=source_channel,target_channel=target_channel)
+    if outcome['outcomeCode']=='update.reader-update-required':
+        raise ReaderUpdateRequired(outcome['requiredVersion'])
+    if outcome['outcomeCode']=='update.below-floor':
+        raise FreshInstallRequired('This version requires a fresh installation; upgrade floor is '+outcome['requiredVersion'])
+    if outcome['outcomeCode']=='update.breakpoint-required':
+        raise InstallError('Upgrade to '+outcome['requiredVersion']+' before this release',code='compatibility.unsupported')
+    if outcome['outcomeCode']=='update.current':
+        raise InstallError('Release does not support this source version; historical downgrade is unavailable',code='compatibility.unsupported')
+
+
+def plugin_readiness_budget(library, target):
+    """Four bounded preparation stages, cleanup and startup/recovery allowance."""
+    if not isinstance(library,dict) or library.get('schema')!=1 or not isinstance(library.get('plugins'),list):
+        raise InstallError('Invalid plugin library for startup budget')
+    count=0
+    for row in library['plugins']:
+        if not isinstance(row,dict):
+            raise InstallError('Invalid plugin library record')
+        if not row.get('removing') and row.get('checkedFor')!=target:
+            count+=1+int(bool(row.get('replacement')))
+    return 90+2700*count
 
 """Shared installation questions and validation; callers own terminal and host effects."""
 import ipaddress
-import json
 from urllib.parse import urlsplit
 
 PROJECT = 'https://github.com/dake6767/dsh-phalanx'
 # Existing installer option spellings; synchronized by the preview contract tests.
 
 SOURCE_OPTIONS = DOWNLOAD_SOURCE_OPTIONS
-PREFIXES = ('containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi')
+PREFIXES = DOWNLOAD_SOURCE_PREFIXES
 
 
 class Cancelled(ValueError):
@@ -865,6 +666,820 @@ def apply_source_choice(args, config):
     for option, category in SOURCE_OPTIONS.items():
         setattr(args, option, config['overrides'].get(category))
 
+"""Shared release transaction owner. All external effects go through its port."""
+
+TERMINAL = ('succeeded','restored','prepare-failed','apply-failed','recovery-failed')
+ACTIVE = ('preparing','stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed')
+
+
+class UpgradeCore:
+    def __init__(self,port):
+        self.port=port
+
+    def save(self,job,phase):
+        point=self.port.time_point() if hasattr(self.port,'time_point') else update_time_point()
+        timing=job.setdefault('timing',{'phaseSeconds':{}})
+        if timing.get('phase')!=phase:
+            previous=timing.get('phase')
+            if previous and isinstance(timing.get('started'),dict):
+                timing['phaseSeconds'][previous]=round(timing['phaseSeconds'].get(previous,0)+update_seconds(timing['started'],timing.get('phaseEnded',point)),3)
+            timing.update(phase=phase,started=point)
+            timing.pop('phaseEnded',None)
+        if phase in TERMINAL:
+            timing.setdefault('phaseEnded',point)
+        if phase=='stopping':
+            timing.setdefault('downtimeStarted',point)
+        if phase in ('committed','restoration-committed') and 'downtimeStarted' in timing:
+            timing.setdefault('downtimeEnded',point)
+        job['phase']=phase
+        job['phaseCode']=update_phase_code(phase)
+        self.port.save(job)
+        return job
+
+    def failure(self,job,error):
+        job.update(failure=self.port.safe(str(error)),failurePhase=job['phase'],errorCode=update_error_code(error))
+
+    def status(self,operation=None):
+        return self.port.operation(operation)
+
+    def begin_prepare(self,target):
+        existing=self.port.operation()
+        if existing and existing['phase'] in ACTIVE:
+            raise InstallError('Another upgrade needs completion or recovery before preparing a target',code='operation.conflict')
+        if existing and existing['phase']=='prepared' and existing['target']==target:
+            return existing
+        job=self.port.begin(target)
+        return self.save(job,'preparing')
+
+    def prepare(self,target):
+        job=self.begin_prepare(target)
+        return self.finish_prepare(job['id']) if job['phase']=='preparing' else job
+
+    def finish_prepare(self,operation):
+        job=self.port.operation(operation)
+        if job is None or job['phase']!='preparing':
+            raise InstallError('Unknown active preparation',code='operation.invalid')
+        try:
+            self.port.preflight(job)
+            job['prepared']=self.port.prepare(job)
+            self.port.preflight(job)
+            return self.save(job,'prepared')
+        except Exception as error:
+            self.failure(job,error)
+            return self.save(job,'prepare-failed')
+
+    def apply(self,operation):
+        job=self.submit_apply(operation)
+        return self.finish_apply(job['id']) if job['phase']=='stopping' else job
+
+    def submit_apply(self,operation):
+        job=self.port.operation(operation)
+        if job is None:
+            raise InstallError('Unknown upgrade operation',code='operation.invalid')
+        if job['phase'] in TERMINAL:
+            return job
+        if job['phase']!='prepared':
+            raise InstallError('Interrupted upgrade requires recover before another apply',code='operation.invalid')
+        try:
+            self.port.preflight(job)
+        except Exception as error:
+            self.failure(job,error)
+            return self.save(job,'apply-failed')
+        try:
+            self.save(job,'stopping')
+            self.port.gate(True)
+            return job
+        except Exception as error:
+            self.failure(job,error)
+            self.port.save(job)
+            return self.recover(job['id'])
+
+    def finish_apply(self,operation):
+        job=self.port.operation(operation)
+        if job is None or job['phase']!='stopping':
+            raise InstallError('Unknown active application',code='operation.invalid')
+        try:
+            self.port.stop(job)
+            job['backupLifecycle']=2
+            self.save(job,'backing-up')
+            job['backup']=self.port.backup(job)
+            self.save(job,'backed-up')
+            self.save(job,'switching')
+            self.port.switch(job)
+            self.save(job,'validating')
+            self.port.verify(job)
+            self.port.commit(job)
+            job['committed']=True
+            self.save(job,'committed')
+            self.port.gate(False)
+            self.save(job,'succeeded')
+        except Exception as error:
+            self.failure(job,error)
+            # Persist the original failure before trying recovery. State and
+            # verified backup identity, never error text, decide restoration.
+            self.port.save(job)
+            return self.recover(job['id'])
+        return self.after_success(job)
+
+    def after_success(self,job):
+        if supports_capacity(job['target'].get('manifest',{})):
+            return self.cleanup(job['id'],discard_backup=job.get('backupLifecycle')==2 or job.get('backup',{}).get('schema')==2)
+        return job
+
+    def cleanup(self,operation=None,*,discard_backup=False):
+        return self.finish_cleanup(self.begin_cleanup(operation,discard_backup=discard_backup)['id'])
+
+    def begin_cleanup(self,operation=None,*,discard_backup=False):
+        job=self.port.operation(operation)
+        if job is None or job['id']!=self.port.operation()['id']:
+            raise InstallError('Cleanup requires the current operation',code='operation.invalid')
+        if job['phase'] not in ('succeeded','restored','prepared','prepare-failed','apply-failed'):
+            raise InstallError('Finish or recover the update before cleanup',code='operation.invalid')
+        if discard_backup and job['phase'] not in ('succeeded','restored'):
+            raise InstallError('An unfinished update still needs its backup',code='operation.invalid')
+        previous=job.get('cleanup',{})
+        job['cleanup']={**previous,'status':'running','discardBackup':discard_backup or previous.get('discardBackup',False),'reclaimedBytes':previous.get('reclaimedBytes',0),'items':previous.get('items',[])}
+        self.port.save(job)
+        return job
+
+    def finish_cleanup(self,operation):
+        job=self.port.operation(operation)
+        if job is None or job.get('cleanup',{}).get('status')!='running':
+            raise InstallError('Unknown active cleanup',code='operation.invalid')
+        try:
+            self.port.cleanup(job)
+        except Exception as error:
+            previous=job.get('cleanup',{})
+            job['cleanup']={**previous,'status':'failed','reclaimedBytes':previous.get('reclaimedBytes',0),'items':previous.get('items',[]),'failure':self.port.safe(str(error)),'errorCode':update_error_code(error,'cleanup.failed')}
+        self.port.save(job)
+        return job
+
+    def recover(self,operation=None):
+        before=self.port.operation(operation)
+        job=self._recover(operation)
+        if job['phase'] not in ACTIVE and before.get('cleanup',{}).get('status')=='running':
+            return self.cleanup(job['id'])
+        if job['phase'] in ('succeeded','restored') and (before['phase'] in ACTIVE or ((job.get('backupLifecycle')==2 or job.get('backup',{}).get('schema')==2) and not job.get('cleanup',{}).get('discardBackup'))):
+            return self.after_success(job)
+        return job
+
+    def _recover(self,operation=None):
+        job=self.port.operation(operation)
+        if job is None:
+            raise InstallError('Unknown upgrade operation',code='operation.invalid')
+        if job['phase'] in ('succeeded','restored','prepare-failed','apply-failed','prepared'):
+            return job
+        if job['phase']=='preparing':
+            job.update(failure='Preparation interrupted; no running release was changed. Download again.',failurePhase=job['phase'],errorCode='operation.interrupted')
+            return self.save(job,'prepare-failed')
+        job.setdefault('failure','Upgrade interrupted before its result was recorded')
+        job.setdefault('failurePhase',job['phase'])
+        job.setdefault('errorCode','operation.interrupted')
+        try:
+            self.port.gate(True)
+            if job.get('restorationCommitted'):
+                # Old-version writes may already have resumed. Start, never recopy.
+                self.port.start(job)
+                self.port.verify(job,old=True)
+                self.port.gate(False)
+                job.pop('instruction',None)
+                return self.save(job,'restored')
+            if job.get('committed'):
+                # Writes may already have reopened. Never roll them back.
+                self.port.start(job)
+                self.port.verify(job)
+                self.port.gate(False)
+                job.pop('instruction',None)
+                return self.save(job,'succeeded')
+            self.save(job,'restoring')
+            self.port.stop(job)
+            if job.get('backup') is not None:
+                self.port.restore(job)
+            else:
+                self.port.restart_old(job)
+            self.port.verify(job,old=True)
+            job['restorationCommitted']=True
+            self.save(job,'restoration-committed')
+            self.port.gate(False)
+            job.pop('instruction',None)
+            return self.save(job,'restored')
+        except Exception as error:
+            job['recoveryFailure']=self.port.safe(str(error))
+            job['recoveryErrorCode']=update_error_code(error,'recovery.failed')
+            try:
+                self.port.stop(job)
+            except Exception as stop_error:
+                job['stopFailure']=self.port.safe(str(stop_error))
+                job['stopErrorCode']=update_error_code(stop_error,'service.stop-failed')
+            job['instruction']=('Recovery and service shutdown failed; admission is unverified. Stop the managed service and inspect diagnostics.' if job.get('stopFailure') else 'Keep maintenance closed.')+' Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work.'
+            return self.save(job,'recovery-failed')
+
+"""Narrow root-only readiness admission, including legacy binaries and reboot."""
+import ipaddress
+import hashlib
+import signal
+import math
+import re
+import socket
+import threading
+import stat
+import json
+import os
+from pathlib import Path, PurePosixPath
+import subprocess
+import sys
+import tempfile
+import uuid
+import base64
+import array
+import secrets
+
+TABLE='dsh_phalanx_upgrade'
+COMMENT='dsh-phalanx upgrade admission protocol 1'
+MARK=0x44534850
+MARKER='/etc/dsh-phalanx/maintenance'
+
+
+def protected_ports(values):
+    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},
+               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]
+    if values.get('DSH_PHALANX_PREVIEW_PORT'):
+        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})
+    return endpoints
+
+
+class AdmissionGateError(Exception):
+    code='admission.failed'
+
+
+
+def maintenance_pages(target):
+    target=Path(target)
+    if target.is_symlink() or (target/'dist').is_symlink():
+        raise AdmissionGateError('Invalid installed maintenance page directory')
+    pages={}
+    for locale in ('en','zh-CN'):
+        path=target/'dist'/('maintenance.'+locale+'.html')
+        try:
+            descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise AdmissionGateError('Installed maintenance page is unavailable') from error
+        with os.fdopen(descriptor,'rb') as file:
+            info=os.fstat(file.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0,os.geteuid()) or info.st_mode&0o022:
+                raise AdmissionGateError('Invalid installed maintenance page ownership')
+            page=file.read(262145)
+            if not page or len(page)>262144:
+                raise AdmissionGateError('Invalid installed maintenance page size')
+            try:
+                page.decode('utf-8')
+            except UnicodeError as error:
+                raise AdmissionGateError('Invalid installed maintenance page encoding') from error
+            pages[locale]=page
+    if pages and len(pages)!=2:
+        raise AdmissionGateError('Installed maintenance pages are incomplete')
+    return pages or None
+
+
+def maintenance_locale(value):
+    languages=[]
+    for part in value.split(','):
+        fields=part.strip().split(';')
+        tag=fields[0].lower()
+        try:
+            quality=1 if len(fields)==1 else float(fields[1].strip().removeprefix('q='))
+        except ValueError:
+            continue
+        if math.isfinite(quality) and 0<quality<=1:
+            languages.append((tag,quality))
+    languages.sort(key=lambda item:item[1],reverse=True)
+    preferred=languages[0][0] if languages else 'en'
+    return 'zh-CN' if preferred=='zh' or preferred.startswith('zh-') else 'en'
+
+
+class MaintenanceListener:
+    """Owns only the temporary HTTP socket; close finishes before its port can be handed off."""
+    def __init__(self,pages,address,port):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        family=socket.AF_INET6 if ipaddress.ip_address(address).version==6 else socket.AF_INET
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version='HTTP/1.1'
+            def setup(handler):
+                super().setup()
+                handler.connection.settimeout(3)
+            def log_message(handler,*args):
+                pass
+            def respond(handler):
+                body=pages[maintenance_locale(handler.headers.get('Accept-Language','en'))]
+                handler.send_response_only(503)
+                for key,value in [('Content-Type','text/html; charset=utf-8'),('Content-Length',str(len(body))),('Retry-After','3'),('Cache-Control','no-store'),('Connection','close'),('Content-Security-Policy',"frame-ancestors 'none'"),('X-Content-Type-Options','nosniff')]:
+                    handler.send_header(key,value)
+                handler.end_headers()
+                handler.close_connection=True
+                if handler.command!='HEAD':
+                    handler.wfile.write(body)
+            do_GET=do_HEAD=do_POST=do_PUT=do_PATCH=do_DELETE=do_OPTIONS=do_CONNECT=do_TRACE=respond
+        class Server(ThreadingHTTPServer):
+            address_family=family
+            allow_reuse_address=True
+            daemon_threads=True
+            block_on_close=False
+            def server_bind(server):
+                if family==socket.AF_INET6:
+                    server.socket.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,0)
+                super().server_bind()
+        self.server=Server((address,port),Handler)
+        self.port=self.server.server_address[1]
+        self.closed=False
+        self.thread=threading.Thread(target=self.server.serve_forever,name='dsh-phalanx-maintenance-http',daemon=True)
+        try:
+            self.thread.start()
+        except BaseException:
+            self.server.server_close()
+            raise
+
+    def close(self):
+        if self.closed:
+            return
+        self.server.shutdown()
+        self.thread.join()
+        self.server.server_close()
+        self.closed=True
+
+
+def process_started(path):
+    return path.read_text().rsplit(')',1)[1].split()[19]
+
+
+def maintenance_token(job,key):
+    used=job.setdefault('maintenanceTokens',[])
+    if not isinstance(used,list) or len(used)>4096 or any(type(value) is not int or not 0<value<2**32 or value==MARK for value in used):
+        raise AdmissionGateError('Invalid maintenance connection history')
+    previous=job.get(key)
+    if isinstance(previous,dict):
+        token=previous.get('token')
+        if type(token) is not int or not 0<token<2**32 or token==MARK:
+            raise AdmissionGateError('Invalid maintenance connection identity')
+        if token not in used:
+            used.append(token)
+        return token
+    token=secrets.randbits(32)
+    while token in (0,MARK) or token in used:
+        token=secrets.randbits(32)
+    used.append(token)
+    return token
+
+
+class ManagedMaintenanceSocket:
+    """PID1 keeps the exact listener bound independently of either serving process."""
+    def __init__(self,host,job,role,key):
+        self.host=host
+        self.job=job
+        self.key=key
+        if str(uuid.UUID(job['id']))!=job['id']:
+            raise AdmissionGateError('Invalid maintenance operation identity')
+        self.unit='dsh-phalanx-upgrade-'+role+'-'+job['id']+'.service'
+        self.cgroup='/system.slice/'+self.unit
+        self.endpoint=protected_ports(job['source']['values'])[0]
+        self.program=str(host.path('/opt/dsh-phalanx/maintenance/gate.py'))
+        self.role=role
+
+    def fdname(self):
+        return self.role+'-'+self.job['id']+'-'+str(self.intent()['token'])
+
+    def stored(self,fields):
+        if fields.get('NFileDescriptorStore')!='1':
+            raise AdmissionGateError('The maintenance listener is not pinned by PID1')
+        rows=json.loads(self.host.run(['systemd-analyze','--json=short','fdstore',self.unit]).stdout)
+        if not isinstance(rows,list) or len(rows)!=1:
+            raise AdmissionGateError('Unexpected maintenance descriptor inventory')
+        row=rows[0]
+        inode=row.get('inode')
+        if (type(inode) is not int or inode<=0 or row.get('fdname')!=self.fdname() or
+                type(row.get('type')) is not int or not stat.S_ISSOCK(row['type']) or row.get('path')!='socket:['+str(inode)+']'):
+            raise AdmissionGateError('Maintenance descriptor differs from its owner')
+        expected=self.intent().get('listener',{}).get('inode')
+        if expected is not None and expected!=inode:
+            raise AdmissionGateError('A different platform listener was pinned')
+        result=self.host.run(['/usr/bin/python3','-I',self.program,'--inspect-listener',str(inode),self.endpoint['address'],str(self.endpoint['port'])])
+        if json.loads(result.stdout)!={'inode':inode,'address':self.endpoint['address'],'port':self.endpoint['port']}:
+            raise AdmissionGateError('Pinned maintenance endpoint differs from its owner')
+        return inode
+
+    def facts(self):
+        properties='LoadState,MainPID,Transient,User,Type,NotifyAccess,KillMode,Restart,ExecStart,ControlGroup,RemainAfterExit,FileDescriptorStoreMax,FileDescriptorStorePreserve,NFileDescriptorStore,CollectMode,ActiveState,Job'
+        result=self.host.run(['systemctl','show',self.unit,'--property='+properties],check=False)
+        fields=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+        if fields.get('LoadState')=='not-found':
+            return None
+        if result.returncode!=0 or fields.get('LoadState')!='loaded':
+            raise AdmissionGateError('Maintenance unit state is unavailable')
+        return fields
+
+    def verify(self,fields,*,listener=False):
+        intent=self.intent()
+        if intent is None or self.job.get(self.key)!=intent:
+            raise AdmissionGateError('Maintenance unit is not owned by this operation')
+        for key,value in [('Transient','yes'),('User','root'),('Type','notify'),('NotifyAccess','main'),('KillMode','control-group'),('Restart','no'),('RemainAfterExit','yes'),('FileDescriptorStoreMax','1'),('FileDescriptorStorePreserve','yes'),('CollectMode','inactive')]:
+            if fields.get(key)!=value:
+                raise AdmissionGateError('Maintenance unit configuration differs from its owner')
+        command=re.fullmatch(r'\{ path=([^ ;]+) ; argv\[\]=([^;]+) ; ignore_errors=no ;[^{}]*\}',fields.get('ExecStart',''))
+        if command is None or command[1]!='/usr/bin/python3' or command[2].split()!=self.arguments:
+            raise AdmissionGateError('Maintenance unit command differs from its owner')
+        raw_pid=fields.get('MainPID','')
+        if not raw_pid.isdecimal():
+            raise AdmissionGateError('Invalid maintenance listener process')
+        pid=int(raw_pid)
+        group=fields.get('ControlGroup','')
+        if group not in ('',self.cgroup) or pid and group!=self.cgroup:
+            raise AdmissionGateError('Maintenance unit cgroup differs from its owner')
+        if pid:
+            process=self.host.path('/proc/'+str(pid))
+            actual=[item for item in (process/'cmdline').read_bytes().split(b'\0') if item]
+            if (actual!=[os.fsencode(item) for item in self.arguments] or
+                    (process/'exe').resolve()!=self.host.path('/usr/bin/python3').resolve() or
+                    '0::'+self.cgroup not in (process/'cgroup').read_text().splitlines()):
+                raise AdmissionGateError('Maintenance listener process differs from its owner')
+        if fields.get('NFileDescriptorStore') not in ('0','1'):
+            raise AdmissionGateError('Invalid maintenance descriptor count')
+        if fields['NFileDescriptorStore']=='1':
+            self.stored(fields)
+        if listener and (fields['NFileDescriptorStore']!='1' or not pid or not self.host.pid_owns_listener(pid,self.endpoint['port'],ipaddress.ip_address(self.endpoint['address']))):
+            raise AdmissionGateError('Maintenance service does not own its expected listener')
+        return pid
+
+    def start(self):
+        if self.intent() is None:
+            return None
+        fields=self.facts()
+        if fields is None:
+            if self.job.get(self.key)!=self.intent():
+                raise AdmissionGateError('Save maintenance ownership before starting its listener')
+            self.host.run(['systemd-run','--unit='+self.unit,'--slice=system.slice',
+                           '--property=Type=notify','--property=NotifyAccess=main','--property=User=root',
+                           '--property=KillMode=control-group','--property=Restart=no','--property=WorkingDirectory=/',
+                           '--property=RemainAfterExit=yes','--property=FileDescriptorStoreMax=1',
+                           '--property=FileDescriptorStorePreserve=yes','--property=CollectMode=inactive',
+                           '--',*self.arguments])
+            fields=self.facts()
+        if fields is None:
+            raise AdmissionGateError('Maintenance listener exited before admission could be verified')
+        self.verify(fields,listener=True)
+        return self.socket_cgroup
+
+    def stop(self):
+        fields=self.facts()
+        if fields is None:
+            return
+        self.verify(fields)
+        result=self.host.run(['systemctl','stop',self.unit],check=False)
+        after=self.facts()
+        if after is not None:
+            if result.returncode!=0 or self.verify(after):
+                raise AdmissionGateError('Maintenance listener did not stop')
+            if after.get('Job',''):
+                raise AdmissionGateError('Maintenance listener still has a pending job')
+            if after.get('ActiveState')=='failed':
+                self.host.run(['systemctl','reset-failed',self.unit])
+                after=self.facts()
+            if after is not None:
+                self.verify(after)
+                if after.get('ActiveState')!='inactive' or after.get('Job',''):
+                    raise AdmissionGateError('Maintenance listener is not inactive')
+                self.host.run(['systemctl','clean','--what=fdstore',self.unit])
+                after=self.facts()
+                if after is not None and (self.verify(after) or after['NFileDescriptorStore']!='0'):
+                    raise AdmissionGateError('Maintenance descriptor was not released')
+        events=self.host.path('/sys/fs/cgroup'+self.cgroup+'/cgroup.events')
+        if events.exists() and dict(line.split() for line in events.read_text().splitlines()).get('populated')!='0':
+            raise AdmissionGateError('Maintenance unit still has active processes')
+
+
+class MaintenanceUnit(ManagedMaintenanceSocket):
+    def __init__(self,host,job):
+        super().__init__(host,job,'page','maintenancePage')
+        self.target=Path(job['source']['target'])
+        self.token=None
+        self.socket_cgroup=self.cgroup
+    def intent(self):
+        pages=maintenance_pages(self.target)
+        if pages is None:
+            return None
+        if self.token is None:
+            self.token=maintenance_token(self.job,self.key)
+        return {'unit':self.unit,'source':str(self.target),'pages':{locale:hashlib.sha256(body).hexdigest() for locale,body in pages.items()},'token':self.token}
+    @property
+    def arguments(self):
+        return ['/usr/bin/python3','-I',self.program,'--serve-page',self.job['id'],str(self.target),self.endpoint['address'],str(self.endpoint['port']),str(self.intent()['token'])]
+
+
+class ListenerPinUnit(ManagedMaintenanceSocket):
+    def __init__(self,host,job):
+        super().__init__(host,job,'listener','maintenanceListener')
+    def intent(self):
+        value=self.job.get(self.key)
+        if value is None:
+            return None
+        if not isinstance(value,dict) or value.get('unit')!=self.unit or not isinstance(value.get('listener'),dict):
+            raise AdmissionGateError('Invalid platform listener ownership')
+        maintenance_token(self.job,self.key)
+        return {'unit':self.unit,'listener':value['listener'],'token':value['token']}
+    @property
+    def arguments(self):
+        value=self.intent()
+        encoded=base64.urlsafe_b64encode(json.dumps(value['listener'],sort_keys=True,separators=(',',':')).encode()).decode()
+        return ['/usr/bin/python3','-I',self.program,'--pin-listener',self.job['id'],encoded,str(value['token'])]
+    @property
+    def socket_cgroup(self):
+        return self.intent()['listener']['cgroup']
+
+
+def duplicate_listener(value):
+    if sys.platform!='linux' or os.uname().machine not in ('x86_64','aarch64'):
+        raise AdmissionGateError('Listener pinning requires the supported Linux host')
+    import ctypes,fcntl
+    pid=value['pid']
+    process=Path('/proc')/str(pid)
+    if process_started(process/'stat')!=value['started']:
+        raise AdmissionGateError('Listener process identity changed')
+    descriptor=os.pidfd_open(pid)
+    try:
+        library=ctypes.CDLL(None,use_errno=True)
+        copied=library.syscall(438,descriptor,value['fd'],0)
+        if copied<0:
+            raise OSError(ctypes.get_errno(),'pidfd_getfd')
+    finally:
+        os.close(descriptor)
+    try:
+        if os.fstat(copied).st_ino!=value['inode']:
+            raise AdmissionGateError('Listener descriptor identity changed')
+        flags=fcntl.fcntl(copied,fcntl.F_GETFL)
+        listener=socket.socket(fileno=copied)
+        copied=None
+        try:
+            if fcntl.fcntl(listener.fileno(),fcntl.F_GETFL)!=flags:
+                fcntl.fcntl(listener.fileno(),fcntl.F_SETFL,flags)
+                raise AdmissionGateError('Listener status flags must remain unchanged')
+            actual=listener.getsockname()
+            address=ipaddress.ip_address(value['address'])
+            valid=(ipaddress.ip_address(actual[0])==address and actual[1]==value['port'] and
+                listener.getsockopt(socket.SOL_SOCKET,socket.SO_TYPE)==socket.SOCK_STREAM and
+                listener.getsockopt(socket.SOL_SOCKET,socket.SO_ACCEPTCONN)==1 and
+                listener.getsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT)==0 and
+                not (address.version==6 and address.is_unspecified and listener.getsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY)!=0))
+            if not valid:
+                raise AdmissionGateError('Invalid exclusive maintenance listener')
+        except BaseException:
+            listener.close()
+            raise
+        return listener
+    finally:
+        if copied is not None:
+            os.close(copied)
+
+
+def inspect_listener(inode,address,port):
+    if not inode.isdecimal() or not port.isdecimal():
+        raise AdmissionGateError('Invalid stored listener')
+    for path in Path('/proc/1/fd').iterdir():
+        try:
+            link=os.readlink(path)
+        except FileNotFoundError:
+            continue
+        if link=='socket:['+inode+']':
+            with duplicate_listener({'pid':1,'fd':int(path.name),'inode':int(inode),'started':process_started(Path('/proc/1/stat')),'address':address,'port':int(port)}):
+                print(json.dumps({'inode':int(inode),'address':address,'port':int(port)}))
+                return
+    raise AdmissionGateError('PID1 no longer holds the listener')
+
+
+def notify_listener(descriptor,name):
+    path=os.environ.get('NOTIFY_SOCKET')
+    if not path:
+        raise AdmissionGateError('Maintenance listener requires its managed unit')
+    with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as notification:
+        notification.connect('\0'+path[1:] if path.startswith('@') else path)
+        notification.sendmsg([('FDSTORE=1\nFDPOLL=0\nFDNAME='+name+'\nREADY=1').encode()],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[descriptor]))])
+
+
+def stopped_event():
+    stopped=threading.Event()
+    for name in (signal.SIGTERM,signal.SIGINT):
+        signal.signal(name,lambda *_:stopped.set())
+    return stopped
+
+
+def pin_listener(operation,encoded,token):
+    if str(uuid.UUID(operation))!=operation or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:
+        raise AdmissionGateError('Invalid listener pin request')
+    value=json.loads(base64.urlsafe_b64decode(encoded))
+    process=Path('/proc')/str(value['pid'])
+    uid=int(next(line for line in (process/'status').read_text().splitlines() if line.startswith('Uid:')).split()[1])
+    if (uid!=value['uid'] or (process/'exe').resolve()!=Path(value['executable']).resolve() or
+            (process/'cwd').resolve()!=Path(value['directory']) or '0::'+value['cgroup'] not in (process/'cgroup').read_text().splitlines()):
+        raise AdmissionGateError('Platform listener differs from its verified source')
+    stopped=stopped_event()
+    with duplicate_listener(value) as listener:
+        notify_listener(listener.fileno(),'listener-'+operation+'-'+token)
+        stopped.wait()
+
+
+def maintenance_serve(operation,target,address,port,token):
+    if str(uuid.UUID(operation))!=operation or not port.isdecimal() or not 1<=int(port)<=65535 or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:
+        raise AdmissionGateError('Invalid maintenance listener request')
+    pages=maintenance_pages(Path(target))
+    if pages is None:
+        raise AdmissionGateError('Installed source has no maintenance pages')
+    stopped=stopped_event()
+    listener=MaintenanceListener(pages,address,int(port))
+    try:
+        notify_listener(listener.server.socket.fileno(),'page-'+operation+'-'+token)
+        stopped.wait()
+    finally:
+        listener.close()
+
+class LinuxAdmissionGate:
+    def __init__(self, host=None):
+        self.host = host
+
+    def run(self,args,**kwargs):
+        command = ['nft', *args]
+        result = self.host.run(command, check=False, **kwargs) if self.host else subprocess.run(command,capture_output=True,text=True,**kwargs)
+        if result.returncode!=0:
+            raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')
+        return result.stdout
+
+    def table_exists(self):
+        tables=json.loads(self.run(['-j','list','tables']))['nftables']
+        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)
+        if found:
+            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']
+            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):
+                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')
+        return found
+
+    def rules(self,ports,existing,*,page_cgroup=None,page_token=None):
+        if not isinstance(ports,list) or len(ports) not in (2,3):
+            raise AdmissionGateError('Invalid protected admission inventory')
+        selectors=[]
+        public=[]
+        for index,endpoint in enumerate(ports):
+            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:
+                raise AdmissionGateError('Invalid protected admission port')
+            address=ipaddress.ip_address(endpoint['address'])
+            family='ip' if address.version==4 else 'ip6'
+            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)
+            selected=[destination+' tcp dport '+str(endpoint['port'])]
+            # A wildcard IPv6 listener can accept mapped IPv4 sockets.
+            if address.version==6 and address.is_unspecified:
+                selected.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))
+            selectors.extend(selected)
+            if index==0:
+                public=selected
+        outgoing='\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)
+        incoming='\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)
+        pages=''
+        if page_cgroup is not None:
+            if type(page_token) is not int or not 0<page_token<2**32 or page_token==MARK:
+                raise AdmissionGateError('Invalid maintenance connection identity')
+            if (not isinstance(page_cgroup,str) or page_cgroup=='/' or not re.fullmatch(r'/[a-zA-Z0-9_@./-]+',page_cgroup) or
+                    str(PurePosixPath(page_cgroup))!=page_cgroup or any(part in ('.','..') for part in page_cgroup.split('/')[1:])):
+                raise AdmissionGateError('Invalid maintenance socket cgroup')
+            group=page_cgroup[1:]
+            level=len(group.split('/'))
+            if level>=255:
+                raise AdmissionGateError('Maintenance socket cgroup is too deep')
+            for selected in public:
+                pages+='  '+selected+' ct mark != '+str(MARK)+' tcp flags & (syn | ack) == syn ct mark set 0\n'
+                owner=selected+' ct mark != '+str(MARK)+' socket cgroupv2 level '+str(level)+' '+json.dumps(group)
+                # Missing next ancestors break this rule; existing descendants cannot be the root cgroup.
+                pages+='  '+owner+' socket cgroupv2 level '+str(level+1)+' != "/" counter reject with tcp reset\n'
+                pages+='  '+owner+' tcp flags & (syn | ack) == syn ct mark set '+str(page_token)+' counter accept\n'
+                pages+='  '+selected+' ct mark '+str(page_token)+' counter accept\n'
+        return (('delete table inet '+TABLE+'\n') if existing else '')+f'''table inet {TABLE} {{
+ comment "{COMMENT}"
+ chain readiness {{
+  type filter hook output priority -150; policy accept;
+{outgoing}
+ }}
+ chain work_admission {{
+  type filter hook input priority -150; policy accept;
+{pages}{incoming}
+ }}
+}}
+'''
+
+    def batch(self,text,check=False):
+        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:
+            os.fchmod(file.fileno(),0o600)
+            file.write(text)
+            file.flush()
+            self.run((['--check'] if check else [])+['-f',file.name])
+
+    def preflight(self,ports):
+        existing=self.table_exists()
+        self.batch(self.rules(ports,existing),check=True)
+        # Validate the supported socket expression without granting a live exception.
+        self.batch(self.rules(ports,existing,page_cgroup='/system.slice',page_token=1),check=True)
+    def close(self,ports):
+        self.batch(self.rules(ports,self.table_exists()))
+    def show_page(self,ports,cgroup,token):
+        self.batch(self.rules(ports,self.table_exists(),page_cgroup=cgroup,page_token=token))
+    def open(self):
+        if self.table_exists():
+            self.batch('delete table inet '+TABLE+'\n')
+
+    def install(self,host,uid,program=None):
+        if program is None:
+            program=globals().get('UPGRADE_GATE_SOURCE')
+        if program is None:
+            program=Path(__file__).read_text()
+        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)
+        unit='[Unit]\nDescription=dsh-phalanx upgrade admission\nBefore=user@'+str(uid)+'.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\n'
+        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)
+        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',
+                    '[Unit]\nRequires=dsh-phalanx-maintenance.service\nAfter=dsh-phalanx-maintenance.service\n',0o644)
+        host.run(['systemctl','daemon-reload'])
+        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])
+
+
+def protected_json(path):
+    info=path.lstat()
+    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:
+        raise AdmissionGateError('Invalid persistent admission carrier')
+    return json.loads(path.read_text())
+
+
+def restore_boot_admission():
+    path=Path(MARKER)
+    gate=LinuxAdmissionGate()
+    if path.exists() or path.is_symlink():
+        value=protected_json(path)
+        if value.get('schema')!=1:
+            raise AdmissionGateError('Unknown persistent maintenance admission protocol')
+        gate.close(value['ports'])
+        return
+    # Platform operations share the same admission owner and survive the window
+    # between durable intent and marker publication.
+    operations=Path('/var/lib/dsh-phalanx-updater/maintenance-operation.json')
+    if operations.exists() or operations.is_symlink():
+        root=operations.parent
+        info=root.lstat()
+        if root.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:
+            raise AdmissionGateError('Invalid platform operation owner')
+        job=protected_json(operations)
+        if job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):
+            raise AdmissionGateError('Unknown platform operation admission protocol')
+        if job['phase'] not in ('succeeded','restored'):
+            value=json.loads(job['marker'])
+            if value.get('schema')!=1 or value.get('operation')!=job['id']:
+                raise AdmissionGateError('Invalid platform operation marker')
+            gate.close(value['ports'])
+            return
+    # The journal precedes the marker and all stop/switch effects. A crash in
+    # that window must still restore admission before the managed user starts.
+    root=Path('/var/lib/dsh-phalanx-updater')
+    pointer=root/'current'
+    if pointer.exists():
+        for carrier in (root,pointer):
+            info=carrier.lstat()
+            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:
+                raise AdmissionGateError('Invalid admission journal owner')
+        operation=pointer.read_text().strip()
+        if str(uuid.UUID(operation))!=operation:
+            raise AdmissionGateError('Invalid admission operation identity')
+        directory=root/operation
+        info=directory.lstat()
+        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:
+            raise AdmissionGateError('Invalid admission operation owner')
+        job=protected_json(directory/'operation.json')
+        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):
+            values=job['source']['values']
+            gate.close(protected_ports(values))
+            return
+        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):
+            raise AdmissionGateError('Unknown admission operation phase')
+    gate.open()
+
+
+if __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':
+    try:
+        if len(sys.argv)==1:
+            restore_boot_admission()
+        elif len(sys.argv)==7 and sys.argv[1]=='--serve-page':
+            maintenance_serve(*sys.argv[2:])
+        elif len(sys.argv)==5 and sys.argv[1]=='--inspect-listener':
+            inspect_listener(*sys.argv[2:])
+        elif len(sys.argv)==5 and sys.argv[1]=='--pin-listener':
+            pin_listener(*sys.argv[2:])
+        else:
+            raise AdmissionGateError('Unknown maintenance entry request')
+    except Exception:
+        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)
+        sys.exit(1)
+
 """Structured installation events, operator output and private safe diagnostics."""
 import contextlib
 import json
@@ -879,46 +1494,17 @@ import unicodedata
 import time
 
 
-# BEGIN GENERATED SYSTEM UPDATE CODES
-# Generated from src/domain/system-update-codes.json; do not edit this value.
-SYSTEM_UPDATE_CODES = json.loads("{\n  \"phases\": {\n    \"install.preflight\": {\n      \"en\": \"Checking installation requirements\",\n      \"zh-CN\": \"检查安装条件\"\n    },\n    \"install.lock\": {\n      \"en\": \"Acquiring the installation lock\",\n      \"zh-CN\": \"获取安装锁\"\n    },\n    \"install.release-selection\": {\n      \"en\": \"Selecting a verified release\",\n      \"zh-CN\": \"选择已验证版本\"\n    },\n    \"install.configuration\": {\n      \"en\": \"Reading installation configuration\",\n      \"zh-CN\": \"读取安装配置\"\n    },\n    \"install.download\": {\n      \"en\": \"Downloading and verifying assets\",\n      \"zh-CN\": \"下载并校验制品\"\n    },\n    \"install.existing-installation\": {\n      \"en\": \"Checking the installed release\",\n      \"zh-CN\": \"检查已安装版本\"\n    },\n    \"install.dependencies\": {\n      \"en\": \"Preparing host dependencies\",\n      \"zh-CN\": \"准备主机依赖\"\n    },\n    \"install.identity-storage\": {\n      \"en\": \"Preparing service identity and storage\",\n      \"zh-CN\": \"准备服务身份与存储\"\n    },\n    \"install.staging\": {\n      \"en\": \"Staging the verified platform\",\n      \"zh-CN\": \"暂存已验证平台\"\n    },\n    \"install.runtime-image\": {\n      \"en\": \"Preparing the runtime image\",\n      \"zh-CN\": \"准备运行镜像\"\n    },\n    \"install.database\": {\n      \"en\": \"Preparing the platform database\",\n      \"zh-CN\": \"准备平台数据库\"\n    },\n    \"install.executor\": {\n      \"en\": \"Installing the update executor\",\n      \"zh-CN\": \"安装升级执行器\"\n    },\n    \"install.activation\": {\n      \"en\": \"Starting the managed service\",\n      \"zh-CN\": \"启动托管服务\"\n    },\n    \"update.preparing\": {\n      \"en\": \"Downloading and verifying the update\",\n      \"zh-CN\": \"下载并校验更新\"\n    },\n    \"update.prepared\": {\n      \"en\": \"Ready to apply\",\n      \"zh-CN\": \"可以应用更新\"\n    },\n    \"update.prepare-failed\": {\n      \"en\": \"Download or verification failed\",\n      \"zh-CN\": \"下载或校验失败\"\n    },\n    \"update.stopping\": {\n      \"en\": \"Stopping the service and user instances\",\n      \"zh-CN\": \"停止平台与成员实例\",\n      \"step\": 1,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.backing-up\": {\n      \"en\": \"Backing up platform data\",\n      \"zh-CN\": \"备份平台数据\",\n      \"step\": 2,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.backed-up\": {\n      \"en\": \"Platform backup verified\",\n      \"zh-CN\": \"平台备份已验证\",\n      \"step\": 3,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.switching\": {\n      \"en\": \"Switching to the verified version\",\n      \"zh-CN\": \"切换到已验证版本\",\n      \"step\": 4,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.validating\": {\n      \"en\": \"Checking the new service\",\n      \"zh-CN\": \"检查新版本服务\",\n      \"step\": 5,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.committed\": {\n      \"en\": \"Update verified; reopening the service\",\n      \"zh-CN\": \"更新已验证，正在开放服务\",\n      \"step\": 6,\n      \"total\": 6,\n      \"mode\": \"apply\"\n    },\n    \"update.succeeded\": {\n      \"en\": \"Update completed successfully\",\n      \"zh-CN\": \"升级成功\"\n    },\n    \"update.apply-failed\": {\n      \"en\": \"Update could not be applied\",\n      \"zh-CN\": \"无法应用更新\"\n    },\n    \"update.restoring\": {\n      \"en\": \"Restoring the previous version\",\n      \"zh-CN\": \"正在恢复旧版本\",\n      \"step\": 1,\n      \"total\": 2,\n      \"mode\": \"recovery\"\n    },\n    \"update.restoration-committed\": {\n      \"en\": \"Previous version verified; reopening the service\",\n      \"zh-CN\": \"旧版本已验证，正在开放服务\",\n      \"step\": 2,\n      \"total\": 2,\n      \"mode\": \"recovery\"\n    },\n    \"update.restored\": {\n      \"en\": \"Update failed; the previous version was restored\",\n      \"zh-CN\": \"升级失败，已恢复旧版本\"\n    },\n    \"update.recovery-failed\": {\n      \"en\": \"Recovery failed; operator action is required\",\n      \"zh-CN\": \"恢复失败，需要管理员处理\"\n    },\n    \"update.bootstrap\": {\n      \"en\": \"Updating the small executor\",\n      \"zh-CN\": \"更新小执行器\"\n    },\n    \"update.cleanup\": {\n      \"en\": \"Cleaning unused installation resources\",\n      \"zh-CN\": \"清理无用安装资源\"\n    },\n    \"deployment.start\": {\n      \"en\": \"Starting the deployment\",\n      \"zh-CN\": \"启动部署\"\n    },\n    \"deployment.stop\": {\n      \"en\": \"Stopping the deployment\",\n      \"zh-CN\": \"停止部署\"\n    },\n    \"deployment.status\": {\n      \"en\": \"Inspecting deployment status\",\n      \"zh-CN\": \"查询部署状态\"\n    }\n  },\n  \"outcomes\": {\n    \"update.available\": {\n      \"en\": \"Update available\",\n      \"zh-CN\": \"有可用更新\"\n    },\n    \"update.current\": {\n      \"en\": \"Already up to date\",\n      \"zh-CN\": \"已是最新版本\"\n    },\n    \"update.breakpoint-required\": {\n      \"en\": \"Update to the required intermediate version first\",\n      \"zh-CN\": \"需要先升级到断点版本\"\n    },\n    \"update.below-floor\": {\n      \"en\": \"The installed version is below the upgrade floor\",\n      \"zh-CN\": \"当前版本低于升级下限\"\n    },\n    \"update.channel-switch\": {\n      \"en\": \"A formal release is available for this candidate\",\n      \"zh-CN\": \"此候选版可以转为正式版\"\n    },\n    \"update.reader-update-required\": {\n      \"en\": \"Update the small executor first\",\n      \"zh-CN\": \"需要先更新小执行器\"\n    }\n  },\n  \"errors\": {\n    \"disk.insufficient\": {\n      \"en\": \"There is not enough disk space\",\n      \"zh-CN\": \"磁盘空间不足\"\n    },\n    \"disk.inspection-failed\": {\n      \"en\": \"Disk capacity could not be checked\",\n      \"zh-CN\": \"无法检查磁盘容量\"\n    },\n    \"database.unavailable\": {\n      \"en\": \"The platform database is unavailable\",\n      \"zh-CN\": \"平台数据库不可用\"\n    },\n    \"database.export-failed\": {\n      \"en\": \"The platform database could not be exported\",\n      \"zh-CN\": \"平台数据库导出失败\"\n    },\n    \"database.restore-failed\": {\n      \"en\": \"The platform database could not be restored\",\n      \"zh-CN\": \"平台数据库恢复失败\"\n    },\n    \"download.failed\": {\n      \"en\": \"The release download failed\",\n      \"zh-CN\": \"发布制品下载失败\"\n    },\n    \"release.metadata-invalid\": {\n      \"en\": \"The release declaration is invalid\",\n      \"zh-CN\": \"发布声明无效\"\n    },\n    \"release.checksum-failed\": {\n      \"en\": \"A release asset failed checksum verification\",\n      \"zh-CN\": \"发布制品校验失败\"\n    },\n    \"release.identity-mismatch\": {\n      \"en\": \"The release or running process identity does not match\",\n      \"zh-CN\": \"发布制品或运行进程身份不匹配\"\n    },\n    \"compatibility.unsupported\": {\n      \"en\": \"This release is incompatible with the installed platform\",\n      \"zh-CN\": \"此版本与已安装平台不兼容\"\n    },\n    \"operation.conflict\": {\n      \"en\": \"Another operation must finish or recover first\",\n      \"zh-CN\": \"需先完成或恢复另一个操作\"\n    },\n    \"operation.invalid\": {\n      \"en\": \"The selected operation or release changed\",\n      \"zh-CN\": \"所选操作或发布身份已变化\"\n    },\n    \"backup.failed\": {\n      \"en\": \"The platform backup failed\",\n      \"zh-CN\": \"平台备份失败\"\n    },\n    \"backup.invalid\": {\n      \"en\": \"The recovery backup is incomplete or damaged\",\n      \"zh-CN\": \"恢复备份不完整或已损坏\"\n    },\n    \"service.stop-failed\": {\n      \"en\": \"The managed service could not be stopped\",\n      \"zh-CN\": \"托管服务停止失败\"\n    },\n    \"service.start-failed\": {\n      \"en\": \"The managed service could not become ready\",\n      \"zh-CN\": \"托管服务未能就绪\"\n    },\n    \"admission.failed\": {\n      \"en\": \"The maintenance admission rule could not be changed\",\n      \"zh-CN\": \"维护准入规则切换失败\"\n    },\n    \"migration.failed\": {\n      \"en\": \"The platform database migration failed\",\n      \"zh-CN\": \"平台数据库迁移失败\"\n    },\n    \"recovery.failed\": {\n      \"en\": \"The previous version could not be restored\",\n      \"zh-CN\": \"旧版本恢复失败\"\n    },\n    \"cleanup.failed\": {\n      \"en\": \"Some installation resources could not be cleaned\",\n      \"zh-CN\": \"部分安装资源清理失败\"\n    },\n    \"operation.interrupted\": {\n      \"en\": \"The operation was interrupted before a result was recorded\",\n      \"zh-CN\": \"操作中断，尚未记录结果\"\n    },\n    \"unknown\": {\n      \"en\": \"An unclassified update error occurred\",\n      \"zh-CN\": \"发生未分类的升级错误\"\n    }\n  }\n}\n")
-# END GENERATED SYSTEM UPDATE CODES
-
-
-def update_phase_code(phase):
-    code='update.'+phase
-    return code if code in SYSTEM_UPDATE_CODES['phases'] else 'unknown'
-
-
-def update_code(value,default='unknown'):
-    return value if isinstance(value,str) and re.fullmatch(r'[a-z][a-z0-9.-]{0,127}',value) else default
-
-
-def update_error_code(error,default='unknown'):
-    code=update_code(getattr(error,'system_update_code',getattr(error,'code',default)),default)
-    return default if code=='unknown' else code
-
-
 def update_diagnostic_path(name):
     return '/var/log/dsh-phalanx/'+name if isinstance(name,str) and re.fullmatch(r'[0-9]{8}T[0-9]{6}-[a-f0-9]{8}\.jsonl',name) else None
 
 
-def update_time_point():
-    return {'wall':time.time(),'mono':time.monotonic(),'boot':None}
-
-
-def update_seconds(start,end):
-    if not isinstance(start,dict) or not isinstance(end,dict):return 0
-    key='mono' if start.get('boot') and start.get('boot')==end.get('boot') else 'wall'
-    values=[start.get(key),end.get(key)]
-    if any(type(value) not in (int,float) or not math.isfinite(value) for value in values):return 0
-    return round(max(0,values[1]-values[0]),3)
-
-
 def update_timing(job,point=None):
     timing=(job or {}).get('timing')
-    if not isinstance(timing,dict) or not isinstance(timing.get('started'),dict):return None
-    point=point or update_time_point();phase=timing['phase'];elapsed=update_seconds(timing['started'],timing.get('phaseEnded',point))
+    if not isinstance(timing,dict) or not isinstance(timing.get('started'),dict):
+        return None
+    point=point or update_time_point()
+    phase=timing['phase']
+    elapsed=update_seconds(timing['started'],timing.get('phaseEnded',point))
     durations={key:value for key,value in timing.get('phaseSeconds',{}).items()
                if 'update.'+key in SYSTEM_UPDATE_CODES['phases'] and type(value) in (int,float) and math.isfinite(value) and value>=0}
     durations[phase]=round(durations.get(phase,0)+elapsed,3)
@@ -929,7 +1515,8 @@ def update_timing(job,point=None):
 
 
 def previous_downtime(job,point=None):
-    if not job:return None
+    if not job:
+        return None
     timing=update_timing(job,point)
     value=timing.get('downtimeSeconds') if timing and not timing['downtimeActive'] and job['phase'] in ('succeeded','restored') else job.get('previousDowntimeSeconds')
     return value if type(value) in (int,float) and math.isfinite(value) and value>=0 else None
@@ -1021,13 +1608,16 @@ class HumanProgressRenderer:
             self.line = False
 
     def render(self, event, *, milestone=False):
-        if self.paused or event['status'] == 'detail' and not self.verbose: return
+        if self.paused or event['status'] == 'detail' and not self.verbose:
+            return
         terminal = self.terminal()
         final = event['status'] in ('completed', 'warning', 'failed', 'info', 'detail')
-        if not final and not milestone and event['elapsed'] - self.last < (1 if terminal else 30): return
+        if not final and not milestone and event['elapsed'] - self.last < (1 if terminal else 30):
+            return
         self.last = event['elapsed']
         detail = event.get('action') or event['message']
-        if event['status'] == 'detail': detail = event['message']
+        if event['status'] == 'detail':
+            detail = event['message']
         if 'bytes' in event:
             detail += f" · {event['bytes']} bytes"
             if event.get('total', 0) and event['total'] >= event['bytes']:
@@ -1044,8 +1634,10 @@ class HumanProgressRenderer:
             line = f"[{event['phase']}] {event['status']} · {detail} · phase {event['phaseElapsed']:.1f}s / total {event['elapsed']:.1f}s"
         line = ' '.join(line.split())
         if terminal:
-            try: width = os.get_terminal_size(sys.stderr.fileno()).columns
-            except (OSError, ValueError): width = 80
+            try:
+                width = os.get_terminal_size(sys.stderr.fileno()).columns
+            except (OSError, ValueError):
+                width = 80
             # A current line must not wrap: finalized milestones can wrap normally.
             if not final and display_width(line) >= width:
                 # Keep facts at the right on narrow terminals; truncating the full
@@ -1059,11 +1651,14 @@ class HumanProgressRenderer:
                 action = operator_text(event.get('action') or event['message'], self.language)
                 budget = max(0, width-2-display_width(suffix))
                 line = fit_terminal(action, budget) + ' ' + suffix
-            if not final: line = fit_terminal(line, max(1, width-1))
+            if not final:
+                line = fit_terminal(line, max(1, width-1))
             sys.stderr.write(('\r\x1b[2K' if self.line else '') + line + ('\n' if final else ''))
-            sys.stderr.flush(); self.line = not final
+            sys.stderr.flush()
+            self.line = not final
         else:
-            self.finish(); print(line, file=sys.stderr, flush=True)
+            self.finish()
+            print(line, file=sys.stderr, flush=True)
 
 
 class Progress:
@@ -1074,21 +1669,26 @@ class Progress:
         self.started = self.phase_started = clock()
         self.current = {}
         self.renderer = HumanProgressRenderer(verbose, language)
-        self.phase = 'Preflight'; self.phase_code='install.preflight'
+        self.phase = 'Preflight'
+        self.phase_code='install.preflight'
         self.secrets = set()
         self.observers = []
         self.lock = threading.RLock()
         self.log = None
         self.host_admission = None
         self.root = root
-        if persist: self.start_log()
+        if persist:
+            self.start_log()
 
     def start_log(self):
-        if self.log is not None: return
+        if self.log is not None:
+            return
         directory = self.root/'var/log/dsh-phalanx'
         for parent in (directory, *directory.parents):
-            if parent.is_symlink(): raise OSError('Diagnostic paths must not be symbolic links')
-            if parent == self.root: break
+            if parent.is_symlink():
+                raise OSError('Diagnostic paths must not be symbolic links')
+            if parent == self.root:
+                break
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         directory.chmod(0o700)
         self.log = directory/(time.strftime('%Y%m%dT%H%M%S')+'-'+secrets.token_hex(4)+'.jsonl')
@@ -1096,14 +1696,16 @@ class Progress:
         os.close(descriptor)
 
     def protect(self, *values):
-        with self.lock: self.secrets.update(str(value) for value in values if value)
+        with self.lock:
+            self.secrets.update(str(value) for value in values if value)
 
     def safe(self, text):
         text = re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)', '', str(text))
         text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
         text = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', '', text)
         with self.lock:
-            for value in sorted(self.secrets, key=len, reverse=True): text = text.replace(value, '[REDACTED]')
+            for value in sorted(self.secrets, key=len, reverse=True):
+                text = text.replace(value, '[REDACTED]')
         # Diagnostic carriers are untrusted: discard whole sensitive lines,
         # including quoted JSON fields and future environment/CLI key names.
         text = re.sub(r'https?://[^\s\"\']*/bootstrap[^\s\"\']*', '[REDACTED initialization link]', text, flags=re.I)
@@ -1122,7 +1724,8 @@ class Progress:
             now = self.clock()
             if status != 'detail':
                 if message and not facts.get('heartbeat'):
-                    if 'bytes' not in facts: self.current = {}
+                    if 'bytes' not in facts:
+                        self.current = {}
                     self.current['action'] = self.safe(facts.get('action', message))
                 self.current.update({key: value for key, value in facts.items() if key in ('bytes', 'total')})
             self.phase_code=update_code(facts.get('phaseCode',self.phase_code))
@@ -1131,13 +1734,15 @@ class Progress:
                      **({'errorCode':update_code(facts['errorCode'])} if 'errorCode' in facts else {})}
             if self.log:
                 try:
-                    with self.log.open('a') as file: file.write(json.dumps(event)+'\n')
+                    with self.log.open('a') as file:
+                        file.write(json.dumps(event)+'\n')
                 except OSError:
                     self.log = None
                     self.renderer.finish()
                     print('Diagnostic log unavailable; check disk space and permissions.', file=sys.stderr, flush=True)
             self.renderer.render(event, milestone=milestone)
-            for observer in self.observers: observer(dict(event))
+            for observer in self.observers:
+                observer(dict(event))
 
     def heartbeat(self):
         self.emit(message='Still working; waiting for this step to finish', heartbeat=True)
@@ -1145,34 +1750,47 @@ class Progress:
     @contextlib.contextmanager
     def input(self):
         with self.lock:
-            self.renderer.finish(); self.renderer.paused = True
-        try: yield
+            self.renderer.finish()
+            self.renderer.paused = True
+        try:
+            yield
         finally:
-            with self.lock: self.renderer.paused = False
+            with self.lock:
+                self.renderer.paused = False
 
     @contextlib.contextmanager
     def stage(self, name, *, phase_code=None):
         with self.lock:
-            self.phase = name; self.phase_code=update_code(phase_code); self.phase_started = self.clock(); self.current = {}
+            self.phase = name
+            self.phase_code=update_code(phase_code)
+            self.phase_started = self.clock()
+            self.current = {}
             self.emit(message='Starting', action=name, milestone=True)
         stop = threading.Event()
         def pulse():
-            while not stop.wait(1): self.heartbeat()
-        thread = threading.Thread(target=pulse, daemon=True); thread.start()
+            while not stop.wait(1):
+                self.heartbeat()
+        thread = threading.Thread(target=pulse, daemon=True)
+        thread.start()
         try:
             yield
         except BaseException as error:
             self.emit('failed', 'Step did not complete',errorCode=update_error_code(error))
             raise
-        else: self.emit('completed', heartbeat=True)
+        else:
+            self.emit('completed', heartbeat=True)
         finally:
-            stop.set(); thread.join()
-            with self.lock: self.renderer.finish()
+            stop.set()
+            thread.join()
+            with self.lock:
+                self.renderer.finish()
 
     def result(self, receipt, *, port=None):
-        if self.host_admission is not None: receipt = {**receipt, 'hostAdmission': self.host_admission}
+        if self.host_admission is not None:
+            receipt = {**receipt, 'hostAdmission': self.host_admission}
         self.renderer.finish()
-        if self.output == 'json': print(json.dumps(receipt, indent=2))
+        if self.output == 'json':
+            print(json.dumps(receipt, indent=2))
         elif receipt['status'] == 'failed':
             self.host_status()
             if self.language == 'zh-CN':
@@ -1216,30 +1834,44 @@ class Progress:
 
     def upgrade_result(self,result):
         self.renderer.finish()
-        if self.host_admission is not None: result = {**result, 'hostAdmission': self.host_admission}
-        if self.output=='json':print(json.dumps(result,indent=2)); return
+        if self.host_admission is not None:
+            result = {**result, 'hostAdmission': self.host_admission}
+        if self.output=='json':
+            print(json.dumps(result,indent=2))
+            return
         self.host_status()
         if 'check' in result:
             check=result['check']
             outcome = check.get('outcomeCode', check['status'])
             label = SYSTEM_UPDATE_CODES['outcomes'].get(outcome, {}).get(self.language, outcome)
             print(('系统更新：' if self.language == 'zh-CN' else 'System update: ')+self.safe(label)+(' ('+outcome+')' if label != outcome else ''))
-            if check.get('version'):print(('版本：' if self.language == 'zh-CN' else 'Release: ')+self.safe(check['version']))
-            if check.get('requiredVersion'):print(('所需版本：' if self.language == 'zh-CN' else 'Required version: ')+self.safe(check['requiredVersion']))
-            if check.get('reason'):print(self.safe(check['reason']))
+            if check.get('version'):
+                print(('版本：' if self.language == 'zh-CN' else 'Release: ')+self.safe(check['version']))
+            if check.get('requiredVersion'):
+                print(('所需版本：' if self.language == 'zh-CN' else 'Required version: ')+self.safe(check['requiredVersion']))
+            if check.get('reason'):
+                print(self.safe(check['reason']))
             return
         job=result['operation']
-        if job is None:print('尚无升级操作记录。' if self.language == 'zh-CN' else 'No upgrade operation has been recorded.'); return
+        if job is None:
+            print('尚无升级操作记录。' if self.language == 'zh-CN' else 'No upgrade operation has been recorded.')
+            return
         phase = SYSTEM_UPDATE_CODES['phases'].get(update_phase_code(job['phase']), {}).get(self.language, job['phase'])
         print(('系统更新 ' if self.language == 'zh-CN' else 'System update ')+job['id']+': '+phase)
         print(('版本：' if self.language == 'zh-CN' else 'Release: ')+job['sourceVersion']+' → '+job['targetVersion'])
-        if job['phase']=='prepared':print(('下载已核验，当前服务保持运行。应用命令：' if self.language == 'zh-CN' else 'Download verified; current service is unchanged. Apply with ')+'--upgrade apply --operation '+job['id']+'.')
-        elif job['phase']=='succeeded':print('所选版本身份和就绪状态已核验，服务已开放。' if self.language == 'zh-CN' else 'Selected release identity and readiness verified; work is open.')
-        elif job['phase']=='restored':print('更新失败，已恢复并核验原数据和服务。' if self.language == 'zh-CN' else 'Update failed. Previous data and service were restored and verified.')
-        elif job['phase']=='recovery-failed':print('恢复失败，请按服务端恢复指引处理后再继续。' if self.language == 'zh-CN' else 'Recovery failed; follow the server recovery instruction before resuming work.')
+        if job['phase']=='prepared':
+            print(('下载已核验，当前服务保持运行。应用命令：' if self.language == 'zh-CN' else 'Download verified; current service is unchanged. Apply with ')+'--upgrade apply --operation '+job['id']+'.')
+        elif job['phase']=='succeeded':
+            print('所选版本身份和就绪状态已核验，服务已开放。' if self.language == 'zh-CN' else 'Selected release identity and readiness verified; work is open.')
+        elif job['phase']=='restored':
+            print('更新失败，已恢复并核验原数据和服务。' if self.language == 'zh-CN' else 'Update failed. Previous data and service were restored and verified.')
+        elif job['phase']=='recovery-failed':
+            print('恢复失败，请按服务端恢复指引处理后再继续。' if self.language == 'zh-CN' else 'Recovery failed; follow the server recovery instruction before resuming work.')
         for key in ('failure','recoveryFailure','stopFailure','instruction'):
-            if job.get(key):print(self.safe(job[key]))
-        if result.get('diagnosticLog'):print(('诊断日志：' if self.language == 'zh-CN' else 'Diagnostic log: ')+result['diagnosticLog'])
+            if job.get(key):
+                print(self.safe(job[key]))
+        if result.get('diagnosticLog'):
+            print(('诊断日志：' if self.language == 'zh-CN' else 'Diagnostic log: ')+result['diagnosticLog'])
 
     def cancel(self, reason):
         self.renderer.finish()
@@ -1254,9 +1886,1138 @@ class Progress:
         log = '/var/log/dsh-phalanx/'+self.log.name if self.log else None
         print(('查看托管用户服务日志：' if self.language == 'zh-CN' else 'Inspect the managed user service: ')+'sudo journalctl _SYSTEMD_USER_UNIT=dsh-phalanx.service _UID="$(id -u dsh-phalanx)" -n 80 --no-pager', file=sys.stderr)
         print('请保留数据目录，修正配置后用 sudo bash install.sh 重试。已准备的系统依赖不会自动撤销。' if self.language == 'zh-CN' else 'Retry with sudo bash install.sh and corrected deployment flags; preserve the data directory. Prepared OS packages are not automatically removed.', file=sys.stderr)
-        if log: print(('诊断日志：' if self.language == 'zh-CN' else 'Diagnostic log: ')+log, file=sys.stderr)
+        if log:
+            print(('诊断日志：' if self.language == 'zh-CN' else 'Diagnostic log: ')+log, file=sys.stderr)
         receipt = {'status':'failed', 'phase':self.phase, 'phaseCode':self.phase_code,'errorCode':update_error_code(error),'reason':reason, 'diagnosticLog':log}
         self.result(receipt)
+
+"""Deployment facts and read-only checks before large downloads or host changes."""
+import ipaddress
+import os
+import json
+import re
+from pathlib import Path
+import secrets
+import shlex
+import urllib.parse
+import tempfile
+
+VERIFIED_HOSTS = frozenset((('ubuntu', '24.04'), ('ubuntu', '26.04')))
+MINIMUM_PODMAN = (4, 9, 3)
+MINIMUM_PASST_DATE = 20240220
+
+
+def passt_version_date(value):
+    version = re.search(r'\b(?:0\.0~git)?(20\d{2})[-_]?(\d{2})[-_]?(\d{2})\b', value)
+    return int(''.join(version.groups())) if version else None
+
+
+def entry_url(port, listen_address):
+    address = ipaddress.ip_address(listen_address)
+    if address.is_unspecified:
+        address = ipaddress.ip_address("127.0.0.1" if address.version == 4 else "::1")
+    entry = str(address) if address.version == 4 else f"[{address}]"
+    return f"http://{entry}:{port}"
+
+
+def host_version_failure(podman, pasta):
+    podman_version = re.search(r'\b(\d+)\.(\d+)\.(\d+)\b', podman)
+    if podman_version is None or tuple(map(int, podman_version.groups())) < MINIMUM_PODMAN:
+        return 'Podman version '+podman+'; required minimum: '+'.'.join(map(str, MINIMUM_PODMAN))
+    passt_version = passt_version_date(pasta)
+    if passt_version is None or passt_version < MINIMUM_PASST_DATE:
+        return 'passt version '+pasta+'; required minimum: 0.0~git'+str(MINIMUM_PASST_DATE)
+    return None
+
+
+def distribution_facts(text):
+    values = {}
+    try:
+        for line in text.splitlines():
+            key, separator, value = line.partition('=')
+            if separator and key.strip() in ('ID', 'ID_LIKE', 'VERSION_ID'):
+                values[key.strip()] = ' '.join(shlex.split(value, comments=True))
+    except ValueError:
+        values = {}
+    distribution, version = values.get('ID', ''), values.get('VERSION_ID', '')
+    family = bool({'debian', 'ubuntu'} & {distribution, *values.get('ID_LIKE', '').split()})
+    return {'distribution': distribution, 'version': version, 'family': 'debian' if family else 'unsupported',
+            'verified': (distribution, version) in VERIFIED_HOSTS}
+
+# BEGIN GENERATED DOWNLOAD SOURCE PRESETS
+# Generated from src/domain/download-source-presets.json; do not edit this value.
+DOWNLOAD_SOURCE_PRESETS = json.loads("{\n  \"official\": {\n    \"npm\": \"https://registry.npmjs.org\",\n    \"pypi\": \"https://pypi.org/simple\",\n    \"containerMirror\": \"\",\n    \"ghcrMirror\": \"\",\n    \"githubAssets\": \"\",\n    \"browser\": \"https://cdn.playwright.dev\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"\"\n  },\n  \"mainland\": {\n    \"npm\": \"https://registry.npmmirror.com\",\n    \"pypi\": \"https://pypi.tuna.tsinghua.edu.cn/simple\",\n    \"containerMirror\": \"https://docker.m.daocloud.io/\",\n    \"ghcrMirror\": \"https://ghcr.nju.edu.cn/\",\n    \"githubAssets\": \"https://ghfast.top/\",\n    \"browser\": \"https://registry.npmmirror.com/-/binary/playwright\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"https://gh-proxy.org/\"\n  },\n  \"bootstrap\": {\n    \"official\": {\n      \"nodePrefix\": \"https://nodejs.org/dist/\",\n      \"ubuntuPrefix\": \"https://cloud-images.ubuntu.com/\"\n    },\n    \"mainland\": {\n      \"nodePrefix\": \"https://npmmirror.com/mirrors/node/\",\n      \"ubuntuPrefix\": \"https://mirrors.nju.edu.cn/ubuntu-cloud-images/\"\n    }\n  }\n}\n")
+# END GENERATED DOWNLOAD SOURCE PRESETS
+
+
+def download_source_selection(value):
+    failure = 'Choose a download preset and HTTP(S) addresses without credentials, queries or fragments.'
+    if not isinstance(value, dict) or set(value) - {'preset', 'overrides'} or value.get('preset') not in ('official', 'mainland'):
+        raise ValueError(failure)
+    overrides = value.get('overrides', {})
+    if not isinstance(overrides, dict):
+        raise ValueError(failure)
+    normalized = {}
+    for key, address in overrides.items():
+        if key not in DOWNLOAD_SOURCE_PRESETS['official'] or not isinstance(address, str) or len(address) > 2048 or re.search(r'[\s\x00-\x1f\x7f]', address):
+            raise ValueError(failure)
+        if address == '' and key in DOWNLOAD_SOURCE_PREFIXES:
+            normalized[key] = ''
+            continue
+        parsed = urllib.parse.urlsplit(address)
+        if (key in ('containerMirror', 'ghcrMirror') and parsed.scheme != 'https') or not re.match(r'^https?://', address, re.I) or parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or '\\' in address:
+            raise ValueError(failure)
+        if parsed.port is not None and not 0 < parsed.port < 65536:
+            raise ValueError(failure)
+        normalized[key] = address.rstrip('/') + ('/' if key in DOWNLOAD_SOURCE_PREFIXES else '')
+    return {'preset': value['preset'], **({'overrides': normalized} if normalized else {})}
+
+
+def resolve_download_sources(selection):
+    selected = download_source_selection(selection)
+    return {**DOWNLOAD_SOURCE_PRESETS[selected['preset']], **selected.get('overrides', {})}
+
+
+# BEGIN GENERATED EXECUTOR FACTS PROGRAM
+EXECUTOR_FACTS_PROGRAM = "// Generated from platform adapters. The source release owns its connection, key and TLS interpretation.\nimport { readFileSync } from 'node:fs';\ntry {\n  const request = JSON.parse(readFileSync(0, 'utf8'));\n  const { readExecutorFacts } = await import(\"data:text/javascript;base64,aW1wb3J0IHsgcGF0aFRvRmlsZVVSTCB9IGZyb20gJ25vZGU6dXJsJzsKaW1wb3J0IHsgbHN0YXRTeW5jLCByZWFkZGlyU3luYyB9IGZyb20gJ25vZGU6ZnMnOwppbXBvcnQgeyBiYXNlbmFtZSwgZGlybmFtZSwgam9pbiB9IGZyb20gJ25vZGU6cGF0aCc7CmNvbnN0IHsgRmlsZVBsYXRmb3JtRGF0YWJhc2VDb25maWcgfSA9IGF3YWl0IGltcG9ydChwYXRoVG9GaWxlVVJMKHByb2Nlc3MuYXJndlsyXSArICcvZGlzdC9hZGFwdGVycy9wbGF0Zm9ybS1kYXRhYmFzZS1jb25maWcuanMnKS5ocmVmKTsKY29uc3QgeyBGaWxlUGxhdGZvcm1TZWNyZXRzIH0gPSBhd2FpdCBpbXBvcnQocGF0aFRvRmlsZVVSTChwcm9jZXNzLmFyZ3ZbMl0gKyAnL2Rpc3QvYWRhcHRlcnMvcGxhdGZvcm0tc2VjcmV0cy5qcycpLmhyZWYpOwpjb25zdCB7IGluc3BlY3RQbGF0Zm9ybURhdGFiYXNlLCBwbGF0Zm9ybURhdGFiYXNlUG9vbCB9ID0gYXdhaXQgaW1wb3J0KHBhdGhUb0ZpbGVVUkwocHJvY2Vzcy5hcmd2WzJdICsgJy9kaXN0L2FkYXB0ZXJzL3BsYXRmb3JtLWRhdGFiYXNlLWluc3BlY3Rpb24uanMnKS5ocmVmKTsKY29uc3QgeyByZWFkUmVnaXN0ZXJlZFNjaGVtYVZlcnNpb25zIH0gPSBhd2FpdCBpbXBvcnQoImRhdGE6dGV4dC9qYXZhc2NyaXB0O2Jhc2U2NCxhVzF3YjNKMElIc2djR0YwYUZSdlJtbHNaVlZTVENCOUlHWnliMjBnSjI1dlpHVTZkWEpzSnpzS1kyOXVjM1FnZXlCUVRFRlVSazlTVFY5VFEwaEZUVUZUTENCelkyaGxiV0ZKWkdWdWRHbG1hV1Z5SUgwZ1BTQmhkMkZwZENCcGJYQnZjblFvSW1SaGRHRTZkR1Y0ZEM5cVlYWmhjMk55YVhCME8ySmhjMlUyTkN4aFZ6RjNZak5LTUVsSWMyZGpSMFl3WVVaU2RsSnRiSE5hVmxaVFZFTkNPVWxIV25saU1qQm5TakkxZGxwSFZUWmtXRXB6U25welMxa3lPWFZqTTFGblpYbENVVlJGUmxWU2F6bFRWRlk1VGxOVlpGTlJWbEpLVkRBMVZFbElNR2RRVTBKb1pESkdjR1JEUW5CaVdFSjJZMjVSYjJOSFJqQmhSbEoyVW0xc2MxcFdWbE5VUTJoM1kyMDVhbHBZVG5wTWJVWjVXak5hWWsxc01HZExlVUZ1VERKU2NHTXpVWFpaVjFKb1kwaFNiR051VFhaalIzaG9aRWRhZG1OdE1IUmpNazV2V2xjeGFFeHRjSHBLZVd0MVlVaEtiRnBwYXpkRGFUaHhTMmxDVldGSFZXZGpTRXAyV2toV2FtUkhiSFppYVVKNldUSm9iR0pYUldkaFZ6VXlXbGMxTUdJelNqVk1RMEo2WVVkR2VWcFhVV2RaYm10bllsZHNibU50UmpCaFZ6bDFURU5DYW1JeU1YZFpXRkp3V1cxc2MyRllValZKUjBaMVdrTkNhVmxYVG5Ka1dFRm5ZMjFXYUZwSFZubGplVFJuUzJrNFMxcFlhSGRpTTBvd1NVZE9kbUp1VGpCSlJrSk5VVlpTUjFReFNrNVlNVTVFVTBWV1RsRldUV2RRVTBKaVpYbENkVmxYTVd4UGFVRnVXa2hPYjFnelFtOVpWM2hvWW01bmJreERRblJoVjJSNVdWaFNjR0l5TlhwUGFVSlJWRVZHVlZKck9WTlVWamxPVTFWa1UxRldVa3BVTURWVVNVZ3haRTkzYjNaTGFXOW5WVzFXYm1GWVRqQmpibXRuWW0xR2RGcFlUV2RaV0Vwc1NVWk9VbFJEUW5CYVIxWjFaRWRzYldGWFZubGplWGRuWW0xV01scFlTV2RaV0VwcFlWaFNlVmxZU2pWSlJrNVNWRU5DZG1OcFFtaEpTRTVzV1ZoS2FtRkdPWGRaV0ZKdlNVZFdOR05JU214ak0wNXdZakkwZFVsRGIzWkRiVlkwWTBjNWVXUkRRbTFrVnpWcVpFZHNkbUpwUW5wWk1taHNZbGRHU2xwSFZuVmtSMnh0WVZkV2VVdEhOV2hpVjFWd1NVaHpTMGxEUVdkSlIyeHRTVU5uYUV3eE5XSlpVekUyV0RFeFlsbFRNVFpOUXpBMVdERXhOMDFEZHpKTmJqQnJURE5WZFdSSFZucGtRMmgxV1ZjeGJFdFRRamhtUTBKMVdWY3hiRXh1VGpCWldFb3dZekZrY0dSSFoyOUtNMEp1V0hsamNFbEllRGhKUnpWb1lsZFZaMUJVTURsSlEyUndZbTFhZG1OdE1XaGtSMngyWW13NWVsa3lhR3hpVjBWdVNVaDRPRWxITldoaVYxVm5VRlF3T1VsRFpIZGtWMHB6WVZkTmJrdFJiMmRKUTBGblNVTkJaMGxJVW05amJUa3pTVVZXZVdOdE9YbExRMlJDU1VoS2JGb3liSHBrUjFaNVdsZFJaMk5IZUdoa1IxcDJZMjB3WjJNeVRtOWFWekZvU1VjeE1XTXpVV2RoUjBZeVdsTkNhRWxIVW5Cak0xSndZbTFPTUVsSE5YWmlhVEY2WlZoT01GcFhNR2RWTVVaTlNVYzFhR0pYVlc1TFZITkxTVU5CWjBsSVNteGtTRlo1WW1sQ1owbHBVamRpYlVaMFdsZ3dhVmxFYzB0bVVXOTJTMmx2WjFGVFFtcGlNakYzWWpOT2NHUkhiSFppYVVKNlpGaENkMkpIYkd4amVVSm9TVWRhY0dWSFZtdEpSMngxWkcxV2RXUkhPWGxsVTBKdFlqTkpaMkl5Tld4SlIxSm9aRWRHYVZsWVRteEpSM2h3V20xV01HRlhNV3hNYVVGeFRIZHdiR1ZJUW5aamJsRm5XbTVXZFZrelVuQmlNalJuWTIxV2JtRllUakJhV0Vwc1drWk9hbUZIVm5SWldFMXZZekpPYjFwWE1XaGplV3RuWlhkdlowbERRV2RoVjFsblMwaE9hbUZIVm5SWldFNWlUVVl3TDB4dE5XaGlWMVZuU1ZRd09VbERaR3RqTW1obVkwZG9hR0pIUm5WbFEyTndRMmxCWjBsRFFXZEpRMEZuWkVkb2VXSXpZMmRTV0VwNVlqTkpiMG94VW05YVUwSjNZa2RHTUZwdE9YbGlVMEpxWWpOS2JFbElUbXBoUjFaMFdWTkNkR1JZVGpCSlIwcHNTVWhLYkZveWJIcGtSMVo1V2xkUloxcHRiSGxqTTFGdVMxUnpTMGxEUVdkSlIwNTJZbTVPTUVsSE5XaGlWMVo2U1VRd1oySnRWak5KUms1c1pFTm5jRTkzYjJkSlEwRm5ZMjFXTUdSWVNuVkpSVGxwWVcxV2FtUkROVzFqYlZac1pXMVZiMk15VG05YVZ6Rm9ZM2sxZEZsWVFXOWpNazV2V2xjeGFFbEVNQ3RKU0hOTFNVTkJaMGxEUVdkSlEwSjZXVEpvYkdKWFJrcGFSMVoxWkVkc2JXRlhWbmxMU0U1cVlVZFdkRmxUTlhWWlZ6RnNTMVJ6UzBsRFFXZEpRMEZuU1VOQ2NGcHBRVzlpYlVaMFdsaE5kV0ZIUm5wTFNFNXFZVWRXZEZsVE5YVlpWekZzUzFOclMwbERRV2RKUTBGblNVTkJaMGxEUVdka1IyaDVZak5qWjFKWVNubGlNMGx2U2pGQ2MxbFlVbTFpTTBwMFNVaE9hbUZIVm5SWlUwSjFXVmN4YkdONVFuUmtXRTR3U1VkS2JFbElWblZoV0VZeFdsTmpjRTkzYjJkSlEwRm5TVU5CWjBsSE5XaGlWMVo2VEcxR2ExcERhSHBaTW1oc1lsZEZkV0p0Um5SYVUyczNRMmxCWjBsRFFXZEpRMEZuWVZkWlowdERSbnBaTW1oc1lsZEZkV0pYYkc1amJVWXdZVmM1ZFdONU5YTmFWelZ1WkVkbloyWklkMmRqTWs1dldsY3hhRXh0TVhCYU0wcG9aRWRzZG1KdVRYVmpNamwwV2xObmIySlhiRzVqYlVZd1lWYzVkVXhEUW5CaWJWSnNaVU5yWjFCVU5HZGlWMnh1WTIxR01HRlhPWFZNYmxwc1kyNU9jR0l5TkdkSlZEQTVTVWRzZFZwSFZqUkpRM05uVFZOcmNFTnBRV2RKUTBGblNVTkJaMGxEUVdkSlNGSnZZMjA1TTBsRlZubGpiVGw1UzBOa1UxcFhaSEJqTTFKc1kyMVdhMGxJVG1waFIxWjBXVk5DZEdGWFpIbFpXRkp3WWpJMWVrbEhNVEZqTTFGbldXMVZaMWt5T1hWa1IyeHVaRmM1TVdONVFtMWpiVGwwU1VoYWJHTnVUbkJpTWpSblRWTmpjRTkzYjJkSlEwRm5TVU5CWjBsSVNteGtTRlo1WW1sQ1VGbHRjR3haTTFGMVdtNUtiRnBZY0d4TFNITm5ZbTFHZEZwVWIyZGpNazV2V2xjeGFFeHROV2hpVjFWelNVY3hjRm96U21oa1IyeDJZbTVOTmtsRk9XbGhiVlpxWkVNMWJXTnRWbXhsYlZWdll6Sk9iMXBYTVdoTWJURndXak5LYUdSSGJIWmliazExWWxkR2QwdEhNWEJhTTBwb1pFZHNkbUpwUVRsUWFVSlFXVzF3YkZrelVYVmFia3BzV2xod2JFdEljMmRNYVRSMVlsZHNibU50UmpCaFZ6bDFTVWd3Y0V0VGEyZG1VMnMzUTJsQlowbERRamxMVTJzM1EyNHdTeUlwT3dvdktpb2dRU0J0YVhOemFXNW5JRzVoYldWemNHRmpaU0J2Y2lCMlpYSnphVzl1SUhSaFlteGxJR2x6SUhabGNuTnBiMjRnZW1WeWJ6c2djbVZoWkdsdVp5QnVaWFpsY2lCd2NtVndZWEpsY3lCcGRDNGdLaThLWlhod2IzSjBJR0Z6ZVc1aklHWjFibU4wYVc5dUlISmxZV1JTWldkcGMzUmxjbVZrVTJOb1pXMWhWbVZ5YzJsdmJuTW9jM0ZzTENCelkyaGxiV0Z6SUQwZ1VFeEJWRVpQVWsxZlUwTklSVTFCVXlrZ2V3b2dJQ0FnWTI5dWMzUWdkbVZ5YzJsdmJuTWdQU0JiWFRzS0lDQWdJR1p2Y2lBb1kyOXVjM1FnYzJOb1pXMWhJRzltSUhOamFHVnRZWE1wSUhzS0lDQWdJQ0FnSUNCamIyNXpkQ0IwWVdKc1pTQTlJR0FrZTNOamFHVnRZVWxrWlc1MGFXWnBaWElvYzJOb1pXMWhMbTVoYldVcGZTNXpZMmhsYldGZmJXbG5jbUYwYVc5dWMyQTdDaUFnSUNBZ0lDQWdZMjl1YzNRZ2NISmxjMlZ1ZENBOUlDaGhkMkZwZENCemNXd3VjWFZsY25rb0oxTkZURVZEVkNCMGIxOXlaV2RqYkdGemN5Z2tNU2s2T25SbGVIUWdRVk1nY21Wc1lYUnBiMjRuTENCYmRHRmliR1ZkS1NrdWNtOTNjMXN3WFM1eVpXeGhkR2x2YmpzS0lDQWdJQ0FnSUNCamIyNXpkQ0IyWlhKemFXOXVJRDBnY0hKbGMyVnVkQ0EvSUU1MWJXSmxjaWdvWVhkaGFYUWdjM0ZzTG5GMVpYSjVLR0JUUlV4RlExUWdRMDlCVEVWVFEwVW9iV0Y0S0habGNuTnBiMjRwTERBcElFRlRJSFpsY25OcGIyNGdSbEpQVFNBa2UzUmhZbXhsZldBcEtTNXliM2R6V3pCZExuWmxjbk5wYjI0cElEb2dNRHNLSUNBZ0lDQWdJQ0IyWlhKemFXOXVjeTV3ZFhOb0tIc2dibUZ0WlRvZ2MyTm9aVzFoTG01aGJXVXNJSFpsY25OcGIyNGdmU2s3Q2lBZ0lDQjlDaUFnSUNCeVpYUjFjbTRnZG1WeWMybHZibk03Q24wSyIpOwpjb25zdCB7IHJlYWRTYXZlZERvd25sb2FkU291cmNlcyB9ID0gYXdhaXQgaW1wb3J0KCJkYXRhOnRleHQvamF2YXNjcmlwdDtiYXNlNjQsYVcxd2IzSjBJSHNnY0dGMGFGUnZSbWxzWlZWU1RDQjlJR1p5YjIwZ0oyNXZaR1U2ZFhKc0p6c0tZMjl1YzNRZ2V5QkNkWE5wYm1WemMxSjFiR1ZGY25KdmNpQjlJRDBnWVhkaGFYUWdhVzF3YjNKMEtIQmhkR2hVYjBacGJHVlZVa3dvY0hKdlkyVnpjeTVoY21kMld6SmRJQ3NnSnk5a2FYTjBMMlJ2YldGcGJpOWlkWE5wYm1WemN5MWxjbkp2Y2k1cWN5Y3BMbWh5WldZcE93cGpiMjV6ZENCN0lHUnZkMjVzYjJGa1UyOTFjbU5sVTJWc1pXTjBhVzl1SUgwZ1BTQmhkMkZwZENCcGJYQnZjblFvY0dGMGFGUnZSbWxzWlZWU1RDaHdjbTlqWlhOekxtRnlaM1piTWwwZ0t5QW5MMlJwYzNRdlpHOXRZV2x1TDJSdmQyNXNiMkZrTFhOdmRYSmpaUzVxY3ljcExtaHlaV1lwT3dwamIyNXpkQ0I3SUZCc1lYUm1iM0p0VTNSdmNtVk1hV1psWTNsamJHVWdmU0E5SUdGM1lXbDBJR2x0Y0c5eWRDaHdZWFJvVkc5R2FXeGxWVkpNS0hCeWIyTmxjM011WVhKbmRsc3lYU0FySUNjdlpHbHpkQzloWkdGd2RHVnljeTl3YkdGMFptOXliUzF6ZEc5eVpTMXNhV1psWTNsamJHVXVhbk1uS1M1b2NtVm1LVHNLTHlvcUlFOXVaU0J5YjNjZ2NtVmhaR1Z5SUhOb1lYSmxaQ0JpZVNCMGFHVWdiR2wyWlNCemRHOXlaU0JoYm1RZ2RHaGxJSEpsWVdRdGIyNXNlU0JsZUdWamRYUnZjaTRnS2k4S1pYaHdiM0owSUdGemVXNWpJR1oxYm1OMGFXOXVJSEpsWVdSVFlYWmxaRVJ2ZDI1c2IyRmtVMjkxY21ObGN5aGtZWFJoWW1GelpTa2dld29nSUNBZ1kyOXVjM1FnVzNKdmQxMGdQU0JoZDJGcGRDQmtZWFJoWW1GelpTNXhkV1Z5ZVNnblUwVk1SVU5VSUhObGJHVmpkR2x2Yml4eVpYWnBjMmx2YmlCR1VrOU5JR1J6YUY5d2FHRnNZVzU0TG1SdmQyNXNiMkZrWDNOdmRYSmpaWE1nVjBoRlVrVWdhV1E5TVNjcE93b2dJQ0FnY21WMGRYSnVJSEp2ZHlBL0lIc2djMlZzWldOMGFXOXVPaUJrYjNkdWJHOWhaRk52ZFhKalpWTmxiR1ZqZEdsdmJpaHliM2N1YzJWc1pXTjBhVzl1S1N3Z2NtVjJhWE5wYjI0NklFNTFiV0psY2loeWIzY3VjbVYyYVhOcGIyNHBJSDBnT2lCMWJtUmxabWx1WldRN0NuMEtMeW9xQ2lBcUlGUm9aU0JrWlhCc2IzbHRaVzUwTFhkcFpHVWdaRzkzYm14dllXUWdZMmh2YVdObExpQlZiblJwYkNCaGJpQmhaRzFwYm1semRISmhkRzl5SUhOaGRtVnpMQ0IwYUdVZ1kyaHZhV05sSUhSb1pRb2dLaUJwYm5OMFlXeHNaWElnY21WamIzSmtaV1FnYVc0Z2RHaGxJR3h2WTJGc0lHTnZibVpwWjNWeVlYUnBiMjRnWVhCd2JHbGxjenNnYjI1alpTQnpZWFpsWkN3Z2RHaGxJR1JoZEdGaVlYTmxDaUFxSUhKdmR5QmtiMlZ6TGlCVWFHVWdkbWxsZHlCcGN5QnlaV2RwYzNSbGNtVmtJR2x1SUdGeVkyaHBkR1ZqZEhWeVpTNXRaRG9nYzNsdVkyaHliMjV2ZFhNZ2NISmxjR0Z5WVhScGIyNGdZMjlrWlFvZ0tpQnlaV0ZrY3lCcGRDd2dZVzVrSUdsMElHbHpJSEpsWm5KbGMyaGxaQ0J2Ym14NUlHRm1kR1Z5SUdWaFkyZ2dZMjl0YldsMGRHVmtJSE5oZG1VdUNpQXFMd3BsZUhCdmNuUWdZMnhoYzNNZ1VHOXpkR2R5WlhORWIzZHViRzloWkZOdmRYSmpaWE1nZXdvZ0lDQWdaR0YwWVdKaGMyVTdDaUFnSUNCcGJuTjBZV3hzWldRN0NpQWdJQ0IyYVdWM093b2dJQ0FnYkdsbVpXTjVZMnhsSUQwZ2JtVjNJRkJzWVhSbWIzSnRVM1J2Y21WTWFXWmxZM2xqYkdVb0owUnZkMjVzYjJGa0lITnZkWEpqWlNCemRHOXlZV2RsSnlrN0NpQWdJQ0JqYjI1emRISjFZM1J2Y2loa1lYUmhZbUZ6WlN3Z2FXNXpkR0ZzYkdWa0tTQjdDaUFnSUNBZ0lDQWdkR2hwY3k1a1lYUmhZbUZ6WlNBOUlHUmhkR0ZpWVhObE93b2dJQ0FnSUNBZ0lIUm9hWE11YVc1emRHRnNiR1ZrSUQwZ2FXNXpkR0ZzYkdWa093b2dJQ0FnZlFvZ0lDQWdhVzVwZEdsaGJHbDZaU2dwSUhzS0lDQWdJQ0FnSUNCeVpYUjFjbTRnZEdocGN5NXNhV1psWTNsamJHVXVhVzVwZEdsaGJHbDZaU2dvS1NBOVBpQjBhR2x6TG14dllXUW9LU2s3Q2lBZ0lDQjlDaUFnSUNCamJHOXpaU2dwSUhzS0lDQWdJQ0FnSUNCeVpYUjFjbTRnZEdocGN5NXNhV1psWTNsamJHVXVZMnh2YzJVb0tDa2dQVDRnS0hSb2FYTXVkbWxsZHlBOUlIVnVaR1ZtYVc1bFpDa3BPd29nSUNBZ2ZRb2dJQ0FnWjJWMEtDa2dld29nSUNBZ0lDQWdJSFJvYVhNdWJHbG1aV041WTJ4bExtRnpjMlZ5ZEU5d1pXNG9LVHNLSUNBZ0lDQWdJQ0JwWmlBb0lYUm9hWE11ZG1sbGR5a0tJQ0FnSUNBZ0lDQWdJQ0FnZEdoeWIzY2dSWEp5YjNJb0owUnZkMjVzYjJGa0lITnZkWEpqWlNCemRHOXlZV2RsSUdseklHNXZkQ0J5WldGa2VTY3BPd29nSUNBZ0lDQWdJSEpsZEhWeWJpQjdJQzR1TG5OMGNuVmpkSFZ5WldSRGJHOXVaU2gwYUdsekxuWnBaWGN1YzJWc1pXTjBhVzl1S1N3Z2MyRjJaV1E2SUhSb2FYTXVkbWxsZHk1eVpYWnBjMmx2YmlBK0lEQWdmVHNLSUNBZ0lIMEtJQ0FnSUhOaGRtVW9hVzV3ZFhRcElIc0tJQ0FnSUNBZ0lDQnlaWFIxY200Z2RHaHBjeTVzYVdabFkzbGpiR1V1ZDNKcGRHVW9ZWE41Ym1NZ0tDa2dQVDRnZXdvZ0lDQWdJQ0FnSUNBZ0lDQmpiMjV6ZENCelpXeGxZM1JwYjI0Z1BTQmtiM2R1Ykc5aFpGTnZkWEpqWlZObGJHVmpkR2x2YmlocGJuQjFkQ2s3Q2lBZ0lDQWdJQ0FnSUNBZ0lIUm9hWE11WjJWMEtDazdJQzh2SUdOc2IzTmxaQ0J2Y2lCdWIzUWdlV1YwSUdsdWFYUnBZV3hwZW1Wa0lHbHpJSEpsY0c5eWRHVmtJR0psWm05eVpTQmhibmtnY1hWbGNua0tJQ0FnSUNBZ0lDQWdJQ0FnWTI5dWMzUWdaWGh3WldOMFpXUWdQU0IwYUdsekxuWnBaWGN1Y21WMmFYTnBiMjQ3Q2lBZ0lDQWdJQ0FnSUNBZ0lHTnZibk4wSUZ0eWIzZGRJRDBnWVhkaGFYUWdkR2hwY3k1a1lYUmhZbUZ6WlM1eGRXVnllU2hnU1U1VFJWSlVJRWxPVkU4Z1pITm9YM0JvWVd4aGJuZ3VaRzkzYm14dllXUmZjMjkxY21ObGN5aHBaQ3h6Wld4bFkzUnBiMjRzY21WMmFYTnBiMjRwSUZaQlRGVkZVeWd4TENReExERXBDaUFnSUNBZ0lDQWdJRTlPSUVOUFRrWk1TVU5VS0dsa0tTQkVUeUJWVUVSQlZFVWdVMFZVSUhObGJHVmpkR2x2YmoxRldFTk1WVVJGUkM1elpXeGxZM1JwYjI0c2NtVjJhWE5wYjI0OVpHOTNibXh2WVdSZmMyOTFjbU5sY3k1eVpYWnBjMmx2YmlzeElGZElSVkpGSUdSdmQyNXNiMkZrWDNOdmRYSmpaWE11Y21WMmFYTnBiMjQ5SkRJS0lDQWdJQ0FnSUNBZ1VrVlVWVkpPU1U1SElISmxkbWx6YVc5dVlDd2dXMHBUVDA0dWMzUnlhVzVuYVdaNUtITmxiR1ZqZEdsdmJpa3NJR1Y0Y0dWamRHVmtYU2s3Q2lBZ0lDQWdJQ0FnSUNBZ0lDOHZJRTV2SUhKdmR5QmlZV05yT2lCMGFHVWdjM1J2Y21Wa0lISmxkbWx6YVc5dUlHMXZkbVZrSUhCaGMzUWdiM1Z5Y3lBb2FXNWpiSFZrYVc1bklHRWdZMjl1WTNWeWNtVnVkQ0JtYVhKemRDQnpZWFpsS1M0S0lDQWdJQ0FnSUNBZ0lDQWdhV1lnS0NGeWIzY3BDaUFnSUNBZ0lDQWdJQ0FnSUNBZ0lDQjBhSEp2ZHlCdVpYY2dRblZ6YVc1bGMzTlNkV3hsUlhKeWIzSW9KMk52Ym1ac2FXTjBKeXdnSjFCc1lYUm1iM0p0SUdOdmJtWnBaM1Z5WVhScGIyNGdZMmhoYm1kbFpDNGdVbVZzYjJGa0lHSmxabTl5WlNCellYWnBibWN1Snl3Z0ozQnNZWFJtYjNKdExXTnZibVpwWjNWeVlYUnBiMjR0WTI5dVpteHBZM1FuS1RzS0lDQWdJQ0FnSUNBZ0lDQWdkR2hwY3k1MmFXVjNJRDBnZXlCelpXeGxZM1JwYjI0c0lISmxkbWx6YVc5dU9pQk9kVzFpWlhJb2NtOTNMbkpsZG1semFXOXVLU0I5T3dvZ0lDQWdJQ0FnSUgwcE93b2dJQ0FnZlFvZ0lDQWdZWE41Ym1NZ2JHOWhaQ2dwSUhzS0lDQWdJQ0FnSUNCMGFHbHpMblpwWlhjZ1BTQW9ZWGRoYVhRZ2NtVmhaRk5oZG1Wa1JHOTNibXh2WVdSVGIzVnlZMlZ6S0hSb2FYTXVaR0YwWVdKaGMyVXBLU0EvUHlCN0lITmxiR1ZqZEdsdmJqb2daRzkzYm14dllXUlRiM1Z5WTJWVFpXeGxZM1JwYjI0b2RHaHBjeTVwYm5OMFlXeHNaV1FwTENCeVpYWnBjMmx2YmpvZ01DQjlPd29nSUNBZ2ZRcDlDZz09Iik7Ci8qKiBPcGFxdWUgZmlsZXN5c3RlbSBmZW5jZTsgY29ubmVjdGlvbiBhbmQga2V5IGludGVycHJldGF0aW9uIHJlbWFpbiB3aXRoIHRoZSBzb3VyY2Ugb3duZXJzLiAqLwpmdW5jdGlvbiBmaWxlSWRlbnRpdHkocGF0aCkgewogICAgY29uc3QgaW5mbyA9IGxzdGF0U3luYyhwYXRoLCB7IGJpZ2ludDogdHJ1ZSB9KTsKICAgIGlmICghaW5mby5pc0ZpbGUoKSkKICAgICAgICB0aHJvdyBFcnJvcignRXhlY3V0b3IgZmFjdHMgcmVxdWlyZSBhbiBpbmRlcGVuZGVudCBwcm90ZWN0ZWQgZmlsZScpOwogICAgcmV0dXJuIHsgcGF0aCwgZGV2aWNlOiBTdHJpbmcoaW5mby5kZXYpLCBpbm9kZTogU3RyaW5nKGluZm8uaW5vKSwgc2l6ZTogU3RyaW5nKGluZm8uc2l6ZSksIG1vZGlmaWVkOiBTdHJpbmcoaW5mby5tdGltZU5zKSwgY2hhbmdlZDogU3RyaW5nKGluZm8uY3RpbWVOcykgfTsKfQpjb25zdCByb3dzID0gKHNxbCkgPT4gKHsKICAgIHF1ZXJ5OiBhc3luYyAodGV4dCwgdmFsdWVzKSA9PiAoYXdhaXQgc3FsLnF1ZXJ5KHRleHQsIHZhbHVlcyA9PT0gdW5kZWZpbmVkID8gdW5kZWZpbmVkIDogWy4uLnZhbHVlc10pKS5yb3dzLAp9KTsKYXN5bmMgZnVuY3Rpb24gY2hlY2tGYWN0cyhzcWwsIHNjaGVtYXMpIHsKICAgIGxldCBzZWxlY3Rpb24sIHZlcnNpb25zID0gbnVsbCwgY2xpZW50OwogICAgdHJ5IHsKICAgICAgICBjbGllbnQgPSBhd2FpdCBzcWwuY29ubmVjdCgpOwogICAgICAgIGF3YWl0IGNsaWVudC5xdWVyeSgnQkVHSU4gSVNPTEFUSU9OIExFVkVMIFJFUEVBVEFCTEUgUkVBRCBSRUFEIE9OTFknKTsKICAgICAgICBhd2FpdCBjbGllbnQucXVlcnkoJ1NFVCBMT0NBTCBzdGF0ZW1lbnRfdGltZW91dD0xMDAwMCcpOwogICAgICAgIGF3YWl0IGNsaWVudC5xdWVyeSgnU0FWRVBPSU5UIGRvd25sb2FkX3NvdXJjZXMnKTsKICAgICAgICB0cnkgewogICAgICAgICAgICBzZWxlY3Rpb24gPSBhd2FpdCByZWFkU2F2ZWREb3dubG9hZFNvdXJjZXMocm93cyhjbGllbnQpKTsKICAgICAgICB9CiAgICAgICAgY2F0Y2ggewogICAgICAgICAgICBhd2FpdCBjbGllbnQucXVlcnkoJ1JPTExCQUNLIFRPIFNBVkVQT0lOVCBkb3dubG9hZF9zb3VyY2VzJyk7CiAgICAgICAgfQogICAgICAgIGF3YWl0IGNsaWVudC5xdWVyeSgnU0FWRVBPSU5UIHNjaGVtYV92ZXJzaW9ucycpOwogICAgICAgIHRyeSB7CiAgICAgICAgICAgIHZlcnNpb25zID0gYXdhaXQgcmVhZFJlZ2lzdGVyZWRTY2hlbWFWZXJzaW9ucyhjbGllbnQsIHNjaGVtYXMubWFwKG5hbWUgPT4gKHsgbmFtZSwgbWlncmF0aW9uczogW10gfSkpKTsKICAgICAgICB9CiAgICAgICAgY2F0Y2ggewogICAgICAgICAgICBhd2FpdCBjbGllbnQucXVlcnkoJ1JPTExCQUNLIFRPIFNBVkVQT0lOVCBzY2hlbWFfdmVyc2lvbnMnKTsKICAgICAgICB9CiAgICAgICAgYXdhaXQgY2xpZW50LnF1ZXJ5KCdDT01NSVQnKTsKICAgIH0KICAgIGNhdGNoIHsKICAgICAgICB2ZXJzaW9ucyA9IG51bGw7CiAgICAgICAgdHJ5IHsKICAgICAgICAgICAgYXdhaXQgY2xpZW50Py5xdWVyeSgnUk9MTEJBQ0snKTsKICAgICAgICB9CiAgICAgICAgY2F0Y2ggewogICAgICAgICAgICAvKiBUaGUgY29ubmVjdGlvbiBtYXkgYWxyZWFkeSBoYXZlIGNsb3NlZC4gKi8KICAgICAgICB9CiAgICB9CiAgICBmaW5hbGx5IHsKICAgICAgICBjbGllbnQ/LnJlbGVhc2UoKTsKICAgIH0KICAgIHJldHVybiB7IHNlbGVjdGlvbjogc2VsZWN0aW9uPy5zZWxlY3Rpb24gPz8gbnVsbCwgc2NoZW1hczogdmVyc2lvbnMgfTsKfQovKiogUmVhZCBzZWxlY3RlZCBzb3VyY2UgZmFjdHMgd2l0aG91dCBwcmVwYXJpbmcgc3RvcmVzLCBtaWdyYXRpb25zIG9yIGEgcGxhdGZvcm0gcnVudGltZS4gKi8KZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIHJlYWRFeGVjdXRvckZhY3RzKGNvbmZpZ0ZpbGUsIGRhdGFSb290LCBmYWN0LCBzY2hlbWFzKSB7CiAgICBjb25zdCBiZWZvcmUgPSBmaWxlSWRlbnRpdHkoY29uZmlnRmlsZSksIHNlbGVjdGVkID0gRmlsZVBsYXRmb3JtRGF0YWJhc2VDb25maWcub3Blbihjb25maWdGaWxlLCBkYXRhUm9vdCksIGtleSA9IGZpbGVJZGVudGl0eShzZWxlY3RlZC5zZWN1cml0eS5tYXN0ZXJLZXlQYXRoKSwgdmVyaWZpZWRLZXkgPSBGaWxlUGxhdGZvcm1TZWNyZXRzLm9wZW4oc2VsZWN0ZWQuc2VjdXJpdHkubWFzdGVyS2V5UGF0aCwgc2VsZWN0ZWQuc2VjdXJpdHkucmVnaXN0cnkpOwogICAgdmVyaWZpZWRLZXkuY2xvc2UoKTsKICAgIGlmIChmYWN0ID09PSAncm90YXRpb24nKQogICAgICAgIHJldHVybiByb3RhdGlvbkZhY3RzKGNvbmZpZ0ZpbGUsIGRhdGFSb290LCBzZWxlY3RlZCwgW2JlZm9yZSwga2V5XSk7CiAgICBjb25zdCBzcWwgPSBwbGF0Zm9ybURhdGFiYXNlUG9vbChzZWxlY3RlZC5jb25uZWN0aW9uKTsKICAgIHRyeSB7CiAgICAgICAgaWYgKGZhY3QgPT09ICdjaGVjaycpIHsKICAgICAgICAgICAgY29uc3QgcmVzdWx0ID0gYXdhaXQgY2hlY2tGYWN0cyhzcWwsIHNjaGVtYXMpOwogICAgICAgICAgICBpZiAoSlNPTi5zdHJpbmdpZnkoYmVmb3JlKSAhPT0gSlNPTi5zdHJpbmdpZnkoZmlsZUlkZW50aXR5KGNvbmZpZ0ZpbGUpKSB8fCBKU09OLnN0cmluZ2lmeShrZXkpICE9PSBKU09OLnN0cmluZ2lmeShmaWxlSWRlbnRpdHkoa2V5LnBhdGgpKSkKICAgICAgICAgICAgICAgIHRocm93IEVycm9yKCdUaGUgc2VsZWN0ZWQgY29ubmVjdGlvbiBvciBrZXkgY2hhbmdlZCBkdXJpbmcgdGhlIHJlcXVlc3QnKTsKICAgICAgICAgICAgcmV0dXJuIHsgLi4ucmVzdWx0LCBpZGVudGl0eTogW2JlZm9yZSwga2V5XSB9OwogICAgICAgIH0KICAgICAgICBhd2FpdCBzcWwucXVlcnkoJ1NFVCBzdGF0ZW1lbnRfdGltZW91dD0xMDAwMCcpOwogICAgICAgIGlmIChmYWN0ID09PSAnc2NoZW1hcycpCiAgICAgICAgICAgIHJldHVybiB7CiAgICAgICAgICAgICAgICBzY2hlbWFzOiBhd2FpdCByZWFkUmVnaXN0ZXJlZFNjaGVtYVZlcnNpb25zKHNxbCwgc2NoZW1hcy5tYXAobmFtZSA9PiAoeyBuYW1lLCBtaWdyYXRpb25zOiBbXSB9KSkpLAogICAgICAgICAgICB9OwogICAgICAgIGNvbnN0IHJvdyA9IGF3YWl0IHJlYWRTYXZlZERvd25sb2FkU291cmNlcyhyb3dzKHNxbCkpOwogICAgICAgIHJldHVybiB7IHNlbGVjdGlvbjogcm93Py5zZWxlY3Rpb24gPz8gbnVsbCB9OwogICAgfQogICAgZmluYWxseSB7CiAgICAgICAgYXdhaXQgc3FsLmVuZCgpOwogICAgfQp9Ci8qKiBBIGxpdmUtc2VydmljZSBwcm9iZSBuZXZlciB0YWtlcyBtYWludGVuYW5jZSBsb2NrcyBvciBwcmVwYXJlcyBzY2hlbWEgb3Iga2V5IGZpbGVzLiAqLwphc3luYyBmdW5jdGlvbiByb3RhdGlvbkZhY3RzKGNvbmZpZ0ZpbGUsIGRhdGFSb290LCBzZWxlY3RlZCwgaWRlbnRpdHkpIHsKICAgIGNvbnN0IGJ1aWx0aW5GaWxlID0gam9pbihkaXJuYW1lKGNvbmZpZ0ZpbGUpLCAnYnVpbHRpbi1kYXRhYmFzZS5qc29uJyk7CiAgICBpZGVudGl0eS5wdXNoKGZpbGVJZGVudGl0eShidWlsdGluRmlsZSkpOwogICAgY29uc3QgYnVpbHRpbiA9IEZpbGVQbGF0Zm9ybURhdGFiYXNlQ29uZmlnLm9wZW4oYnVpbHRpbkZpbGUsIGRhdGFSb290KTsKICAgIGlmICghc2VsZWN0ZWQuZGVwbG95bWVudElkIHx8IGJ1aWx0aW4uZGVwbG95bWVudElkICE9PSBzZWxlY3RlZC5kZXBsb3ltZW50SWQgfHwgYnVpbHRpbi5zZWN1cml0eS5tYXN0ZXJLZXlQYXRoICE9PSBzZWxlY3RlZC5zZWN1cml0eS5tYXN0ZXJLZXlQYXRoKQogICAgICAgIHRocm93IEVycm9yKCdSb3RhdGlvbiByZXF1aXJlcyBtYXRjaGluZyBwcm90ZWN0ZWQgZGVwbG95bWVudCBjb25maWd1cmF0aW9ucycpOwogICAgY29uc3QgY2xlYXIgPSAoKSA9PiB7CiAgICAgICAgZm9yIChjb25zdCBwYXRoIG9mIFtjb25maWdGaWxlLCBidWlsdGluRmlsZSwgc2VsZWN0ZWQuc2VjdXJpdHkubWFzdGVyS2V5UGF0aF0pIHsKICAgICAgICAgICAgY29uc3QgbmFtZSA9IGJhc2VuYW1lKHBhdGgpOwogICAgICAgICAgICBpZiAocmVhZGRpclN5bmMoZGlybmFtZShwYXRoKSkuc29tZShlbnRyeSA9PiBlbnRyeS5zdGFydHNXaXRoKG5hbWUgKyAnLm5leHQtJykgfHwgZW50cnkuc3RhcnRzV2l0aChuYW1lICsgJy50bXAta2V5LScpKSkKICAgICAgICAgICAgICAgIHRocm93IEVycm9yKCdBIHN0YWdlZCBrZXkgb3BlcmF0aW9uIG11c3QgYmUgcmVjb3ZlcmVkIGZpcnN0Jyk7CiAgICAgICAgfQogICAgICAgIGNvbnN0IGVudHJpZXMgPSByZWFkZGlyU3luYyhkaXJuYW1lKGNvbmZpZ0ZpbGUpKTsKICAgICAgICBpZiAoZW50cmllcy5pbmNsdWRlcygncGxhdGZvcm0ta2V5LW9wZXJhdGlvbi5qc29uJykgfHwgZW50cmllcy5pbmNsdWRlcygncGxhdGZvcm0tZGF0YWJhc2Utb3BlcmF0aW9uLmpzb24nKSkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ0EgcHJvZHVjdCBtYWludGVuYW5jZSBqb3VybmFsIG11c3QgYmUgcmVjb3ZlcmVkIGZpcnN0Jyk7CiAgICB9OwogICAgY2xlYXIoKTsKICAgIGxldCByZWFkeSA9IGZhbHNlOwogICAgaWYgKHNlbGVjdGVkLnNlbGVjdGlvbiAhPT0gdW5kZWZpbmVkKSB7CiAgICAgICAgY29uc3QgY2hlY2tlZCA9IGF3YWl0IGluc3BlY3RQbGF0Zm9ybURhdGFiYXNlKHNlbGVjdGVkLmNvbm5lY3Rpb24sIHNlbGVjdGVkLnNlY3VyaXR5LnJlZ2lzdHJ5Lm1hc3RlckZpbmdlcnByaW50LCBzZWxlY3RlZC5kZXBsb3ltZW50SWQpOwogICAgICAgIGlmICghY2hlY2tlZC5vaykKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ1JvdGF0aW9uIHJlYWRpbmVzcyByZXF1aXJlcyBhIHJlYWNoYWJsZSBtYXRjaGluZyBwbGF0Zm9ybSBkYXRhYmFzZScpOwogICAgICAgIHJlYWR5ID0gY2hlY2tlZC5zY2hlbWEgPT09ICdwbGF0Zm9ybSc7CiAgICB9CiAgICBjbGVhcigpOwogICAgaWYgKGlkZW50aXR5LnNvbWUoYmVmb3JlID0+IEpTT04uc3RyaW5naWZ5KGJlZm9yZSkgIT09IEpTT04uc3RyaW5naWZ5KGZpbGVJZGVudGl0eShiZWZvcmUucGF0aCkpKSkKICAgICAgICB0aHJvdyBFcnJvcignVGhlIHByb3RlY3RlZCBjb25maWd1cmF0aW9uIG9yIGtleSBjaGFuZ2VkIGR1cmluZyByb3RhdGlvbiByZWFkaW5lc3MgY2hlY2tzJyk7CiAgICByZXR1cm4gewogICAgICAgIHJlYWR5LAogICAgICAgIGluaXRpYWxpemF0aW9uUGVuZGluZzogIXJlYWR5LAogICAgICAgIGRlcGxveW1lbnRJZDogc2VsZWN0ZWQuZGVwbG95bWVudElkLAogICAgICAgIGZpbmdlcnByaW50OiBzZWxlY3RlZC5zZWN1cml0eS5yZWdpc3RyeS5tYXN0ZXJGaW5nZXJwcmludCwKICAgICAgICBpZGVudGl0eSwKICAgIH07Cn0K\");\n  const result = await readExecutorFacts(request.configFile, request.dataRoot, request.fact, request.schemas);\n  console.log(JSON.stringify(result));\n} catch {\n  console.error('Platform database facts are unavailable; inspect the selected connection and master-key file');\n  process.exitCode = 2;\n}\n"
+# END GENERATED EXECUTOR FACTS PROGRAM
+
+
+def executor_facts(host, values, fact, *, source=None, schemas=('dsh_phalanx',)):
+    """A bounded read-only adapter; the selected source owns its connection and key interpretation."""
+    target=Path(source) if source is not None else host.path('/opt/dsh-phalanx/current').resolve()
+    config=host.path(values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'))
+    if 'DSH_PHALANX_DATA_ROOT' not in values or not (target/'start').exists() or fact=='download-sources' and not config.exists():
+        return None
+    with tempfile.TemporaryDirectory(prefix='dsh-phalanx-facts-') as temporary:
+        program=Path(temporary)/'executor-facts.mjs'
+        request=Path(temporary)/'request.json'
+        program.write_text(EXECUTOR_FACTS_PROGRAM)
+        program.chmod(0o600)
+        request.write_text(json.dumps({'fact':fact,'configFile':str(config),'dataRoot':str(host.path(values['DSH_PHALANX_DATA_ROOT'])),'schemas':list(schemas)}))
+        request.chmod(0o600)
+        result=host.run(['timeout','--signal=TERM','--kill-after=5s','20s',str(target/'node/bin/node'),str(program),str(target)],input_file=request,check=False)
+    if result.returncode==2:
+        host.tell('The platform database did not answer; using the local record instead of ' + fact)
+        return None
+    if result.returncode!=0:
+        raise ValueError('The installed platform could not report ' + fact)
+    return json.loads(result.stdout)
+
+
+def platform_facts(host, values, fact):
+    """Read narrow download facts; other diagnostics use the installed CLI."""
+    if fact=='download-sources':
+        return executor_facts(host,values,fact)
+    start = host.path('/opt/dsh-phalanx/current/start')
+    database = host.path(values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'))
+    # No selected database yet (for example an interrupted installation): nothing can have been saved there.
+    if 'DSH_PHALANX_DATA_ROOT' not in values or not start.exists() or not database.exists():
+        return None
+    account = host.run(['getent', 'passwd', 'dsh-phalanx'], check=False)
+    if account.returncode != 0:
+        return None
+    uid = int(account.stdout.split(':')[2])
+    result = host.user(uid, ['timeout', '--signal=TERM', '--kill-after=5s', '30s', str(start), 'platform-facts', fact,
+                             '--config-file', values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'),
+                             '--data-root', values['DSH_PHALANX_DATA_ROOT']], check=False)
+    if result.returncode == 2:
+        host.tell('The platform database did not answer; using the local record instead of ' + fact)
+        return None
+    if result.returncode != 0:
+        raise ValueError('The installed platform could not report ' + fact)
+    return json.loads(result.stdout)
+
+
+def configured_download_sources(host, values, args=None, *, platform_running=False):
+    # Two stages: the installer's recorded choice applies until an administrator saves one in the platform database.
+    saved = platform_facts(host, values, 'download-sources') if platform_running else None
+    return download_source_choice(values, args, saved)
+
+
+def download_source_choice(values, args=None, saved=None):
+    selection = json.loads(values.get('DSH_PHALANX_DOWNLOAD_SOURCES', '{"preset":"official"}'))
+    if saved is not None and saved.get('selection') is not None:
+        selection = saved['selection']
+    selection = download_source_selection(selection)
+    if args is not None:
+        preset = getattr(args, 'download_source_preset', None)
+        if preset is not None:
+            selection = {'preset': preset}
+        overrides = {**selection.get('overrides', {})}
+        for option, category in DOWNLOAD_SOURCE_OPTIONS.items():
+            value = getattr(args, option, None)
+            if value is not None:
+                overrides[category] = value
+        selection = download_source_selection({**selection, 'overrides': overrides})
+    return selection
+
+
+def download_source_environment(sources, architecture):
+    return {'NPM_CONFIG_REGISTRY': sources['npm'], 'PNPM_CONFIG_REGISTRY': sources['npm'], 'COREPACK_NPM_REGISTRY': sources['npm'],
+            'PIP_INDEX_URL': sources['pypi'], 'UV_DEFAULT_INDEX': sources['pypi'],
+            'PLAYWRIGHT_DOWNLOAD_HOST': sources['browser'],
+            **({'PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST': sources['browserChromiumArm64']} if architecture == 'arm64' else {})}
+
+
+ACCOUNT = 'dsh-phalanx'
+CONFIG = '/etc/dsh-phalanx/environment'
+STATE = '/etc/dsh-phalanx/install-state.json'
+HOME_DIR = '/var/lib/dsh-phalanx'
+CURRENT = '/opt/dsh-phalanx/current'
+UNIT = HOME_DIR + '/.config/systemd/user/dsh-phalanx.service'
+UNINSTALL_STATE = '/etc/dsh-phalanx/uninstall-state.json'
+
+
+def uninstall_record(host):
+    path = host.path(UNINSTALL_STATE)
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.parent.is_symlink() or path.is_symlink() or not path.is_file() or path.stat().st_uid != os.geteuid() or path.stat().st_mode & 0o077:
+        raise ConfigurationError('Uninstall receipt ownership cannot be verified')
+    if path.stat().st_size > 1048576:
+        raise ConfigurationError('Uninstall receipt exceeds its allowed size')
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict) or value.get('schema') != 1 or value.get('phase') not in ('removing', 'retained', 'purging'):
+        raise ConfigurationError('Invalid uninstall receipt')
+    return value
+
+
+def default_storage_root(data_root):
+    return os.path.abspath(data_root)+'.durable'
+
+
+def unit_argument(value):
+    return '"'+str(value).replace('\\','\\\\').replace('"','\\"').replace('%','%%')+'"'
+
+
+def effective_user_data_root(values):
+    return values.get('DSH_PHALANX_USER_DATA_ROOT') or default_storage_root(values['DSH_PHALANX_DATA_ROOT'])+'/users'
+
+
+class ConfigurationError(ValueError):
+    pass
+
+
+class HiddenConfigurationConflict(ConfigurationError):
+    """An existing compatibility listener needs explicit offline maintenance."""
+    pass
+
+
+OPTIONS = {
+    'model_base_url': 'MODEL_UPSTREAM_BASE_URL', 'model_provider': 'ALLOWED_MODEL_PROVIDER',
+    'model': 'ALLOWED_MODEL', 'listen_address': 'HOST', 'port': 'PORT',
+    'preview_port': 'PREVIEW_PORT', 'preview_origin': 'PREVIEW_ORIGIN',
+    'gateway_port': 'CONTAINER_GATEWAY_PORT', 'public_origin': 'PUBLIC_ORIGIN',
+    'host_public_addresses': 'HOST_PUBLIC_ADDRESSES', 'user_data_root': 'USER_DATA_ROOT',
+    'user_data_mount': 'USER_DATA_MOUNT',
+}
+
+
+def environment_text(values):
+    return "".join(f'{key}="'+value.replace("\\", "\\\\").replace('"', '\\"')+'"\n' for key, value in sorted(values.items()))
+
+
+def installed_state(host):
+    path = host.path(STATE)
+    if path.is_symlink():
+        raise ConfigurationError('Installation receipt must not be a symbolic link')
+    if not path.exists():
+        return None
+    state = json.loads(path.read_text())
+    if state.get('status') != 'installed':
+        return None
+    if not host.path('/opt/dsh-phalanx/current').is_symlink() or not host.path(CONFIG).is_file():
+        raise ConfigurationError('Successful installation receipt has missing managed files; inspect the existing installation')
+    return state
+
+
+def outbound_proxy_environment(values, environment=None):
+    environment=os.environ if environment is None else environment
+    def selected(upper, lower):
+        source=values if upper in values or lower in values else environment
+        return source.get(lower,source.get(upper,''))
+    proxy=selected('HTTPS_PROXY','https_proxy')
+    bypass=selected('NO_PROXY','no_proxy')
+    if not isinstance(proxy,str) or len(proxy)>8192 or re.search(r'[\s\x00-\x1f\x7f]',proxy):
+        raise ConfigurationError('HTTPS_PROXY must be an HTTP(S) proxy URL without whitespace')
+    if proxy:
+        try:
+            url=urllib.parse.urlsplit(proxy)
+            if url.scheme not in ('http','https') or not url.hostname or url.path not in ('','/') or url.query or url.fragment or url.port==0:
+                raise ValueError()
+        except ValueError as error:
+            raise ConfigurationError('HTTPS_PROXY must be a valid HTTP(S) proxy URL') from error
+    if not isinstance(bypass,str) or len(bypass)>8192 or re.search(r'[\x00-\x1f\x7f]',bypass):
+        raise ConfigurationError('NO_PROXY must be a comma-separated host exclusion list')
+    bypass=','.join(dict.fromkeys([*(part.strip() for part in bypass.split(',') if part.strip()),'localhost','.localhost','127.0.0.1','::1']))
+    return {'HTTPS_PROXY':proxy,'https_proxy':proxy,'HTTP_PROXY':proxy,'http_proxy':proxy,'NO_PROXY':bypass,'no_proxy':bypass}
+
+
+def read_configuration(host):
+    path = host.path(CONFIG)
+    if not path.exists() and host.path('/etc/dsh-phalanx/install-draft').exists():
+        path = host.path('/etc/dsh-phalanx/install-draft')
+    if path.is_symlink():
+        raise ConfigurationError('Managed configuration must not be a symbolic link')
+    values = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            key, value = line.split('=', 1)
+            parts = shlex.split(value)
+            if len(parts) != 1:
+                raise ConfigurationError('Invalid protected configuration')
+            values[key] = parts[0]
+    return values
+
+
+def validate_authority(url):
+    hostname = url.hostname
+    if not hostname or '%' in hostname or '\\' in url.netloc:
+        raise ConfigurationError('URL must have a valid host')
+    if ':' in hostname:
+        ipaddress.IPv6Address(hostname)
+    else:
+        ascii_host = hostname.encode('idna').decode('ascii')
+        if not re.fullmatch(r'[A-Za-z0-9_.-]+', ascii_host):
+            raise ConfigurationError('URL must have a valid host')
+    _ = url.port
+
+
+def validate_configuration(host, values):
+    for name in ('ALLOWED_MODEL_PROVIDER', 'ALLOWED_MODEL', 'MODEL_UPSTREAM_BASE_URL'):
+        if not values.get('DSH_PHALANX_'+name, '').strip():
+            raise ConfigurationError(name+' must not be empty')
+    if values['DSH_PHALANX_ALLOWED_MODEL_PROVIDER'] != 'deepseek-official':
+        raise ConfigurationError('Initial legacy model provider must be deepseek-official; configure shared providers in administration after signup')
+    if 'DSH_PHALANX_SESSION_SECRET' in values and len(values['DSH_PHALANX_SESSION_SECRET']) < 32:
+        raise ConfigurationError('Session secret must contain at least 32 characters')
+    for address in filter(None, values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES', '').split(',')):
+        if not ipaddress.IPv4Address(address.strip()).is_global:
+            raise ConfigurationError('Host aliases must be public IPv4 literals')
+    if any('\n' in value or '\r' in value or '\0' in value for value in values.values()):
+        raise ConfigurationError('Invalid deployment configuration')
+    for name in ('PORT', 'CONTAINER_GATEWAY_PORT'):
+        if not 1 <= int(values['DSH_PHALANX_'+name]) <= 65535:
+            raise ConfigurationError(name+' must be between 1 and 65535')
+    if int(values['DSH_PHALANX_PORT']) == int(values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']):
+        raise ConfigurationError('Entry and private gateway ports must differ')
+    ipaddress.ip_address(values['DSH_PHALANX_HOST'])
+    origin = urllib.parse.urlparse(values['DSH_PHALANX_PUBLIC_ORIGIN'])
+    if origin.scheme not in ('http', 'https') or not origin.hostname or origin.username or origin.password or origin.path not in ('', '/') or origin.query or origin.fragment:
+        raise ConfigurationError('Public origin must be an HTTP(S) origin without credentials or path')
+    validate_authority(origin)
+    if values.get('DSH_PHALANX_PREVIEW_PORT') or values.get('DSH_PHALANX_PREVIEW_ORIGIN'):
+        preview = urllib.parse.urlparse(values.get('DSH_PHALANX_PREVIEW_ORIGIN', ''))
+        port = int(values.get('DSH_PHALANX_PREVIEW_PORT', '0'))
+        if not 1 <= port <= 65535 or port in (int(values['DSH_PHALANX_PORT']), int(values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])):
+            raise ConfigurationError('Preview requires a separate listener port')
+        if preview.scheme != origin.scheme or preview.hostname != origin.hostname or (preview.port or (443 if preview.scheme == 'https' else 80)) == (origin.port or (443 if origin.scheme == 'https' else 80)) or preview.username or preview.password or preview.path not in ('', '/') or preview.query or preview.fragment:
+            raise ConfigurationError('Preview origin must use the same host and scheme on a different public port')
+        validate_authority(preview)
+    upstream = urllib.parse.urlparse(values['DSH_PHALANX_MODEL_UPSTREAM_BASE_URL'])
+    if upstream.scheme not in ('http', 'https') or not upstream.hostname or upstream.username or upstream.password or upstream.query or upstream.fragment:
+        raise ConfigurationError('Model upstream must be an HTTP(S) URL without credentials, query or fragment')
+    validate_authority(upstream)
+
+
+def validate_storage(host, values):
+    root_value, mount_value = (values.get('DSH_PHALANX_'+name) for name in ('USER_DATA_ROOT', 'USER_DATA_MOUNT'))
+    if root_value is None and mount_value is None:
+        return
+    if not root_value or not mount_value or not Path(root_value).is_absolute() or not Path(mount_value).is_absolute():
+        raise ConfigurationError('External user storage requires absolute root and mount paths')
+    root, mount = host.path(root_value), host.path(mount_value).resolve(strict=True)
+    platform = host.path(values['DSH_PHALANX_DATA_ROOT']).resolve()
+    canonical = root.resolve()
+    if mount == host.path('/') or not canonical.is_relative_to(mount):
+        raise ConfigurationError('User storage must be inside the declared independent data mount')
+    if canonical.is_relative_to(platform) or platform.is_relative_to(canonical):
+        raise ConfigurationError('Platform and external user storage must not overlap')
+    ancestor = root
+    while not ancestor.exists():
+        ancestor = ancestor.parent
+    facts = json.loads(host.run(['findmnt', '--json', '--target', str(ancestor), '--output', 'TARGET']).stdout)
+    if Path(facts['filesystems'][0]['target']).resolve() != mount:
+        raise ConfigurationError('The declared user data volume is not mounted; no directory was created')
+    if root.is_symlink() or root.exists() and not root.is_dir():
+        raise ConfigurationError('User storage must be a directory, not a symbolic link')
+
+
+def check_ports(host, args, values, successful, interactive):
+    endpoints = [('PORT', values['DSH_PHALANX_HOST'], '--port'), ('CONTAINER_GATEWAY_PORT', '127.0.0.1', '--gateway-port')]
+    if values.get('DSH_PHALANX_PREVIEW_PORT'):
+        endpoints.append(('PREVIEW_PORT', values['DSH_PHALANX_HOST'], '--preview-port'))
+    for name, address, flag in endpoints:
+        key = 'DSH_PHALANX_'+name
+        while True:
+            number = int(values[key])
+            # A previously accepted port can be occupied only by our actual service.
+            conflict = host.port_conflict(address, number, allow_managed=successful)
+            if conflict is None:
+                break
+            if name == 'CONTAINER_GATEWAY_PORT' and not successful and args.gateway_port is None and not getattr(args, 'gateway_chosen', False):
+                free = number+1
+                while free <= 65535 and (free == int(values['DSH_PHALANX_PORT']) or host.port_conflict(address, free) is not None):
+                    free += 1
+                if free > 65535:
+                    raise ConfigurationError('No free private gateway port; specify --gateway-port')
+                host.tell(f'Private gateway port {number} is occupied; using {free} (saved in configuration).')
+                values[key] = str(free)
+                continue
+            if name == 'PREVIEW_PORT':
+                reason = f'已有兼容监听端口 {number} 不可用，已保留配置；请按服务管理文档处理后重试。' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else f'Existing compatibility listener port {number} is unavailable; configuration retained. Follow service management documentation before retrying.'
+                raise HiddenConfigurationConflict(reason)
+            host.tell(f'{flag} {number} is unavailable: {conflict}. No occupying process was stopped.')
+            if not interactive or successful:
+                raise ConfigurationError(f'Choose a free {flag} and rerun the installer; {conflict}')
+            dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+            values[key] = dialogue.ask(f'新的 {flag} 值', f'New {flag} value', validate=validate_port)
+            origin = urllib.parse.urlparse(values['DSH_PHALANX_PUBLIC_ORIGIN'])
+            if name == 'PORT' and origin.scheme == 'http' and origin.port == number and (getattr(args, 'dialogue', None) is None or args.dialogue.automatic_origin):
+                values['DSH_PHALANX_PUBLIC_ORIGIN'] = origin._replace(netloc=origin.netloc.rsplit(':', 1)[0]+':'+values[key]).geturl()
+            if not values[key].isdigit() or not 1 <= int(values[key]) <= 65535:
+                raise ConfigurationError('Port must be between 1 and 65535')
+
+
+def configuration(host, args, *, target_version, entry_url, access_candidate):
+    # The release selector has already verified this manifest version.
+    release = tuple(map(int, target_version.split('.')))
+    protected_secrets = release >= (0, 1, 25)
+    if protected_secrets and args.model_key_file:
+        raise ConfigurationError('Configure provider credentials in administration after signup; --model-key-file is only for historical releases')
+    modern = release >= (0, 1, 1)
+    if not modern and (args.user_data_root is not None or args.user_data_mount is not None):
+        raise ConfigurationError('External user storage options require 0.1.1 or later')
+    previous = read_configuration(host)
+    successful = installed_state(host) is not None or uninstall_record(host) is not None
+    interactive = host.terminal_available() and not getattr(args, 'non_interactive', False)
+    values = dict(previous)
+    if protected_secrets:
+        values.pop('DSH_PHALANX_SESSION_SECRET', None)
+        values.pop('DSH_PHALANX_MODEL_UPSTREAM_API_KEY', None)
+    proxy=outbound_proxy_environment(previous)
+    for name in ('HTTPS_PROXY','NO_PROXY'):
+        if name in proxy:
+            values[name]=proxy[name]
+    values.pop('https_proxy',None)
+    values.pop('no_proxy',None)
+    args.gateway_chosen = 'DSH_PHALANX_CONTAINER_GATEWAY_PORT' in previous
+    for option, key in OPTIONS.items():
+        value = getattr(args, option, None)
+        if value is not None:
+            name = 'DSH_PHALANX_'+key
+            prior = previous.get(name, '3081' if key == 'CONTAINER_GATEWAY_PORT' else None)
+            if prior is not None and prior != str(value):
+                if successful:
+                    raise ConfigurationError('Existing successful installation configuration differs; use explicit offline configuration/storage maintenance')
+            values[name] = str(value)
+    if getattr(args, 'server_ip', None) is not None:
+        validate_ip(args.server_ip)
+    missing = []
+    if not interactive:
+        if 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
+            missing.append('--host-public-addresses')
+        if modern and 'DSH_PHALANX_PUBLIC_ORIGIN' not in values:
+            missing.append('--public-origin')
+        if not modern and args.model_key_file is None and 'DSH_PHALANX_MODEL_UPSTREAM_API_KEY' not in values:
+            missing.append('--model-key-file')
+        if missing:
+            prefix = '非交互安装缺少参数：' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else 'Missing '
+            example = '。示例：' if getattr(args, 'language', 'zh-CN') == 'zh-CN' else '. Example: '
+            raise ConfigurationError(prefix+', '.join(missing)+example+'sudo bash install.sh --public-origin http://<host>:18080 --host-public-addresses ""'+(' --model-key-file /path/to/protected-key' if not modern else ''))
+    if not modern and 'DSH_PHALANX_HOST_PUBLIC_ADDRESSES' not in values:
+        values['DSH_PHALANX_HOST_PUBLIC_ADDRESSES'] = host.prompt('All public IPv4 host aliases, comma-separated (empty if none): ')
+    if args.model_key_file:
+        path = args.model_key_file
+        if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+            raise ConfigurationError('Model key file must be a regular protected file (mode 0600)')
+        key = path.read_text().rstrip('\r\n')
+        if successful and values.get('DSH_PHALANX_MODEL_UPSTREAM_API_KEY') != key:
+            raise ConfigurationError('Existing successful model configuration differs')
+        if not key or any(ord(char) < 32 or ord(char) > 126 for char in key):
+            raise ConfigurationError('A nonempty printable upstream credential is required')
+        values['DSH_PHALANX_MODEL_UPSTREAM_API_KEY'] = key
+    elif not modern and 'DSH_PHALANX_MODEL_UPSTREAM_API_KEY' not in values:
+        values['DSH_PHALANX_MODEL_UPSTREAM_API_KEY'] = host.prompt('Model upstream API key: ', secret=True)
+    key = values.get('DSH_PHALANX_MODEL_UPSTREAM_API_KEY')
+    if key is not None and (not key or any(ord(char) < 32 or ord(char) > 126 for char in key)):
+        raise ConfigurationError('A nonempty printable upstream credential is required')
+    defaults = {'HOST': '0.0.0.0' if modern else '127.0.0.1', 'PORT': '18080', 'CONTAINER_GATEWAY_PORT': '3081',
+                'ALLOWED_MODEL_PROVIDER': 'deepseek-official', 'ALLOWED_MODEL': 'deepseek-chat',
+                'MODEL_UPSTREAM_BASE_URL': 'https://api.deepseek.com',
+                'DATA_ROOT': HOME_DIR+'/data', 'CONTAINER_RUNTIME': '/usr/bin/podman', 'REGISTRATION_ENABLED': 'false'}
+    if not protected_secrets:
+        defaults['SESSION_SECRET'] = secrets.token_hex(32)
+    for name, value in defaults.items():
+        values.setdefault('DSH_PHALANX_'+name, value)
+    if interactive and modern and not successful:
+        dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+        selection = configured_download_sources(host, values, args)
+        config = {'source': selection['preset'], 'overrides': selection.get('overrides', {}),
+                  'server_ip': getattr(args, 'server_ip', None), 'port': values['DSH_PHALANX_PORT'],
+                  'origin': values.get('DSH_PHALANX_PUBLIC_ORIGIN'), 'mapping': values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES'),
+                  'gateway': values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'], 'data': values.get('DSH_PHALANX_USER_DATA_ROOT', ''),
+                  'mount': values.get('DSH_PHALANX_USER_DATA_MOUNT', '')}
+        if config['origin'] and args.public_origin is None:
+            try:
+                previous_ip = str(ipaddress.ip_address(urllib.parse.urlsplit(config['origin']).hostname))
+            except ValueError:
+                previous_ip = None
+            config['server_ip'] = config['server_ip'] or previous_ip
+            dialogue.automatic_origin = previous_ip is not None and config['origin'] == entry_url(config['port'], previous_ip)
+        supplied = set()
+        if args.public_origin is not None:
+            supplied.update(('server_ip', 'origin'))
+        if getattr(args, 'server_ip', None) is not None:
+            config['server_ip'] = validate_ip(args.server_ip)
+            supplied.add('server_ip')
+        if args.port is not None:
+            supplied.add('port')
+        if args.host_public_addresses is not None:
+            supplied.add('mapping')
+        dialogue.edit_common(config, supplied)
+        if dialogue.choose('展开高级设置？y/n', 'Open advanced settings? y/n', ('y', 'n'), 'n') == 'y':
+            dialogue.edit_advanced(config)
+        while True:
+            for name, key in (('port', 'PORT'), ('origin', 'PUBLIC_ORIGIN'), ('gateway', 'CONTAINER_GATEWAY_PORT')):
+                values['DSH_PHALANX_'+key] = config[name]
+            for name, key in (('mapping', 'HOST_PUBLIC_ADDRESSES'), ('data', 'USER_DATA_ROOT'), ('mount', 'USER_DATA_MOUNT')):
+                if config[name] is None or name != 'mapping' and not config[name]:
+                    values.pop('DSH_PHALANX_'+key, None)
+                else:
+                    values['DSH_PHALANX_'+key] = config[name]
+            apply_source_choice(args, config)
+            args.gateway_chosen = args.gateway_chosen or dialogue.gateway_chosen
+            try:
+                validate_configuration(host, values)
+                validate_storage(host, values)
+                check_ports(host, args, values, successful, interactive)
+                config['port'] = values['DSH_PHALANX_PORT']
+                config['gateway'] = values['DSH_PHALANX_CONTAINER_GATEWAY_PORT']
+                config['origin'] = values['DSH_PHALANX_PUBLIC_ORIGIN']
+            except (ValueError, OSError) as error:
+                if isinstance(error, (Cancelled, HiddenConfigurationConflict)) or args.preview_port is not None or args.preview_origin is not None:
+                    raise
+                dialogue.tell('配置未通过校验，请修改后重试：'+operator_text(str(error), 'zh-CN'), 'Configuration validation failed; edit and retry: '+str(error))
+                dialogue.edit_common(config)
+                dialogue.edit_advanced(config)
+                continue
+            dialogue.summary({**config, 'data': config['data'] or effective_user_data_root(values)})
+            action = dialogue.choose('摘要：install 安装 / edit 修改 / cancel 取消', 'Summary: install / edit / cancel', ('install', 'edit', 'cancel'), 'install')
+            if action == 'install':
+                break
+            if action == 'cancel':
+                raise Cancelled(dialogue.tr('安装已取消；保留已准备的依赖及现有数据。', 'Installation cancelled; prepared dependencies and existing data are retained.'))
+            section = dialogue.choose('修改：source 下载源 / common 常用 / advanced 高级', 'Edit: source / common / advanced', ('source', 'common', 'advanced'), 'common')
+            if section == 'source':
+                dialogue.edit_source(config)
+                apply_source_choice(args, config)
+                host.download_sources = resolve_download_sources({'preset': config['source'], 'overrides': config['overrides']})
+                if getattr(host, 'recheck_release', None) is not None:
+                    host.recheck_release()
+                dialogue.tell('已按新下载源重新核对版本。', 'Release rechecked using the new source.')
+            elif section == 'common':
+                dialogue.edit_common(config)
+            else:
+                dialogue.edit_advanced(config)
+    values.setdefault('DSH_PHALANX_PUBLIC_ORIGIN', entry_url(values['DSH_PHALANX_PORT'], values['DSH_PHALANX_HOST']))
+    values['DSH_PHALANX_DOWNLOAD_SOURCES'] = json.dumps(configured_download_sources(host, values, args), separators=(',', ':'))
+    validate_configuration(host, values)
+    validate_storage(host, values)
+    check_ports(host, args, values, successful, interactive)
+    validate_configuration(host, values)
+    if not successful:
+        changes = sorted(key.removeprefix('DSH_PHALANX_') for key, value in values.items() if key in previous and previous[key] != value)
+        if modern:
+            if not interactive:
+                dialogue = getattr(args, 'dialogue', None) or InstallerQuestions(getattr(args, 'language', 'zh-CN'), host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
+                selection = configured_download_sources(host, values, args)
+                dialogue.summary({'source': selection['preset'], 'overrides': selection.get('overrides', {}), 'server_ip': getattr(args, 'server_ip', None),
+                                  'port': values['DSH_PHALANX_PORT'], 'origin': values['DSH_PHALANX_PUBLIC_ORIGIN'], 'gateway': values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'],
+                                  'mapping': values.get('DSH_PHALANX_HOST_PUBLIC_ADDRESSES'), 'data': effective_user_data_root(values), 'mount': values.get('DSH_PHALANX_USER_DATA_MOUNT', '')})
+        else:
+            host.tell('Configuration: '+values['DSH_PHALANX_PUBLIC_ORIGIN']+'; entry port '+values['DSH_PHALANX_PORT']+'; private gateway '+values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])
+            host.tell('Platform data: '+values['DSH_PHALANX_DATA_ROOT']+'; user data: '+effective_user_data_root(values))
+        if changes:
+            host.tell('Retry changes: '+', '.join(changes)+'. Existing data will be preserved.')
+        if interactive and not modern and host.prompt('Continue with this configuration? [y/N]: ').lower() != 'y':
+            raise ConfigurationError('Installation cancelled before downloads or deployment changes')
+    return values
+
+"""Verified fixed project releases, archive staging and rootless image I/O."""
+import hashlib
+import http.client
+import socket
+import struct
+import signal
+import subprocess
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import tarfile
+import tempfile
+import urllib.parse
+import urllib.error
+
+IMAGE = "ghcr.io/dake6767/dsh-phalanx"
+RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx/releases"
+CANDIDATE_RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx-candidates/releases"
+CANDIDATE_CHANNEL_URL = "https://raw.githubusercontent.com/dake6767/dsh-phalanx-candidates/main/candidate-channel.json"
+ASSETS = ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")
+
+
+def release_channel(version):
+    if not isinstance(version,str) or not (STABLE.fullmatch(version) or CANDIDATE.fullmatch(version)):
+        raise InstallError('Invalid release channel version',code='operation.invalid')
+    formal=bool(STABLE.fullmatch(version))
+    return {'kind':'formal' if formal else 'candidate','baseUrl':RELEASE_BASE if formal else CANDIDATE_RELEASE_BASE}
+
+
+def installed_channel(state):
+    expected=release_channel(state['version'])
+    channel=state.get('channel',expected)
+    if (not isinstance(channel,dict) or channel.get('kind')!=expected['kind'] or channel.get('baseUrl')!=expected['baseUrl']):
+        raise InstallError('Installed release channel is inconsistent',code='release.identity-mismatch')
+    return expected
+
+
+def asset_names(manifest):
+    architecture = {'linux/amd64': 'amd64', 'linux/arm64': 'arm64'}.get(manifest.get('platform'))
+    if architecture is None:
+        raise InstallError('Unsupported artifact platform',code='release.metadata-invalid')
+    return (f'dsh-phalanx-linux-{architecture}.tar.gz', f'dsh-phalanx-dsh-linux-{architecture}.oci.tar')
+
+
+def selected_platform(host):
+    return 'linux/arm64' if getattr(host, 'development_arm64', False) else 'linux/amd64'
+
+
+def digest(path):
+    result = hashlib.sha256()
+    with path.open("rb") as file:
+        for block in iter(lambda: file.read(1024*1024), b""):
+            result.update(block)
+    return result.hexdigest()
+
+
+
+def image_identity(manifest):
+    if 'imageIdentity' not in manifest:
+        return None
+    value=manifest['imageIdentity']
+    if (not isinstance(value,dict) or
+            not isinstance(value.get('inputHash'),str) or not re.fullmatch('[a-f0-9]{64}',value['inputHash']) or
+            not isinstance(value.get('buildCommit'),str) or not re.fullmatch('[a-f0-9]{40}',value['buildCommit']) or
+            value.get('digest')!=manifest['image']['digest'] or value.get('dshRevision')!=manifest['dshRevision']):
+        raise InstallError('Invalid independent image identity',code='release.identity-mismatch')
+    return value
+
+
+def verify_manifest(directory, version, archive=True, *, assets=True, platform='linux/amd64'):
+    try:
+        manifest = json.loads((directory / "manifest.json").read_text())
+        if not isinstance(manifest,dict):
+            raise InstallError("Invalid release manifest",code='release.metadata-invalid')
+        names = asset_names(manifest)
+        image = manifest.get("image", {})
+        files = manifest.get("files", {})
+        if not isinstance(image,dict) or not isinstance(files,dict) or not isinstance(manifest.get("toolchain"),dict):
+            raise InstallError("Invalid release manifest",code='release.metadata-invalid')
+        if (not candidate_identity(manifest) or
+                manifest.get("platform") != platform or
+                not re.fullmatch(r"[a-f0-9]{40}", manifest.get("commit", "")) or
+                not re.fullmatch(r"[a-f0-9]{40}", manifest.get("dshRevision", "")) or
+                not re.fullmatch(r"[1-9][0-9]*", manifest.get("runId", "")) or
+                image.get("name") != IMAGE or image.get("tag") != candidate_image_tag(manifest["tag"]) or
+                not re.fullmatch(r"sha256:[a-f0-9]{64}", image.get("digest", "")) or
+                image.get("reference") != IMAGE+"@"+image["digest"] or
+                set(files) != set(names) or
+                any(not re.fullmatch(r"[a-f0-9]{64}", value) for value in files.values()) or
+                not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest.get("toolchain", {}).get("node", ""))):
+            raise InstallError("Invalid release manifest",code='release.metadata-invalid')
+        image_identity(manifest)
+        validate_contract(manifest)
+        if version != manifest["tag"] and version != "v"+manifest["targetVersion"]:
+            raise InstallError("Requested version does not match the manifest",code='release.metadata-invalid')
+        expected = "".join(f"{files[name]}  {name}\n" for name in names)
+        if (directory / "SHA256SUMS").read_text() != expected:
+            raise InstallError("Checksum inventory mismatch",code='release.checksum-failed')
+        for name in (names if archive else names[:1]) if assets else ():
+            file = directory / name
+            if file.is_symlink() or not file.is_file() or digest(file) != files[name]:
+                raise InstallError(f"Checksum mismatch: {name}",code='release.checksum-failed')
+        return manifest
+    except (ValueError,UnicodeError,TypeError) as error:
+        raise InstallError('Invalid release manifest',code='release.metadata-invalid') from error
+
+
+def release_location(args):
+    development = getattr(args, 'dev_release_base_url', None)
+    if development is not None:
+        if development != CANDIDATE_RELEASE_BASE or not re.fullmatch(r'run-[1-9][0-9]*', args.version) or args.bundle_dir is not None:
+            raise InstallError('Development release source requires the candidate repository and an explicit run-ID candidate',code='operation.invalid')
+        return development
+    if args.version.startswith('run-') and args.bundle_dir is None:
+        raise InstallError('Run-ID candidates require the explicit development release source',code='operation.invalid')
+    return RELEASE_BASE
+
+
+@install_failure('download.failed')
+def download(host,url,**options):
+    return host.request(url,**options)
+
+
+def metadata(host, url):
+    try:
+        return download(host,url,max_bytes=262144)
+    except (OSError, InstallError) as error:
+        raise InstallError('Release metadata unavailable or incomplete: '+url+'. Retry a completed release or check --github-proxy-prefix. '+str(error),code=update_error_code(error,'download.failed')) from error
+
+
+def json_metadata(body):
+    try:
+        value = json.loads(body)
+        if not isinstance(value, dict):
+            raise ValueError()
+        return value
+    except (ValueError, UnicodeError) as error:
+        raise InstallError('Invalid release metadata; check the release asset prefix and retry a completed release',code='release.metadata-invalid') from error
+
+
+def metadata_missing(error):
+    while error is not None:
+        if isinstance(error,urllib.error.HTTPError) and error.code==404:
+            return True
+        error=error.__cause__
+    return False
+
+
+def candidate_channel(host):
+    value=json_metadata(metadata(host,CANDIDATE_CHANNEL_URL))
+    if type(value.get('schema')) is not int or value['schema']!=1:
+        raise InstallError('Unsupported candidate channel metadata',code='release.metadata-invalid')
+    if value.get('candidate') is None:
+        raise InstallError('No candidate release is currently available',code='release.metadata-invalid')
+    if (not isinstance(value['candidate'],str) or not value['candidate'].startswith('run-') or not CANDIDATE.fullmatch(value['candidate']) or
+            not isinstance(value.get('commit'),str) or not re.fullmatch('[a-f0-9]{40}',value['commit']) or
+            not isinstance(value.get('manifestSha256'),str) or not re.fullmatch('[a-f0-9]{64}',value['manifestSha256'])):
+        raise InstallError('Invalid candidate channel identity',code='release.metadata-invalid')
+    version_parts(value.get('targetVersion'))
+    return value
+
+
+def verify_stable_assets(host, base, manifest, pointer=None):
+    release = json_metadata(metadata(host, base+'release.json'))
+    acceptance_bytes = metadata(host, base+'acceptance.json')
+    acceptance = json_metadata(acceptance_bytes)
+    summary = metadata(host, base+'acceptance.md')
+    summary_hash = hashlib.sha256(summary).hexdigest()
+    policy = manifest.get('acceptancePolicy')
+    if policy is None:
+        policy = {'0.1.0': {'ticket': 14, 'checks': ['ci', 'linux', 'cleanInstall', 'https', 'dogfood']},
+            '0.1.1': {'ticket': 9, 'checks': ['ci', 'linux', 'cleanInstall', 'https', 'models', 'spaces', 'recovery', 'storage', 'upgrade', 'review']}}.get(manifest['targetVersion'])
+    expected = {'schema': 1, 'version': manifest['targetVersion'], 'candidate': manifest['tag'], 'candidateRun': manifest['runId'],
+        'commit': manifest['commit'], 'files': manifest['files'], 'image': IMAGE+':'+manifest['targetVersion'],
+        'imageDigest': manifest['image']['digest'], 'acceptanceSha256': hashlib.sha256(acceptance_bytes).hexdigest(), 'summarySha256': summary_hash}
+    accepted = {'schema': 1, 'status': 'accepted', 'candidate': manifest['tag'], 'commit': manifest['commit'], 'runId': manifest['runId'],
+        'platformSha256': manifest['files'][ASSETS[0]], 'imageDigest': manifest['image']['digest'], 'summarySha256': summary_hash}
+    checks = acceptance.get('checks')
+    if (not policy or not isinstance(checks, dict) or acceptance.get('ticket') != policy['ticket'] or
+            any(release.get(key) != value for key, value in expected.items()) or
+            any(acceptance.get(key) != value for key, value in accepted.items()) or
+            any(checks.get(key) != 'passed' for key in policy['checks']) or
+            pointer is not None and pointer != release):
+        raise InstallError('Release, acceptance and latest pointer identities disagree; select a completed version or retry after publication',code='release.metadata-invalid')
+
+
+def verify_candidate_assets(host, base, manifest, manifest_bytes):
+    proof = json_metadata(metadata(host, base+'candidate.json'))
+    expected = {'schema': 1, 'repository': 'dake6767/dsh-phalanx', 'candidate': manifest['tag'], 'runId': manifest['runId'],
+        'commit': manifest['commit'], 'targetVersion': manifest['targetVersion'], 'manifestSha256': hashlib.sha256(manifest_bytes).hexdigest()}
+    workflow = proof.get('workflow')
+    if isinstance(workflow,dict) and workflow.get('ref')!='refs/heads/main' and workflow.get('commit')!=manifest['commit']:
+        raise InstallError('Candidate snapshot workflow must build its own source commit',code='release.metadata-invalid')
+    if (any(proof.get(key) != value for key, value in expected.items()) or not isinstance(workflow, dict) or
+            workflow.get('path') != '.github/workflows/candidate.yml' or (workflow.get('ref') != 'refs/heads/candidate/'+manifest['targetVersion'] and not (version_parts(manifest['targetVersion'])<(0,1,24) and workflow.get('ref')=='refs/heads/main')) or
+            not isinstance(workflow.get('commit'), str) or not re.fullmatch(r'[a-f0-9]{40}', workflow['commit'])):
+        raise InstallError('Candidate publication identity disagrees with its manifest; use a completed candidate with candidate.json',code='release.metadata-invalid')
+
+
+def select_release(host,args,destination):
+    release_base = release_location(args)
+    if args.bundle_dir is not None:
+        if not CANDIDATE.fullmatch(args.version):
+            raise InstallError('Private archive handoff requires an explicit candidate version',code='release.metadata-invalid')
+        return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False,platform=selected_platform(host)),args.version
+    if selected_platform(host) != 'linux/amd64':
+        raise InstallError('Development arm64 requires a local bundle',code='release.metadata-invalid')
+    if args.version!='latest' and not STABLE.fullmatch(args.version) and not CANDIDATE.fullmatch(args.version):
+        raise InstallError('Specify latest, a stable version, or an explicit candidate tag',code='release.metadata-invalid')
+    pointer = json_metadata(metadata(host, release_base+'/latest/download/release.json')) if args.version == 'latest' else None
+    version = 'v'+str(pointer.get('version', '')) if pointer is not None else args.version
+    if pointer is not None and not STABLE.fullmatch(version):
+        raise InstallError('Latest pointer must name a completed stable release; select an explicit stable version',code='release.metadata-invalid')
+    base = release_base+'/download/'+version+'/'
+    for name in ('manifest.json','SHA256SUMS'):
+        (destination/name).write_bytes(metadata(host, base+name))
+    manifest=verify_manifest(destination,version,assets=False)
+    if STABLE.fullmatch(version):
+        verify_stable_assets(host, base, manifest, pointer)
+    elif getattr(args, 'dev_release_base_url', None) is not None:
+        verify_candidate_assets(host, base, manifest, (destination/'manifest.json').read_bytes())
+    else:
+        raise InstallError('Online candidates require the explicit development release source',code='release.metadata-invalid')
+    state=installed_state(host)
+    if state and state['version']==version and (manifest['commit']!=state['commit'] or manifest['image']['digest']!=state['imageDigest'] or manifest['files'][ASSETS[0]]!=state['platformSha256']):
+        raise InstallError('Installed manifest and receipt disagree',code='release.identity-mismatch')
+    return destination,manifest,version
+
+
+def acquire(host,args,destination,check_manifest=None,*,selected=None):
+    directory,manifest,version=selected if selected is not None else select_release(host,args,destination)
+    if check_manifest:
+        check_manifest(directory,manifest,version)
+    if args.bundle_dir is not None:
+        if host.progress:
+            host.progress.emit(message='Verifying release checksums', milestone=True)
+        return directory,verify_manifest(directory,version,platform=selected_platform(host))
+    state=installed_state(host)
+    same=state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest'] and state['platformSha256']==manifest['files'][ASSETS[0]]
+    if not same:
+        sha=manifest['files'][ASSETS[0]]
+        cached=host.path('/var/cache/dsh-phalanx/'+sha+'.tar.gz')
+        if cached.is_file() and not cached.is_symlink() and digest(cached)==sha:
+            shutil.copyfile(cached,directory/ASSETS[0])
+            host.tell('Reusing checksum-verified platform download.')
+        else:
+            base=release_location(args)+'/download/'+version+'/'
+            (directory/ASSETS[0]).write_bytes(download(host,base+ASSETS[0]))
+        if host.progress:
+            host.progress.emit(message='Verifying platform checksum', milestone=True)
+        manifest=verify_manifest(directory,version,archive=False)
+        cache=host.mkdir('/var/cache/dsh-phalanx',0o700)/(sha+'.tar.gz')
+        temporary=cache.with_suffix('.next')
+        shutil.copyfile(directory/ASSETS[0],temporary)
+        temporary.chmod(0o600)
+        os.replace(temporary,cache)
+    return directory,manifest
+
+
+def supply_image(host, uid, directory, manifest, archive):
+    reference = manifest["image"]["reference"]
+    present = host.user(uid, ["podman", "image", "exists", reference], check=False)
+    if present.returncode == 1:
+        if archive:
+            host.user(uid, ["podman", "load"], input_file=directory / asset_names(manifest)[1])
+            identity=image_identity(manifest)
+            label='dsh.input.sha256='+identity['inputHash'] if identity else 'org.opencontainers.image.revision='+manifest['commit']
+            ids = host.user(uid, ["podman", "images", "--filter", "label="+label, "--format", "{{.ID}}"]).stdout.splitlines()
+            matches = []
+            for image_id in set(ids):
+                facts = json.loads(host.user(uid, ["podman", "image", "inspect", image_id]).stdout)[0]
+                if image_matches(facts,manifest):
+                    matches.append(image_id)
+            if len(matches) != 1:
+                raise InstallError("Archive did not supply exactly one matching candidate image",code='release.identity-mismatch')
+            host.user(uid, ["podman", "tag", matches[0], IMAGE+":"+manifest["image"]["tag"]])
+        else:
+            mirror = getattr(host, 'download_sources', {}).get('ghcrMirror', '')
+            address = urllib.parse.urlsplit(mirror)
+            transport = address.netloc + address.path + reference.removeprefix('ghcr.io/') if mirror else reference
+            try:
+                host.user(uid, ["podman", "pull", transport])
+            except InstallError as error:
+                raise InstallError('GHCR image download failed at '+transport+'. Change the GHCR mirror in Download sources or --ghcr-mirror. '+str(error),code='download.failed') from error
+            if mirror:
+                # Restore the canonical name after fetching the exact digest;
+                # verify_image still checks digest, platform, source and DSH revision.
+                host.user(uid, ['podman', 'tag', transport, IMAGE+':'+manifest['image']['tag']])
+    elif present.returncode != 0:
+        raise InstallError("Cannot inspect rootless image storage",code='unknown')
+    return verify_image(host,uid,manifest)
+
+
+def image_command(image,manifest):
+    identity=image_identity(manifest)
+    config=image.get('Config') or {}
+    labels=config.get('Labels') or {}
+    label_matches=(labels.get('dsh.input.sha256')==identity['inputHash'] if identity else
+                   labels.get('org.opencontainers.image.revision')==manifest['commit'])
+    if (image.get('Digest')!=manifest['image']['digest'] or image.get('Architecture')!=manifest['platform'].split('/')[1] or
+            image.get('Os')!='linux' or config.get('User')!='node' or labels.get('dsh.revision')!=manifest['dshRevision'] or not label_matches):
+        raise InstallError('Imported/pulled image identity does not match this platform release',code='release.identity-mismatch')
+    command=config.get('Cmd')
+    if not isinstance(command,list) or len(command)<2 or not all(isinstance(part,str) and part for part in command):
+        raise InstallError('Image does not declare its official runtime command',code='release.identity-mismatch')
+    return command
+
+
+def image_matches(image,manifest):
+    try:
+        image_command(image,manifest)
+        return True
+    except (InstallError,KeyError,TypeError,AttributeError,IndexError):
+        return False
+
+
+def verify_image(host,uid,manifest):
+    image=host.inspect_image(uid,manifest['image']['reference'])
+    return image_command(image,manifest)
+
+
+def stage_platform(host, directory, manifest):
+    if host.progress:
+        host.progress.emit(message='Staging verified platform', milestone=True)
+    sha = manifest["files"][asset_names(manifest)[0]]
+    target = f'/opt/dsh-phalanx/releases/{manifest["tag"]}-{sha[:16]}'
+    host.mkdir("/opt/dsh-phalanx")
+    releases = host.mkdir("/opt/dsh-phalanx/releases")
+    if not host.path(target).exists():
+        with tempfile.TemporaryDirectory(prefix=".install-", dir=releases) as temporary:
+            with tarfile.open(directory / asset_names(manifest)[0], "r:gz") as archive:
+                archive.extractall(temporary, filter="data")
+            staging = Path(temporary)
+            for name in ("start", "node/bin/node", "dist/composition/cli.js", "admin-ui/dist/community.html"):
+                if not (staging / name).is_file():
+                    raise InstallError("Platform archive lacks required runtime assets",code='release.identity-mismatch')
+            build = json.loads((staging / "build-info.json").read_text())
+            if build.get("commit") != manifest["commit"] or build.get("platform") != manifest["platform"]:
+                raise InstallError("Packaged product identity mismatch",code='release.identity-mismatch')
+            node = host.run([str(staging / "node/bin/node"), "--version"]).stdout.strip()
+            if node != "v"+manifest["toolchain"]["node"]:
+                raise InstallError("Bundled Node identity mismatch",code='release.identity-mismatch')
+            (staging / ".artifact-sha256").write_text(sha)
+            staging.chmod(0o755)
+            os.rename(staging, host.path(target))
+    if host.path(target+"/.artifact-sha256").read_text() != sha:
+        raise InstallError("Existing release directory has a conflicting identity",code='release.identity-mismatch')
+    root = host.path(target)
+    for path in (root, *root.rglob("*")):
+        if not path.is_symlink():
+            path.chmod(0o755 if path.is_dir() or path.stat().st_mode & 0o111 else 0o644)
+    # A durable prepared/committed journal must never outlive its release tree.
+    paths=(root,*root.rglob('*'))
+    for path in paths:
+        if path.is_file() and not path.is_symlink():
+            with path.open('rb') as file:
+                os.fsync(file.fileno())
+    for path in reversed(paths):
+        if path.is_dir() and not path.is_symlink():
+            host.sync_directory(path)
+    host.sync_directory(releases)
+    return target
+
+
+
+def release_notes(host,version):
+    if isinstance(version,str) and version.startswith('run-') and CANDIDATE.fullmatch(version):
+        return 'Candidate release: '+CANDIDATE_RELEASE_BASE+'/tag/'+version
+    if not STABLE.fullmatch(version):
+        raise InstallError('Formal release notes require a stable version',code='release.metadata-invalid')
+    release = json_metadata(metadata(host, RELEASE_BASE+'/download/'+version+'/release.json'))
+    if release.get('version') != version[1:]:
+        raise InstallError('Release notes identity changed',code='release.metadata-invalid')
+    body = release.get('releaseNotes', 'Release notes: https://github.com/dake6767/dsh-phalanx/releases/tag/'+version)
+    if not isinstance(body,str):
+        raise InstallError('Invalid release notes',code='release.metadata-invalid')
+    return body.encode('utf-8')[:32768].decode('utf-8',errors='ignore')
+
+
+def release_versions(host,current,latest,target_version=None):
+    """Discover names from Release assets only; every version still verifies its own assets."""
+    candidate=isinstance(latest,str) and latest.startswith('run-') and CANDIDATE.fullmatch(latest)
+    if not candidate and (not isinstance(latest,str) or not STABLE.fullmatch(latest)):
+        raise InstallError('Invalid channel version listing',code='release.metadata-invalid')
+    if candidate:
+        version_parts(target_version)
+    release=json_metadata(metadata(host,RELEASE_BASE+('/latest/download/release.json' if candidate else '/download/'+latest+'/release.json')))
+    formal_latest='v'+str(release.get('version','')) if candidate else latest
+    if not STABLE.fullmatch(formal_latest) or release.get('version')!=formal_latest[1:]:
+        raise InstallError('Release version listing identity changed',code='release.metadata-invalid')
+    rows=release.get('versions')
+    if rows is None and version_parts(formal_latest[1:])<(0,1,27):
+        rows=[formal_latest]
+    if not isinstance(rows,list) or not rows or rows[-1]!=formal_latest:
+        raise InstallError('Invalid release version listing',code='release.metadata-invalid')
+    previous=None
+    names=[]
+    for tag in rows:
+        if not isinstance(tag,str) or not STABLE.fullmatch(tag):
+            raise InstallError('Invalid release version listing',code='release.metadata-invalid')
+        version=version_parts(tag[1:])
+        if previous is not None and version<=previous:
+            raise InstallError('Invalid ordered release version listing',code='release.metadata-invalid')
+        previous=version
+        if version_parts(current)<=version and (not candidate or version<=version_parts(target_version)):
+            names.append(tag)
+    return names+[latest] if candidate else names if latest in names else [latest]
+
+
+class ImageConnection(http.client.HTTPConnection):
+    def __init__(self,path,authorize):
+        super().__init__('localhost',timeout=3)
+        self.path=path
+        self.authorize=authorize
+    def connect(self):
+        self.sock=socket.socket(socket.AF_UNIX)
+        self.sock.settimeout(3)
+        try:
+            self.sock.connect(self.path)
+            self.authorize(self.sock)
+        except BaseException:
+            self.close()
+            raise
+
+
+class UnixImageInspector:
+    """Transport reuse only: every request obtains a fresh official Libpod inspect result."""
+    def __init__(self,path,authorize):
+        self.connection=ImageConnection(path,authorize)
+    def inspect(self,reference):
+        try:
+            if self.connection.sock:
+                self.connection.authorize(self.connection.sock)
+            self.connection.request('GET','/v4.0.0/libpod/images/'+urllib.parse.quote(reference,safe='')+'/json')
+            response=self.connection.getresponse()
+            body=response.read(2*1024*1024+1)
+            if response.status!=200 or len(body)>2*1024*1024:
+                raise InstallError('The instance image is unavailable from its owned inspection service')
+            value=json.loads(body)
+            if not isinstance(value,dict):
+                raise ValueError('Invalid image inspection result')
+            return value
+        except BaseException:
+            self.close()
+            raise
+    def close(self):
+        self.connection.close()
+
+
+class OwnedImageInspector:
+    """One executor owns this independent rootless service, peer proof and runtime directory."""
+    def __init__(self,host,uid):
+        self.host=host
+        self.uid=uid
+        self.process=None
+        self.directory=None
+        self.reader=None
+        self.peer=None
+        self.socket_inode=None
+        self.context=None
+        self.path=None
+    def stamp(self,pid):
+        return self.host.path('/proc/'+str(pid)+'/stat').read_text().rsplit(')',1)[1].split()[19]
+    def configuration(self):
+        roots=[self.host.path(p) for p in ('/usr/share/containers','/etc/containers',HOME_DIR+'/.config/containers')]
+        paths=[p/name for p in roots for name in ('storage.conf','containers.conf')]+[p for root in roots for p in (root/'containers.conf.d').glob('*.conf')]
+        result=[]
+        for path in sorted(paths):
+            try:
+                info=path.stat()
+                fact=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+            except FileNotFoundError:
+                fact=None
+            result.append((str(path),fact))
+        return result
+    def authorize(self,connection):
+        pid,uid,gid=struct.unpack('3i',connection.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+        proof=(pid,self.stamp(pid),uid,gid)
+        if (uid!=self.uid or gid!=self.gid or os.getpgid(pid)!=self.process.pid or
+                self.host.path('/proc/'+str(pid)+'/exe').resolve()!=Path('/usr/bin/podman').resolve() or
+                self.host.path('/proc/'+str(pid)+'/cmdline').read_bytes().split(b'\0')[-2]!=os.fsencode(self.uri) or
+                self.process.poll() is not None or self.stamp(self.process.pid)!=self.wrapper_started or
+                self.peer is not None and self.peer!=proof):
+            raise InstallError('The owned image inspection peer identity changed')
+        self.peer=proof
+    def start(self):
+        account=self.host.run(['getent','passwd',ACCOUNT]).stdout.strip().split(':')
+        if len(account)!=7 or int(account[2])!=self.uid or account[5]!=HOME_DIR:
+            raise InstallError('Invalid image inspection identity')
+        self.gid=int(account[3])
+        parent=self.host.path('/run/dsh-phalanx-updater')
+        info=parent.lstat()
+        if parent.is_symlink() or not parent.is_dir() or info.st_uid!=0 or info.st_gid!=self.gid or info.st_mode&0o027:
+            raise InstallError('Invalid owned image inspection runtime')
+        self.context=self.configuration()
+        self.directory=Path(tempfile.mkdtemp(prefix='image-',dir=parent))
+        self.directory_inode=self.directory.stat().st_ino
+        self.directory.chmod(0o700)
+        os.chown(self.directory,self.uid,self.gid)
+        self.path=self.directory/'api.sock'
+        self.uri='unix://'+str(self.path)
+        self.process=subprocess.Popen(['runuser','-u',ACCOUNT,'--','podman','system','service','--time','0',self.uri],
+            env=self.host.user_environment(self.uid),cwd=self.host.path(HOME_DIR),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+        self.wrapper_started=self.stamp(self.process.pid)
+        self.reader=UnixImageInspector(str(self.path),self.authorize)
+        deadline=self.host.clock()+10
+        while True:
+            if self.path.exists():
+                self.socket_inode=self.path.lstat().st_ino
+            try:
+                self.reader.connection.connect()
+                break
+            except (ConnectionRefusedError,FileNotFoundError):
+                if self.process.poll() is not None or self.host.clock()>=deadline:
+                    raise InstallError('The owned image inspection service did not start') from None
+                self.host.pause(.02)
+        if self.context!=self.configuration():
+            raise InstallError('Image inspection configuration changed during startup')
+    def inspect(self,reference):
+        if self.process is not None and (self.process.poll() is not None or self.context!=self.configuration()):
+            self.close()
+        if self.process is None:
+            self.start()
+        return self.reader.inspect(reference)
+    def close(self):
+        if self.reader:
+            self.reader.close()
+        if self.process:
+            if self.process.poll() is None:
+                self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if self.peer:
+                    pid,ticks,_,_=self.peer
+                    try:
+                        if self.stamp(pid)==ticks and os.getpgid(pid)==self.process.pid:
+                            os.kill(pid,signal.SIGKILL)
+                    except (ProcessLookupError,FileNotFoundError):
+                        pass
+                self.process.kill()
+                self.process.wait(timeout=5)
+            if self.peer:
+                try:
+                    if self.stamp(self.peer[0])==self.peer[1]:
+                        raise InstallError('The owned image inspection peer did not stop')
+                except FileNotFoundError:
+                    pass
+        if self.directory:
+            if self.path is not None and self.path.exists():
+                with socket.socket(socket.AF_UNIX) as probe:
+                    try:
+                        probe.connect(str(self.path))
+                    except (ConnectionRefusedError,FileNotFoundError):
+                        pass
+                    else:
+                        raise InstallError('The image inspection socket is still active')
+                info=self.path.lstat()
+                if self.path.is_symlink() or info.st_ino!=self.socket_inode or info.st_uid!=self.uid:
+                    raise InstallError('The owned image inspection socket changed')
+                self.path.unlink()
+            if self.directory.is_symlink() or self.directory.stat().st_ino!=self.directory_inode:
+                raise InstallError('The owned image inspection directory changed')
+            self.directory.rmdir()
+        self.process=None
+        self.directory=None
+        self.reader=None
+        self.peer=None
+        self.socket_inode=None
+        self.context=None
+        self.path=None
 
 """The installer filesystem, terminal, socket and operating-system exit."""
 import json
@@ -1276,7 +3037,6 @@ import http.client
 import urllib.request
 import urllib.error
 import urllib.parse
-import functools
 import contextlib
 import shutil
 import socket
@@ -1284,41 +3044,25 @@ import errno
 import selectors
 import base64
 
-
-ACCOUNT = "dsh-phalanx"
 PACKAGES = ("git", "nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
-class InstallError(Exception):
-    def __init__(self,message,*,code='unknown'):
-        super().__init__(message);self.code=code
 
 
 def origin_authority(value):
     public=urllib.parse.urlsplit(value)
     hostname=ipaddress.ip_address(public.hostname).compressed if ':' in public.hostname else public.hostname.encode('idna').decode('ascii')
     authority='['+hostname+']' if ':' in hostname else hostname
-    if public.port is not None and public.port!={'http':80,'https':443}[public.scheme]:authority+=':'+str(public.port)
+    if public.port is not None and public.port!={'http':80,'https':443}[public.scheme]:
+        authority+=':'+str(public.port)
     return authority
 
 
-def install_failure(code):
-    """Classify an effect without changing exception types or HTTP fallback status."""
-    def decorate(work):
-        @functools.wraps(work)
-        def perform(*args,**kwargs):
-            try:return work(*args,**kwargs)
-            except Exception as error:
-                if update_error_code(error)!='unknown':raise
-                if isinstance(error,InstallError):error.code=code
-                else:error.system_update_code=code
-                raise
-        return perform
-    return decorate
-
-
 def proxy_bypass(address, environment):
-    if urllib.request.proxy_bypass_environment(address.netloc, {'no':environment.get('NO_PROXY','')}):return True
-    try:return ipaddress.ip_address(address.hostname).is_loopback
-    except ValueError:return False
+    if urllib.request.proxy_bypass_environment(address.netloc, {'no':environment.get('NO_PROXY','')}):
+        return True
+    try:
+        return ipaddress.ip_address(address.hostname).is_loopback
+    except ValueError:
+        return False
 
 
 class ConfiguredProxyHandler(urllib.request.ProxyHandler):
@@ -1328,14 +3072,16 @@ class ConfiguredProxyHandler(urllib.request.ProxyHandler):
         super().__init__({protocol:environment['HTTPS_PROXY'] for protocol in ('http','https')} if environment.get('HTTPS_PROXY') else {})
 
     def proxy_open(self, request, proxy, protocol):
-        if proxy_bypass(urllib.parse.urlsplit(request.full_url),self.environment):return None
+        if proxy_bypass(urllib.parse.urlsplit(request.full_url),self.environment):
+            return None
         address=urllib.parse.urlsplit(proxy)
         if address.username is not None:
             credentials=urllib.parse.unquote(address.username)+':'+urllib.parse.unquote(address.password or '')
             request.add_unredirected_header('Proxy-Authorization','Basic '+base64.b64encode(credentials.encode()).decode())
         original=request.type
         request.set_proxy(address.netloc.rsplit('@',1)[-1],address.scheme)
-        if original not in (address.scheme,'https'):return self.parent.open(request,timeout=request.timeout)
+        if original not in (address.scheme,'https'):
+            return self.parent.open(request,timeout=request.timeout)
         return None
 
 
@@ -1369,9 +3115,11 @@ class Host:
         pasta = self.run(['/usr/bin/pasta', '--version']).stdout.strip()
         if passt_version_date(pasta) is None:
             package = self.run(['dpkg-query', '-W', '-f=${db:Status-Status} ${Version}\\n', 'passt'], check=False)
-            if package.returncode == 0 and re.fullmatch(r'installed \S+\n?', package.stdout): pasta = package.stdout.strip()
+            if package.returncode == 0 and re.fullmatch(r'installed \S+\n?', package.stdout):
+                pasta = package.stdout.strip()
         failure = host_version_failure(podman, pasta)
-        if failure: raise InstallError(failure, code='compatibility.unsupported')
+        if failure:
+            raise InstallError(failure, code='compatibility.unsupported')
         init = self.path('/proc/1/comm')
         if not init.is_file() or init.read_text().strip() != 'systemd':
             raise InstallError('systemd must be the host init system', code='compatibility.unsupported')
@@ -1382,7 +3130,8 @@ class Host:
         else:
             def command(arguments):
                 return self.user(uid, ['timeout', '--signal=TERM', '--kill-after=5s', '30s', *arguments])
-            try: command(['systemctl', '--user', 'is-active', '--quiet', 'default.target'])
+            try:
+                command(['systemctl', '--user', 'is-active', '--quiet', 'default.target'])
             except InstallError:
                 raise InstallError('A systemd user manager must be available for rootless containers', code='compatibility.unsupported') from None
             info = self.rootless_info(command)
@@ -1397,8 +3146,14 @@ class Host:
         directory = self.path(home)
         directory.mkdir(mode=0o700)
         inode = directory.stat().st_ino
-        attempted = False; created = False; linger_attempted = False; podman_attempted = False
-        identity = None; failure = None; cleanup = []; info = None
+        attempted = False
+        created = False
+        linger_attempted = False
+        podman_attempted = False
+        identity = None
+        failure = None
+        cleanup = []
+        info = None
         def owned(row):
             return bool(row and len(row) == 7 and row[0] == account and row[5:] == [home, '/usr/sbin/nologin'] and
                         row[2].isdecimal() and row[3].isdecimal() and min(int(row[2]), int(row[3])) > 0)
@@ -1418,11 +3173,13 @@ class Host:
             identity = found.stdout.strip().split(':') if created else None
             if created and not owned(identity):
                 raise InstallError('Temporary rootless probe identity does not match its owner')
-            if added.returncode != 0 or not created: raise InstallError('Cannot create the temporary rootless probe identity')
+            if added.returncode != 0 or not created:
+                raise InstallError('Cannot create the temporary rootless probe identity')
             for table, flag in (('subuid', '--add-subuids'), ('subgid', '--add-subgids')):
                 rows = [row.split(':') for row in self.path('/etc/'+table).read_text().splitlines() if row]
                 start = max([100000, *(int(row[1])+int(row[2]) for row in rows)])
-                if start+65535 >= 2**32: raise InstallError('No subordinate-ID range is available for the rootless probe')
+                if start+65535 >= 2**32:
+                    raise InstallError('No subordinate-ID range is available for the rootless probe')
                 self.run(['usermod', flag, str(start)+'-'+str(start+65535), account])
             self.atomic(home+'/.config/containers/storage.conf', '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n')
             self.run(['chown', '-R', identity[2]+':'+identity[3], str(directory)])
@@ -1435,7 +3192,8 @@ class Host:
                 raise InstallError('A systemd user manager must be available for rootless containers', code='compatibility.unsupported') from None
             podman_attempted = True
             info = self.rootless_info(command)
-        except BaseException as error: failure = error
+        except BaseException as error:
+            failure = error
         if attempted and not created:
             found = self.run(['getent', 'passwd', account], check=False)
             if found.returncode not in (0, 2):
@@ -1447,38 +3205,53 @@ class Host:
             if not owned(identity) or current != identity:
                 raise InstallError('Temporary rootless probe ownership changed; retained '+account+' at '+home) from failure
             actions = []
-            if podman_attempted: actions.append(lambda: command(['/usr/bin/podman', 'system', 'migrate']))
-            if linger_attempted: actions.append(lambda: self.run(['loginctl', 'disable-linger', account]))
+            if podman_attempted:
+                actions.append(lambda: command(['/usr/bin/podman', 'system', 'migrate']))
+            if linger_attempted:
+                actions.append(lambda: self.run(['loginctl', 'disable-linger', account]))
             for action in actions:
-                try: action()
-                except BaseException as error: cleanup.append(error)
+                try:
+                    action()
+                except BaseException as error:
+                    cleanup.append(error)
             quiesced = not linger_attempted
             if linger_attempted:
                 units = ['user@'+identity[2]+'.service', 'user-runtime-dir@'+identity[2]+'.service']
                 for arguments in (['loginctl', 'terminate-user', account], ['systemctl', 'stop', *units]):
-                    try: self.run(arguments, check=False)
-                    except BaseException as error: cleanup.append(error)
+                    try:
+                        self.run(arguments, check=False)
+                    except BaseException as error:
+                        cleanup.append(error)
                 try:
                     states = self.run(['systemctl', 'show', *units, '--property=ActiveState', '--value']).stdout.splitlines()
                     carriers = (self.path('/run/user/'+identity[2]), self.path('/var/lib/systemd/linger/'+account))
-                    if [state for state in states if state] != ['inactive', 'inactive']: raise InstallError('Temporary rootless probe session remains')
+                    if [state for state in states if state] != ['inactive', 'inactive']:
+                        raise InstallError('Temporary rootless probe session remains')
                     for path in carriers:
-                        try: path.lstat()
-                        except FileNotFoundError: continue
+                        try:
+                            path.lstat()
+                        except FileNotFoundError:
+                            continue
                         raise InstallError('Temporary rootless probe runtime or linger state remains')
                     quiesced = True
-                except BaseException as error: cleanup.append(error)
+                except BaseException as error:
+                    cleanup.append(error)
             if quiesced:
-                try: self.run(['userdel', account])
-                except BaseException as error: cleanup.append(error)
+                try:
+                    self.run(['userdel', account])
+                except BaseException as error:
+                    cleanup.append(error)
         if not cleanup:
             try:
-                if directory.is_symlink() or directory.stat().st_ino != inode: raise InstallError('Temporary rootless probe directory changed')
+                if directory.is_symlink() or directory.stat().st_ino != inode:
+                    raise InstallError('Temporary rootless probe directory changed')
                 shutil.rmtree(directory)
-            except BaseException as error: cleanup.append(error)
+            except BaseException as error:
+                cleanup.append(error)
         if cleanup:
             raise InstallError((str(failure)+'; ' if failure else '')+'Temporary rootless probe cleanup failed: '+str(cleanup[0])) from None
-        if failure is not None: raise failure
+        if failure is not None:
+            raise failure
         return info
 
     def rootless_info(self, command):
@@ -1494,7 +3267,8 @@ class Host:
         release = self.path('/etc/os-release')
         facts = distribution_facts(release.read_text() if release.is_file() else '')
         previous = self.progress.host_admission if self.progress else None
-        if self.progress: self.progress.host_admission = facts
+        if self.progress:
+            self.progress.host_admission = facts
         if facts['family'] != 'debian':
             raise InstallError('Installation supports only Debian-family Linux hosts (Ubuntu, Debian and derivatives)', code='compatibility.unsupported')
         if not facts['verified'] and facts != previous:
@@ -1539,28 +3313,40 @@ class Host:
             if self.injected_command:
                 result = self.command(arguments, capture_output=True, text=True, stdin=source, env=env, cwd=cwd, **({'pass_fds':pass_fds} if pass_fds else {}))
                 if self.progress and streaming:
-                    for line in (result.stdout+result.stderr).splitlines(): self.progress.emit('detail', message=line)
+                    for line in (result.stdout+result.stderr).splitlines():
+                        self.progress.emit('detail', message=line)
             else:
                 process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=source or subprocess.DEVNULL, env=env, cwd=cwd, pass_fds=pass_fds)
-                captured = {'out':[], 'err':[]}; pending = {'out':b'', 'err':b''}
+                captured = {'out':[], 'err':[]}
+                pending = {'out':b'', 'err':b''}
                 try:
                     with selectors.DefaultSelector() as selector:
-                        for stream,key in ((process.stdout,'out'),(process.stderr,'err')): selector.register(stream, selectors.EVENT_READ, key)
+                        for stream,key in ((process.stdout,'out'),(process.stderr,'err')):
+                            selector.register(stream, selectors.EVENT_READ, key)
                         while selector.get_map():
                             for selected,_ in selector.select(1):
-                                key=selected.data; chunk=os.read(selected.fileobj.fileno(), 65536)
+                                key=selected.data
+                                chunk=os.read(selected.fileobj.fileno(), 65536)
                                 if not chunk:
                                     selector.unregister(selected.fileobj)
-                                    if pending[key] and streaming and self.progress: self.progress.emit('detail', message=pending[key].decode(errors='replace'))
+                                    if pending[key] and streaming and self.progress:
+                                        self.progress.emit('detail', message=pending[key].decode(errors='replace'))
                                     continue
-                                captured[key].append(chunk); pending[key]+=chunk
+                                captured[key].append(chunk)
+                                pending[key]+=chunk
                                 while b'\n' in pending[key] or b'\r' in pending[key]:
-                                    match=re.search(b'[\r\n]',pending[key]); line=pending[key][:match.start()]; pending[key]=pending[key][match.end():]
-                                    if streaming and self.progress: self.progress.emit('detail', message=line.decode(errors='replace'))
+                                    match=re.search(b'[\r\n]',pending[key])
+                                    line=pending[key][:match.start()]
+                                    pending[key]=pending[key][match.end():]
+                                    if streaming and self.progress:
+                                        self.progress.emit('detail', message=line.decode(errors='replace'))
                     result=subprocess.CompletedProcess(arguments, process.wait(), b''.join(captured['out']).decode(errors='replace'), b''.join(captured['err']).decode(errors='replace'))
                 finally:
-                    if process.poll() is None: process.terminate(); process.wait()
-                    process.stdout.close(); process.stderr.close()
+                    if process.poll() is None:
+                        process.terminate()
+                        process.wait()
+                    process.stdout.close()
+                    process.stderr.close()
         if check and result.returncode != 0:
             raise InstallError(f"{arguments[0]} failed (exit {result.returncode}): {result.stderr[:1500]}")
         return result
@@ -1588,19 +3374,25 @@ class Host:
                     connection.sock.setsockopt(socket.SOL_SOCKET,36,socket_mark)  # Linux SO_MARK; root-owned probe only
                     connection.sock.connect((str(address),connection.port))
             class ReadinessHandler(urllib.request.HTTPHandler):
-                def http_open(handler,request):return handler.do_open(ReadinessConnection,request)
+                def http_open(handler,request):
+                    return handler.do_open(ReadinessConnection,request)
             handlers.append(ReadinessHandler())
         opener=urllib.request.build_opener(*handlers)
         try:
             with opener.open(request,timeout=timeout) as response:
-                chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
+                chunks=[]
+                received=0
+                total=int(response.headers.get('Content-Length','0') or '0')
                 while True:
                     block=response.read(65536)
-                    if not block: break
+                    if not block:
+                        break
                     received+=len(block)
-                    if max_bytes is not None and received>max_bytes:raise InstallError("Release metadata exceeds its bounded size",code='release.metadata-invalid')
+                    if max_bytes is not None and received>max_bytes:
+                        raise InstallError("Release metadata exceeds its bounded size",code='release.metadata-invalid')
                     chunks.append(block)
-                    if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
+                    if self.progress and authority is None:
+                        self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
                 return b''.join(chunks)
         except (OSError, http.client.HTTPException) as error:
             if self.proxy_environment.get('HTTPS_PROXY') and not bypass:
@@ -1616,18 +3408,24 @@ class Host:
                 raise InstallError("Installation paths must not contain symbolic links")
             if parent == self.root:
                 break
-        missing=[]; cursor=destination
-        while not cursor.exists():missing.append(cursor); cursor=cursor.parent
+        missing=[]
+        cursor=destination
+        while not cursor.exists():
+            missing.append(cursor)
+            cursor=cursor.parent
         destination.mkdir(parents=True, mode=0o755 if mode is None else mode, exist_ok=True)
-        for created in reversed(missing):self.sync_directory(created.parent)
+        for created in reversed(missing):
+            self.sync_directory(created.parent)
         if mode is not None:
             destination.chmod(mode)
         return destination
 
     def sync_directory(self,path):
         descriptor=os.open(path,os.O_RDONLY | getattr(os,'O_DIRECTORY',0))
-        try:os.fsync(descriptor)
-        finally:os.close(descriptor)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def atomic(self, path, text, mode=0o600):
         destination = self.path(path)
@@ -1654,14 +3452,19 @@ class Host:
         return self.run(["runuser", "-u", ACCOUNT, "--", *arguments], env=self.user_environment(uid), cwd=self.path(HOME_DIR), **kwargs)
 
     def time_point(self):
-        point=update_time_point();point['mono']=self.clock()
-        try:point['boot']=self.path('/proc/sys/kernel/random/boot_id').read_text().strip() or None
-        except OSError:pass
+        point=update_time_point()
+        point['mono']=self.clock()
+        try:
+            point['boot']=self.path('/proc/sys/kernel/random/boot_id').read_text().strip() or None
+        except OSError:
+            pass
         return point
 
     def file_identity(self, path):
-        path=Path(path);info=path.lstat()
-        if path.is_symlink() or not path.is_file():raise InstallError('Facts require an independent protected file')
+        path=Path(path)
+        info=path.lstat()
+        if path.is_symlink() or not path.is_file():
+            raise InstallError('Facts require an independent protected file')
         return {'path':str(path),'device':str(info.st_dev),'inode':str(info.st_ino),'size':str(info.st_size),
                 'modified':str(info.st_mtime_ns),'changed':str(info.st_ctime_ns)}
 
@@ -1742,12 +3545,15 @@ class Host:
         return self.listener_file(pid,port,address) is not None
 
     def listener_file(self, pid, port, address):
-        if not pid: return None
+        if not pid:
+            return None
         try:
             sockets = {}
             for file in self.path(f"/proc/{pid}/fd").iterdir():
-                try:sockets[os.readlink(file)]=int(file.name)
-                except FileNotFoundError:continue
+                try:
+                    sockets[os.readlink(file)]=int(file.name)
+                except FileNotFoundError:
+                    continue
             packed = address.packed
             encoded = (packed[::-1] if address.version == 4 else b"".join(packed[index:index+4][::-1] for index in range(0, 16, 4))).hex().upper()
             table = self.path("/proc/net/tcp"+("6" if address.version == 6 else ""))
@@ -1772,7 +3578,8 @@ class Host:
             try:
                 pid = self.listener_pid(uid, port, address)
                 if pid:
-                    if on_listener is not None: on_listener(pid)
+                    if on_listener is not None:
+                        on_listener(pid)
                     self.request(entry+path, authority=authority, **({"socket_mark":socket_mark} if socket_mark is not None else {}))
                     if self.listener_pid(uid, port, address) == pid:
                         return
@@ -1782,10 +3589,12 @@ class Host:
                         try:
                             body=error.read(4097)
                             failure=json.loads(body) if len(body)<=4096 else None
-                        except (OSError,ValueError,http.client.HTTPException):failure=None
+                        except (OSError,ValueError,http.client.HTTPException):
+                            failure=None
                         if isinstance(failure,dict) and failure.get('code')=='platform-configuration-unavailable':
                             raise InstallError('Managed platform configuration requires recovery; the selected release cannot become ready.',code=update_code(failure.get('errorCode'),'service.start-failed')) from None
-                finally:error.close()
+                finally:
+                    error.close()
                 http_failed = bool(pid)
             except OSError:
                 http_failed = bool(pid)
@@ -1796,7 +3605,8 @@ class Host:
                 journal=self.run(['journalctl','_SYSTEMD_USER_UNIT=dsh-phalanx.service',f'_UID={uid}','-n','40','--no-pager'], check=False)
                 if self.progress:
                     self.progress.emit(message='Service facts: '+details.stdout)
-                    for line in journal.stdout.splitlines(): self.progress.emit('detail', message=line)
+                    for line in journal.stdout.splitlines():
+                        self.progress.emit('detail', message=line)
                 conflict = self.port_conflict(listen_address, port, allow_managed=True)
                 if conflict:
                     raise InstallError(f'Entry port {port} cannot be bound by the managed service: {conflict}. No occupying process was stopped.')
@@ -1807,885 +3617,9 @@ class Host:
                 if http_failed:
                     raise InstallError('Managed listener was found but HTTP readiness failed; inspect the service journal above.')
                 raise InstallError('Managed service did not own a ready listener; root cause is unknown. Inspect service facts and journal above.')
-            if self.progress: self.progress.emit(message="Waiting for the managed process to own a ready HTTP listener")
+            if self.progress:
+                self.progress.emit(message="Waiting for the managed process to own a ready HTTP listener")
             self.pause(1)
-
-"""Pure release protocol and source/data compatibility decisions."""
-import re
-
-VERSION = r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
-LEGACY_CANDIDATE = re.compile('v'+VERSION+r'-rc\.[1-9][0-9]*\Z')
-CANDIDATE = re.compile(r'(?:v'+VERSION+r'-rc\.[1-9][0-9]*|run-[1-9][0-9]*)\Z')
-STABLE = re.compile('v'+VERSION+r'\Z')
-
-
-def version_parts(value):
-    if not isinstance(value,str) or not re.fullmatch(VERSION,value):
-        raise InstallError('Invalid release version')
-    parts=tuple(map(int,value.split('.')))
-    if any(part>2**53-1 for part in parts): raise InstallError('Invalid release version')
-    return parts
-
-
-def candidate_image_tag(tag):
-    if not isinstance(tag,str) or not CANDIDATE.fullmatch(tag):raise InstallError('Invalid candidate identity')
-    return tag[1:] if LEGACY_CANDIDATE.fullmatch(tag) else tag
-
-
-def candidate_identity(manifest):
-    tag=manifest.get('tag'); run=manifest.get('runId')
-    if not isinstance(tag,str) or not CANDIDATE.fullmatch(tag):return False
-    try:version_parts(manifest.get('targetVersion'))
-    except InstallError:return False
-    if LEGACY_CANDIDATE.fullmatch(tag):return manifest['targetVersion']==tag.split('-rc.')[0][1:]
-    return manifest.get('schema')==2 and isinstance(run,str) and re.fullmatch(r'[1-9][0-9]*',run) is not None and tag=='run-'+run
-
-
-def positive(value):
-    return type(value) is int and 0<value<=2**53-1
-
-
-# Capability version: raise only when older executors cannot perform the transaction.
-# Ordinary target releases do not increase this version.
-READER_VERSION = '0.1.38'
-
-class ReaderUpdateRequired(InstallError):
-    def __init__(self,version):
-        self.required_version=version
-        self.selected_version=None
-        super().__init__('This release requires updater '+version+' or newer; update the small executor with the target installer first')
-
-
-def require_reader(manifest,reader_version=READER_VERSION):
-    value=manifest.get('compatibility',{})
-    minimum=value.get('minimumReader') if isinstance(value,dict) else None
-    if minimum is not None:
-        if version_parts(reader_version)<version_parts(minimum):raise ReaderUpdateRequired(minimum)
-        return True
-    return False
-
-
-def supports_capacity(manifest):
-    protocol=manifest.get('compatibility',{}).get('protocol')
-    return type(protocol) is int and protocol>=3
-
-
-def validate_contract(manifest):
-    if manifest.get('schema')==1 and manifest.get('targetVersion') in ('0.1.0','0.1.1'): return
-    declared_reader=require_reader(manifest)
-    value=manifest.get('compatibility'); policy=manifest.get('acceptancePolicy')
-    if not isinstance(value,dict) or not isinstance(policy,dict):raise InstallError('Unsupported release compatibility protocol')
-    accounts=value.get('accounts')
-    if not isinstance(accounts,dict) or not isinstance(value.get('source'),dict):raise InstallError('Unsupported release compatibility protocol')
-    checks=policy.get('checks',[])
-    required={'ci','linux','upgrade'} if version_parts(manifest.get('targetVersion'))>=(0,1,24) else {'ci','linux','cleanInstall','upgrade','review'}
-    if (manifest.get('schema')!=2 or not positive(value.get('protocol')) or (value['protocol']>3 and not declared_reader) or not positive(value.get('environmentEpoch')) or
-            not all(positive(accounts.get(key)) for key in ('sourceMin','sourceMax','target')) or
-            accounts['sourceMin']>accounts['sourceMax'] or accounts['target']<accounts['sourceMax'] or
-            not positive(policy.get('ticket')) or not isinstance(checks,list) or
-            not all(isinstance(key,str) and re.fullmatch('[a-z][A-Za-z]*',key) for key in checks) or
-            len(set(checks))!=len(checks) or not required.issubset(checks) or
-            version_parts(manifest['targetVersion'])>=(0,1,24) and not set(checks).issubset({'ci','linux','upgrade','cleanInstall'})):
-        raise InstallError('Unsupported release compatibility protocol')
-    if version_parts(manifest['targetVersion'])>=(0,1,13) and value['protocol']<3:
-        raise InstallError('This release requires capacity-aware upgrade protocol 3')
-    if value['protocol']>=3:
-        sizes=manifest.get('storage',{})
-        if not isinstance(sizes,dict) or not all(positive(sizes.get(key)) for key in ('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')):
-            raise InstallError('Release storage requirements are missing or invalid')
-        if not isinstance(manifest.get('updater'),str) or len(manifest['updater'].encode())>16384:
-            raise InstallError('Release updater inventory is missing or unbounded')
-    revisions=value.get('sourceDshRevisions')
-    if value['protocol']==2 or (value['protocol']>=3 and 'sourceDshRevisions' in value):
-        if (not isinstance(revisions,list) or not revisions or
-                not all(isinstance(revision,str) and re.fullmatch('[a-f0-9]{40}',revision) for revision in revisions) or
-                len(set(revisions))!=len(revisions)):
-            raise InstallError('Runtime transition requires exact source DSH revisions')
-    elif revisions is not None:raise InstallError('Protocol 1 cannot declare a runtime transition')
-    through=value.get('freshInstallThrough')
-    if 'freshInstallThrough' in value and (value['protocol']<3 or version_parts(through)>=version_parts(manifest['targetVersion']) or accounts['sourceMin']<6):
-        raise InstallError('Invalid fresh-install compatibility boundary')
-    if 'schemas' in value:
-        rows=value['schemas']; names=set()
-        if not isinstance(rows,list) or not rows or not isinstance(rows[0],dict) or rows[0].get('name')!='dsh_phalanx':
-            raise InstallError('Registered schema compatibility must begin with the platform core')
-        for row in rows:
-            name=row.get('name') if isinstance(row,dict) else None
-            if (not isinstance(name,str) or not re.fullmatch('[a-z_][a-z0-9_]{0,62}',name) or
-                    name.startswith('pg_') or name in ('public','information_schema') or name in names or
-                    type(row.get('sourceMin')) is not int or not 0<=row['sourceMin']<=2**53-1 or
-                    type(row.get('sourceMax')) is not int or not row['sourceMin']<=row['sourceMax']<=2**53-1 or
-                    not positive(row.get('target')) or row['target']<row['sourceMax']):
-                raise InstallError('Invalid registered schema compatibility range')
-            names.add(name)
-        if any(rows[0][key]!=accounts[key] for key in ('sourceMin','sourceMax','target')):
-            raise InstallError('Legacy accounts must match the platform core compatibility range')
-    floor=value.get('upgradeFloor')
-    if 'upgradeFloor' in value and version_parts(floor)>=version_parts(manifest['targetVersion']):
-        raise InstallError('Invalid upgrade floor')
-    if 'breakpoints' in value:
-        points=value['breakpoints'];previous=None;previous_epoch=0
-        if not isinstance(points,list):raise InstallError('Invalid upgrade breakpoints')
-        for point in points:
-            if not isinstance(point,dict):raise InstallError('Invalid upgrade breakpoint')
-            version=version_parts(point.get('version'));epoch=point.get('environmentEpoch')
-            if (version>version_parts(manifest['targetVersion']) or (floor is not None and version<version_parts(floor)) or
-                    (previous is not None and version<=previous) or not positive(epoch) or epoch<previous_epoch or epoch>value['environmentEpoch']):
-                raise InstallError('Invalid ordered upgrade breakpoints')
-            previous=version;previous_epoch=epoch
-    source=value.get('source',{})
-    if version_parts(source.get('min'))>=version_parts(source.get('maxExclusive')) or version_parts(source['min'])>=version_parts(manifest['targetVersion']):
-        raise InstallError('Invalid upgrade source interval')
-
-
-class FreshInstallRequired(InstallError):
-    pass
-
-
-def upgrade_source_boundary(source,target):
-    """The single source-version boundary, usable before invoking any source CLI."""
-    validate_contract(target)
-    value=target.get('compatibility',{});floor=value.get('upgradeFloor');through=value.get('freshInstallThrough')
-    if floor is not None and version_parts(source['targetVersion'])<version_parts(floor):
-        return {'outcomeCode':'update.below-floor','requiredVersion':floor}
-    if through is not None and version_parts(source['targetVersion'])<=version_parts(through):
-        return {'outcomeCode':'update.below-floor','requiredVersion':floor or value['source']['min']}
-    return None
-
-
-def require_upgrade_source(source,target):
-    boundary=upgrade_source_boundary(source,target)
-    if boundary is not None:
-        raise FreshInstallRequired('This version requires a fresh installation; upgrade floor is '+boundary['requiredVersion']+'. Back up the existing deployment and follow https://github.com/dake6767/dsh-phalanx/blob/main/docs/install.md#recoverable-system-updates')
-
-
-def reuse_rehearsal(source,target,account_schema):
-    if isinstance(account_schema,dict):account_schema=account_schema.get('dsh_phalanx')
-    identity=source.get('imageIdentity')
-    return (isinstance(identity,dict) and identity==target.get('imageIdentity') and
-            source.get('imageSelection',{}).get('rehearsal') is True and target.get('imageSelection',{}).get('rehearsal') is True and
-            all(re.fullmatch(r'run-[1-9][0-9]*',value['tag']) for value in (source,target)) and
-            source['runId']!=target['runId'] and source['commit']!=target['commit'] and
-            source['targetVersion']==target['targetVersion'] and source['dshRevision']==target['dshRevision'] and
-            source['compatibility']['accounts']['target']==target['compatibility']['accounts']['target']==account_schema)
-
-
-def upgrade_outcome(source,target,account_schema,*,development_rebuild=False,image_reuse_rehearsal=False,inspect_schema=True,source_channel=None,target_channel=None):
-    try:boundary=upgrade_source_boundary(source,target)
-    except ReaderUpdateRequired as error:return {'outcomeCode':'update.reader-update-required','requiredVersion':error.required_version}
-    if boundary is not None:return boundary
-    if target.get('schema')!=2: raise InstallError('Upgrade target must declare the release compatibility protocol',code='compatibility.unsupported')
-    value=target['compatibility']; old=source.get('compatibility')
-    if old is None:
-        if source.get('schema')!=1 or source.get('targetVersion')!='0.1.1':
-            raise InstallError('This legacy deployment must enter 0.1.1 before a protocol upgrade',code='compatibility.unsupported')
-        epoch=1
-    else:
-        validate_contract(source); epoch=old['environmentEpoch']
-    current=version_parts(source['targetVersion']); selected=version_parts(target['targetVersion'])
-    interval=value['source']; accounts=value['accounts']
-    for point in value.get('breakpoints',[]):
-        if current<version_parts(point['version'])<selected:
-            return {'outcomeCode':'update.breakpoint-required','requiredVersion':point['version']}
-    local_rebuild=(development_rebuild and source['platform']==target['platform']=='linux/arm64' and current==selected)
-    if image_reuse_rehearsal and not reuse_rehearsal(source,target,account_schema):
-        raise InstallError('Image reuse rehearsal requires distinct marked candidates with the same version, image and account schema',code='compatibility.unsupported')
-    channel_switch=(current==selected and (source_channel or source.get('channel',{})).get('kind')=='candidate' and (target_channel or target.get('channel',{})).get('kind')=='formal')
-    if current>=selected and not (local_rebuild or image_reuse_rehearsal or channel_switch):return {'outcomeCode':'update.current'}
-    if not (local_rebuild or image_reuse_rehearsal or channel_switch) and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
-        raise InstallError('Release does not support this source version; historical downgrade is unavailable',code='compatibility.unsupported')
-    runtime_allowed=(source['dshRevision']==target['dshRevision'] or
-                     (value['protocol']>=2 and source['dshRevision'] in value.get('sourceDshRevisions',[])))
-    epoch_entry=any(version_parts(point['version'])==selected and point['environmentEpoch']==value['environmentEpoch'] and epoch<point['environmentEpoch'] for point in value.get('breakpoints',[]))
-    if source['platform']!=target['platform'] or not runtime_allowed or (epoch!=value['environmentEpoch'] and not epoch_entry):
-        raise InstallError('DSH or user-environment migration is unsupported by this recovery protocol',code='compatibility.unsupported')
-    if not inspect_schema:return {'outcomeCode':'update.channel-switch' if channel_switch else 'update.available'}
-    schemas=value.get('schemas')
-    if schemas is None:
-        recorded=account_schema.get('dsh_phalanx') if isinstance(account_schema,dict) else account_schema
-        if type(recorded) is not int or not accounts['sourceMin']<=recorded<=accounts['sourceMax']:
-            raise InstallError('Account database schema is outside the declared upgrade source range',code='compatibility.unsupported')
-    else:
-        recorded=account_schema if isinstance(account_schema,dict) else {'dsh_phalanx':account_schema}
-        for row in schemas:
-            version=recorded.get(row['name'],0)
-            if type(version) is not int or not row['sourceMin']<=version<=row['sourceMax']:
-                raise InstallError('Database schema '+row['name']+' is outside the declared upgrade source range',code='compatibility.unsupported')
-    return {'outcomeCode':'update.channel-switch' if channel_switch else 'update.available'}
-
-
-def compatible(source,target,account_schema,*,development_rebuild=False,image_reuse_rehearsal=False,source_channel=None,target_channel=None):
-    outcome=upgrade_outcome(source,target,account_schema,development_rebuild=development_rebuild,image_reuse_rehearsal=image_reuse_rehearsal,source_channel=source_channel,target_channel=target_channel)
-    if outcome['outcomeCode']=='update.reader-update-required':raise ReaderUpdateRequired(outcome['requiredVersion'])
-    if outcome['outcomeCode']=='update.below-floor':raise FreshInstallRequired('This version requires a fresh installation; upgrade floor is '+outcome['requiredVersion'])
-    if outcome['outcomeCode']=='update.breakpoint-required':raise InstallError('Upgrade to '+outcome['requiredVersion']+' before this release',code='compatibility.unsupported')
-    if outcome['outcomeCode']=='update.current':raise InstallError('Release does not support this source version; historical downgrade is unavailable',code='compatibility.unsupported')
-
-
-def plugin_readiness_budget(library, target):
-    """Four bounded preparation stages, cleanup and startup/recovery allowance."""
-    if not isinstance(library,dict) or library.get('schema')!=1 or not isinstance(library.get('plugins'),list):
-        raise InstallError('Invalid plugin library for startup budget')
-    count=0
-    for row in library['plugins']:
-        if not isinstance(row,dict):raise InstallError('Invalid plugin library record')
-        if not row.get('removing') and row.get('checkedFor')!=target:
-            count+=1+int(bool(row.get('replacement')))
-    return 90+2700*count
-
-"""Verified fixed project releases, archive staging and rootless image I/O."""
-import hashlib
-import http.client
-import socket
-import struct
-import signal
-import subprocess
-import json
-import os
-from pathlib import Path
-import re
-import shutil
-import tarfile
-import tempfile
-import urllib.parse
-import urllib.error
-
-IMAGE = "ghcr.io/dake6767/dsh-phalanx"
-RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx/releases"
-CANDIDATE_RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx-candidates/releases"
-CANDIDATE_CHANNEL_URL = "https://raw.githubusercontent.com/dake6767/dsh-phalanx-candidates/main/candidate-channel.json"
-ASSETS = ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")
-
-
-def release_channel(version):
-    if not isinstance(version,str) or not (STABLE.fullmatch(version) or CANDIDATE.fullmatch(version)):
-        raise InstallError('Invalid release channel version',code='operation.invalid')
-    formal=bool(STABLE.fullmatch(version))
-    return {'kind':'formal' if formal else 'candidate','baseUrl':RELEASE_BASE if formal else CANDIDATE_RELEASE_BASE}
-
-
-def installed_channel(state):
-    expected=release_channel(state['version'])
-    channel=state.get('channel',expected)
-    if (not isinstance(channel,dict) or channel.get('kind')!=expected['kind'] or channel.get('baseUrl')!=expected['baseUrl']):
-        raise InstallError('Installed release channel is inconsistent',code='release.identity-mismatch')
-    return expected
-
-
-def asset_names(manifest):
-    architecture = {'linux/amd64': 'amd64', 'linux/arm64': 'arm64'}.get(manifest.get('platform'))
-    if architecture is None: raise InstallError('Unsupported artifact platform',code='release.metadata-invalid')
-    return (f'dsh-phalanx-linux-{architecture}.tar.gz', f'dsh-phalanx-dsh-linux-{architecture}.oci.tar')
-
-
-def selected_platform(host):
-    return 'linux/arm64' if getattr(host, 'development_arm64', False) else 'linux/amd64'
-
-
-def digest(path):
-    result = hashlib.sha256()
-    with path.open("rb") as file:
-        for block in iter(lambda: file.read(1024*1024), b""):
-            result.update(block)
-    return result.hexdigest()
-
-
-
-def image_identity(manifest):
-    if 'imageIdentity' not in manifest:return None
-    value=manifest['imageIdentity']
-    if (not isinstance(value,dict) or
-            not isinstance(value.get('inputHash'),str) or not re.fullmatch('[a-f0-9]{64}',value['inputHash']) or
-            not isinstance(value.get('buildCommit'),str) or not re.fullmatch('[a-f0-9]{40}',value['buildCommit']) or
-            value.get('digest')!=manifest['image']['digest'] or value.get('dshRevision')!=manifest['dshRevision']):
-        raise InstallError('Invalid independent image identity',code='release.identity-mismatch')
-    return value
-
-
-def verify_manifest(directory, version, archive=True, *, assets=True, platform='linux/amd64'):
-    try:
-        manifest = json.loads((directory / "manifest.json").read_text())
-        if not isinstance(manifest,dict):raise InstallError("Invalid release manifest",code='release.metadata-invalid')
-        names = asset_names(manifest)
-        image = manifest.get("image", {})
-        files = manifest.get("files", {})
-        if not isinstance(image,dict) or not isinstance(files,dict) or not isinstance(manifest.get("toolchain"),dict):raise InstallError("Invalid release manifest",code='release.metadata-invalid')
-        if (not candidate_identity(manifest) or
-                manifest.get("platform") != platform or
-                not re.fullmatch(r"[a-f0-9]{40}", manifest.get("commit", "")) or
-                not re.fullmatch(r"[a-f0-9]{40}", manifest.get("dshRevision", "")) or
-                not re.fullmatch(r"[1-9][0-9]*", manifest.get("runId", "")) or
-                image.get("name") != IMAGE or image.get("tag") != candidate_image_tag(manifest["tag"]) or
-                not re.fullmatch(r"sha256:[a-f0-9]{64}", image.get("digest", "")) or
-                image.get("reference") != IMAGE+"@"+image["digest"] or
-                set(files) != set(names) or
-                any(not re.fullmatch(r"[a-f0-9]{64}", value) for value in files.values()) or
-                not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest.get("toolchain", {}).get("node", ""))):
-            raise InstallError("Invalid release manifest",code='release.metadata-invalid')
-        image_identity(manifest)
-        validate_contract(manifest)
-        if version != manifest["tag"] and version != "v"+manifest["targetVersion"]:
-            raise InstallError("Requested version does not match the manifest",code='release.metadata-invalid')
-        expected = "".join(f"{files[name]}  {name}\n" for name in names)
-        if (directory / "SHA256SUMS").read_text() != expected:
-            raise InstallError("Checksum inventory mismatch",code='release.checksum-failed')
-        for name in (names if archive else names[:1]) if assets else ():
-            file = directory / name
-            if file.is_symlink() or not file.is_file() or digest(file) != files[name]:
-                raise InstallError(f"Checksum mismatch: {name}",code='release.checksum-failed')
-        return manifest
-    except (ValueError,UnicodeError,TypeError) as error:
-        raise InstallError('Invalid release manifest',code='release.metadata-invalid') from error
-
-
-def release_location(args):
-    development = getattr(args, 'dev_release_base_url', None)
-    if development is not None:
-        if development != CANDIDATE_RELEASE_BASE or not re.fullmatch(r'run-[1-9][0-9]*', args.version) or args.bundle_dir is not None:
-            raise InstallError('Development release source requires the candidate repository and an explicit run-ID candidate',code='operation.invalid')
-        return development
-    if args.version.startswith('run-') and args.bundle_dir is None:
-        raise InstallError('Run-ID candidates require the explicit development release source',code='operation.invalid')
-    return RELEASE_BASE
-
-
-@install_failure('download.failed')
-def download(host,url,**options):return host.request(url,**options)
-
-
-def metadata(host, url):
-    try:
-        return download(host,url,max_bytes=262144)
-    except (OSError, InstallError) as error:
-        raise InstallError('Release metadata unavailable or incomplete: '+url+'. Retry a completed release or check --github-proxy-prefix. '+str(error),code=update_error_code(error,'download.failed')) from error
-
-
-def json_metadata(body):
-    try:
-        value = json.loads(body)
-        if not isinstance(value, dict): raise ValueError()
-        return value
-    except (ValueError, UnicodeError) as error:
-        raise InstallError('Invalid release metadata; check the release asset prefix and retry a completed release',code='release.metadata-invalid') from error
-
-
-def metadata_missing(error):
-    while error is not None:
-        if isinstance(error,urllib.error.HTTPError) and error.code==404:return True
-        error=error.__cause__
-    return False
-
-
-def candidate_channel(host):
-    value=json_metadata(metadata(host,CANDIDATE_CHANNEL_URL))
-    if type(value.get('schema')) is not int or value['schema']!=1:raise InstallError('Unsupported candidate channel metadata',code='release.metadata-invalid')
-    if value.get('candidate') is None:raise InstallError('No candidate release is currently available',code='release.metadata-invalid')
-    if (not isinstance(value['candidate'],str) or not value['candidate'].startswith('run-') or not CANDIDATE.fullmatch(value['candidate']) or
-            not isinstance(value.get('commit'),str) or not re.fullmatch('[a-f0-9]{40}',value['commit']) or
-            not isinstance(value.get('manifestSha256'),str) or not re.fullmatch('[a-f0-9]{64}',value['manifestSha256'])):
-        raise InstallError('Invalid candidate channel identity',code='release.metadata-invalid')
-    version_parts(value.get('targetVersion'))
-    return value
-
-
-def verify_stable_assets(host, base, manifest, pointer=None):
-    release = json_metadata(metadata(host, base+'release.json'))
-    acceptance_bytes = metadata(host, base+'acceptance.json')
-    acceptance = json_metadata(acceptance_bytes)
-    summary = metadata(host, base+'acceptance.md')
-    summary_hash = hashlib.sha256(summary).hexdigest()
-    policy = manifest.get('acceptancePolicy')
-    if policy is None:
-        policy = {'0.1.0': {'ticket': 14, 'checks': ['ci', 'linux', 'cleanInstall', 'https', 'dogfood']},
-            '0.1.1': {'ticket': 9, 'checks': ['ci', 'linux', 'cleanInstall', 'https', 'models', 'spaces', 'recovery', 'storage', 'upgrade', 'review']}}.get(manifest['targetVersion'])
-    expected = {'schema': 1, 'version': manifest['targetVersion'], 'candidate': manifest['tag'], 'candidateRun': manifest['runId'],
-        'commit': manifest['commit'], 'files': manifest['files'], 'image': IMAGE+':'+manifest['targetVersion'],
-        'imageDigest': manifest['image']['digest'], 'acceptanceSha256': hashlib.sha256(acceptance_bytes).hexdigest(), 'summarySha256': summary_hash}
-    accepted = {'schema': 1, 'status': 'accepted', 'candidate': manifest['tag'], 'commit': manifest['commit'], 'runId': manifest['runId'],
-        'platformSha256': manifest['files'][ASSETS[0]], 'imageDigest': manifest['image']['digest'], 'summarySha256': summary_hash}
-    checks = acceptance.get('checks')
-    if (not policy or not isinstance(checks, dict) or acceptance.get('ticket') != policy['ticket'] or
-            any(release.get(key) != value for key, value in expected.items()) or
-            any(acceptance.get(key) != value for key, value in accepted.items()) or
-            any(checks.get(key) != 'passed' for key in policy['checks']) or
-            pointer is not None and pointer != release):
-        raise InstallError('Release, acceptance and latest pointer identities disagree; select a completed version or retry after publication',code='release.metadata-invalid')
-
-
-def verify_candidate_assets(host, base, manifest, manifest_bytes):
-    proof = json_metadata(metadata(host, base+'candidate.json'))
-    expected = {'schema': 1, 'repository': 'dake6767/dsh-phalanx', 'candidate': manifest['tag'], 'runId': manifest['runId'],
-        'commit': manifest['commit'], 'targetVersion': manifest['targetVersion'], 'manifestSha256': hashlib.sha256(manifest_bytes).hexdigest()}
-    workflow = proof.get('workflow')
-    if isinstance(workflow,dict) and workflow.get('ref')!='refs/heads/main' and workflow.get('commit')!=manifest['commit']:
-        raise InstallError('Candidate snapshot workflow must build its own source commit',code='release.metadata-invalid')
-    if (any(proof.get(key) != value for key, value in expected.items()) or not isinstance(workflow, dict) or
-            workflow.get('path') != '.github/workflows/candidate.yml' or (workflow.get('ref') != 'refs/heads/candidate/'+manifest['targetVersion'] and not (version_parts(manifest['targetVersion'])<(0,1,24) and workflow.get('ref')=='refs/heads/main')) or
-            not isinstance(workflow.get('commit'), str) or not re.fullmatch(r'[a-f0-9]{40}', workflow['commit'])):
-        raise InstallError('Candidate publication identity disagrees with its manifest; use a completed candidate with candidate.json',code='release.metadata-invalid')
-
-
-def select_release(host,args,destination):
-    release_base = release_location(args)
-    if args.bundle_dir is not None:
-        if not CANDIDATE.fullmatch(args.version):raise InstallError('Private archive handoff requires an explicit candidate version',code='release.metadata-invalid')
-        return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False,platform=selected_platform(host)),args.version
-    if selected_platform(host) != 'linux/amd64':raise InstallError('Development arm64 requires a local bundle',code='release.metadata-invalid')
-    if args.version!='latest' and not STABLE.fullmatch(args.version) and not CANDIDATE.fullmatch(args.version):
-        raise InstallError('Specify latest, a stable version, or an explicit candidate tag',code='release.metadata-invalid')
-    pointer = json_metadata(metadata(host, release_base+'/latest/download/release.json')) if args.version == 'latest' else None
-    version = 'v'+str(pointer.get('version', '')) if pointer is not None else args.version
-    if pointer is not None and not STABLE.fullmatch(version):
-        raise InstallError('Latest pointer must name a completed stable release; select an explicit stable version',code='release.metadata-invalid')
-    base = release_base+'/download/'+version+'/'
-    for name in ('manifest.json','SHA256SUMS'):
-        (destination/name).write_bytes(metadata(host, base+name))
-    manifest=verify_manifest(destination,version,assets=False)
-    if STABLE.fullmatch(version):
-        verify_stable_assets(host, base, manifest, pointer)
-    elif getattr(args, 'dev_release_base_url', None) is not None:
-        verify_candidate_assets(host, base, manifest, (destination/'manifest.json').read_bytes())
-    else:
-        raise InstallError('Online candidates require the explicit development release source',code='release.metadata-invalid')
-    state=installed_state(host)
-    if state and state['version']==version and (manifest['commit']!=state['commit'] or manifest['image']['digest']!=state['imageDigest'] or manifest['files'][ASSETS[0]]!=state['platformSha256']):
-        raise InstallError('Installed manifest and receipt disagree',code='release.identity-mismatch')
-    return destination,manifest,version
-
-
-def acquire(host,args,destination,check_manifest=None,*,selected=None):
-    directory,manifest,version=selected if selected is not None else select_release(host,args,destination)
-    if check_manifest:check_manifest(directory,manifest,version)
-    if args.bundle_dir is not None:
-        if host.progress:host.progress.emit(message='Verifying release checksums', milestone=True)
-        return directory,verify_manifest(directory,version,platform=selected_platform(host))
-    state=installed_state(host)
-    same=state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest'] and state['platformSha256']==manifest['files'][ASSETS[0]]
-    if not same:
-        sha=manifest['files'][ASSETS[0]]; cached=host.path('/var/cache/dsh-phalanx/'+sha+'.tar.gz')
-        if cached.is_file() and not cached.is_symlink() and digest(cached)==sha:
-            shutil.copyfile(cached,directory/ASSETS[0]); host.tell('Reusing checksum-verified platform download.')
-        else:
-            base=release_location(args)+'/download/'+version+'/'
-            (directory/ASSETS[0]).write_bytes(download(host,base+ASSETS[0]))
-        if host.progress:host.progress.emit(message='Verifying platform checksum', milestone=True)
-        manifest=verify_manifest(directory,version,archive=False)
-        cache=host.mkdir('/var/cache/dsh-phalanx',0o700)/(sha+'.tar.gz'); temporary=cache.with_suffix('.next')
-        shutil.copyfile(directory/ASSETS[0],temporary); temporary.chmod(0o600); os.replace(temporary,cache)
-    return directory,manifest
-
-
-def supply_image(host, uid, directory, manifest, archive):
-    reference = manifest["image"]["reference"]
-    present = host.user(uid, ["podman", "image", "exists", reference], check=False)
-    if present.returncode == 1:
-        if archive:
-            host.user(uid, ["podman", "load"], input_file=directory / asset_names(manifest)[1])
-            identity=image_identity(manifest)
-            label='dsh.input.sha256='+identity['inputHash'] if identity else 'org.opencontainers.image.revision='+manifest['commit']
-            ids = host.user(uid, ["podman", "images", "--filter", "label="+label, "--format", "{{.ID}}"]).stdout.splitlines()
-            matches = []
-            for image_id in set(ids):
-                facts = json.loads(host.user(uid, ["podman", "image", "inspect", image_id]).stdout)[0]
-                if image_matches(facts,manifest):
-                    matches.append(image_id)
-            if len(matches) != 1:
-                raise InstallError("Archive did not supply exactly one matching candidate image",code='release.identity-mismatch')
-            host.user(uid, ["podman", "tag", matches[0], IMAGE+":"+manifest["image"]["tag"]])
-        else:
-            mirror = getattr(host, 'download_sources', {}).get('ghcrMirror', '')
-            address = urllib.parse.urlsplit(mirror)
-            transport = address.netloc + address.path + reference.removeprefix('ghcr.io/') if mirror else reference
-            try:
-                host.user(uid, ["podman", "pull", transport])
-            except InstallError as error:
-                raise InstallError('GHCR image download failed at '+transport+'. Change the GHCR mirror in Download sources or --ghcr-mirror. '+str(error),code='download.failed') from error
-            if mirror:
-                # Restore the canonical name after fetching the exact digest;
-                # verify_image still checks digest, platform, source and DSH revision.
-                host.user(uid, ['podman', 'tag', transport, IMAGE+':'+manifest['image']['tag']])
-    elif present.returncode != 0:
-        raise InstallError("Cannot inspect rootless image storage",code='unknown')
-    return verify_image(host,uid,manifest)
-
-
-def image_command(image,manifest):
-    identity=image_identity(manifest)
-    config=image.get('Config') or {};labels=config.get('Labels') or {}
-    label_matches=(labels.get('dsh.input.sha256')==identity['inputHash'] if identity else
-                   labels.get('org.opencontainers.image.revision')==manifest['commit'])
-    if (image.get('Digest')!=manifest['image']['digest'] or image.get('Architecture')!=manifest['platform'].split('/')[1] or
-            image.get('Os')!='linux' or config.get('User')!='node' or labels.get('dsh.revision')!=manifest['dshRevision'] or not label_matches):
-        raise InstallError('Imported/pulled image identity does not match this platform release',code='release.identity-mismatch')
-    command=config.get('Cmd')
-    if not isinstance(command,list) or len(command)<2 or not all(isinstance(part,str) and part for part in command):
-        raise InstallError('Image does not declare its official runtime command',code='release.identity-mismatch')
-    return command
-
-
-def image_matches(image,manifest):
-    try:image_command(image,manifest);return True
-    except (InstallError,KeyError,TypeError,AttributeError,IndexError):return False
-
-
-def verify_image(host,uid,manifest):
-    image=host.inspect_image(uid,manifest['image']['reference'])
-    return image_command(image,manifest)
-
-
-def stage_platform(host, directory, manifest):
-    if host.progress:host.progress.emit(message='Staging verified platform', milestone=True)
-    sha = manifest["files"][asset_names(manifest)[0]]
-    target = f'/opt/dsh-phalanx/releases/{manifest["tag"]}-{sha[:16]}'
-    host.mkdir("/opt/dsh-phalanx")
-    releases = host.mkdir("/opt/dsh-phalanx/releases")
-    if not host.path(target).exists():
-        with tempfile.TemporaryDirectory(prefix=".install-", dir=releases) as temporary:
-            with tarfile.open(directory / asset_names(manifest)[0], "r:gz") as archive:
-                archive.extractall(temporary, filter="data")
-            staging = Path(temporary)
-            for name in ("start", "node/bin/node", "dist/composition/cli.js", "admin-ui/dist/community.html"):
-                if not (staging / name).is_file():
-                    raise InstallError("Platform archive lacks required runtime assets",code='release.identity-mismatch')
-            build = json.loads((staging / "build-info.json").read_text())
-            if build.get("commit") != manifest["commit"] or build.get("platform") != manifest["platform"]:
-                raise InstallError("Packaged product identity mismatch",code='release.identity-mismatch')
-            node = host.run([str(staging / "node/bin/node"), "--version"]).stdout.strip()
-            if node != "v"+manifest["toolchain"]["node"]:
-                raise InstallError("Bundled Node identity mismatch",code='release.identity-mismatch')
-            (staging / ".artifact-sha256").write_text(sha)
-            staging.chmod(0o755)
-            os.rename(staging, host.path(target))
-    if host.path(target+"/.artifact-sha256").read_text() != sha:
-        raise InstallError("Existing release directory has a conflicting identity",code='release.identity-mismatch')
-    root = host.path(target)
-    for path in (root, *root.rglob("*")):
-        if not path.is_symlink():
-            path.chmod(0o755 if path.is_dir() or path.stat().st_mode & 0o111 else 0o644)
-    # A durable prepared/committed journal must never outlive its release tree.
-    paths=(root,*root.rglob('*'))
-    for path in paths:
-        if path.is_file() and not path.is_symlink():
-            with path.open('rb') as file:os.fsync(file.fileno())
-    for path in reversed(paths):
-        if path.is_dir() and not path.is_symlink():host.sync_directory(path)
-    host.sync_directory(releases)
-    return target
-
-
-
-def release_notes(host,version):
-    if isinstance(version,str) and version.startswith('run-') and CANDIDATE.fullmatch(version):
-        return 'Candidate release: '+CANDIDATE_RELEASE_BASE+'/tag/'+version
-    if not STABLE.fullmatch(version):raise InstallError('Formal release notes require a stable version',code='release.metadata-invalid')
-    release = json_metadata(metadata(host, RELEASE_BASE+'/download/'+version+'/release.json'))
-    if release.get('version') != version[1:]:raise InstallError('Release notes identity changed',code='release.metadata-invalid')
-    body = release.get('releaseNotes', 'Release notes: https://github.com/dake6767/dsh-phalanx/releases/tag/'+version)
-    if not isinstance(body,str):raise InstallError('Invalid release notes',code='release.metadata-invalid')
-    return body.encode('utf-8')[:32768].decode('utf-8',errors='ignore')
-
-
-def release_versions(host,current,latest,target_version=None):
-    """Discover names from Release assets only; every version still verifies its own assets."""
-    candidate=isinstance(latest,str) and latest.startswith('run-') and CANDIDATE.fullmatch(latest)
-    if not candidate and (not isinstance(latest,str) or not STABLE.fullmatch(latest)):raise InstallError('Invalid channel version listing',code='release.metadata-invalid')
-    if candidate:version_parts(target_version)
-    release=json_metadata(metadata(host,RELEASE_BASE+('/latest/download/release.json' if candidate else '/download/'+latest+'/release.json')))
-    formal_latest='v'+str(release.get('version','')) if candidate else latest
-    if not STABLE.fullmatch(formal_latest) or release.get('version')!=formal_latest[1:]:raise InstallError('Release version listing identity changed',code='release.metadata-invalid')
-    rows=release.get('versions')
-    if rows is None and version_parts(formal_latest[1:])<(0,1,27):rows=[formal_latest]
-    if not isinstance(rows,list) or not rows or rows[-1]!=formal_latest:raise InstallError('Invalid release version listing',code='release.metadata-invalid')
-    previous=None;names=[]
-    for tag in rows:
-        if not isinstance(tag,str) or not STABLE.fullmatch(tag):raise InstallError('Invalid release version listing',code='release.metadata-invalid')
-        version=version_parts(tag[1:])
-        if previous is not None and version<=previous:raise InstallError('Invalid ordered release version listing',code='release.metadata-invalid')
-        previous=version
-        if version_parts(current)<=version and (not candidate or version<=version_parts(target_version)):names.append(tag)
-    return names+[latest] if candidate else names if latest in names else [latest]
-
-
-class ImageConnection(http.client.HTTPConnection):
-    def __init__(self,path,authorize):
-        super().__init__('localhost',timeout=3);self.path=path;self.authorize=authorize
-    def connect(self):
-        self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(3)
-        try:self.sock.connect(self.path);self.authorize(self.sock)
-        except BaseException:self.close();raise
-
-
-class UnixImageInspector:
-    """Transport reuse only: every request obtains a fresh official Libpod inspect result."""
-    def __init__(self,path,authorize):self.connection=ImageConnection(path,authorize)
-    def inspect(self,reference):
-        try:
-            if self.connection.sock:self.connection.authorize(self.connection.sock)
-            self.connection.request('GET','/v4.0.0/libpod/images/'+urllib.parse.quote(reference,safe='')+'/json')
-            response=self.connection.getresponse();body=response.read(2*1024*1024+1)
-            if response.status!=200 or len(body)>2*1024*1024:raise InstallError('The instance image is unavailable from its owned inspection service')
-            value=json.loads(body)
-            if not isinstance(value,dict):raise ValueError('Invalid image inspection result')
-            return value
-        except BaseException:self.close();raise
-    def close(self):self.connection.close()
-
-
-class OwnedImageInspector:
-    """One executor owns this independent rootless service, peer proof and runtime directory."""
-    def __init__(self,host,uid):
-        self.host=host;self.uid=uid;self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None
-    def stamp(self,pid):return self.host.path('/proc/'+str(pid)+'/stat').read_text().rsplit(')',1)[1].split()[19]
-    def configuration(self):
-        roots=[self.host.path(p) for p in ('/usr/share/containers','/etc/containers',HOME_DIR+'/.config/containers')]
-        paths=[p/name for p in roots for name in ('storage.conf','containers.conf')]+[p for root in roots for p in (root/'containers.conf.d').glob('*.conf')]
-        result=[]
-        for path in sorted(paths):
-            try:
-                info=path.stat();fact=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
-            except FileNotFoundError:fact=None
-            result.append((str(path),fact))
-        return result
-    def authorize(self,connection):
-        pid,uid,gid=struct.unpack('3i',connection.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
-        proof=(pid,self.stamp(pid),uid,gid)
-        if (uid!=self.uid or gid!=self.gid or os.getpgid(pid)!=self.process.pid or
-                self.host.path('/proc/'+str(pid)+'/exe').resolve()!=Path('/usr/bin/podman').resolve() or
-                self.host.path('/proc/'+str(pid)+'/cmdline').read_bytes().split(b'\0')[-2]!=os.fsencode(self.uri) or
-                self.process.poll() is not None or self.stamp(self.process.pid)!=self.wrapper_started or
-                self.peer is not None and self.peer!=proof):
-            raise InstallError('The owned image inspection peer identity changed')
-        self.peer=proof
-    def start(self):
-        account=self.host.run(['getent','passwd',ACCOUNT]).stdout.strip().split(':')
-        if len(account)!=7 or int(account[2])!=self.uid or account[5]!=HOME_DIR:raise InstallError('Invalid image inspection identity')
-        self.gid=int(account[3]);parent=self.host.path('/run/dsh-phalanx-updater');info=parent.lstat()
-        if parent.is_symlink() or not parent.is_dir() or info.st_uid!=0 or info.st_gid!=self.gid or info.st_mode&0o027:
-            raise InstallError('Invalid owned image inspection runtime')
-        self.context=self.configuration();self.directory=Path(tempfile.mkdtemp(prefix='image-',dir=parent));self.directory_inode=self.directory.stat().st_ino
-        self.directory.chmod(0o700);os.chown(self.directory,self.uid,self.gid);self.path=self.directory/'api.sock';self.uri='unix://'+str(self.path)
-        self.process=subprocess.Popen(['runuser','-u',ACCOUNT,'--','podman','system','service','--time','0',self.uri],
-            env=self.host.user_environment(self.uid),cwd=self.host.path(HOME_DIR),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-        self.wrapper_started=self.stamp(self.process.pid);self.reader=UnixImageInspector(str(self.path),self.authorize)
-        deadline=self.host.clock()+10
-        while True:
-            if self.path.exists():self.socket_inode=self.path.lstat().st_ino
-            try:self.reader.connection.connect();break
-            except (ConnectionRefusedError,FileNotFoundError):
-                if self.process.poll() is not None or self.host.clock()>=deadline:raise InstallError('The owned image inspection service did not start') from None
-                self.host.pause(.02)
-        if self.context!=self.configuration():raise InstallError('Image inspection configuration changed during startup')
-    def inspect(self,reference):
-        if self.process is not None and (self.process.poll() is not None or self.context!=self.configuration()):self.close()
-        if self.process is None:self.start()
-        return self.reader.inspect(reference)
-    def close(self):
-        if self.reader:self.reader.close()
-        if self.process:
-            if self.process.poll() is None:self.process.terminate()
-            try:self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                if self.peer:
-                    pid,ticks,_,_=self.peer
-                    try:
-                        if self.stamp(pid)==ticks and os.getpgid(pid)==self.process.pid:os.kill(pid,signal.SIGKILL)
-                    except (ProcessLookupError,FileNotFoundError):pass
-                self.process.kill();self.process.wait(timeout=5)
-            if self.peer:
-                try:
-                    if self.stamp(self.peer[0])==self.peer[1]:raise InstallError('The owned image inspection peer did not stop')
-                except FileNotFoundError:pass
-        if self.directory:
-            if self.path is not None and self.path.exists():
-                with socket.socket(socket.AF_UNIX) as probe:
-                    try:probe.connect(str(self.path))
-                    except (ConnectionRefusedError,FileNotFoundError):pass
-                    else:raise InstallError('The image inspection socket is still active')
-                info=self.path.lstat()
-                if self.path.is_symlink() or info.st_ino!=self.socket_inode or info.st_uid!=self.uid:raise InstallError('The owned image inspection socket changed')
-                self.path.unlink()
-            if self.directory.is_symlink() or self.directory.stat().st_ino!=self.directory_inode:raise InstallError('The owned image inspection directory changed')
-            self.directory.rmdir()
-        self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None
-
-"""Shared release transaction owner. All external effects go through its port."""
-
-TERMINAL = ('succeeded','restored','prepare-failed','apply-failed','recovery-failed')
-ACTIVE = ('preparing','stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed')
-
-
-class UpgradeCore:
-    def __init__(self,port):self.port=port
-
-    def save(self,job,phase):
-        point=self.port.time_point() if hasattr(self.port,'time_point') else update_time_point()
-        timing=job.setdefault('timing',{'phaseSeconds':{}})
-        if timing.get('phase')!=phase:
-            previous=timing.get('phase')
-            if previous and isinstance(timing.get('started'),dict):
-                timing['phaseSeconds'][previous]=round(timing['phaseSeconds'].get(previous,0)+update_seconds(timing['started'],timing.get('phaseEnded',point)),3)
-            timing.update(phase=phase,started=point);timing.pop('phaseEnded',None)
-        if phase in TERMINAL:timing.setdefault('phaseEnded',point)
-        if phase=='stopping':timing.setdefault('downtimeStarted',point)
-        if phase in ('committed','restoration-committed') and 'downtimeStarted' in timing:timing.setdefault('downtimeEnded',point)
-        job['phase']=phase;job['phaseCode']=update_phase_code(phase)
-        self.port.save(job)
-        return job
-
-    def failure(self,job,error):
-        job.update(failure=self.port.safe(str(error)),failurePhase=job['phase'],errorCode=update_error_code(error))
-
-    def status(self,operation=None):
-        return self.port.operation(operation)
-
-    def begin_prepare(self,target):
-        existing=self.port.operation()
-        if existing and existing['phase'] in ACTIVE:
-            raise InstallError('Another upgrade needs completion or recovery before preparing a target',code='operation.conflict')
-        if existing and existing['phase']=='prepared' and existing['target']==target:return existing
-        job=self.port.begin(target)
-        return self.save(job,'preparing')
-
-    def prepare(self,target):
-        job=self.begin_prepare(target)
-        return self.finish_prepare(job['id']) if job['phase']=='preparing' else job
-
-    def finish_prepare(self,operation):
-        job=self.port.operation(operation)
-        if job is None or job['phase']!='preparing':raise InstallError('Unknown active preparation',code='operation.invalid')
-        try:
-            self.port.preflight(job)
-            job['prepared']=self.port.prepare(job)
-            self.port.preflight(job)
-            return self.save(job,'prepared')
-        except Exception as error:
-            self.failure(job,error)
-            return self.save(job,'prepare-failed')
-
-    def apply(self,operation):
-        job=self.submit_apply(operation)
-        return self.finish_apply(job['id']) if job['phase']=='stopping' else job
-
-    def submit_apply(self,operation):
-        job=self.port.operation(operation)
-        if job is None:raise InstallError('Unknown upgrade operation',code='operation.invalid')
-        if job['phase'] in TERMINAL:return job
-        if job['phase']!='prepared':raise InstallError('Interrupted upgrade requires recover before another apply',code='operation.invalid')
-        try:
-            self.port.preflight(job)
-        except Exception as error:
-            self.failure(job,error)
-            return self.save(job,'apply-failed')
-        try:
-            self.save(job,'stopping')
-            self.port.gate(True)
-            return job
-        except Exception as error:
-            self.failure(job,error);self.port.save(job)
-            return self.recover(job['id'])
-
-    def finish_apply(self,operation):
-        job=self.port.operation(operation)
-        if job is None or job['phase']!='stopping':raise InstallError('Unknown active application',code='operation.invalid')
-        try:
-            self.port.stop(job)
-            job['backupLifecycle']=2
-            self.save(job,'backing-up')
-            job['backup']=self.port.backup(job)
-            self.save(job,'backed-up')
-            self.save(job,'switching')
-            self.port.switch(job)
-            self.save(job,'validating')
-            self.port.verify(job)
-            self.port.commit(job)
-            job['committed']=True
-            self.save(job,'committed')
-            self.port.gate(False)
-            self.save(job,'succeeded')
-        except Exception as error:
-            self.failure(job,error)
-            # Persist the original failure before trying recovery. State and
-            # verified backup identity, never error text, decide restoration.
-            self.port.save(job)
-            return self.recover(job['id'])
-        return self.after_success(job)
-
-    def after_success(self,job):
-        if supports_capacity(job['target'].get('manifest',{})):
-            return self.cleanup(job['id'],discard_backup=job.get('backupLifecycle')==2 or job.get('backup',{}).get('schema')==2)
-        return job
-
-    def cleanup(self,operation=None,*,discard_backup=False):
-        return self.finish_cleanup(self.begin_cleanup(operation,discard_backup=discard_backup)['id'])
-
-    def begin_cleanup(self,operation=None,*,discard_backup=False):
-        job=self.port.operation(operation)
-        if job is None or job['id']!=self.port.operation()['id']:raise InstallError('Cleanup requires the current operation',code='operation.invalid')
-        if job['phase'] not in ('succeeded','restored','prepared','prepare-failed','apply-failed'):raise InstallError('Finish or recover the update before cleanup',code='operation.invalid')
-        if discard_backup and job['phase'] not in ('succeeded','restored'):raise InstallError('An unfinished update still needs its backup',code='operation.invalid')
-        previous=job.get('cleanup',{})
-        job['cleanup']={**previous,'status':'running','discardBackup':discard_backup or previous.get('discardBackup',False),'reclaimedBytes':previous.get('reclaimedBytes',0),'items':previous.get('items',[])}
-        self.port.save(job)
-        return job
-
-    def finish_cleanup(self,operation):
-        job=self.port.operation(operation)
-        if job is None or job.get('cleanup',{}).get('status')!='running':raise InstallError('Unknown active cleanup',code='operation.invalid')
-        try:self.port.cleanup(job)
-        except Exception as error:
-            previous=job.get('cleanup',{})
-            job['cleanup']={**previous,'status':'failed','reclaimedBytes':previous.get('reclaimedBytes',0),'items':previous.get('items',[]),'failure':self.port.safe(str(error)),'errorCode':update_error_code(error,'cleanup.failed')}
-        self.port.save(job)
-        return job
-
-    def recover(self,operation=None):
-        before=self.port.operation(operation)
-        job=self._recover(operation)
-        if job['phase'] not in ACTIVE and before.get('cleanup',{}).get('status')=='running':return self.cleanup(job['id'])
-        if job['phase'] in ('succeeded','restored') and (before['phase'] in ACTIVE or ((job.get('backupLifecycle')==2 or job.get('backup',{}).get('schema')==2) and not job.get('cleanup',{}).get('discardBackup'))):return self.after_success(job)
-        return job
-
-    def _recover(self,operation=None):
-        job=self.port.operation(operation)
-        if job is None:raise InstallError('Unknown upgrade operation',code='operation.invalid')
-        if job['phase'] in ('succeeded','restored','prepare-failed','apply-failed','prepared'):return job
-        if job['phase']=='preparing':
-            job.update(failure='Preparation interrupted; no running release was changed. Download again.',failurePhase=job['phase'],errorCode='operation.interrupted')
-            return self.save(job,'prepare-failed')
-        job.setdefault('failure','Upgrade interrupted before its result was recorded')
-        job.setdefault('failurePhase',job['phase']);job.setdefault('errorCode','operation.interrupted')
-        try:
-            self.port.gate(True)
-            if job.get('restorationCommitted'):
-                # Old-version writes may already have resumed. Start, never recopy.
-                self.port.start(job)
-                self.port.verify(job,old=True)
-                self.port.gate(False)
-                job.pop('instruction',None)
-                return self.save(job,'restored')
-            if job.get('committed'):
-                # Writes may already have reopened. Never roll them back.
-                self.port.start(job)
-                self.port.verify(job)
-                self.port.gate(False)
-                job.pop('instruction',None)
-                return self.save(job,'succeeded')
-            self.save(job,'restoring')
-            self.port.stop(job)
-            if job.get('backup') is not None:self.port.restore(job)
-            else:self.port.restart_old(job)
-            self.port.verify(job,old=True)
-            job['restorationCommitted']=True
-            self.save(job,'restoration-committed')
-            self.port.gate(False)
-            job.pop('instruction',None)
-            return self.save(job,'restored')
-        except Exception as error:
-            job['recoveryFailure']=self.port.safe(str(error));job['recoveryErrorCode']=update_error_code(error,'recovery.failed')
-            try:self.port.stop(job)
-            except Exception as stop_error:job['stopFailure']=self.port.safe(str(stop_error));job['stopErrorCode']=update_error_code(stop_error,'service.stop-failed')
-            job['instruction']=('Recovery and service shutdown failed; admission is unverified. Stop the managed service and inspect diagnostics.' if job.get('stopFailure') else 'Keep maintenance closed.')+' Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work.'
-            return self.save(job,'recovery-failed')
 
 """Verified platform-carrier snapshots. Member homes/workspaces are excluded."""
 import hashlib
@@ -2699,24 +3633,33 @@ EXCLUDED = {'users','platform.lock'}
 
 
 def rebuildable_paths(paths):
-    if not isinstance(paths,(list,tuple)):raise InstallError('Invalid rebuildable data layout')
+    if not isinstance(paths,(list,tuple)):
+        raise InstallError('Invalid rebuildable data layout')
     for path in paths:
         if (not isinstance(path,str) or not path or PurePosixPath(path).is_absolute() or
                 str(PurePosixPath(path))!=path or any(part in ('.','..') for part in path.split('/')) or
-                path.split('/')[0] in EXCLUDED):raise InstallError('Invalid rebuildable data layout')
-    if len(set(paths))!=len(paths):raise InstallError('Duplicate rebuildable data layout entry')
+                path.split('/')[0] in EXCLUDED):
+            raise InstallError('Invalid rebuildable data layout')
+    if len(set(paths))!=len(paths):
+        raise InstallError('Duplicate rebuildable data layout entry')
     return tuple(paths)
 
 
-def excluded_path(path,roots):return any(path==root or path.startswith(root+'/') for root in roots)
+def excluded_path(path,roots):
+    return any(path==root or path.startswith(root+'/') for root in roots)
 
 
 def carrier_metadata(path):
-    info=path.lstat(); result={'mode':stat.S_IMODE(info.st_mode),'uid':info.st_uid,'gid':info.st_gid}
-    if stat.S_ISLNK(info.st_mode):result.update(type='link',link=os.readlink(path))
-    elif stat.S_ISDIR(info.st_mode):result.update(type='directory')
-    elif stat.S_ISREG(info.st_mode):result.update(type='file',size=info.st_size)
-    else:raise InstallError('Platform backup rejects special files')
+    info=path.lstat()
+    result={'mode':stat.S_IMODE(info.st_mode),'uid':info.st_uid,'gid':info.st_gid}
+    if stat.S_ISLNK(info.st_mode):
+        result.update(type='link',link=os.readlink(path))
+    elif stat.S_ISDIR(info.st_mode):
+        result.update(type='directory')
+    elif stat.S_ISREG(info.st_mode):
+        result.update(type='file',size=info.st_size)
+    else:
+        raise InstallError('Platform backup rejects special files')
     return result
 
 
@@ -2725,7 +3668,8 @@ def facts(path):
     if result['type']=='file':
         value=hashlib.sha256()
         with path.open('rb') as file:
-            for block in iter(lambda:file.read(1024*1024),b''):value.update(block)
+            for block in iter(lambda:file.read(1024*1024),b''):
+                value.update(block)
         result['sha256']=value.hexdigest()
     return result
 
@@ -2733,42 +3677,53 @@ def facts(path):
 def inventory(path,exclude=False,*,rebuildable=()):
     rows={}
     def visit(item,key):
-        value=facts(item); rows[key]=value
+        value=facts(item)
+        rows[key]=value
         if value['type']=='directory':
             for child in sorted(item.iterdir()):
                 relative=child.name if key=='.' else key+'/'+child.name
-                if exclude and excluded_path(relative,(*EXCLUDED,*rebuildable)):continue
+                if exclude and excluded_path(relative,(*EXCLUDED,*rebuildable)):
+                    continue
                 visit(child,relative)
-    if path.exists() or path.is_symlink():visit(path,'.')
+    if path.exists() or path.is_symlink():
+        visit(path,'.')
     return rows
 
 
 def sync_directory(path):
     descriptor=os.open(path,os.O_RDONLY|os.O_DIRECTORY)
-    try:os.fsync(descriptor)
-    finally:os.close(descriptor)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def copy_carrier(source,destination,*,excluded=(),merge=False):
     rows={}
     def copy(item,target,key):
         value=carrier_metadata(item)
-        if value['type']=='link':target.symlink_to(value['link'])
+        if value['type']=='link':
+            target.symlink_to(value['link'])
         elif value['type']=='directory':
             if merge and target.exists():
-                if target.is_symlink() or not target.is_dir():raise InstallError('Mutable restore directory changed type')
-            else:target.mkdir()
+                if target.is_symlink() or not target.is_dir():
+                    raise InstallError('Mutable restore directory changed type')
+            else:
+                target.mkdir()
             for child in sorted(item.iterdir()):
                 relative=child.name if key=='.' else key+'/'+child.name
-                if not excluded_path(relative,excluded):copy(child,target/child.name,relative)
+                if not excluded_path(relative,excluded):
+                    copy(child,target/child.name,relative)
         else:
             digest=hashlib.sha256()
             with item.open('rb') as original,target.open('xb') as copied:
                 for block in iter(lambda:original.read(1024*1024),b''):
-                    copied.write(block);digest.update(block)
+                    copied.write(block)
+                    digest.update(block)
             value['sha256']=digest.hexdigest()
         os.chown(target,value['uid'],value['gid'],follow_symlinks=False)
-        if value['type']!='link':target.chmod(value['mode'])
+        if value['type']!='link':
+            target.chmod(value['mode'])
         rows[key]=value
     copy(source,destination,'.')
     return rows
@@ -2783,24 +3738,29 @@ def carrier_bytes(path,*,excluded=(),relative='.'):
 
 
 def remove_carrier(path):
-    if path.is_symlink() or path.is_file():path.unlink()
-    elif path.exists():shutil.rmtree(path)
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
 
 
 class PlatformBackup:
     def __init__(self,data,directory,carriers,*,rebuildable=()):
-        self.data=Path(data); self.directory=Path(directory)
+        self.data=Path(data)
+        self.directory=Path(directory)
         self.carriers={key:Path(value) for key,value in carriers.items()}
         self.rebuildable=rebuildable_paths(rebuildable)
 
     def root_directory(self):
-        if self.data.is_symlink() or not self.data.is_dir():raise InstallError('Platform data root must be a real directory')
+        if self.data.is_symlink() or not self.data.is_dir():
+            raise InstallError('Platform data root must be a real directory')
 
     def real_directory(self,relative):
         path=self.data
         for part in PurePosixPath(relative).parts:
             path=path/part
-            if path.is_symlink() or not path.is_dir():return False
+            if path.is_symlink() or not path.is_dir():
+                return False
         return True
 
     def retained_directories(self):
@@ -2808,11 +3768,14 @@ class PlatformBackup:
         def visit(path):
             retained.add(path.relative_to(self.data).as_posix())
             for child in path.iterdir():
-                if child.is_dir() and not child.is_symlink():visit(child)
+                if child.is_dir() and not child.is_symlink():
+                    visit(child)
         for relative in self.rebuildable:
             path=self.data/relative
-            if not path.exists() and not path.is_symlink():continue
-            if not self.real_directory(relative):raise InstallError('Rebuildable data root must be a real directory: '+relative)
+            if not path.exists() and not path.is_symlink():
+                continue
+            if not self.real_directory(relative):
+                raise InstallError('Rebuildable data root must be a real directory: '+relative)
             visit(path)
         return sorted(retained)
 
@@ -2828,7 +3791,8 @@ class PlatformBackup:
         self.directory.mkdir(mode=0o700)
         snapshot=self.directory/'data'
         rows=copy_carrier(self.data,snapshot,excluded=excluded)
-        files=self.directory/'files'; files.mkdir(mode=0o700)
+        files=self.directory/'files'
+        files.mkdir(mode=0o700)
         saved={}
         for key,path in self.carriers.items():
             saved[key]=copy_carrier(path,files/key) if path.exists() or path.is_symlink() else {}
@@ -2837,67 +3801,92 @@ class PlatformBackup:
 
     @install_failure('backup.invalid')
     def verify(self,receipt):
-        if receipt.get('schema') not in (1,2) or set(receipt.get('files',{}))!=set(self.carriers):raise InstallError('Invalid backup receipt')
+        if receipt.get('schema') not in (1,2) or set(receipt.get('files',{}))!=set(self.carriers):
+            raise InstallError('Invalid backup receipt')
         if receipt['schema']==2:
             roots=rebuildable_paths(receipt.get('rebuildable'))
             retained=rebuildable_paths(receipt.get('retainedDirectories'))
-            if any(not excluded_path(path,roots) for path in retained):raise InstallError('Invalid retained rebuildable directory')
+            if any(not excluded_path(path,roots) for path in retained):
+                raise InstallError('Invalid retained rebuildable directory')
             missing=[path for path in retained if not self.real_directory(path)]
-            if missing:raise InstallError('Retained rebuildable directories are missing: '+', '.join(missing))
-        if inventory(self.directory/'data')!=receipt['data']:raise InstallError('Platform backup is damaged; recovery stopped before replacing data')
+            if missing:
+                raise InstallError('Retained rebuildable directories are missing: '+', '.join(missing))
+        if inventory(self.directory/'data')!=receipt['data']:
+            raise InstallError('Platform backup is damaged; recovery stopped before replacing data')
         for key in self.carriers:
-            if inventory(self.directory/'files'/key)!=receipt['files'][key]:raise InstallError('Protected configuration backup is damaged')
+            if inventory(self.directory/'files'/key)!=receipt['files'][key]:
+                raise InstallError('Protected configuration backup is damaged')
 
     @install_failure('recovery.failed')
     def restore(self,receipt):
-        self.verify(receipt); self.root_directory()
+        self.verify(receipt)
+        self.root_directory()
         rebuildable=tuple(receipt['rebuildable']) if receipt['schema']==2 else ()
         excluded=(*EXCLUDED,*rebuildable)
         def clear(directory,relative='.'):
             for child in sorted(directory.iterdir()):
                 key=child.name if relative=='.' else relative+'/'+child.name
-                if excluded_path(key,excluded):continue
-                if child.is_dir() and not child.is_symlink() and any(root.startswith(key+'/') for root in excluded):clear(child,key)
-                else:remove_carrier(child)
+                if excluded_path(key,excluded):
+                    continue
+                if child.is_dir() and not child.is_symlink() and any(root.startswith(key+'/') for root in excluded):
+                    clear(child,key)
+                else:
+                    remove_carrier(child)
         clear(self.data)
         copy_carrier(self.directory/'data',self.data,merge=True)
-        if inventory(self.data,exclude=True,rebuildable=rebuildable)!=receipt['data']:raise InstallError('Restored platform data verification failed')
+        if inventory(self.data,exclude=True,rebuildable=rebuildable)!=receipt['data']:
+            raise InstallError('Restored platform data verification failed')
         for key,path in self.carriers.items():
             remove_carrier(path)
-            if receipt['files'][key]:copy_carrier(self.directory/'files'/key,path)
-            if inventory(path)!=receipt['files'][key]:raise InstallError('Restored configuration verification failed')
+            if receipt['files'][key]:
+                copy_carrier(self.directory/'files'/key,path)
+            if inventory(path)!=receipt['files'][key]:
+                raise InstallError('Restored configuration verification failed')
             sync_directory(path.parent)
-        sync_directory(self.data);os.sync()
+        sync_directory(self.data)
+        os.sync()
 
 class UpgradeDatabaseBackup:
     """Schedules the platform-owned adapter with a verified source runtime; only public facts cross back."""
     def __init__(self,port,job):
-        self.port=port;self.host=port.host;self.job=job;self.source=job['source']
+        self.port=port
+        self.host=port.host
+        self.job=job
+        self.source=job['source']
 
-    def enabled(self):return version_parts(self.source['manifest']['targetVersion'])>=(0,1,26)
+    def enabled(self):
+        return version_parts(self.source['manifest']['targetVersion'])>=(0,1,26)
 
     def run(self,action,**fields):
         code={'inspect':'database.unavailable','backup':'database.export-failed','restore':'database.restore-failed','prepare-tools':'unknown'}.get(action,'operation.invalid')
-        values=self.source['values'];directory=self.port.path(self.job)
+        values=self.source['values']
+        directory=self.port.path(self.job)
         descriptor=getattr(self.host,'install_lock_fd',None)
-        if not isinstance(descriptor,int):raise InstallError('A database upgrade requires the shared installation lease')
-        program=directory/'database-adapter.mjs';request=directory/'database-request.json'
+        if not isinstance(descriptor,int):
+            raise InstallError('A database upgrade requires the shared installation lease')
+        program=directory/'database-adapter.mjs'
+        request=directory/'database-request.json'
         info={'action':action,'installLockFd':descriptor,'installLockPath':str(self.host.path('/run/lock/dsh-phalanx-install.lock')),'configFile':str(self.host.path(values.get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json'))),
               'dataRoot':str(self.host.path(values['DSH_PHALANX_DATA_ROOT'])),**fields}
         self.host.atomic(str(program.relative_to(self.host.root)),DATABASE_PROGRAM,0o600)
         self.host.atomic(str(request.relative_to(self.host.root)),json.dumps(info)+'\n',0o600)
         try:
             result=self.host.run([str(Path(self.source['target'])/'node/bin/node'),str(program),self.source['target']],input_file=request,check=False,pass_fds=(descriptor,))
-            if result.returncode!=0:raise InstallError('Platform database upgrade operation failed; keep the backup and inspect the selected connection and tool identity',code=code)
+            if result.returncode!=0:
+                raise InstallError('Platform database upgrade operation failed; keep the backup and inspect the selected connection and tool identity',code=code)
             value=json.loads(result.stdout)
-            if not isinstance(value,dict):raise ValueError('Invalid database result')
+            if not isinstance(value,dict):
+                raise ValueError('Invalid database result')
             return value
-        except (OSError,ValueError):raise InstallError('Platform database upgrade adapter did not return verified facts',code=code) from None
+        except (OSError,ValueError):
+            raise InstallError('Platform database upgrade adapter did not return verified facts',code=code) from None
         finally:
-            request.unlink(missing_ok=True);program.unlink(missing_ok=True)
+            request.unlink(missing_ok=True)
+            program.unlink(missing_ok=True)
 
     def inspect(self):
-        if not self.enabled():return
+        if not self.enabled():
+            return
         recorded=self.port.schema(self.source)
         names=list(recorded) if isinstance(recorded,dict) else ['dsh_phalanx']
         target=[row['name'] for row in self.job['target']['manifest']['compatibility'].get('schemas',[])]
@@ -2909,523 +3898,59 @@ class UpgradeDatabaseBackup:
             previous=self.job['database']['facts']
             if any(facts.get(key)!=previous.get(key) for key in ('configurationSha256','serverMajor','selection','schemas')):
                 raise InstallError('Database selection or registered schemas changed; prepare this update again')
-        self.job['database']={**self.job.get('database',{}),'facts':facts};self.port.save(self.job)
+        self.job['database']={**self.job.get('database',{}),'facts':facts}
+        self.port.save(self.job)
 
     def prepare(self):
-        if not self.enabled():return
-        if 'database' not in self.job:raise InstallError('Inspect database capacity before preparing archive tools')
-        if 'tool' in self.job['database']:return
+        if not self.enabled():
+            return
+        if 'database' not in self.job:
+            raise InstallError('Inspect database capacity before preparing archive tools')
+        if 'tool' in self.job['database']:
+            return
         build=json.loads((Path(self.source['target'])/'build-info.json').read_text())
         pin=build.get('versions',{}).get('postgres')
-        if not isinstance(pin,dict):raise InstallError('The installed PostgreSQL tool pin is missing')
+        if not isinstance(pin,dict):
+            raise InstallError('The installed PostgreSQL tool pin is missing')
         value=self.run('prepare-tools',facts=self.job['database']['facts'],pin=pin,mirror=getattr(self.host,'download_sources',{}).get('containerMirror',''))
-        if not isinstance(value.get('tool'),dict):raise InstallError('Pinned database archive tools are unavailable')
-        self.job['database']['tool']=value['tool'];self.port.save(self.job)
+        if not isinstance(value.get('tool'),dict):
+            raise InstallError('Pinned database archive tools are unavailable')
+        self.job['database']['tool']=value['tool']
+        self.port.save(self.job)
 
     def create(self):
-        if not self.enabled():return None
-        if 'database' not in self.job:raise InstallError('Database archive tools were not prepared before downtime')
-        directory=self.port.path(self.job)/'backup'/'database';directory.mkdir(mode=0o700)
+        if not self.enabled():
+            return None
+        if 'database' not in self.job:
+            raise InstallError('Database archive tools were not prepared before downtime')
+        directory=self.port.path(self.job)/'backup'/'database'
+        directory.mkdir(mode=0o700)
         return self.run('backup',directory=str(directory),**self.job['database'])
 
     def verify(self,receipt):
-        if not self.enabled():return
+        if not self.enabled():
+            return
         archive=self.port.path(self.job)/'backup'/'database'/'platform.pgdump'
         if (not isinstance(receipt,dict) or receipt.get('schema')!=1 or archive.is_symlink() or not archive.is_file() or
                 archive.stat().st_mode&0o777!=0o600 or archive.stat().st_uid!=os.geteuid()):
             raise InstallError('Invalid protected PostgreSQL archive',code='backup.invalid')
-        with archive.open('rb') as file:digest=hashlib.file_digest(file,'sha256').hexdigest()
-        if receipt.get('sha256')!=digest:raise InstallError('PostgreSQL archive is damaged; recovery stopped before replacing data',code='backup.invalid')
+        with archive.open('rb') as file:
+            digest=hashlib.file_digest(file,'sha256').hexdigest()
+        if receipt.get('sha256')!=digest:
+            raise InstallError('PostgreSQL archive is damaged; recovery stopped before replacing data',code='backup.invalid')
 
     def restore(self,receipt):
-        if not self.enabled():return
+        if not self.enabled():
+            return
         self.verify(receipt)
         result=self.run('restore',directory=str(self.port.path(self.job)/'backup'/'database'),receipt=receipt,tool=self.job['database']['tool'])
-        if result.get('restored') is not True:raise InstallError('Database restoration did not complete',code='database.restore-failed')
+        if result.get('restored') is not True:
+            raise InstallError('Database restoration did not complete',code='database.restore-failed')
 
 
 # BEGIN GENERATED DATABASE PROGRAM
 DATABASE_PROGRAM = "// Generated from platform adapters. Uses the verified source package's connection and key owners.\nimport { readFileSync, fstatSync, readlinkSync } from 'node:fs';\nconst request = JSON.parse(readFileSync(0, 'utf8'));\nif (request.installLockFd !== undefined) {\n  const file=fstatSync(request.installLockFd);\n  if (!file.isFile() || file.uid!==process.getuid() || (file.mode&511)!==384 || readlinkSync('/proc/self/fd/'+request.installLockFd)!==request.installLockPath) throw Error('Invalid upgrade installation lease');\n  process.env.PHALANX_INSTALL_LOCK_FD=String(request.installLockFd);\n} else if (request.action!=='inspect') throw Error('Database writes require the shared installation lease');\nconst database = await import(\"data:text/javascript;base64,aW1wb3J0IHsgcGF0aFRvRmlsZVVSTCB9IGZyb20gJ25vZGU6dXJsJzsKY29uc3QgeyBwb3N0Z3Jlc1VwZ3JhZGVQYXNzd29yZEZpbGUgfSA9IGF3YWl0IGltcG9ydCgiZGF0YTp0ZXh0L2phdmFzY3JpcHQ7YmFzZTY0LGFXMXdiM0owSUhzZ2NHRjBhRlJ2Um1sc1pWVlNUQ0I5SUdaeWIyMGdKMjV2WkdVNmRYSnNKenNLTHlvcUlHeHBZbkJ4SjNNZ2NISnBkbUYwWlNCd1lYTnpkMjl5WkMxbWFXeGxJR1Z1WTI5a2FXNW5PeUIyWVd4cFpHRjBaU0JpWldadmNtVWdaRzkzYm5ScGJXVWdZWE1nZDJWc2JDQmhjeUJwYlcxbFpHbGhkR1ZzZVNCaVpXWnZjbVVnZFhObExpQXFMd3BsZUhCdmNuUWdablZ1WTNScGIyNGdjRzl6ZEdkeVpYTlZjR2R5WVdSbFVHRnpjM2R2Y21SR2FXeGxLR052Ym01bFkzUnBiMjRwSUhzS0lDQWdJR052Ym5OMElHWnBaV3hrY3lBOUlGdGpiMjV1WldOMGFXOXVMbWh2YzNRc0lGTjBjbWx1WnloamIyNXVaV04wYVc5dUxuQnZjblFwTENCamIyNXVaV04wYVc5dUxtUmhkR0ZpWVhObExDQmpiMjV1WldOMGFXOXVMblZ6WlhKdVlXMWxMQ0JqYjI1dVpXTjBhVzl1TG5CaGMzTjNiM0prWFRzS0lDQWdJSEpsZEhWeWJpQW9abWxsYkdSekNpQWdJQ0FnSUNBZ0xtMWhjQ2gyWVd4MVpTQTlQaUI3Q2lBZ0lDQWdJQ0FnYVdZZ0tDOWJYSEpjYmx3d1hTOTFMblJsYzNRb2RtRnNkV1VwS1FvZ0lDQWdJQ0FnSUNBZ0lDQjBhSEp2ZHlCRmNuSnZjaWduVUc5emRHZHlaVk5SVENCaGNtTm9hWFpsSUdOeVpXUmxiblJwWVd4eklHMTFjM1FnWm1sMElIUm9aU0J3Y21sMllYUmxJSEJoYzNOM2IzSmtMV1pwYkdVZ1ptOXliV0YwT3lCMGFHVWdjblZ1Ym1sdVp5QmtaWEJzYjNsdFpXNTBJSGRoY3lCdWIzUWdZMmhoYm1kbFpDY3BPd29nSUNBZ0lDQWdJSEpsZEhWeWJpQjJZV3gxWlM1eVpYQnNZV05sUVd4c0tDZGNYQ2NzSUNkY1hGeGNKeWt1Y21Wd2JHRmpaVUZzYkNnbk9pY3NJQ2RjWERvbktUc0tJQ0FnSUgwcENpQWdJQ0FnSUNBZ0xtcHZhVzRvSnpvbktTQXJJQ2RjYmljcE93cDlDaThxS2lCVVQwTWdjMlZzWldOMGFXOXVJRzl0YVhSeklHOXViSGtnWTNKbFlYUnBiMjRnYjJZZ2IzSnBaMmx1WVd3Z2JtRnRaWE53WVdObGN5d2djSEpsYzJWeWRtbHVaeUJsZG1WeWVTQkJRMHdnWVc1a0lHTnZiblJsYm5RZ1pXNTBjbmt1SUNvdkNtVjRjRzl5ZENCbWRXNWpkR2x2YmlCd2IzTjBaM0psYzFWd1ozSmhaR1ZTWlhOMGIzSmxUR2x6ZENocGJuQjFkQ3dnY21WMFlXbHVaV1JUWTJobGJXRnpLU0I3Q2lBZ0lDQmpiMjV6ZENCelpXVnVJRDBnYm1WM0lGTmxkQ2dwT3dvZ0lDQWdZMjl1YzNRZ2JHbHVaWE1nUFNCcGJuQjFkQzV6Y0d4cGRDZ25YRzRuS1M1dFlYQW9iR2x1WlNBOVBpQjdDaUFnSUNBZ0lDQWdZMjl1YzNRZ2MyTm9aVzFoSUQwZ0wxNWJNQzA1WFNzN0lGc3dMVGxkS3lCYk1DMDVYU3NnVTBOSVJVMUJJQzBnS0Z0aExYcGZYVnRoTFhvd0xUbGZYU29wSUM5MUxtVjRaV01vYkdsdVpTay9MbHN4WFRzS0lDQWdJQ0FnSUNCcFppQW9JWE5qYUdWdFlTa0tJQ0FnSUNBZ0lDQWdJQ0FnY21WMGRYSnVJR3hwYm1VN0NpQWdJQ0FnSUNBZ2FXWWdLQ0Z5WlhSaGFXNWxaRk5qYUdWdFlYTXVhVzVqYkhWa1pYTW9jMk5vWlcxaEtTQjhmQ0J6WldWdUxtaGhjeWh6WTJobGJXRXBLUW9nSUNBZ0lDQWdJQ0FnSUNCMGFISnZkeUJGY25KdmNpZ25SR0YwWVdKaGMyVWdZWEpqYUdsMlpTQnpZMmhsYldFZ2FXNTJaVzUwYjNKNUlHUnBabVpsY25NZ1puSnZiU0JwZEhNZ1ltRmphM1Z3SnlrN0NpQWdJQ0FnSUNBZ2MyVmxiaTVoWkdRb2MyTm9aVzFoS1RzS0lDQWdJQ0FnSUNCeVpYUjFjbTRnSnpzbklDc2diR2x1WlRzS0lDQWdJSDBwT3dvZ0lDQWdhV1lnS0hObFpXNHVjMmw2WlNBaFBUMGdjbVYwWVdsdVpXUlRZMmhsYldGekxteGxibWQwYUNrS0lDQWdJQ0FnSUNCMGFISnZkeUJGY25KdmNpZ25SR0YwWVdKaGMyVWdZWEpqYUdsMlpTQnBjeUJ0YVhOemFXNW5JR0Z1SUc5eWFXZHBibUZzSUc1aGJXVnpjR0ZqWlNjcE93b2dJQ0FnY21WMGRYSnVJR3hwYm1WekxtcHZhVzRvSjF4dUp5azdDbjBLIik7CmltcG9ydCB7IGNyZWF0ZUhhc2ggfSBmcm9tICdub2RlOmNyeXB0byc7CmltcG9ydCB7IHJlYWRGaWxlU3luYywgbHN0YXRTeW5jLCBjaG1vZFN5bmMsIG9wZW5TeW5jLCBmc3luY1N5bmMsIGNsb3NlU3luYywgY3JlYXRlUmVhZFN0cmVhbSB9IGZyb20gJ25vZGU6ZnMnOwppbXBvcnQgeyBqb2luIH0gZnJvbSAnbm9kZTpwYXRoJzsKaW1wb3J0IHsgaXNEZWVwU3RyaWN0RXF1YWwgfSBmcm9tICdub2RlOnV0aWwnOwpjb25zdCB7IEFkdmlzb3J5TG9jayB9ID0gYXdhaXQgaW1wb3J0KHBhdGhUb0ZpbGVVUkwocHJvY2Vzcy5hcmd2WzJdICsgJy9kaXN0L2FkYXB0ZXJzL2Fkdmlzb3J5LWxvY2tzLmpzJykuaHJlZik7CmNvbnN0IHsgRmlsZVBsYXRmb3JtRGF0YWJhc2VDb25maWcgfSA9IGF3YWl0IGltcG9ydChwYXRoVG9GaWxlVVJMKHByb2Nlc3MuYXJndlsyXSArICcvZGlzdC9hZGFwdGVycy9wbGF0Zm9ybS1kYXRhYmFzZS1jb25maWcuanMnKS5ocmVmKTsKY29uc3QgeyBwbGF0Zm9ybURhdGFiYXNlUG9vbCB9ID0gYXdhaXQgaW1wb3J0KHBhdGhUb0ZpbGVVUkwocHJvY2Vzcy5hcmd2WzJdICsgJy9kaXN0L2FkYXB0ZXJzL3BsYXRmb3JtLWRhdGFiYXNlLWluc3BlY3Rpb24uanMnKS5ocmVmKTsKY29uc3QgeyByZWFkUmVnaXN0ZXJlZFNjaGVtYVZlcnNpb25zIH0gPSBhd2FpdCBpbXBvcnQoImRhdGE6dGV4dC9qYXZhc2NyaXB0O2Jhc2U2NCxhVzF3YjNKMElIc2djR0YwYUZSdlJtbHNaVlZTVENCOUlHWnliMjBnSjI1dlpHVTZkWEpzSnpzS1kyOXVjM1FnZXlCUVRFRlVSazlTVFY5VFEwaEZUVUZUTENCelkyaGxiV0ZKWkdWdWRHbG1hV1Z5SUgwZ1BTQmhkMkZwZENCcGJYQnZjblFvSW1SaGRHRTZkR1Y0ZEM5cVlYWmhjMk55YVhCME8ySmhjMlUyTkN4aFZ6RjNZak5LTUVsSWMyZGpSMFl3WVVaU2RsSnRiSE5hVmxaVFZFTkNPVWxIV25saU1qQm5TakkxZGxwSFZUWmtXRXB6U25welMxa3lPWFZqTTFGblpYbENVVlJGUmxWU2F6bFRWRlk1VGxOVlpGTlJWbEpLVkRBMVZFbElNR2RRVTBKb1pESkdjR1JEUW5CaVdFSjJZMjVSYjJOSFJqQmhSbEoyVW0xc2MxcFdWbE5VUTJoM1kyMDVhbHBZVG5wTWJVWjVXak5hWWsxc01HZExlVUZ1VERKU2NHTXpVWFpaVjFKb1kwaFNiR051VFhaalIzaG9aRWRhZG1OdE1IUmpNazV2V2xjeGFFeHRjSHBLZVd0MVlVaEtiRnBwYXpkRGFUaHhTMmxDVldGSFZXZGpTRXAyV2toV2FtUkhiSFppYVVKNldUSm9iR0pYUldkaFZ6VXlXbGMxTUdJelNqVk1RMEo2WVVkR2VWcFhVV2RaYm10bllsZHNibU50UmpCaFZ6bDFURU5DYW1JeU1YZFpXRkp3V1cxc2MyRllValZKUjBaMVdrTkNhVmxYVG5Ka1dFRm5ZMjFXYUZwSFZubGplVFJuUzJrNFMxcFlhSGRpTTBvd1NVZE9kbUp1VGpCSlJrSk5VVlpTUjFReFNrNVlNVTVFVTBWV1RsRldUV2RRVTBKaVpYbENkVmxYTVd4UGFVRnVXa2hPYjFnelFtOVpWM2hvWW01bmJreERRblJoVjJSNVdWaFNjR0l5TlhwUGFVSlJWRVZHVlZKck9WTlVWamxPVTFWa1UxRldVa3BVTURWVVNVZ3haRTkzYjNaTGFXOW5WVzFXYm1GWVRqQmpibXRuWW0xR2RGcFlUV2RaV0Vwc1NVWk9VbFJEUW5CYVIxWjFaRWRzYldGWFZubGplWGRuWW0xV01scFlTV2RaV0VwcFlWaFNlVmxZU2pWSlJrNVNWRU5DZG1OcFFtaEpTRTVzV1ZoS2FtRkdPWGRaV0ZKdlNVZFdOR05JU214ak0wNXdZakkwZFVsRGIzWkRiVlkwWTBjNWVXUkRRbTFrVnpWcVpFZHNkbUpwUW5wWk1taHNZbGRHU2xwSFZuVmtSMnh0WVZkV2VVdEhOV2hpVjFWd1NVaHpTMGxEUVdkSlIyeHRTVU5uYUV3eE5XSlpVekUyV0RFeFlsbFRNVFpOUXpBMVdERXhOMDFEZHpKTmJqQnJURE5WZFdSSFZucGtRMmgxV1ZjeGJFdFRRamhtUTBKMVdWY3hiRXh1VGpCWldFb3dZekZrY0dSSFoyOUtNMEp1V0hsamNFbEllRGhKUnpWb1lsZFZaMUJVTURsSlEyUndZbTFhZG1OdE1XaGtSMngyWW13NWVsa3lhR3hpVjBWdVNVaDRPRWxITldoaVYxVm5VRlF3T1VsRFpIZGtWMHB6WVZkTmJrdFJiMmRKUTBGblNVTkJaMGxJVW05amJUa3pTVVZXZVdOdE9YbExRMlJDU1VoS2JGb3liSHBrUjFaNVdsZFJaMk5IZUdoa1IxcDJZMjB3WjJNeVRtOWFWekZvU1VjeE1XTXpVV2RoUjBZeVdsTkNhRWxIVW5Cak0xSndZbTFPTUVsSE5YWmlhVEY2WlZoT01GcFhNR2RWTVVaTlNVYzFhR0pYVlc1TFZITkxTVU5CWjBsSVNteGtTRlo1WW1sQ1owbHBVamRpYlVaMFdsZ3dhVmxFYzB0bVVXOTJTMmx2WjFGVFFtcGlNakYzWWpOT2NHUkhiSFppYVVKNlpGaENkMkpIYkd4amVVSm9TVWRhY0dWSFZtdEpSMngxWkcxV2RXUkhPWGxsVTBKdFlqTkpaMkl5Tld4SlIxSm9aRWRHYVZsWVRteEpSM2h3V20xV01HRlhNV3hNYVVGeFRIZHdiR1ZJUW5aamJsRm5XbTVXZFZrelVuQmlNalJuWTIxV2JtRllUakJhV0Vwc1drWk9hbUZIVm5SWldFMXZZekpPYjFwWE1XaGplV3RuWlhkdlowbERRV2RoVjFsblMwaE9hbUZIVm5SWldFNWlUVVl3TDB4dE5XaGlWMVZuU1ZRd09VbERaR3RqTW1obVkwZG9hR0pIUm5WbFEyTndRMmxCWjBsRFFXZEpRMEZuWkVkb2VXSXpZMmRTV0VwNVlqTkpiMG94VW05YVUwSjNZa2RHTUZwdE9YbGlVMEpxWWpOS2JFbElUbXBoUjFaMFdWTkNkR1JZVGpCSlIwcHNTVWhLYkZveWJIcGtSMVo1V2xkUloxcHRiSGxqTTFGdVMxUnpTMGxEUVdkSlIwNTJZbTVPTUVsSE5XaGlWMVo2U1VRd1oySnRWak5KUms1c1pFTm5jRTkzYjJkSlEwRm5ZMjFXTUdSWVNuVkpSVGxwWVcxV2FtUkROVzFqYlZac1pXMVZiMk15VG05YVZ6Rm9ZM2sxZEZsWVFXOWpNazV2V2xjeGFFbEVNQ3RKU0hOTFNVTkJaMGxEUVdkSlEwSjZXVEpvYkdKWFJrcGFSMVoxWkVkc2JXRlhWbmxMU0U1cVlVZFdkRmxUTlhWWlZ6RnNTMVJ6UzBsRFFXZEpRMEZuU1VOQ2NGcHBRVzlpYlVaMFdsaE5kV0ZIUm5wTFNFNXFZVWRXZEZsVE5YVlpWekZzUzFOclMwbERRV2RKUTBGblNVTkJaMGxEUVdka1IyaDVZak5qWjFKWVNubGlNMGx2U2pGQ2MxbFlVbTFpTTBwMFNVaE9hbUZIVm5SWlUwSjFXVmN4YkdONVFuUmtXRTR3U1VkS2JFbElWblZoV0VZeFdsTmpjRTkzYjJkSlEwRm5TVU5CWjBsSE5XaGlWMVo2VEcxR2ExcERhSHBaTW1oc1lsZEZkV0p0Um5SYVUyczNRMmxCWjBsRFFXZEpRMEZuWVZkWlowdERSbnBaTW1oc1lsZEZkV0pYYkc1amJVWXdZVmM1ZFdONU5YTmFWelZ1WkVkbloyWklkMmRqTWs1dldsY3hhRXh0TVhCYU0wcG9aRWRzZG1KdVRYVmpNamwwV2xObmIySlhiRzVqYlVZd1lWYzVkVXhEUW5CaWJWSnNaVU5yWjFCVU5HZGlWMnh1WTIxR01HRlhPWFZNYmxwc1kyNU9jR0l5TkdkSlZEQTVTVWRzZFZwSFZqUkpRM05uVFZOcmNFTnBRV2RKUTBGblNVTkJaMGxEUVdkSlNGSnZZMjA1TTBsRlZubGpiVGw1UzBOa1UxcFhaSEJqTTFKc1kyMVdhMGxJVG1waFIxWjBXVk5DZEdGWFpIbFpXRkp3WWpJMWVrbEhNVEZqTTFGbldXMVZaMWt5T1hWa1IyeHVaRmM1TVdONVFtMWpiVGwwU1VoYWJHTnVUbkJpTWpSblRWTmpjRTkzYjJkSlEwRm5TVU5CWjBsSVNteGtTRlo1WW1sQ1VGbHRjR3haTTFGMVdtNUtiRnBZY0d4TFNITm5ZbTFHZEZwVWIyZGpNazV2V2xjeGFFeHROV2hpVjFWelNVY3hjRm96U21oa1IyeDJZbTVOTmtsRk9XbGhiVlpxWkVNMWJXTnRWbXhsYlZWdll6Sk9iMXBYTVdoTWJURndXak5LYUdSSGJIWmliazExWWxkR2QwdEhNWEJhTTBwb1pFZHNkbUpwUVRsUWFVSlFXVzF3YkZrelVYVmFia3BzV2xod2JFdEljMmRNYVRSMVlsZHNibU50UmpCaFZ6bDFTVWd3Y0V0VGEyZG1VMnMzUTJsQlowbERRamxMVTJzM1EyNHdTeUlwT3dvdktpb2dRU0J0YVhOemFXNW5JRzVoYldWemNHRmpaU0J2Y2lCMlpYSnphVzl1SUhSaFlteGxJR2x6SUhabGNuTnBiMjRnZW1WeWJ6c2djbVZoWkdsdVp5QnVaWFpsY2lCd2NtVndZWEpsY3lCcGRDNGdLaThLWlhod2IzSjBJR0Z6ZVc1aklHWjFibU4wYVc5dUlISmxZV1JTWldkcGMzUmxjbVZrVTJOb1pXMWhWbVZ5YzJsdmJuTW9jM0ZzTENCelkyaGxiV0Z6SUQwZ1VFeEJWRVpQVWsxZlUwTklSVTFCVXlrZ2V3b2dJQ0FnWTI5dWMzUWdkbVZ5YzJsdmJuTWdQU0JiWFRzS0lDQWdJR1p2Y2lBb1kyOXVjM1FnYzJOb1pXMWhJRzltSUhOamFHVnRZWE1wSUhzS0lDQWdJQ0FnSUNCamIyNXpkQ0IwWVdKc1pTQTlJR0FrZTNOamFHVnRZVWxrWlc1MGFXWnBaWElvYzJOb1pXMWhMbTVoYldVcGZTNXpZMmhsYldGZmJXbG5jbUYwYVc5dWMyQTdDaUFnSUNBZ0lDQWdZMjl1YzNRZ2NISmxjMlZ1ZENBOUlDaGhkMkZwZENCemNXd3VjWFZsY25rb0oxTkZURVZEVkNCMGIxOXlaV2RqYkdGemN5Z2tNU2s2T25SbGVIUWdRVk1nY21Wc1lYUnBiMjRuTENCYmRHRmliR1ZkS1NrdWNtOTNjMXN3WFM1eVpXeGhkR2x2YmpzS0lDQWdJQ0FnSUNCamIyNXpkQ0IyWlhKemFXOXVJRDBnY0hKbGMyVnVkQ0EvSUU1MWJXSmxjaWdvWVhkaGFYUWdjM0ZzTG5GMVpYSjVLR0JUUlV4RlExUWdRMDlCVEVWVFEwVW9iV0Y0S0habGNuTnBiMjRwTERBcElFRlRJSFpsY25OcGIyNGdSbEpQVFNBa2UzUmhZbXhsZldBcEtTNXliM2R6V3pCZExuWmxjbk5wYjI0cElEb2dNRHNLSUNBZ0lDQWdJQ0IyWlhKemFXOXVjeTV3ZFhOb0tIc2dibUZ0WlRvZ2MyTm9aVzFoTG01aGJXVXNJSFpsY25OcGIyNGdmU2s3Q2lBZ0lDQjlDaUFnSUNCeVpYUjFjbTRnZG1WeWMybHZibk03Q24wSyIpOwpjb25zdCB7IHNjaGVtYUlkZW50aWZpZXIgfSA9IGF3YWl0IGltcG9ydCgiZGF0YTp0ZXh0L2phdmFzY3JpcHQ7YmFzZTY0LGFXMXdiM0owSUhzZ2NHRjBhRlJ2Um1sc1pWVlNUQ0I5SUdaeWIyMGdKMjV2WkdVNmRYSnNKenNLWTI5dWMzUWdleUJRVEVGVVJrOVNUVjlOU1VkU1FWUkpUMDVUSUgwZ1BTQmhkMkZwZENCcGJYQnZjblFvY0dGMGFGUnZSbWxzWlZWU1RDaHdjbTlqWlhOekxtRnlaM1piTWwwZ0t5QW5MMlJwYzNRdllXUmhjSFJsY25NdmNHeGhkR1p2Y20wdGMyTm9aVzFoTG1wekp5a3VhSEpsWmlrN0NpOHFLaUJVYUdVZ2NISnZaSFZqZEdsdmJpQnpZMmhsYldFZ2FXNTJaVzUwYjNKNUxDQnphR0Z5WldRZ1lua2diV2xuY21GMGFXOXVMQ0JqYjIxd1lYUnBZbWxzYVhSNUlHRnVaQ0JpWVdOcmRYQWdjbVZoWkdWeWN5NGdLaThLWlhod2IzSjBJR052Ym5OMElGQk1RVlJHVDFKTlgxTkRTRVZOUVZNZ1BTQmJleUJ1WVcxbE9pQW5aSE5vWDNCb1lXeGhibmduTENCdGFXZHlZWFJwYjI1ek9pQlFURUZVUms5U1RWOU5TVWRTUVZSSlQwNVRJSDFkT3dvdktpb2dVbVZuYVhOMGNua2dibUZ0WlhNZ1lYSmxJRk5SVENCcFpHVnVkR2xtYVdWeWN5d2dibVYyWlhJZ1lYSmlhWFJ5WVhKNUlGTlJUQ0J2Y2lCaElITmxZWEpqYUY5d1lYUm9JR1Y0Y0hKbGMzTnBiMjR1SUNvdkNtVjRjRzl5ZENCbWRXNWpkR2x2YmlCelkyaGxiV0ZKWkdWdWRHbG1hV1Z5S0c1aGJXVXBJSHNLSUNBZ0lHbG1JQ2doTDE1YllTMTZYMTFiWVMxNk1DMDVYMTE3TUN3Mk1uMGtMM1V1ZEdWemRDaHVZVzFsS1NCOGZDQnVZVzFsTG5OMFlYSjBjMWRwZEdnb0ozQm5YeWNwSUh4OElHNWhiV1VnUFQwOUlDZHBibVp2Y20xaGRHbHZibDl6WTJobGJXRW5JSHg4SUc1aGJXVWdQVDA5SUNkd2RXSnNhV01uS1FvZ0lDQWdJQ0FnSUhSb2NtOTNJRVZ5Y205eUtDZEJJSEpsWjJsemRHVnlaV1FnY0d4aGRHWnZjbTBnYzJOb1pXMWhJRzExYzNRZ2FHRjJaU0JoSUdScGMzUnBibU4wSUc1dmJpMXplWE4wWlcwZ1UxRk1JRzVoYldVbktUc0tJQ0FnSUhKbGRIVnliaUJnSWlSN2JtRnRaWDBpWURzS2ZRb3ZLaW9nUVNCamIyMXdiM05wZEdsdmJpQnpkWEJ3YkdsbGN5QmhJR1pwZUdWa0lHbHVkbVZ1ZEc5eWVTQm1iM0lnYjI1bElHUmhkR0ZpWVhObElHeHBabVYwYVcxbExpQXFMd3BsZUhCdmNuUWdablZ1WTNScGIyNGdjbVZuYVhOMFpYSmxaRk5qYUdWdFlYTW9jMk5vWlcxaGN5a2dld29nSUNBZ2FXWWdLSE5qYUdWdFlYTmJNRjAvTG01aGJXVWdJVDA5SUNka2MyaGZjR2hoYkdGdWVDY3BDaUFnSUNBZ0lDQWdkR2h5YjNjZ1JYSnliM0lvSjFSb1pTQndiR0YwWm05eWJTQmpiM0psSUhOamFHVnRZU0J0ZFhOMElHSmxJSEpsWjJsemRHVnlaV1FnWm1seWMzUW5LVHNLSUNBZ0lHTnZibk4wSUc1aGJXVnpJRDBnYm1WM0lGTmxkQ2dwT3dvZ0lDQWdjbVYwZFhKdUlFOWlhbVZqZEM1bWNtVmxlbVVvYzJOb1pXMWhjeTV0WVhBb2MyTm9aVzFoSUQwK0lIc0tJQ0FnSUNBZ0lDQnpZMmhsYldGSlpHVnVkR2xtYVdWeUtITmphR1Z0WVM1dVlXMWxLVHNLSUNBZ0lDQWdJQ0JwWmlBb2JtRnRaWE11YUdGektITmphR1Z0WVM1dVlXMWxLU2tLSUNBZ0lDQWdJQ0FnSUNBZ2RHaHliM2NnUlhKeWIzSW9KMUJzWVhSbWIzSnRJSE5qYUdWdFlTQnVZVzFsY3lCdGRYTjBJR0psSUhWdWFYRjFaU2NwT3dvZ0lDQWdJQ0FnSUc1aGJXVnpMbUZrWkNoelkyaGxiV0V1Ym1GdFpTazdDaUFnSUNBZ0lDQWdhV1lnS0NGelkyaGxiV0V1YldsbmNtRjBhVzl1Y3k1c1pXNW5kR2dnZkh3Z2MyTm9aVzFoTG0xcFozSmhkR2x2Ym5NdWMyOXRaU2dvYldsbmNtRjBhVzl1TENCcGJtUmxlQ2tnUFQ0Z2JXbG5jbUYwYVc5dUxuWmxjbk5wYjI0Z0lUMDlJR2x1WkdWNElDc2dNU2twQ2lBZ0lDQWdJQ0FnSUNBZ0lIUm9jbTkzSUVWeWNtOXlLQ2RTWldkcGMzUmxjbVZrSUhOamFHVnRZU0J0YVdkeVlYUnBiMjV6SUcxMWMzUWdZbVVnWTI5dWRHbG5kVzkxY3lCbWNtOXRJSFpsY25OcGIyNGdNU2NwT3dvZ0lDQWdJQ0FnSUhKbGRIVnliaUJQWW1wbFkzUXVabkpsWlhwbEtIc2dibUZ0WlRvZ2MyTm9aVzFoTG01aGJXVXNJRzFwWjNKaGRHbHZibk02SUU5aWFtVmpkQzVtY21WbGVtVW9jMk5vWlcxaExtMXBaM0poZEdsdmJuTXViV0Z3S0cxcFozSmhkR2x2YmlBOVBpQlBZbXBsWTNRdVpuSmxaWHBsS0hzZ0xpNHViV2xuY21GMGFXOXVJSDBwS1NrZ2ZTazdDaUFnSUNCOUtTazdDbjBLIik7CmNvbnN0IE5BTUVTUEFDRV9NRVRBREFUQSA9IGBqc29uYl9idWlsZF9vYmplY3QoJ293bmVyJyxuLm5zcG93bmVyOjp0ZXh0LAogICdhY2wnLENBU0UgV0hFTiBuLm5zcGFjbCBJUyBOVUxMIFRIRU4gTlVMTCBFTFNFIChTRUxFQ1QgYXJyYXlfYWdnKGE6OnRleHQgT1JERVIgQlkgYTo6dGV4dCkgRlJPTSB1bm5lc3Qobi5uc3BhY2wpIGEpIEVORCwKICAnY29tbWVudEhhc2gnLG1kNShvYmpfZGVzY3JpcHRpb24obi5vaWQsJ3BnX25hbWVzcGFjZScpKSwKICAnZGVmYXVsdFByaXZpbGVnZXMnLENPQUxFU0NFKChTRUxFQ1QganNvbmJfYWdnKGpzb25iX2J1aWxkX29iamVjdCgncm9sZScsZC5kZWZhY2xyb2xlOjp0ZXh0LCdraW5kJyxkLmRlZmFjbG9ianR5cGUsCiAgICAnYWNsJywoU0VMRUNUIGFycmF5X2FnZyhhOjp0ZXh0IE9SREVSIEJZIGE6OnRleHQpIEZST00gdW5uZXN0KGQuZGVmYWNsYWNsKSBhKSkgT1JERVIgQlkgZC5kZWZhY2xyb2xlLGQuZGVmYWNsb2JqdHlwZSkKICAgIEZST00gcGdfZGVmYXVsdF9hY2wgZCBXSEVSRSBkLmRlZmFjbG5hbWVzcGFjZT1uLm9pZCksJ1tdJzo6anNvbmIpKWA7Ci8qKiBSZWFkLW9ubHkgdXBncmFkZSBmYWN0czsgY29ubmVjdGlvbiBjcmVkZW50aWFscyBuZXZlciBsZWF2ZSB0aGlzIGFkYXB0ZXIuICovCmV4cG9ydCBhc3luYyBmdW5jdGlvbiBpbnNwZWN0VXBncmFkZURhdGFiYXNlKGNvbmZpZ0ZpbGUsIGRhdGFSb290LCBzY2hlbWFzKSB7CiAgICBpZiAoc2NoZW1hc1swXSAhPT0gJ2RzaF9waGFsYW54JyB8fCBuZXcgU2V0KHNjaGVtYXMpLnNpemUgIT09IHNjaGVtYXMubGVuZ3RoKQogICAgICAgIHRocm93IEVycm9yKCdJbnZhbGlkIHVwZ3JhZGUgc2NoZW1hIGludmVudG9yeScpOwogICAgZm9yIChjb25zdCBuYW1lIG9mIHNjaGVtYXMpCiAgICAgICAgc2NoZW1hSWRlbnRpZmllcihuYW1lKTsKICAgIGNvbnN0IHNhdmVkID0gRmlsZVBsYXRmb3JtRGF0YWJhc2VDb25maWcub3Blbihjb25maWdGaWxlLCBkYXRhUm9vdCk7CiAgICBwb3N0Z3Jlc1VwZ3JhZGVQYXNzd29yZEZpbGUoc2F2ZWQuY29ubmVjdGlvbik7CiAgICBjb25zdCBwb29sID0gcGxhdGZvcm1EYXRhYmFzZVBvb2woc2F2ZWQuY29ubmVjdGlvbik7CiAgICB0cnkgewogICAgICAgIGNvbnN0IHZlcnNpb24gPSBOdW1iZXIoKGF3YWl0IHBvb2wucXVlcnkoIlNFTEVDVCBjdXJyZW50X3NldHRpbmcoJ3NlcnZlcl92ZXJzaW9uX251bScpIEFTIHZlcnNpb24iKSkucm93c1swXS52ZXJzaW9uKTsKICAgICAgICBjb25zdCBzZXJ2ZXJNYWpvciA9IE1hdGguZmxvb3IodmVyc2lvbiAvIDEwMDAwKTsKICAgICAgICBpZiAoc2VydmVyTWFqb3IgPCAxNCB8fCAhc2F2ZWQuc2VsZWN0aW9uKQogICAgICAgICAgICB0aHJvdyBFcnJvcignQSBzZWxlY3RlZCBQb3N0Z3JlU1FMIDE0IG9yIG5ld2VyIGRhdGFiYXNlIGlzIHJlcXVpcmVkJyk7CiAgICAgICAgY29uc3Qgcm93cyA9IFtdOwogICAgICAgIGZvciAoY29uc3QgbmFtZSBvZiBzY2hlbWFzKSB7CiAgICAgICAgICAgIGNvbnN0IHJvdyA9IChhd2FpdCBwb29sLnF1ZXJ5KGBTRUxFQ1Qgbi5vaWQgSVMgTk9UIE5VTEwgQVMgcHJlc2VudCwKICAgICAgICBuLm5zcG93bmVyPShTRUxFQ1Qgb2lkIEZST00gcGdfcm9sZXMgV0hFUkUgcm9sbmFtZT1jdXJyZW50X3VzZXIpIEFTIG93bmVkCiAgICAgICAgRlJPTSAoU0VMRUNUIDEpIEFTIHByb2JlIExFRlQgSk9JTiBwZ19uYW1lc3BhY2UgbiBPTiBuLm5zcG5hbWU9JDFgLCBbbmFtZV0pKS5yb3dzWzBdOwogICAgICAgICAgICBpZiAocm93LnByZXNlbnQgJiYgIXJvdy5vd25lZCkKICAgICAgICAgICAgICAgIHRocm93IEVycm9yKCdUaGUgZGF0YWJhc2Ugcm9sZSBtdXN0IG93biBlYWNoIHJlZ2lzdGVyZWQgc2NoZW1hJyk7CiAgICAgICAgICAgIGNvbnN0IFtyZWNvcmRlZF0gPSBhd2FpdCByZWFkUmVnaXN0ZXJlZFNjaGVtYVZlcnNpb25zKHBvb2wsIFt7IG5hbWUsIG1pZ3JhdGlvbnM6IFtdIH1dKTsKICAgICAgICAgICAgY29uc3QgbmFtZXNwYWNlID0gcm93LnByZXNlbnQKICAgICAgICAgICAgICAgID8gKGF3YWl0IHBvb2wucXVlcnkoYFNFTEVDVCAke05BTUVTUEFDRV9NRVRBREFUQX0gQVMgbWV0YWRhdGEgRlJPTSBwZ19uYW1lc3BhY2UgbiBXSEVSRSBuLm5zcG5hbWU9JDFgLCBbbmFtZV0pKQogICAgICAgICAgICAgICAgICAgIC5yb3dzWzBdLm1ldGFkYXRhCiAgICAgICAgICAgICAgICA6IHVuZGVmaW5lZDsKICAgICAgICAgICAgcm93cy5wdXNoKHsgbmFtZSwgcHJlc2VudDogcm93LnByZXNlbnQsIHZlcnNpb246IHJlY29yZGVkLnZlcnNpb24sIC4uLihuYW1lc3BhY2UgPyB7IG5hbWVzcGFjZSB9IDoge30pIH0pOwogICAgICAgIH0KICAgICAgICBjb25zdCBieXRlcyA9IE51bWJlcigoYXdhaXQgcG9vbC5xdWVyeShgU0VMRUNUIENPQUxFU0NFKHN1bShwZ190b3RhbF9yZWxhdGlvbl9zaXplKGMub2lkKSksMCk6OnRleHQgQVMgYnl0ZXMKICAgICAgRlJPTSBwZ19jbGFzcyBjIEpPSU4gcGdfbmFtZXNwYWNlIG4gT04gbi5vaWQ9Yy5yZWxuYW1lc3BhY2UgV0hFUkUgbi5uc3BuYW1lPUFOWSgkMTo6dGV4dFtdKSBBTkQgYy5yZWxraW5kIElOICgncicsJ20nLCdTJylgLCBbc2NoZW1hc10pKS5yb3dzWzBdLmJ5dGVzKTsKICAgICAgICBpZiAoIU51bWJlci5pc1NhZmVJbnRlZ2VyKGJ5dGVzKSB8fCBieXRlcyA8IDApCiAgICAgICAgICAgIHRocm93IEVycm9yKCdEYXRhYmFzZSBleHBvcnQgc2l6ZSBpcyB1bmF2YWlsYWJsZScpOwogICAgICAgIHJldHVybiB7CiAgICAgICAgICAgIG1hc3RlcktleVBhdGg6IHNhdmVkLnNlY3VyaXR5Lm1hc3RlcktleVBhdGgsCiAgICAgICAgICAgIGNvbmZpZ3VyYXRpb25TaGEyNTY6IGNyZWF0ZUhhc2goJ3NoYTI1NicpLnVwZGF0ZShyZWFkRmlsZVN5bmMoY29uZmlnRmlsZSkpLmRpZ2VzdCgnaGV4JyksCiAgICAgICAgICAgIHNlbGVjdGlvbjogc2F2ZWQuc2VsZWN0aW9uLAogICAgICAgICAgICBzZXJ2ZXJNYWpvciwKICAgICAgICAgICAgZXN0aW1hdGVkQnl0ZXM6IGJ5dGVzLAogICAgICAgICAgICBzY2hlbWFzOiByb3dzLAogICAgICAgIH07CiAgICB9CiAgICBjYXRjaCB7CiAgICAgICAgdGhyb3cgRXJyb3IoJ1VwZ3JhZGUgZGF0YWJhc2UgaW5zcGVjdGlvbiBmYWlsZWQ7IGNoZWNrIHRoZSBzZWxlY3RlZCBjb25uZWN0aW9uLCByb2xlIGFuZCByZWdpc3RlcmVkIHNjaGVtYXMnKTsKICAgIH0KICAgIGZpbmFsbHkgewogICAgICAgIGF3YWl0IHBvb2wuZW5kKCk7CiAgICB9Cn0KZnVuY3Rpb24gcHJpdmF0ZURpcmVjdG9yeShkaXJlY3RvcnkpIHsKICAgIGNvbnN0IGluZm8gPSBsc3RhdFN5bmMoZGlyZWN0b3J5KTsKICAgIGlmICghaW5mby5pc0RpcmVjdG9yeSgpIHx8IGluZm8udWlkICE9PSBwcm9jZXNzLmdldHVpZD8uKCkgfHwgKGluZm8ubW9kZSAmIDBvNzc3KSAhPT0gMG83MDApCiAgICAgICAgdGhyb3cgRXJyb3IoJ1VwZ3JhZGUgYXJjaGl2ZSBkaXJlY3RvcnkgbXVzdCBiZSBwcml2YXRlIGFuZCBvd25lZCcpOwp9CmFzeW5jIGZ1bmN0aW9uIGFyY2hpdmVIYXNoKHBhdGgpIHsKICAgIGNvbnN0IGluZm8gPSBsc3RhdFN5bmMocGF0aCk7CiAgICBpZiAoIWluZm8uaXNGaWxlKCkgfHwgaW5mby51aWQgIT09IHByb2Nlc3MuZ2V0dWlkPy4oKSB8fCAoaW5mby5tb2RlICYgMG83NzcpICE9PSAwbzYwMCkKICAgICAgICB0aHJvdyBFcnJvcignVXBncmFkZSBhcmNoaXZlIG11c3QgYmUgYSBwcml2YXRlIHJlZ3VsYXIgZmlsZScpOwogICAgY29uc3QgaGFzaCA9IGNyZWF0ZUhhc2goJ3NoYTI1NicpOwogICAgZm9yIGF3YWl0IChjb25zdCBibG9jayBvZiBjcmVhdGVSZWFkU3RyZWFtKHBhdGgpKQogICAgICAgIGhhc2gudXBkYXRlKGJsb2NrKTsKICAgIHJldHVybiBoYXNoLmRpZ2VzdCgnaGV4Jyk7Cn0KYXN5bmMgZnVuY3Rpb24gb2ZmbGluZShjb25uZWN0aW9uLCBhY3Rpb24pIHsKICAgIGNvbnN0IHBvb2wgPSBwbGF0Zm9ybURhdGFiYXNlUG9vbChjb25uZWN0aW9uKTsKICAgIGxldCBjbGllbnQ7CiAgICBjb25zdCBjb250cm9sbGVyID0gbmV3IEFib3J0Q29udHJvbGxlcigpOwogICAgdHJ5IHsKICAgICAgICBjbGllbnQgPSBhd2FpdCBwb29sLmNvbm5lY3QoKTsKICAgICAgICBjbGllbnQub25jZSgnZXJyb3InLCAoKSA9PiBjb250cm9sbGVyLmFib3J0KCkpOwogICAgICAgIGNsaWVudC5vbmNlKCdlbmQnLCAoKSA9PiBjb250cm9sbGVyLmFib3J0KCkpOwogICAgICAgIGZvciAoY29uc3Qga2V5IG9mIFtBZHZpc29yeUxvY2suZGVwbG95bWVudCwgQWR2aXNvcnlMb2NrLm1pZ3JhdGlvbl0pIHsKICAgICAgICAgICAgaWYgKCEoYXdhaXQgY2xpZW50LnF1ZXJ5KCdTRUxFQ1QgcGdfdHJ5X2Fkdmlzb3J5X2xvY2soJDE6OmJpZ2ludCkgQVMgYWNxdWlyZWQnLCBba2V5XSkpLnJvd3NbMF0uYWNxdWlyZWQpCiAgICAgICAgICAgICAgICB0aHJvdyBFcnJvcignU3RvcCB0aGUgcGxhdGZvcm0gYmVmb3JlIGV4cG9ydGluZyBvciByZXN0b3JpbmcgaXRzIGRhdGFiYXNlJyk7CiAgICAgICAgfQogICAgICAgIGNvbnN0IHJlc3VsdCA9IGF3YWl0IGFjdGlvbihjb250cm9sbGVyLnNpZ25hbCk7CiAgICAgICAgY29udHJvbGxlci5zaWduYWwudGhyb3dJZkFib3J0ZWQoKTsKICAgICAgICByZXR1cm4gcmVzdWx0OwogICAgfQogICAgZmluYWxseSB7CiAgICAgICAgY2xpZW50Py5yZWxlYXNlKHRydWUpOwogICAgICAgIGF3YWl0IHBvb2wuZW5kKCk7CiAgICB9Cn0KZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIGJhY2t1cFVwZ3JhZGVEYXRhYmFzZShjb25maWdGaWxlLCBkYXRhUm9vdCwgZmFjdHMsIGRpcmVjdG9yeSwgdG9vbHMpIHsKICAgIHByaXZhdGVEaXJlY3RvcnkoZGlyZWN0b3J5KTsKICAgIGNvbnN0IHNhdmVkID0gRmlsZVBsYXRmb3JtRGF0YWJhc2VDb25maWcub3Blbihjb25maWdGaWxlLCBkYXRhUm9vdCk7CiAgICByZXR1cm4gb2ZmbGluZShzYXZlZC5jb25uZWN0aW9uLCBhc3luYyAoc2lnbmFsKSA9PiB7CiAgICAgICAgY29uc3QgYWN0dWFsID0gYXdhaXQgaW5zcGVjdFVwZ3JhZGVEYXRhYmFzZShjb25maWdGaWxlLCBkYXRhUm9vdCwgZmFjdHMuc2NoZW1hcy5tYXAocm93ID0+IHJvdy5uYW1lKSk7CiAgICAgICAgaWYgKGFjdHVhbC5jb25maWd1cmF0aW9uU2hhMjU2ICE9PSBmYWN0cy5jb25maWd1cmF0aW9uU2hhMjU2IHx8CiAgICAgICAgICAgIGFjdHVhbC5zZXJ2ZXJNYWpvciAhPT0gZmFjdHMuc2VydmVyTWFqb3IgfHwKICAgICAgICAgICAgIWlzRGVlcFN0cmljdEVxdWFsKGFjdHVhbC5zY2hlbWFzLCBmYWN0cy5zY2hlbWFzKSkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ0RhdGFiYXNlIHNlbGVjdGlvbiBvciByZWdpc3RlcmVkIHNjaGVtYXMgY2hhbmdlZCBhZnRlciBwcmVwYXJhdGlvbicpOwogICAgICAgIGNvbnN0IHBhdGggPSBqb2luKGRpcmVjdG9yeSwgJ3BsYXRmb3JtLnBnZHVtcCcpOwogICAgICAgIGF3YWl0IHRvb2xzLmR1bXAoc2F2ZWQuY29ubmVjdGlvbiwgZmFjdHMuc2NoZW1hcy5maWx0ZXIocm93ID0+IHJvdy5wcmVzZW50KS5tYXAocm93ID0+IHJvdy5uYW1lKSwgcGF0aCwgc2lnbmFsKTsKICAgICAgICBjaG1vZFN5bmMocGF0aCwgMG82MDApOwogICAgICAgIGNvbnN0IHNoYTI1NiA9IGF3YWl0IGFyY2hpdmVIYXNoKHBhdGgpOwogICAgICAgIGZvciAoY29uc3QgbmFtZSBvZiBbcGF0aCwgZGlyZWN0b3J5XSkgewogICAgICAgICAgICBjb25zdCBmZCA9IG9wZW5TeW5jKG5hbWUsICdyJyk7CiAgICAgICAgICAgIHRyeSB7CiAgICAgICAgICAgICAgICBmc3luY1N5bmMoZmQpOwogICAgICAgICAgICB9CiAgICAgICAgICAgIGZpbmFsbHkgewogICAgICAgICAgICAgICAgY2xvc2VTeW5jKGZkKTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICByZXR1cm4geyBzY2hlbWE6IDEsIGZhY3RzOiBhY3R1YWwsIHNoYTI1NiB9OwogICAgfSk7Cn0KLyoqIERhdGFiYXNlLWVuZm9yY2VkIFJFU1RSSUNUIHByb3RlY3RzIGluY29taW5nIGRlcGVuZGVuY2llcyBldmVuIHdoZW4gYW5vdGhlciBzZXNzaW9uIGNyZWF0ZXMgb25lIGR1cmluZyByZWNvdmVyeS4gKi8KZnVuY3Rpb24gbmFtZXNwYWNlQ2hlY2soZmFjdHMpIHsKICAgIHJldHVybiBmYWN0cy5zY2hlbWFzCiAgICAgICAgLmZpbHRlcihyb3cgPT4gcm93LnByZXNlbnQpCiAgICAgICAgLm1hcChyb3cgPT4gewogICAgICAgIGNvbnN0IGV4cGVjdGVkID0gSlNPTi5zdHJpbmdpZnkocm93Lm5hbWVzcGFjZSkucmVwbGFjZUFsbCgiJyIsICInJyIpOwogICAgICAgIHJldHVybiBgSUYgTk9UIEVYSVNUUyhTRUxFQ1QgMSBGUk9NIHBnX25hbWVzcGFjZSBuIFdIRVJFIG4ubnNwbmFtZT0nJHtyb3cubmFtZX0nIEFORCAke05BTUVTUEFDRV9NRVRBREFUQX09JyR7ZXhwZWN0ZWR9Jzo6anNvbmIpCiAgICAgIFRIRU4gUkFJU0UgRVhDRVBUSU9OICdSZWdpc3RlcmVkIG5hbWVzcGFjZSBvd25lcnNoaXAgb3IgcHJpdmlsZWdlcyBjaGFuZ2VkOyBrZWVwIG1haW50ZW5hbmNlIGNsb3NlZCc7IEVORCBJRjtgOwogICAgfSkKICAgICAgICAuam9pbignXG4nKTsKfQpmdW5jdGlvbiByZXN0b3JlUHJlbHVkZShmYWN0cykgewogICAgY29uc3QgbmFtZXMgPSBmYWN0cy5zY2hlbWFzLm1hcChyb3cgPT4gcm93Lm5hbWUpLCBtYWpvciA9IGZhY3RzLnNlcnZlck1ham9yOwogICAgY29uc3QgcmV0YWluZWQgPSBmYWN0cy5zY2hlbWFzCiAgICAgICAgLmZpbHRlcihyb3cgPT4gcm93LnByZXNlbnQpCiAgICAgICAgLm1hcChyb3cgPT4gIiciICsgcm93Lm5hbWUgKyAiJyIpCiAgICAgICAgLmpvaW4oJywnKTsKICAgIGNvbnN0IGFic2VudCA9IGZhY3RzLnNjaGVtYXMuZmlsdGVyKHJvdyA9PiAhcm93LnByZXNlbnQpLm1hcChyb3cgPT4gc2NoZW1hSWRlbnRpZmllcihyb3cubmFtZSkpOwogICAgY29uc3QgbGl0ZXJhbHMgPSBuYW1lcy5tYXAobmFtZSA9PiAiJyIgKyBuYW1lICsgIiciKS5qb2luKCcsJyk7CiAgICByZXR1cm4gYFNFVCBMT0NBTCBzdGFuZGFyZF9jb25mb3JtaW5nX3N0cmluZ3M9b247CiAgRE8gJHVwZ3JhZGVfcmVzdG9yZSQKICBERUNMQVJFIGNhbmRpZGF0ZSByZWNvcmQ7IHByb2dyZXNzZWQgYm9vbGVhbjsKICBCRUdJTgogICAgSUYgTk9UIHBnX3RyeV9hZHZpc29yeV94YWN0X2xvY2soJHtBZHZpc29yeUxvY2suZGVwbG95bWVudH06OmJpZ2ludCkgT1IgTk9UIHBnX3RyeV9hZHZpc29yeV94YWN0X2xvY2soJHtBZHZpc29yeUxvY2subWlncmF0aW9ufTo6YmlnaW50KQogICAgICBUSEVOIFJBSVNFIEVYQ0VQVElPTiAnQW5vdGhlciBwbGF0Zm9ybSBwcm9jZXNzIG93bnMgdGhlIHNlbGVjdGVkIGRhdGFiYXNlJzsgRU5EIElGOwogICAgSUYgY3VycmVudF9zZXR0aW5nKCdzZXJ2ZXJfdmVyc2lvbl9udW0nKTo6aW50ZWdlci8xMDAwMDw+JHttYWpvcn0KICAgICAgVEhFTiBSQUlTRSBFWENFUFRJT04gJ1Bvc3RncmVTUUwgc2VydmVyIG1ham9yIGNoYW5nZWQgYWZ0ZXIgYmFja3VwJzsgRU5EIElGOwogICAgSUYgRVhJU1RTIChTRUxFQ1QgMSBGUk9NIHBnX25hbWVzcGFjZSBXSEVSRSBuc3BuYW1lIElOICgke2xpdGVyYWxzfSkgQU5EIG5zcG93bmVyPD4oU0VMRUNUIG9pZCBGUk9NIHBnX3JvbGVzIFdIRVJFIHJvbG5hbWU9Y3VycmVudF91c2VyKSkKICAgICAgVEhFTiBSQUlTRSBFWENFUFRJT04gJ1RoZSByZXN0b3Jpbmcgcm9sZSBubyBsb25nZXIgb3ducyBhbGwgcmVnaXN0ZXJlZCBzY2hlbWFzJzsgRU5EIElGOwogICAgSUYgRVhJU1RTIChTRUxFQ1QgMSBGUk9NIHBnX2luaGVyaXRzIGkgSk9JTiBwZ19jbGFzcyBjaGlsZCBPTiBjaGlsZC5vaWQ9aS5pbmhyZWxpZCBKT0lOIHBnX25hbWVzcGFjZSBjbiBPTiBjbi5vaWQ9Y2hpbGQucmVsbmFtZXNwYWNlCiAgICAgIEpPSU4gcGdfY2xhc3MgcGFyZW50IE9OIHBhcmVudC5vaWQ9aS5pbmhwYXJlbnQgSk9JTiBwZ19uYW1lc3BhY2UgcG4gT04gcG4ub2lkPXBhcmVudC5yZWxuYW1lc3BhY2UKICAgICAgV0hFUkUgKGNuLm5zcG5hbWUgSU4gKCR7bGl0ZXJhbHN9KSk8Pihwbi5uc3BuYW1lIElOICgke2xpdGVyYWxzfSkpKQogICAgICBUSEVOIFJBSVNFIEVYQ0VQVElPTiAnUmVzdG9yZSByZWZ1c2VzIGluaGVyaXRhbmNlIGFjcm9zcyByZWdpc3RlcmVkIHNjaGVtYXMnOyBFTkQgSUY7CiAgICAke25hbWVzcGFjZUNoZWNrKGZhY3RzKX0KICAgIExPT1AKICAgICAgcHJvZ3Jlc3NlZD1mYWxzZTsKICAgICAgRk9SIGNhbmRpZGF0ZSBJTgogICAgICAgIFNFTEVDVCBraW5kLHN0cmluZ19hZ2coaWRlbnRpdHksJywnIE9SREVSIEJZIGlkZW50aXR5KSBBUyBpZGVudGl0aWVzIEZST00gKAogICAgICAgICAgU0VMRUNUIENBU0UKICAgICAgICAgICAgV0hFTiBkLmNsYXNzaWQ9J3BnX2NsYXNzJzo6cmVnY2xhc3MgVEhFTiAoU0VMRUNUIENBU0UgYy5yZWxraW5kCiAgICAgICAgICAgICAgV0hFTiAncicgVEhFTiAnVEFCTEUnIFdIRU4gJ3AnIFRIRU4gJ1RBQkxFJyBXSEVOICd2JyBUSEVOICdWSUVXJyBXSEVOICdtJyBUSEVOICdNQVRFUklBTElaRUQgVklFVycKICAgICAgICAgICAgICBXSEVOICdTJyBUSEVOICdTRVFVRU5DRScgV0hFTiAnZicgVEhFTiAnRk9SRUlHTiBUQUJMRScgRU5EIEZST00gcGdfY2xhc3MgYyBXSEVSRSBjLm9pZD1kLm9iamlkKQogICAgICAgICAgICBXSEVOIGQuY2xhc3NpZD0ncGdfdHlwZSc6OnJlZ2NsYXNzIFRIRU4gKFNFTEVDVCBDQVNFIFdIRU4gdC50eXB0eXBlPSdkJyBUSEVOICdET01BSU4nIEVMU0UgJ1RZUEUnIEVORCBGUk9NIHBnX3R5cGUgdCBXSEVSRSB0Lm9pZD1kLm9iamlkKQogICAgICAgICAgICBXSEVOIGQuY2xhc3NpZD0ncGdfcHJvYyc6OnJlZ2NsYXNzIFRIRU4gKFNFTEVDVCBDQVNFIHAucHJva2luZCBXSEVOICdwJyBUSEVOICdQUk9DRURVUkUnIFdIRU4gJ2EnIFRIRU4gJ0FHR1JFR0FURScgRUxTRSAnRlVOQ1RJT04nIEVORCBGUk9NIHBnX3Byb2MgcCBXSEVSRSBwLm9pZD1kLm9iamlkKQogICAgICAgICAgICBXSEVOIGQuY2xhc3NpZD0ncGdfb3BlcmF0b3InOjpyZWdjbGFzcyBUSEVOICdPUEVSQVRPUicKICAgICAgICAgICAgV0hFTiBkLmNsYXNzaWQ9J3BnX2NvbGxhdGlvbic6OnJlZ2NsYXNzIFRIRU4gJ0NPTExBVElPTicKICAgICAgICAgICAgV0hFTiBkLmNsYXNzaWQ9J3BnX2NvbnZlcnNpb24nOjpyZWdjbGFzcyBUSEVOICdDT05WRVJTSU9OJwogICAgICAgICAgICBXSEVOIGQuY2xhc3NpZD0ncGdfdHNfY29uZmlnJzo6cmVnY2xhc3MgVEhFTiAnVEVYVCBTRUFSQ0ggQ09ORklHVVJBVElPTicKICAgICAgICAgICAgV0hFTiBkLmNsYXNzaWQ9J3BnX3RzX2RpY3QnOjpyZWdjbGFzcyBUSEVOICdURVhUIFNFQVJDSCBESUNUSU9OQVJZJwogICAgICAgICAgICBXSEVOIGQuY2xhc3NpZD0ncGdfdHNfcGFyc2VyJzo6cmVnY2xhc3MgVEhFTiAnVEVYVCBTRUFSQ0ggUEFSU0VSJwogICAgICAgICAgICBXSEVOIGQuY2xhc3NpZD0ncGdfdHNfdGVtcGxhdGUnOjpyZWdjbGFzcyBUSEVOICdURVhUIFNFQVJDSCBURU1QTEFURScKICAgICAgICAgICAgV0hFTiBkLmNsYXNzaWQ9J3BnX3N0YXRpc3RpY19leHQnOjpyZWdjbGFzcyBUSEVOICdTVEFUSVNUSUNTJwogICAgICAgICAgRU5EIEFTIGtpbmQsKHBnX2lkZW50aWZ5X29iamVjdChkLmNsYXNzaWQsZC5vYmppZCwwKSkuaWRlbnRpdHkgQVMgaWRlbnRpdHkKICAgICAgICAgIEZST00gcGdfZGVwZW5kIGQgSk9JTiBwZ19uYW1lc3BhY2UgbiBPTiBkLnJlZmNsYXNzaWQ9J3BnX25hbWVzcGFjZSc6OnJlZ2NsYXNzIEFORCBkLnJlZm9iamlkPW4ub2lkCiAgICAgICAgICBXSEVSRSBuLm5zcG5hbWUgSU4gKCR7bGl0ZXJhbHN9KSBBTkQgZC5kZXB0eXBlPSduJwogICAgICAgICAgICBBTkQgTk9UIEVYSVNUUyAoU0VMRUNUIDEgRlJPTSBwZ19kZXBlbmQgb3duZXIgV0hFUkUgb3duZXIuY2xhc3NpZD1kLmNsYXNzaWQgQU5EIG93bmVyLm9iamlkPWQub2JqaWQgQU5EIG93bmVyLmRlcHR5cGU9J2knKQogICAgICAgICkgb2JqZWN0cyBXSEVSRSBraW5kIElTIE5PVCBOVUxMIEdST1VQIEJZIGtpbmQKICAgICAgTE9PUAogICAgICAgIEJFR0lOCiAgICAgICAgICBFWEVDVVRFICdEUk9QICd8fGNhbmRpZGF0ZS5raW5kfHwnIElGIEVYSVNUUyAnfHxjYW5kaWRhdGUuaWRlbnRpdGllc3x8JyBSRVNUUklDVCc7CiAgICAgICAgICBwcm9ncmVzc2VkPXRydWU7CiAgICAgICAgRVhDRVBUSU9OIFdIRU4gZGVwZW5kZW50X29iamVjdHNfc3RpbGxfZXhpc3QgVEhFTiBOVUxMOwogICAgICAgIEVORDsKICAgICAgRU5EIExPT1A7CiAgICAgIEVYSVQgV0hFTiBOT1QgcHJvZ3Jlc3NlZDsKICAgIEVORCBMT09QOwogICAgSUYgRVhJU1RTKFNFTEVDVCAxIEZST00gcGdfZGVwZW5kIGQgSk9JTiBwZ19uYW1lc3BhY2UgbiBPTiBkLnJlZmNsYXNzaWQ9J3BnX25hbWVzcGFjZSc6OnJlZ2NsYXNzIEFORCBkLnJlZm9iamlkPW4ub2lkCiAgICAgIFdIRVJFIG4ubnNwbmFtZSBJTiAoJHtyZXRhaW5lZCB8fCAiJycifSkgQU5EIGQuZGVwdHlwZT0nbicgQU5EIGQuY2xhc3NpZDw+J3BnX2RlZmF1bHRfYWNsJzo6cmVnY2xhc3MpCiAgICAgIFRIRU4gUkFJU0UgRVhDRVBUSU9OICdSZWdpc3RlcmVkIG5hbWVzcGFjZXMgY29udGFpbiBvYmplY3RzIHRoYXQgY2Fubm90IGJlIHJlc3RvcmVkIHNhZmVseSc7IEVORCBJRjsKICBFTkQgJHVwZ3JhZGVfcmVzdG9yZSQ7CiAgJHthYnNlbnQubGVuZ3RoID8gJ0RST1AgU0NIRU1BIElGIEVYSVNUUyAnICsgYWJzZW50LmpvaW4oJywnKSArICcgUkVTVFJJQ1Q7JyA6ICcnfWA7Cn0KZnVuY3Rpb24gcmVzdG9yZVZlcmlmaWNhdGlvbihmYWN0cykgewogICAgY29uc3QgY2hlY2tzID0gZmFjdHMuc2NoZW1hcy5tYXAocm93ID0+IHJvdy5wcmVzZW50CiAgICAgICAgPyBgSUYgdG9fcmVnbmFtZXNwYWNlKCcke3Jvdy5uYW1lfScpIElTIE5VTEwgVEhFTiBSQUlTRSBFWENFUFRJT04gJ1Jlc3RvcmVkIG5hbWVzcGFjZSBpcyBtaXNzaW5nJzsgRU5EIElGOwogICAgICAgSUYgdG9fcmVnY2xhc3MoJyR7cm93Lm5hbWV9LnNjaGVtYV9taWdyYXRpb25zJykgSVMgTlVMTCBUSEVOCiAgICAgICAgIElGICR7cm93LnZlcnNpb259PD4wIFRIRU4gUkFJU0UgRVhDRVBUSU9OICdSZXN0b3JlZCBzY2hlbWEgdmVyc2lvbiBpcyBtaXNzaW5nJzsgRU5EIElGOwogICAgICAgRUxTSUYgKFNFTEVDVCBDT0FMRVNDRShtYXgodmVyc2lvbiksMCkgRlJPTSAke3NjaGVtYUlkZW50aWZpZXIocm93Lm5hbWUpfS5zY2hlbWFfbWlncmF0aW9ucyk8PiR7cm93LnZlcnNpb259CiAgICAgICAgIFRIRU4gUkFJU0UgRVhDRVBUSU9OICdSZXN0b3JlZCByZWdpc3RlcmVkIHNjaGVtYSB2ZXJzaW9uIGRpZmZlcnMnOyBFTkQgSUY7YAogICAgICAgIDogYElGIHRvX3JlZ25hbWVzcGFjZSgnJHtyb3cubmFtZX0nKSBJUyBOT1QgTlVMTCBUSEVOIFJBSVNFIEVYQ0VQVElPTiAnTmV3IG5hbWVzcGFjZSByZW1haW5lZCBhZnRlciByZWNvdmVyeSc7IEVORCBJRjtgKTsKICAgIHJldHVybiBgRE8gJHVwZ3JhZGVfdmVyaWZ5JCBCRUdJTiAke2NoZWNrcy5qb2luKCdcbicpfSAke25hbWVzcGFjZUNoZWNrKGZhY3RzKX0gRU5EICR1cGdyYWRlX3ZlcmlmeSQ7YDsKfQpleHBvcnQgYXN5bmMgZnVuY3Rpb24gcmVzdG9yZVVwZ3JhZGVEYXRhYmFzZShjb25maWdGaWxlLCBkYXRhUm9vdCwgaW5wdXQsIGRpcmVjdG9yeSwgdG9vbHMpIHsKICAgIHByaXZhdGVEaXJlY3RvcnkoZGlyZWN0b3J5KTsKICAgIGNvbnN0IHJlY2VpcHQgPSBpbnB1dDsKICAgIGlmICghcmVjZWlwdCB8fAogICAgICAgIHJlY2VpcHQuc2NoZW1hICE9PSAxIHx8CiAgICAgICAgIS9eW2EtZjAtOV17NjR9JC91LnRlc3QocmVjZWlwdC5zaGEyNTYpIHx8CiAgICAgICAgIXJlY2VpcHQuZmFjdHMgfHwKICAgICAgICAhL15bYS1mMC05XXs2NH0kL3UudGVzdChyZWNlaXB0LmZhY3RzLmNvbmZpZ3VyYXRpb25TaGEyNTYpIHx8CiAgICAgICAgIU51bWJlci5pc0ludGVnZXIocmVjZWlwdC5mYWN0cy5zZXJ2ZXJNYWpvcikgfHwKICAgICAgICByZWNlaXB0LmZhY3RzLnNlcnZlck1ham9yIDwgMTQgfHwKICAgICAgICAhQXJyYXkuaXNBcnJheShyZWNlaXB0LmZhY3RzLnNjaGVtYXMpKQogICAgICAgIHRocm93IEVycm9yKCdJbnZhbGlkIGRhdGFiYXNlIGJhY2t1cCByZWNlaXB0Jyk7CiAgICBjb25zdCBuYW1lcyA9IHJlY2VpcHQuZmFjdHMuc2NoZW1hcy5tYXAocm93ID0+IHsKICAgICAgICBzY2hlbWFJZGVudGlmaWVyKHJvdy5uYW1lKTsKICAgICAgICBpZiAodHlwZW9mIHJvdy5wcmVzZW50ICE9PSAnYm9vbGVhbicgfHwKICAgICAgICAgICAgIU51bWJlci5pc1NhZmVJbnRlZ2VyKHJvdy52ZXJzaW9uKSB8fAogICAgICAgICAgICByb3cudmVyc2lvbiA8IDAgfHwKICAgICAgICAgICAgKHJvdy5wcmVzZW50ICYmICghcm93Lm5hbWVzcGFjZSB8fCB0eXBlb2Ygcm93Lm5hbWVzcGFjZSAhPT0gJ29iamVjdCcpKSkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ0ludmFsaWQgc2NoZW1hIGJhY2t1cCByZWNlaXB0Jyk7CiAgICAgICAgcmV0dXJuIHJvdy5uYW1lOwogICAgfSk7CiAgICBpZiAobmFtZXNbMF0gIT09ICdkc2hfcGhhbGFueCcgfHwgbmV3IFNldChuYW1lcykuc2l6ZSAhPT0gbmFtZXMubGVuZ3RoKQogICAgICAgIHRocm93IEVycm9yKCdJbnZhbGlkIGRhdGFiYXNlIHNjaGVtYSBiYWNrdXAgaW52ZW50b3J5Jyk7CiAgICBjb25zdCBhcmNoaXZlID0gam9pbihkaXJlY3RvcnksICdwbGF0Zm9ybS5wZ2R1bXAnKTsKICAgIGlmICgoYXdhaXQgYXJjaGl2ZUhhc2goYXJjaGl2ZSkpICE9PSByZWNlaXB0LnNoYTI1NikKICAgICAgICB0aHJvdyBFcnJvcignRGF0YWJhc2UgYXJjaGl2ZSBpcyBkYW1hZ2VkOyByZWNvdmVyeSBzdG9wcGVkJyk7CiAgICBjb25zdCBzYXZlZCA9IEZpbGVQbGF0Zm9ybURhdGFiYXNlQ29uZmlnLm9wZW4oY29uZmlnRmlsZSwgZGF0YVJvb3QpOwogICAgaWYgKGNyZWF0ZUhhc2goJ3NoYTI1NicpLnVwZGF0ZShyZWFkRmlsZVN5bmMoY29uZmlnRmlsZSkpLmRpZ2VzdCgnaGV4JykgIT09IHJlY2VpcHQuZmFjdHMuY29uZmlndXJhdGlvblNoYTI1NikKICAgICAgICB0aHJvdyBFcnJvcignUmVzdG9yZSB0aGUgb3JpZ2luYWwgZGF0YWJhc2UgY29ubmVjdGlvbiBiZWZvcmUgcmVjb3ZlcmluZyBpdHMgc2NoZW1hcycpOwogICAgYXdhaXQgdG9vbHMucmVzdG9yZShzYXZlZC5jb25uZWN0aW9uLCBhcmNoaXZlLCByZXN0b3JlUHJlbHVkZShyZWNlaXB0LmZhY3RzKSwgcmVzdG9yZVZlcmlmaWNhdGlvbihyZWNlaXB0LmZhY3RzKSwgcmVjZWlwdC5mYWN0cy5zY2hlbWFzLmZpbHRlcihyb3cgPT4gcm93LnByZXNlbnQpLm1hcChyb3cgPT4gcm93Lm5hbWUpKTsKfQo=\");\nconst tools = await import(\"data:text/javascript;base64,aW1wb3J0IHsgcGF0aFRvRmlsZVVSTCB9IGZyb20gJ25vZGU6dXJsJzsKY29uc3QgeyBwb3N0Z3Jlc1VwZ3JhZGVQYXNzd29yZEZpbGUsIHBvc3RncmVzVXBncmFkZVJlc3RvcmVMaXN0IH0gPSBhd2FpdCBpbXBvcnQoImRhdGE6dGV4dC9qYXZhc2NyaXB0O2Jhc2U2NCxhVzF3YjNKMElIc2djR0YwYUZSdlJtbHNaVlZTVENCOUlHWnliMjBnSjI1dlpHVTZkWEpzSnpzS0x5b3FJR3hwWW5CeEozTWdjSEpwZG1GMFpTQndZWE56ZDI5eVpDMW1hV3hsSUdWdVkyOWthVzVuT3lCMllXeHBaR0YwWlNCaVpXWnZjbVVnWkc5M2JuUnBiV1VnWVhNZ2QyVnNiQ0JoY3lCcGJXMWxaR2xoZEdWc2VTQmlaV1p2Y21VZ2RYTmxMaUFxTHdwbGVIQnZjblFnWm5WdVkzUnBiMjRnY0c5emRHZHlaWE5WY0dkeVlXUmxVR0Z6YzNkdmNtUkdhV3hsS0dOdmJtNWxZM1JwYjI0cElIc0tJQ0FnSUdOdmJuTjBJR1pwWld4a2N5QTlJRnRqYjI1dVpXTjBhVzl1TG1odmMzUXNJRk4wY21sdVp5aGpiMjV1WldOMGFXOXVMbkJ2Y25RcExDQmpiMjV1WldOMGFXOXVMbVJoZEdGaVlYTmxMQ0JqYjI1dVpXTjBhVzl1TG5WelpYSnVZVzFsTENCamIyNXVaV04wYVc5dUxuQmhjM04zYjNKa1hUc0tJQ0FnSUhKbGRIVnliaUFvWm1sbGJHUnpDaUFnSUNBZ0lDQWdMbTFoY0NoMllXeDFaU0E5UGlCN0NpQWdJQ0FnSUNBZ2FXWWdLQzliWEhKY2Jsd3dYUzkxTG5SbGMzUW9kbUZzZFdVcEtRb2dJQ0FnSUNBZ0lDQWdJQ0IwYUhKdmR5QkZjbkp2Y2lnblVHOXpkR2R5WlZOUlRDQmhjbU5vYVhabElHTnlaV1JsYm5ScFlXeHpJRzExYzNRZ1ptbDBJSFJvWlNCd2NtbDJZWFJsSUhCaGMzTjNiM0prTFdacGJHVWdabTl5YldGME95QjBhR1VnY25WdWJtbHVaeUJrWlhCc2IzbHRaVzUwSUhkaGN5QnViM1FnWTJoaGJtZGxaQ2NwT3dvZ0lDQWdJQ0FnSUhKbGRIVnliaUIyWVd4MVpTNXlaWEJzWVdObFFXeHNLQ2RjWENjc0lDZGNYRnhjSnlrdWNtVndiR0ZqWlVGc2JDZ25PaWNzSUNkY1hEb25LVHNLSUNBZ0lIMHBDaUFnSUNBZ0lDQWdMbXB2YVc0b0p6b25LU0FySUNkY2JpY3BPd3A5Q2k4cUtpQlVUME1nYzJWc1pXTjBhVzl1SUc5dGFYUnpJRzl1YkhrZ1kzSmxZWFJwYjI0Z2IyWWdiM0pwWjJsdVlXd2dibUZ0WlhOd1lXTmxjeXdnY0hKbGMyVnlkbWx1WnlCbGRtVnllU0JCUTB3Z1lXNWtJR052Ym5SbGJuUWdaVzUwY25rdUlDb3ZDbVY0Y0c5eWRDQm1kVzVqZEdsdmJpQndiM04wWjNKbGMxVndaM0poWkdWU1pYTjBiM0psVEdsemRDaHBibkIxZEN3Z2NtVjBZV2x1WldSVFkyaGxiV0Z6S1NCN0NpQWdJQ0JqYjI1emRDQnpaV1Z1SUQwZ2JtVjNJRk5sZENncE93b2dJQ0FnWTI5dWMzUWdiR2x1WlhNZ1BTQnBibkIxZEM1emNHeHBkQ2duWEc0bktTNXRZWEFvYkdsdVpTQTlQaUI3Q2lBZ0lDQWdJQ0FnWTI5dWMzUWdjMk5vWlcxaElEMGdMMTViTUMwNVhTczdJRnN3TFRsZEt5QmJNQzA1WFNzZ1UwTklSVTFCSUMwZ0tGdGhMWHBmWFZ0aExYb3dMVGxmWFNvcElDOTFMbVY0WldNb2JHbHVaU2svTGxzeFhUc0tJQ0FnSUNBZ0lDQnBaaUFvSVhOamFHVnRZU2tLSUNBZ0lDQWdJQ0FnSUNBZ2NtVjBkWEp1SUd4cGJtVTdDaUFnSUNBZ0lDQWdhV1lnS0NGeVpYUmhhVzVsWkZOamFHVnRZWE11YVc1amJIVmtaWE1vYzJOb1pXMWhLU0I4ZkNCelpXVnVMbWhoY3loelkyaGxiV0VwS1FvZ0lDQWdJQ0FnSUNBZ0lDQjBhSEp2ZHlCRmNuSnZjaWduUkdGMFlXSmhjMlVnWVhKamFHbDJaU0J6WTJobGJXRWdhVzUyWlc1MGIzSjVJR1JwWm1abGNuTWdabkp2YlNCcGRITWdZbUZqYTNWd0p5azdDaUFnSUNBZ0lDQWdjMlZsYmk1aFpHUW9jMk5vWlcxaEtUc0tJQ0FnSUNBZ0lDQnlaWFIxY200Z0p6c25JQ3NnYkdsdVpUc0tJQ0FnSUgwcE93b2dJQ0FnYVdZZ0tITmxaVzR1YzJsNlpTQWhQVDBnY21WMFlXbHVaV1JUWTJobGJXRnpMbXhsYm1kMGFDa0tJQ0FnSUNBZ0lDQjBhSEp2ZHlCRmNuSnZjaWduUkdGMFlXSmhjMlVnWVhKamFHbDJaU0JwY3lCdGFYTnphVzVuSUdGdUlHOXlhV2RwYm1Gc0lHNWhiV1Z6Y0dGalpTY3BPd29nSUNBZ2NtVjBkWEp1SUd4cGJtVnpMbXB2YVc0b0oxeHVKeWs3Q24wSyIpOwppbXBvcnQgeyBzcGF3biB9IGZyb20gJ25vZGU6Y2hpbGRfcHJvY2Vzcyc7CmltcG9ydCB7IGNyZWF0ZUhhc2gsIHJhbmRvbVVVSUQgfSBmcm9tICdub2RlOmNyeXB0byc7CmltcG9ydCB7IG1rZGlyU3luYywgcm1TeW5jLCB3cml0ZUZpbGVTeW5jIH0gZnJvbSAnbm9kZTpmcyc7CmltcG9ydCB7IGRpcm5hbWUsIGpvaW4gfSBmcm9tICdub2RlOnBhdGgnOwpjb25zdCB7IHNjaGVtYUlkZW50aWZpZXIgfSA9IGF3YWl0IGltcG9ydCgiZGF0YTp0ZXh0L2phdmFzY3JpcHQ7YmFzZTY0LGFXMXdiM0owSUhzZ2NHRjBhRlJ2Um1sc1pWVlNUQ0I5SUdaeWIyMGdKMjV2WkdVNmRYSnNKenNLWTI5dWMzUWdleUJRVEVGVVJrOVNUVjlOU1VkU1FWUkpUMDVUSUgwZ1BTQmhkMkZwZENCcGJYQnZjblFvY0dGMGFGUnZSbWxzWlZWU1RDaHdjbTlqWlhOekxtRnlaM1piTWwwZ0t5QW5MMlJwYzNRdllXUmhjSFJsY25NdmNHeGhkR1p2Y20wdGMyTm9aVzFoTG1wekp5a3VhSEpsWmlrN0NpOHFLaUJVYUdVZ2NISnZaSFZqZEdsdmJpQnpZMmhsYldFZ2FXNTJaVzUwYjNKNUxDQnphR0Z5WldRZ1lua2diV2xuY21GMGFXOXVMQ0JqYjIxd1lYUnBZbWxzYVhSNUlHRnVaQ0JpWVdOcmRYQWdjbVZoWkdWeWN5NGdLaThLWlhod2IzSjBJR052Ym5OMElGQk1RVlJHVDFKTlgxTkRTRVZOUVZNZ1BTQmJleUJ1WVcxbE9pQW5aSE5vWDNCb1lXeGhibmduTENCdGFXZHlZWFJwYjI1ek9pQlFURUZVUms5U1RWOU5TVWRTUVZSSlQwNVRJSDFkT3dvdktpb2dVbVZuYVhOMGNua2dibUZ0WlhNZ1lYSmxJRk5SVENCcFpHVnVkR2xtYVdWeWN5d2dibVYyWlhJZ1lYSmlhWFJ5WVhKNUlGTlJUQ0J2Y2lCaElITmxZWEpqYUY5d1lYUm9JR1Y0Y0hKbGMzTnBiMjR1SUNvdkNtVjRjRzl5ZENCbWRXNWpkR2x2YmlCelkyaGxiV0ZKWkdWdWRHbG1hV1Z5S0c1aGJXVXBJSHNLSUNBZ0lHbG1JQ2doTDE1YllTMTZYMTFiWVMxNk1DMDVYMTE3TUN3Mk1uMGtMM1V1ZEdWemRDaHVZVzFsS1NCOGZDQnVZVzFsTG5OMFlYSjBjMWRwZEdnb0ozQm5YeWNwSUh4OElHNWhiV1VnUFQwOUlDZHBibVp2Y20xaGRHbHZibDl6WTJobGJXRW5JSHg4SUc1aGJXVWdQVDA5SUNkd2RXSnNhV01uS1FvZ0lDQWdJQ0FnSUhSb2NtOTNJRVZ5Y205eUtDZEJJSEpsWjJsemRHVnlaV1FnY0d4aGRHWnZjbTBnYzJOb1pXMWhJRzExYzNRZ2FHRjJaU0JoSUdScGMzUnBibU4wSUc1dmJpMXplWE4wWlcwZ1UxRk1JRzVoYldVbktUc0tJQ0FnSUhKbGRIVnliaUJnSWlSN2JtRnRaWDBpWURzS2ZRb3ZLaW9nUVNCamIyMXdiM05wZEdsdmJpQnpkWEJ3YkdsbGN5QmhJR1pwZUdWa0lHbHVkbVZ1ZEc5eWVTQm1iM0lnYjI1bElHUmhkR0ZpWVhObElHeHBabVYwYVcxbExpQXFMd3BsZUhCdmNuUWdablZ1WTNScGIyNGdjbVZuYVhOMFpYSmxaRk5qYUdWdFlYTW9jMk5vWlcxaGN5a2dld29nSUNBZ2FXWWdLSE5qYUdWdFlYTmJNRjAvTG01aGJXVWdJVDA5SUNka2MyaGZjR2hoYkdGdWVDY3BDaUFnSUNBZ0lDQWdkR2h5YjNjZ1JYSnliM0lvSjFSb1pTQndiR0YwWm05eWJTQmpiM0psSUhOamFHVnRZU0J0ZFhOMElHSmxJSEpsWjJsemRHVnlaV1FnWm1seWMzUW5LVHNLSUNBZ0lHTnZibk4wSUc1aGJXVnpJRDBnYm1WM0lGTmxkQ2dwT3dvZ0lDQWdjbVYwZFhKdUlFOWlhbVZqZEM1bWNtVmxlbVVvYzJOb1pXMWhjeTV0WVhBb2MyTm9aVzFoSUQwK0lIc0tJQ0FnSUNBZ0lDQnpZMmhsYldGSlpHVnVkR2xtYVdWeUtITmphR1Z0WVM1dVlXMWxLVHNLSUNBZ0lDQWdJQ0JwWmlBb2JtRnRaWE11YUdGektITmphR1Z0WVM1dVlXMWxLU2tLSUNBZ0lDQWdJQ0FnSUNBZ2RHaHliM2NnUlhKeWIzSW9KMUJzWVhSbWIzSnRJSE5qYUdWdFlTQnVZVzFsY3lCdGRYTjBJR0psSUhWdWFYRjFaU2NwT3dvZ0lDQWdJQ0FnSUc1aGJXVnpMbUZrWkNoelkyaGxiV0V1Ym1GdFpTazdDaUFnSUNBZ0lDQWdhV1lnS0NGelkyaGxiV0V1YldsbmNtRjBhVzl1Y3k1c1pXNW5kR2dnZkh3Z2MyTm9aVzFoTG0xcFozSmhkR2x2Ym5NdWMyOXRaU2dvYldsbmNtRjBhVzl1TENCcGJtUmxlQ2tnUFQ0Z2JXbG5jbUYwYVc5dUxuWmxjbk5wYjI0Z0lUMDlJR2x1WkdWNElDc2dNU2twQ2lBZ0lDQWdJQ0FnSUNBZ0lIUm9jbTkzSUVWeWNtOXlLQ2RTWldkcGMzUmxjbVZrSUhOamFHVnRZU0J0YVdkeVlYUnBiMjV6SUcxMWMzUWdZbVVnWTI5dWRHbG5kVzkxY3lCbWNtOXRJSFpsY25OcGIyNGdNU2NwT3dvZ0lDQWdJQ0FnSUhKbGRIVnliaUJQWW1wbFkzUXVabkpsWlhwbEtIc2dibUZ0WlRvZ2MyTm9aVzFoTG01aGJXVXNJRzFwWjNKaGRHbHZibk02SUU5aWFtVmpkQzVtY21WbGVtVW9jMk5vWlcxaExtMXBaM0poZEdsdmJuTXViV0Z3S0cxcFozSmhkR2x2YmlBOVBpQlBZbXBsWTNRdVpuSmxaWHBsS0hzZ0xpNHViV2xuY21GMGFXOXVJSDBwS1NrZ2ZTazdDaUFnSUNCOUtTazdDbjBLIik7Ci8qKiBQb2RtYW4gZXhwb3NlcyByYXcgY29uZmlnIGhhc2hlczsgY2FsbGVycyBtYXkgYWxyZWFkeSBjYXJyeSB0aGVpciBxdWFsaWZpZWQgZm9ybS4gKi8KZnVuY3Rpb24gaW1hZ2VDb25maWdJZCh2YWx1ZSkgewogICAgY29uc3QgaGFzaCA9IHR5cGVvZiB2YWx1ZSA9PT0gJ3N0cmluZycgPyAvXig/OnNoYTI1NjopPyhbYS1mMC05XXs2NH0pJC91LmV4ZWModmFsdWUpPy5bMV0gOiB1bmRlZmluZWQ7CiAgICBpZiAoIWhhc2gpCiAgICAgICAgdGhyb3cgRXJyb3IoJ0FuIGltbXV0YWJsZSBQb3N0Z3JlU1FMIHRvb2wgaW1hZ2UgSUQgaXMgcmVxdWlyZWQnKTsKICAgIHJldHVybiAnc2hhMjU2OicgKyBoYXNoOwp9Ci8vIFRoZSByZWxheSBob2xkcyB0aGUgaW5oZXJpdGVkIHRyYW5zYWN0aW9uIGxlYXNlIHVudGlsIFBvZG1hbiBleGl0cywgZXZlbiBpZiBpdHMgTm9kZSBjYWxsZXIgZGllcy4KY29uc3QgbG9ja0Rlc2NyaXB0b3IgPSBwcm9jZXNzLmVudi5QSEFMQU5YX0lOU1RBTExfTE9DS19GRCA9PT0gdW5kZWZpbmVkID8gdW5kZWZpbmVkIDogTnVtYmVyKHByb2Nlc3MuZW52LlBIQUxBTlhfSU5TVEFMTF9MT0NLX0ZEKTsKY29uc3QgbGVhc2VSZWxheSA9ICdpbXBvcnQgb3Msc2lnbmFsLHN1YnByb2Nlc3Msc3lzXG5mZD1pbnQoc3lzLmFyZ3ZbMV0pO29zLmZzdGF0KGZkKVxuY2hpbGQ9Tm9uZTtjYW5jZWxsZWQ9RmFsc2VcbmRlZiBjYW5jZWwoKl8pOlxuIGdsb2JhbCBjYW5jZWxsZWRcbiBjYW5jZWxsZWQ9VHJ1ZVxuIGlmIGNoaWxkIGlzIG5vdCBOb25lOlxuICB0cnk6Y2hpbGQudGVybWluYXRlKClcbiAgZXhjZXB0IFByb2Nlc3NMb29rdXBFcnJvcjpwYXNzXG5zaWduYWwuc2lnbmFsKHNpZ25hbC5TSUdURVJNLGNhbmNlbClcbmNoaWxkPXN1YnByb2Nlc3MuUG9wZW4oc3lzLmFyZ3ZbMjpdLGNsb3NlX2Zkcz1UcnVlKVxuaWYgY2FuY2VsbGVkOmNhbmNlbCgpXG53aGlsZSBUcnVlOlxuIHRyeTpzdGF0dXM9Y2hpbGQud2FpdCgpO2JyZWFrXG4gZXhjZXB0IEludGVycnVwdGVkRXJyb3I6Y29udGludWVcbnN5cy5leGl0KHN0YXR1cylcbic7CmFzeW5jIGZ1bmN0aW9uIGNvbW1hbmQoYXJncywgc2lnbmFsKSB7CiAgICByZXR1cm4gbmV3IFByb21pc2UoKHJlc29sdmUsIHJlamVjdCkgPT4gewogICAgICAgIGlmIChsb2NrRGVzY3JpcHRvciAhPT0gdW5kZWZpbmVkICYmICghTnVtYmVyLmlzSW50ZWdlcihsb2NrRGVzY3JpcHRvcikgfHwgbG9ja0Rlc2NyaXB0b3IgPCAzKSkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ0ludmFsaWQgZGF0YWJhc2UgdG9vbCBsZWFzZSBkZXNjcmlwdG9yJyk7CiAgICAgICAgY29uc3QgZXhlY3V0YWJsZSA9IGxvY2tEZXNjcmlwdG9yID09PSB1bmRlZmluZWQgPyAnL3Vzci9iaW4vcG9kbWFuJyA6ICcvdXNyL2Jpbi9weXRob24zJzsKICAgICAgICBjb25zdCBhcmd1bWVudHNfID0gbG9ja0Rlc2NyaXB0b3IgPT09IHVuZGVmaW5lZCA/IGFyZ3MgOiBbJy1jJywgbGVhc2VSZWxheSwgJzMnLCAnL3Vzci9iaW4vcG9kbWFuJywgLi4uYXJnc107CiAgICAgICAgY29uc3QgY2hpbGQgPSBzcGF3bihleGVjdXRhYmxlLCBhcmd1bWVudHNfLCB7CiAgICAgICAgICAgIHN0ZGlvOiBsb2NrRGVzY3JpcHRvciA9PT0gdW5kZWZpbmVkID8gWydpZ25vcmUnLCAncGlwZScsICdpZ25vcmUnXSA6IFsnaWdub3JlJywgJ3BpcGUnLCAnaWdub3JlJywgbG9ja0Rlc2NyaXB0b3JdLAogICAgICAgICAgICBzaWduYWwsCiAgICAgICAgfSk7CiAgICAgICAgbGV0IG91dHB1dCA9ICcnLCBleGNlZWRlZCA9IGZhbHNlOwogICAgICAgIGNoaWxkLnN0ZG91dC5zZXRFbmNvZGluZygndXRmOCcpOwogICAgICAgIGNoaWxkLnN0ZG91dC5vbignZGF0YScsIGNodW5rID0+IHsKICAgICAgICAgICAgaWYgKG91dHB1dC5sZW5ndGggKyBTdHJpbmcoY2h1bmspLmxlbmd0aCA+IDI1NiAqIDEwMjQpIHsKICAgICAgICAgICAgICAgIGV4Y2VlZGVkID0gdHJ1ZTsKICAgICAgICAgICAgICAgIGNoaWxkLmtpbGwoJ1NJR1RFUk0nKTsKICAgICAgICAgICAgfQogICAgICAgICAgICBlbHNlCiAgICAgICAgICAgICAgICBvdXRwdXQgKz0gU3RyaW5nKGNodW5rKTsKICAgICAgICB9KTsKICAgICAgICBsZXQgZmFpbGVkID0gZmFsc2U7CiAgICAgICAgY2hpbGQub25jZSgnZXJyb3InLCAoKSA9PiB7CiAgICAgICAgICAgIGZhaWxlZCA9IHRydWU7CiAgICAgICAgfSk7CiAgICAgICAgY2hpbGQub25jZSgnY2xvc2UnLCBjb2RlID0+IGNvZGUgPT09IDAgJiYgIWV4Y2VlZGVkICYmICFmYWlsZWQKICAgICAgICAgICAgPyByZXNvbHZlKG91dHB1dCkKICAgICAgICAgICAgOiByZWplY3QoRXJyb3IoJ1Bvc3RncmVTUUwgYXJjaGl2ZSB0b29sIGZhaWxlZDsga2VlcCB0aGUgdmVyaWZpZWQgYmFja3VwIGFuZCBpbnNwZWN0IGRhdGFiYXNlIGF2YWlsYWJpbGl0eScpKSk7CiAgICB9KTsKfQovKiogUmVzb2x2ZSBvbmNlIGJlZm9yZSBkb3dudGltZTsgZXZlcnkgbGF0ZXIgaW52b2NhdGlvbiBmb3JiaWRzIHB1bGxzIGFuZCB1c2VzIHRoaXMgZGlnZXN0LiAqLwpleHBvcnQgYXN5bmMgZnVuY3Rpb24gcHJlcGFyZVBvc3RncmVzVXBncmFkZVRvb2xzKG1ham9yLCBzZWxlY3Rpb24sIHBpbiwgbWlycm9yID0gJycpIHsKICAgIGlmICghTnVtYmVyLmlzSW50ZWdlcihtYWpvcikgfHwKICAgICAgICBtYWpvciA8IDE0IHx8CiAgICAgICAgIS9eZG9ja2VyLmlvXC9saWJyYXJ5XC9wb3N0Z3JlczpbMC05XVthLXpBLVowLTkuLV0qJC91LnRlc3QocGluLmltYWdlKSB8fAogICAgICAgICEvXnNoYTI1NjpbYS1mMC05XXs2NH0kL3UudGVzdChwaW4uZGlnZXN0KSkKICAgICAgICB0aHJvdyBFcnJvcignSW52YWxpZCBQb3N0Z3JlU1FMIGFyY2hpdmUgdG9vbCBpZGVudGl0eScpOwogICAgaWYgKHNlbGVjdGlvbiA9PT0gJ2J1aWx0aW4nICYmIE51bWJlcihwaW4uaW1hZ2Uuc3BsaXQoJzonKS5hdCgtMSkuc3BsaXQoJy4nKVswXSkgIT09IG1ham9yKQogICAgICAgIHRocm93IEVycm9yKCdCdWlsdC1pbiBQb3N0Z3JlU1FMIHRvb2wgbWFqb3IgZGlmZmVycyBmcm9tIHRoZSBzZXJ2ZXInKTsKICAgIGlmIChzZWxlY3Rpb24gPT09ICdleHRlcm5hbCcgJiYgTnVtYmVyKHBpbi5pbWFnZS5zcGxpdCgnOicpLmF0KC0xKS5zcGxpdCgnLicpWzBdKSA9PT0gbWFqb3IpIHsKICAgICAgICAvLyBSZXVzZSB0aGUga25vd24gcGluIG9ubHkgYWZ0ZXIgdGhlIHNhbWUgaWRlbnRpdHksIHBsYXRmb3JtIGFuZCB0b29sIGNoZWNrcyBhcyBhIGZyZXNoIHB1bGwuCiAgICAgICAgdHJ5IHsKICAgICAgICAgICAgY29uc3QgY2FjaGVkID0gSlNPTi5wYXJzZShhd2FpdCBjb21tYW5kKFsnaW1hZ2UnLCAnaW5zcGVjdCcsICdkb2NrZXIuaW8vbGlicmFyeS9wb3N0Z3Jlc0AnICsgcGluLmRpZ2VzdF0pKTsKICAgICAgICAgICAgcmV0dXJuIGF3YWl0IHZlcmlmaWVkVG9vbHMoY2FjaGVkLCBtYWpvciwgcGluLmRpZ2VzdCk7CiAgICAgICAgfQogICAgICAgIGNhdGNoIHsKICAgICAgICAgICAgLy8gQSBtaXNzaW5nIG9yIHVudXNhYmxlIGNhY2hlIGVudHJ5IHN0aWxsIHJlcXVpcmVzIG9mZmljaWFsIHRvb2xzIG9mIHRoaXMgc2VydmVyJ3MgbWFqb3IuCiAgICAgICAgfQogICAgfQogICAgY29uc3QgcmVmZXJlbmNlID0gc2VsZWN0aW9uID09PSAnYnVpbHRpbicgPyAnZG9ja2VyLmlvL2xpYnJhcnkvcG9zdGdyZXNAJyArIHBpbi5kaWdlc3QgOiBgZG9ja2VyLmlvL2xpYnJhcnkvcG9zdGdyZXM6JHttYWpvcn0tYm9va3dvcm1gOwogICAgbGV0IGltYWdlOwogICAgdHJ5IHsKICAgICAgICBpbWFnZSA9IEpTT04ucGFyc2UoYXdhaXQgY29tbWFuZChbJ2ltYWdlJywgJ2luc3BlY3QnLCByZWZlcmVuY2VdKSk7CiAgICB9CiAgICBjYXRjaCB7CiAgICAgICAgY29uc3QgYWRkcmVzcyA9IG1pcnJvciA/IG5ldyBVUkwobWlycm9yKSA6IHVuZGVmaW5lZDsKICAgICAgICBpZiAoYWRkcmVzcyAmJiAoIVsnaHR0cHM6JywgJ2h0dHA6J10uaW5jbHVkZXMoYWRkcmVzcy5wcm90b2NvbCkgfHwgYWRkcmVzcy51c2VybmFtZSB8fCBhZGRyZXNzLnBhc3N3b3JkKSkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ0ludmFsaWQgUG9zdGdyZVNRTCB0b29sIG1pcnJvcicpOwogICAgICAgIGNvbnN0IHRyYW5zcG9ydCA9IGFkZHJlc3MgPyBhZGRyZXNzLmhvc3QgKyBhZGRyZXNzLnBhdGhuYW1lICsgcmVmZXJlbmNlLnJlcGxhY2UoJ2RvY2tlci5pby8nLCAnJykgOiByZWZlcmVuY2U7CiAgICAgICAgYXdhaXQgY29tbWFuZChbJ3B1bGwnLCAnLS1xdWlldCcsIHRyYW5zcG9ydF0pOwogICAgICAgIGltYWdlID0gSlNPTi5wYXJzZShhd2FpdCBjb21tYW5kKFsnaW1hZ2UnLCAnaW5zcGVjdCcsIHRyYW5zcG9ydF0pKTsKICAgIH0KICAgIHJldHVybiB2ZXJpZmllZFRvb2xzKGltYWdlLCBtYWpvciwgc2VsZWN0aW9uID09PSAnYnVpbHRpbicgPyBwaW4uZGlnZXN0IDogdW5kZWZpbmVkKTsKfQphc3luYyBmdW5jdGlvbiB2ZXJpZmllZFRvb2xzKGltYWdlLCBtYWpvciwgZGlnZXN0KSB7CiAgICBjb25zdCBmb3VuZCA9IGltYWdlWzBdOwogICAgaWYgKGltYWdlLmxlbmd0aCAhPT0gMSB8fAogICAgICAgICFmb3VuZCB8fAogICAgICAgICEvXnNoYTI1NjpbYS1mMC05XXs2NH0kL3UudGVzdChmb3VuZC5EaWdlc3QgPz8gJycpIHx8CiAgICAgICAgZm91bmQuT3MgIT09ICdsaW51eCcgfHwKICAgICAgICBmb3VuZC5BcmNoaXRlY3R1cmUgIT09IChwcm9jZXNzLmFyY2ggPT09ICdhcm02NCcgPyAnYXJtNjQnIDogJ2FtZDY0JykgfHwKICAgICAgICAoZGlnZXN0ICE9PSB1bmRlZmluZWQgJiYgZm91bmQuRGlnZXN0ICE9PSBkaWdlc3QpKQogICAgICAgIHRocm93IEVycm9yKCdQb3N0Z3JlU1FMIGFyY2hpdmUgdG9vbCBkaWdlc3Qgb3IgcGxhdGZvcm0gZGlmZmVycycpOwogICAgY29uc3QgZml4ZWQgPSBpbWFnZUNvbmZpZ0lkKGZvdW5kLklkKTsgLy8gQ29udGVudC1hZGRyZXNzZWQgY29uZmlnIGluY2x1ZGVzIGV2ZXJ5IGxheWVyIGlkZW50aXR5OyBuZXZlciB0YWcgYSBkaWdlc3QgYXMgYSBuYW1lLgogICAgZm9yIChjb25zdCB0b29sIG9mIFsncGdfZHVtcCcsICdwZ19yZXN0b3JlJ10pIHsKICAgICAgICBjb25zdCBvdXRwdXQgPSBhd2FpdCBjb21tYW5kKFsncnVuJywgJy0tcm0nLCAnLS1wdWxsPW5ldmVyJywgJy0tbmV0d29yaz1ub25lJywgZml4ZWQsIHRvb2wsICctLXZlcnNpb24nXSk7CiAgICAgICAgaWYgKCFuZXcgUmVnRXhwKCdeJyArIHRvb2wgKyAnIFxcKFBvc3RncmVTUUxcXCkgJyArIG1ham9yICsgJ1xcLicsICd1JykudGVzdChvdXRwdXQpKQogICAgICAgICAgICB0aHJvdyBFcnJvcignUG9zdGdyZVNRTCBhcmNoaXZlIHRvb2wgbXVzdCBtYXRjaCB0aGUgc2VydmVyIG1ham9yJyk7CiAgICB9CiAgICByZXR1cm4geyBpbWFnZTogZml4ZWQsIGRpZ2VzdDogZm91bmQuRGlnZXN0LCBtYWpvciB9Owp9Ci8qKiBDcmVkZW50aWFscyBleGlzdCBvbmx5IGluIGFuIG93bmVkIHByaXZhdGUgZmlsZSwgbW91bnRlZCBpbnRvIG9uZSBzaG9ydC1saXZlZCB0b29sIGNvbnRhaW5lci4gKi8KZXhwb3J0IGNsYXNzIFBvc3RncmVzVXBncmFkZVRvb2xzIHsKICAgIGlkZW50aXR5OwogICAgY29uc3RydWN0b3IoaWRlbnRpdHkpIHsKICAgICAgICB0aGlzLmlkZW50aXR5ID0gaWRlbnRpdHk7CiAgICAgICAgaWYgKCFpZGVudGl0eSB8fCAhL15zaGEyNTY6W2EtZjAtOV17NjR9JC91LnRlc3QoaWRlbnRpdHkuZGlnZXN0KSB8fCAhTnVtYmVyLmlzSW50ZWdlcihpZGVudGl0eS5tYWpvcikgfHwgaWRlbnRpdHkubWFqb3IgPCAxNCkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ0FuIGltbXV0YWJsZSBQb3N0Z3JlU1FMIHRvb2wgaWRlbnRpdHkgaXMgcmVxdWlyZWQnKTsKICAgICAgICB0aGlzLmlkZW50aXR5ID0geyAuLi5pZGVudGl0eSwgaW1hZ2U6IGltYWdlQ29uZmlnSWQoaWRlbnRpdHkuaW1hZ2UpIH07CiAgICB9CiAgICBhc3luYyB1c2UoY29ubmVjdGlvbiwgZGlyZWN0b3J5LCBhY3Rpb24sIHNpZ25hbCkgewogICAgICAgIGNvbnN0IGNhY2hlZCA9IEpTT04ucGFyc2UoYXdhaXQgY29tbWFuZChbJ2ltYWdlJywgJ2luc3BlY3QnLCB0aGlzLmlkZW50aXR5LmltYWdlXSkpOwogICAgICAgIGlmIChjYWNoZWQubGVuZ3RoICE9PSAxIHx8IGltYWdlQ29uZmlnSWQoY2FjaGVkWzBdLklkKSAhPT0gdGhpcy5pZGVudGl0eS5pbWFnZSB8fCBjYWNoZWRbMF0uRGlnZXN0ICE9PSB0aGlzLmlkZW50aXR5LmRpZ2VzdCkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ1ByZXBhcmVkIFBvc3RncmVTUUwgYXJjaGl2ZSB0b29sIGlkZW50aXR5IGlzIHVuYXZhaWxhYmxlJyk7CiAgICAgICAgY29uc3Qgd29yayA9IGpvaW4oZGlyZWN0b3J5LCAnLmRhdGFiYXNlLXRvb2wtJyArIHJhbmRvbVVVSUQoKSk7CiAgICAgICAgbWtkaXJTeW5jKHdvcmssIHsgbW9kZTogMG83MDAgfSk7CiAgICAgICAgdHJ5IHsKICAgICAgICAgICAgd3JpdGVGaWxlU3luYyhqb2luKHdvcmssICdwZ3Bhc3MnKSwgcG9zdGdyZXNVcGdyYWRlUGFzc3dvcmRGaWxlKGNvbm5lY3Rpb24pLCB7IG1vZGU6IDBvNjAwLCBmbGFnOiAnd3gnIH0pOwogICAgICAgICAgICBpZiAoY29ubmVjdGlvbi5jYSAhPT0gdW5kZWZpbmVkKQogICAgICAgICAgICAgICAgd3JpdGVGaWxlU3luYyhqb2luKHdvcmssICdjYS5wZW0nKSwgY29ubmVjdGlvbi5jYSwgeyBtb2RlOiAwbzYwMCwgZmxhZzogJ3d4JyB9KTsKICAgICAgICAgICAgY29uc3QgZW52aXJvbm1lbnQgPSB7CiAgICAgICAgICAgICAgICBQR0hPU1Q6IGNvbm5lY3Rpb24uaG9zdCwKICAgICAgICAgICAgICAgIFBHUE9SVDogU3RyaW5nKGNvbm5lY3Rpb24ucG9ydCksCiAgICAgICAgICAgICAgICBQR0RBVEFCQVNFOiBjb25uZWN0aW9uLmRhdGFiYXNlLAogICAgICAgICAgICAgICAgUEdVU0VSOiBjb25uZWN0aW9uLnVzZXJuYW1lLAogICAgICAgICAgICAgICAgUEdQQVNTRklMRTogJy9jcmVkZW50aWFscy9wZ3Bhc3MnLAogICAgICAgICAgICAgICAgUEdTU0xNT0RFOiBjb25uZWN0aW9uLnRscywKICAgICAgICAgICAgICAgIFBHQ09OTkVDVF9USU1FT1VUOiAnMTAnLAogICAgICAgICAgICAgICAgLi4uKGNvbm5lY3Rpb24uY2EgPT09IHVuZGVmaW5lZCA/IHt9IDogeyBQR1NTTFJPT1RDRVJUOiAnL2NyZWRlbnRpYWxzL2NhLnBlbScgfSksCiAgICAgICAgICAgIH07CiAgICAgICAgICAgIGNvbnN0IHJ1biA9IGFzeW5jIChhcmdzKSA9PiB7CiAgICAgICAgICAgICAgICBjb25zdCBuYW1lID0gJ3BoYWxhbngtdXBncmFkZS10b29sLScgKyByYW5kb21VVUlEKCk7CiAgICAgICAgICAgICAgICB0cnkgewogICAgICAgICAgICAgICAgICAgIHJldHVybiBhd2FpdCBjb21tYW5kKFsKICAgICAgICAgICAgICAgICAgICAgICAgJ3J1bicsCiAgICAgICAgICAgICAgICAgICAgICAgICctLXJtJywKICAgICAgICAgICAgICAgICAgICAgICAgJy0tbmFtZScsCiAgICAgICAgICAgICAgICAgICAgICAgIG5hbWUsCiAgICAgICAgICAgICAgICAgICAgICAgICctLXB1bGw9bmV2ZXInLAogICAgICAgICAgICAgICAgICAgICAgICAnLS1uZXR3b3JrPWhvc3QnLAogICAgICAgICAgICAgICAgICAgICAgICAnLS1sYWJlbCcsCiAgICAgICAgICAgICAgICAgICAgICAgICdkc2gucGhhbGFueC51cGdyYWRlLWFyY2hpdmUtb3duZXI9JyArIGNyZWF0ZUhhc2goJ3NoYTI1NicpLnVwZGF0ZShkaXJlY3RvcnkpLmRpZ2VzdCgnaGV4JyksCiAgICAgICAgICAgICAgICAgICAgICAgICctLXVzZXI9MDowJywKICAgICAgICAgICAgICAgICAgICAgICAgJy0tdm9sdW1lJywKICAgICAgICAgICAgICAgICAgICAgICAgZGlyZWN0b3J5ICsgJzovd29yazpydycsCiAgICAgICAgICAgICAgICAgICAgICAgICctLXZvbHVtZScsCiAgICAgICAgICAgICAgICAgICAgICAgIHdvcmsgKyAnOi9jcmVkZW50aWFsczpybycsCiAgICAgICAgICAgICAgICAgICAgICAgIC4uLk9iamVjdC5lbnRyaWVzKGVudmlyb25tZW50KS5mbGF0TWFwKChba2V5LCB2YWx1ZV0pID0+IFsnLS1lbnYnLCBrZXkgKyAnPScgKyB2YWx1ZV0pLAogICAgICAgICAgICAgICAgICAgICAgICB0aGlzLmlkZW50aXR5LmltYWdlLAogICAgICAgICAgICAgICAgICAgICAgICAuLi5hcmdzLAogICAgICAgICAgICAgICAgICAgIF0sIHNpZ25hbCk7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICBmaW5hbGx5IHsKICAgICAgICAgICAgICAgICAgICBhd2FpdCBjb21tYW5kKFsncm0nLCAnLS1mb3JjZScsICctLWlnbm9yZScsIG5hbWVdKTsKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfTsKICAgICAgICAgICAgcmV0dXJuIGF3YWl0IGFjdGlvbihydW4sIHdvcmspOwogICAgICAgIH0KICAgICAgICBmaW5hbGx5IHsKICAgICAgICAgICAgcm1TeW5jKHdvcmssIHsgcmVjdXJzaXZlOiB0cnVlLCBmb3JjZTogdHJ1ZSB9KTsKICAgICAgICB9CiAgICB9CiAgICBhc3luYyBkdW1wKGNvbm5lY3Rpb24sIHNjaGVtYXMsIGRlc3RpbmF0aW9uLCBzaWduYWwpIHsKICAgICAgICBpZiAoIXNjaGVtYXMubGVuZ3RoKQogICAgICAgICAgICB0aHJvdyBFcnJvcignUmVmdXNpbmcgdG8gZXhwb3J0IGFuIGVtcHR5IHJlZ2lzdGVyZWQgc2NoZW1hIHNlbGVjdGlvbicpOwogICAgICAgIGZvciAoY29uc3QgbmFtZSBvZiBzY2hlbWFzKQogICAgICAgICAgICBzY2hlbWFJZGVudGlmaWVyKG5hbWUpOwogICAgICAgIHdyaXRlRmlsZVN5bmMoZGVzdGluYXRpb24sICcnLCB7IG1vZGU6IDBvNjAwLCBmbGFnOiAnd3gnIH0pOwogICAgICAgIGF3YWl0IHRoaXMudXNlKGNvbm5lY3Rpb24sIGRpcm5hbWUoZGVzdGluYXRpb24pLCBhc3luYyAocnVuKSA9PiB7CiAgICAgICAgICAgIGF3YWl0IHJ1bihbJ3BnX2R1bXAnLCAnLS1mb3JtYXQ9Y3VzdG9tJywgJy0tZmlsZT0vd29yay9wbGF0Zm9ybS5wZ2R1bXAnLCAnLS1zdHJpY3QtbmFtZXMnLCAuLi5zY2hlbWFzLmZsYXRNYXAobmFtZSA9PiBbJy0tc2NoZW1hJywgbmFtZV0pXSk7CiAgICAgICAgfSwgc2lnbmFsKTsKICAgIH0KICAgIGFzeW5jIHJlc3RvcmUoY29ubmVjdGlvbiwgYXJjaGl2ZSwgYmVmb3JlLCBhZnRlciwgcmV0YWluZWRTY2hlbWFzKSB7CiAgICAgICAgYXdhaXQgdGhpcy51c2UoY29ubmVjdGlvbiwgZGlybmFtZShhcmNoaXZlKSwgYXN5bmMgKHJ1biwgd29yaykgPT4gewogICAgICAgICAgICBjb25zdCBsaXN0ID0gYXdhaXQgcnVuKFsncGdfcmVzdG9yZScsICctLWxpc3QnLCAnL3dvcmsvcGxhdGZvcm0ucGdkdW1wJ10pOwogICAgICAgICAgICB3cml0ZUZpbGVTeW5jKGpvaW4od29yaywgJ3Jlc3RvcmUubGlzdCcpLCBwb3N0Z3Jlc1VwZ3JhZGVSZXN0b3JlTGlzdChsaXN0LCByZXRhaW5lZFNjaGVtYXMpLCB7IG1vZGU6IDBvNjAwIH0pOwogICAgICAgICAgICB3cml0ZUZpbGVTeW5jKGpvaW4od29yaywgJ2JlZm9yZS5zcWwnKSwgYmVmb3JlLCB7IG1vZGU6IDBvNjAwIH0pOwogICAgICAgICAgICB3cml0ZUZpbGVTeW5jKGpvaW4od29yaywgJ2FmdGVyLnNxbCcpLCBhZnRlciwgeyBtb2RlOiAwbzYwMCB9KTsKICAgICAgICAgICAgLy8gQSBmYWlsZWQgcHJvZHVjZXIgbmV2ZXIgZW1pdHMgQ09NTUlUOiBwc3FsIGNsb3NlcyBhbmQgcm9sbHMgdGhlIG9wZW4gdHJhbnNhY3Rpb24gYmFjay4KICAgICAgICAgICAgLy8gU3RyZWFtIHRoZSBhcmNoaXZlIGluc3RlYWQgb2Ygd3JpdGluZyBhIHNlY29uZCBmdWxsIFNRTCBjb3B5IGJlc2lkZSB0aGUgY3VzdG9tIGR1bXAuCiAgICAgICAgICAgIHdyaXRlRmlsZVN5bmMoam9pbih3b3JrLCAncmVzdG9yZS5zaCcpLCBgIyEvYmluL2Jhc2gKc2V0IC1vIHBpcGVmYWlsCnsKICBwcmludGYgJ0JFR0lOO1xcbicgfHwgZXhpdCAxCiAgY2F0IC9jcmVkZW50aWFscy9iZWZvcmUuc3FsIHx8IGV4aXQgMQogIHBnX3Jlc3RvcmUgLS11c2UtbGlzdD0vY3JlZGVudGlhbHMvcmVzdG9yZS5saXN0IC0tZXhpdC1vbi1lcnJvciAtLWZpbGU9LSAvd29yay9wbGF0Zm9ybS5wZ2R1bXAgfHwgZXhpdCAxCiAgY2F0IC9jcmVkZW50aWFscy9hZnRlci5zcWwgfHwgZXhpdCAxCiAgcHJpbnRmICdcXG5DT01NSVQ7XFxuJwp9IHwgcHNxbCAtWCAtLXNldD1PTl9FUlJPUl9TVE9QPTEgLS1maWxlPS0KYCwgeyBtb2RlOiAwbzYwMCB9KTsKICAgICAgICAgICAgYXdhaXQgcnVuKFsnYmFzaCcsICcvY3JlZGVudGlhbHMvcmVzdG9yZS5zaCddKTsKICAgICAgICB9KTsKICAgIH0KfQo=\");\ntry {\n  let result;\n  if (request.action === 'prepare-tools') {\n    const facts = request.facts;\n    const tool = await tools.preparePostgresUpgradeTools(facts.serverMajor, facts.selection, request.pin, request.mirror);\n    result = { tool };\n  } else if (request.action === 'inspect') {\n    result = await database.inspectUpgradeDatabase(request.configFile, request.dataRoot, request.schemas);\n    if (request.sourceSchemas && result.schemas.some(row => !request.sourceSchemas.includes(row.name) && row.present)) throw Error('A target-only schema already exists outside the source registry');\n  } else if (request.action === 'backup') {\n    result = await database.backupUpgradeDatabase(request.configFile, request.dataRoot, request.facts, request.directory, new tools.PostgresUpgradeTools(request.tool));\n  } else if (request.action === 'restore') {\n    await database.restoreUpgradeDatabase(request.configFile, request.dataRoot, request.receipt, request.directory, new tools.PostgresUpgradeTools(request.tool));\n    result = { restored: true };\n  } else throw Error('Unsupported upgrade database operation');\n  console.log(JSON.stringify(result));\n} catch {\n  console.error('Upgrade database operation failed; keep admission closed and inspect the selected connection, archive and tool identity');\n  process.exitCode = 1;\n}\n"
 # END GENERATED DATABASE PROGRAM
-
-"""Narrow root-only readiness admission, including legacy binaries and reboot."""
-import ipaddress
-import hashlib
-import signal
-import math
-import re
-import socket
-import threading
-import stat
-import json
-import os
-from pathlib import Path, PurePosixPath
-import subprocess
-import sys
-import tempfile
-import uuid
-import base64
-import array
-import secrets
-
-TABLE='dsh_phalanx_upgrade'
-COMMENT='dsh-phalanx upgrade admission protocol 1'
-MARK=0x44534850
-MARKER='/etc/dsh-phalanx/maintenance'
-
-
-def protected_ports(values):
-    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},
-               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]
-    if values.get('DSH_PHALANX_PREVIEW_PORT'):
-        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})
-    return endpoints
-
-
-class AdmissionGateError(Exception):
-    code='admission.failed'
-
-
-
-def maintenance_pages(target):
-    target=Path(target)
-    if target.is_symlink() or (target/'dist').is_symlink():raise AdmissionGateError('Invalid installed maintenance page directory')
-    pages={}
-    for locale in ('en','zh-CN'):
-        path=target/'dist'/('maintenance.'+locale+'.html')
-        try:descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
-        except FileNotFoundError:continue
-        except OSError as error:raise AdmissionGateError('Installed maintenance page is unavailable') from error
-        with os.fdopen(descriptor,'rb') as file:
-            info=os.fstat(file.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0,os.geteuid()) or info.st_mode&0o022:
-                raise AdmissionGateError('Invalid installed maintenance page ownership')
-            page=file.read(262145)
-            if not page or len(page)>262144:raise AdmissionGateError('Invalid installed maintenance page size')
-            try:page.decode('utf-8')
-            except UnicodeError as error:raise AdmissionGateError('Invalid installed maintenance page encoding') from error
-            pages[locale]=page
-    if pages and len(pages)!=2:raise AdmissionGateError('Installed maintenance pages are incomplete')
-    return pages or None
-
-
-def maintenance_locale(value):
-    languages=[]
-    for part in value.split(','):
-        fields=part.strip().split(';');tag=fields[0].lower()
-        try:quality=1 if len(fields)==1 else float(fields[1].strip().removeprefix('q='))
-        except ValueError:continue
-        if math.isfinite(quality) and 0<quality<=1:languages.append((tag,quality))
-    languages.sort(key=lambda item:item[1],reverse=True)
-    preferred=languages[0][0] if languages else 'en'
-    return 'zh-CN' if preferred=='zh' or preferred.startswith('zh-') else 'en'
-
-
-class MaintenanceListener:
-    """Owns only the temporary HTTP socket; close finishes before its port can be handed off."""
-    def __init__(self,pages,address,port):
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-        family=socket.AF_INET6 if ipaddress.ip_address(address).version==6 else socket.AF_INET
-        class Handler(BaseHTTPRequestHandler):
-            protocol_version='HTTP/1.1'
-            def setup(handler):
-                super().setup();handler.connection.settimeout(3)
-            def log_message(handler,*args):pass
-            def respond(handler):
-                body=pages[maintenance_locale(handler.headers.get('Accept-Language','en'))]
-                handler.send_response_only(503)
-                for key,value in [('Content-Type','text/html; charset=utf-8'),('Content-Length',str(len(body))),('Retry-After','3'),('Cache-Control','no-store'),('Connection','close'),('Content-Security-Policy',"frame-ancestors 'none'"),('X-Content-Type-Options','nosniff')]:handler.send_header(key,value)
-                handler.end_headers();handler.close_connection=True
-                if handler.command!='HEAD':handler.wfile.write(body)
-            do_GET=do_HEAD=do_POST=do_PUT=do_PATCH=do_DELETE=do_OPTIONS=do_CONNECT=do_TRACE=respond
-        class Server(ThreadingHTTPServer):
-            address_family=family;allow_reuse_address=True;daemon_threads=True;block_on_close=False
-            def server_bind(server):
-                if family==socket.AF_INET6:server.socket.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,0)
-                super().server_bind()
-        self.server=Server((address,port),Handler);self.port=self.server.server_address[1];self.closed=False
-        self.thread=threading.Thread(target=self.server.serve_forever,name='dsh-phalanx-maintenance-http',daemon=True)
-        try:self.thread.start()
-        except BaseException:self.server.server_close();raise
-
-    def close(self):
-        if self.closed:return
-        self.server.shutdown();self.thread.join();self.server.server_close();self.closed=True
-
-
-def process_started(path):return path.read_text().rsplit(')',1)[1].split()[19]
-
-
-def maintenance_token(job,key):
-    used=job.setdefault('maintenanceTokens',[])
-    if not isinstance(used,list) or len(used)>4096 or any(type(value) is not int or not 0<value<2**32 or value==MARK for value in used):
-        raise AdmissionGateError('Invalid maintenance connection history')
-    previous=job.get(key)
-    if isinstance(previous,dict):
-        token=previous.get('token')
-        if type(token) is not int or not 0<token<2**32 or token==MARK:raise AdmissionGateError('Invalid maintenance connection identity')
-        if token not in used:used.append(token)
-        return token
-    token=secrets.randbits(32)
-    while token in (0,MARK) or token in used:token=secrets.randbits(32)
-    used.append(token);return token
-
-
-class ManagedMaintenanceSocket:
-    """PID1 keeps the exact listener bound independently of either serving process."""
-    def __init__(self,host,job,role,key):
-        self.host=host;self.job=job;self.key=key
-        if str(uuid.UUID(job['id']))!=job['id']:raise AdmissionGateError('Invalid maintenance operation identity')
-        self.unit='dsh-phalanx-upgrade-'+role+'-'+job['id']+'.service';self.cgroup='/system.slice/'+self.unit
-        self.endpoint=protected_ports(job['source']['values'])[0]
-        self.program=str(host.path('/opt/dsh-phalanx/maintenance/gate.py'));self.role=role
-
-    def fdname(self):return self.role+'-'+self.job['id']+'-'+str(self.intent()['token'])
-
-    def stored(self,fields):
-        if fields.get('NFileDescriptorStore')!='1':raise AdmissionGateError('The maintenance listener is not pinned by PID1')
-        rows=json.loads(self.host.run(['systemd-analyze','--json=short','fdstore',self.unit]).stdout)
-        if not isinstance(rows,list) or len(rows)!=1:raise AdmissionGateError('Unexpected maintenance descriptor inventory')
-        row=rows[0];inode=row.get('inode')
-        if (type(inode) is not int or inode<=0 or row.get('fdname')!=self.fdname() or
-                type(row.get('type')) is not int or not stat.S_ISSOCK(row['type']) or row.get('path')!='socket:['+str(inode)+']'):
-            raise AdmissionGateError('Maintenance descriptor differs from its owner')
-        expected=self.intent().get('listener',{}).get('inode')
-        if expected is not None and expected!=inode:raise AdmissionGateError('A different platform listener was pinned')
-        result=self.host.run(['/usr/bin/python3','-I',self.program,'--inspect-listener',str(inode),self.endpoint['address'],str(self.endpoint['port'])])
-        if json.loads(result.stdout)!={'inode':inode,'address':self.endpoint['address'],'port':self.endpoint['port']}:
-            raise AdmissionGateError('Pinned maintenance endpoint differs from its owner')
-        return inode
-
-    def facts(self):
-        properties='LoadState,MainPID,Transient,User,Type,NotifyAccess,KillMode,Restart,ExecStart,ControlGroup,RemainAfterExit,FileDescriptorStoreMax,FileDescriptorStorePreserve,NFileDescriptorStore,CollectMode,ActiveState,Job'
-        result=self.host.run(['systemctl','show',self.unit,'--property='+properties],check=False)
-        fields=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
-        if fields.get('LoadState')=='not-found':return None
-        if result.returncode!=0 or fields.get('LoadState')!='loaded':raise AdmissionGateError('Maintenance unit state is unavailable')
-        return fields
-
-    def verify(self,fields,*,listener=False):
-        intent=self.intent()
-        if intent is None or self.job.get(self.key)!=intent:raise AdmissionGateError('Maintenance unit is not owned by this operation')
-        for key,value in [('Transient','yes'),('User','root'),('Type','notify'),('NotifyAccess','main'),('KillMode','control-group'),('Restart','no'),('RemainAfterExit','yes'),('FileDescriptorStoreMax','1'),('FileDescriptorStorePreserve','yes'),('CollectMode','inactive')]:
-            if fields.get(key)!=value:raise AdmissionGateError('Maintenance unit configuration differs from its owner')
-        command=re.fullmatch(r'\{ path=([^ ;]+) ; argv\[\]=([^;]+) ; ignore_errors=no ;[^{}]*\}',fields.get('ExecStart',''))
-        if command is None or command[1]!='/usr/bin/python3' or command[2].split()!=self.arguments:
-            raise AdmissionGateError('Maintenance unit command differs from its owner')
-        raw_pid=fields.get('MainPID','')
-        if not raw_pid.isdecimal():raise AdmissionGateError('Invalid maintenance listener process')
-        pid=int(raw_pid);group=fields.get('ControlGroup','')
-        if group not in ('',self.cgroup) or pid and group!=self.cgroup:raise AdmissionGateError('Maintenance unit cgroup differs from its owner')
-        if pid:
-            process=self.host.path('/proc/'+str(pid))
-            actual=[item for item in (process/'cmdline').read_bytes().split(b'\0') if item]
-            if (actual!=[os.fsencode(item) for item in self.arguments] or
-                    (process/'exe').resolve()!=self.host.path('/usr/bin/python3').resolve() or
-                    '0::'+self.cgroup not in (process/'cgroup').read_text().splitlines()):
-                raise AdmissionGateError('Maintenance listener process differs from its owner')
-        if fields.get('NFileDescriptorStore') not in ('0','1'):raise AdmissionGateError('Invalid maintenance descriptor count')
-        if fields['NFileDescriptorStore']=='1':self.stored(fields)
-        if listener and (fields['NFileDescriptorStore']!='1' or not pid or not self.host.pid_owns_listener(pid,self.endpoint['port'],ipaddress.ip_address(self.endpoint['address']))):
-            raise AdmissionGateError('Maintenance service does not own its expected listener')
-        return pid
-
-    def start(self):
-        if self.intent() is None:return None
-        fields=self.facts()
-        if fields is None:
-            if self.job.get(self.key)!=self.intent():raise AdmissionGateError('Save maintenance ownership before starting its listener')
-            self.host.run(['systemd-run','--unit='+self.unit,'--slice=system.slice',
-                           '--property=Type=notify','--property=NotifyAccess=main','--property=User=root',
-                           '--property=KillMode=control-group','--property=Restart=no','--property=WorkingDirectory=/',
-                           '--property=RemainAfterExit=yes','--property=FileDescriptorStoreMax=1',
-                           '--property=FileDescriptorStorePreserve=yes','--property=CollectMode=inactive',
-                           '--',*self.arguments])
-            fields=self.facts()
-        if fields is None:raise AdmissionGateError('Maintenance listener exited before admission could be verified')
-        self.verify(fields,listener=True)
-        return self.socket_cgroup
-
-    def stop(self):
-        fields=self.facts()
-        if fields is None:return
-        self.verify(fields)
-        result=self.host.run(['systemctl','stop',self.unit],check=False)
-        after=self.facts()
-        if after is not None:
-            if result.returncode!=0 or self.verify(after):raise AdmissionGateError('Maintenance listener did not stop')
-            if after.get('Job',''):raise AdmissionGateError('Maintenance listener still has a pending job')
-            if after.get('ActiveState')=='failed':
-                self.host.run(['systemctl','reset-failed',self.unit]);after=self.facts()
-            if after is not None:
-                self.verify(after)
-                if after.get('ActiveState')!='inactive' or after.get('Job',''):raise AdmissionGateError('Maintenance listener is not inactive')
-                self.host.run(['systemctl','clean','--what=fdstore',self.unit]);after=self.facts()
-                if after is not None and (self.verify(after) or after['NFileDescriptorStore']!='0'):
-                    raise AdmissionGateError('Maintenance descriptor was not released')
-        events=self.host.path('/sys/fs/cgroup'+self.cgroup+'/cgroup.events')
-        if events.exists() and dict(line.split() for line in events.read_text().splitlines()).get('populated')!='0':
-            raise AdmissionGateError('Maintenance unit still has active processes')
-
-
-class MaintenanceUnit(ManagedMaintenanceSocket):
-    def __init__(self,host,job):
-        super().__init__(host,job,'page','maintenancePage');self.target=Path(job['source']['target']);self.token=None
-        self.socket_cgroup=self.cgroup
-    def intent(self):
-        pages=maintenance_pages(self.target)
-        if pages is None:return None
-        if self.token is None:self.token=maintenance_token(self.job,self.key)
-        return {'unit':self.unit,'source':str(self.target),'pages':{locale:hashlib.sha256(body).hexdigest() for locale,body in pages.items()},'token':self.token}
-    @property
-    def arguments(self):
-        return ['/usr/bin/python3','-I',self.program,'--serve-page',self.job['id'],str(self.target),self.endpoint['address'],str(self.endpoint['port']),str(self.intent()['token'])]
-
-
-class ListenerPinUnit(ManagedMaintenanceSocket):
-    def __init__(self,host,job):
-        super().__init__(host,job,'listener','maintenanceListener')
-    def intent(self):
-        value=self.job.get(self.key)
-        if value is None:return None
-        if not isinstance(value,dict) or value.get('unit')!=self.unit or not isinstance(value.get('listener'),dict):
-            raise AdmissionGateError('Invalid platform listener ownership')
-        maintenance_token(self.job,self.key)
-        return {'unit':self.unit,'listener':value['listener'],'token':value['token']}
-    @property
-    def arguments(self):
-        value=self.intent();encoded=base64.urlsafe_b64encode(json.dumps(value['listener'],sort_keys=True,separators=(',',':')).encode()).decode()
-        return ['/usr/bin/python3','-I',self.program,'--pin-listener',self.job['id'],encoded,str(value['token'])]
-    @property
-    def socket_cgroup(self):return self.intent()['listener']['cgroup']
-
-
-def duplicate_listener(value):
-    if sys.platform!='linux' or os.uname().machine not in ('x86_64','aarch64'):raise AdmissionGateError('Listener pinning requires the supported Linux host')
-    import ctypes,fcntl
-    pid=value['pid'];process=Path('/proc')/str(pid)
-    if process_started(process/'stat')!=value['started']:raise AdmissionGateError('Listener process identity changed')
-    descriptor=os.pidfd_open(pid)
-    try:
-        library=ctypes.CDLL(None,use_errno=True);copied=library.syscall(438,descriptor,value['fd'],0)
-        if copied<0:raise OSError(ctypes.get_errno(),'pidfd_getfd')
-    finally:os.close(descriptor)
-    try:
-        if os.fstat(copied).st_ino!=value['inode']:raise AdmissionGateError('Listener descriptor identity changed')
-        flags=fcntl.fcntl(copied,fcntl.F_GETFL);listener=socket.socket(fileno=copied);copied=None
-        try:
-            if fcntl.fcntl(listener.fileno(),fcntl.F_GETFL)!=flags:
-                fcntl.fcntl(listener.fileno(),fcntl.F_SETFL,flags);raise AdmissionGateError('Listener status flags must remain unchanged')
-            actual=listener.getsockname();address=ipaddress.ip_address(value['address'])
-            valid=(ipaddress.ip_address(actual[0])==address and actual[1]==value['port'] and
-                listener.getsockopt(socket.SOL_SOCKET,socket.SO_TYPE)==socket.SOCK_STREAM and
-                listener.getsockopt(socket.SOL_SOCKET,socket.SO_ACCEPTCONN)==1 and
-                listener.getsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT)==0 and
-                not (address.version==6 and address.is_unspecified and listener.getsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY)!=0))
-            if not valid:raise AdmissionGateError('Invalid exclusive maintenance listener')
-        except BaseException:listener.close();raise
-        return listener
-    finally:
-        if copied is not None:os.close(copied)
-
-
-def inspect_listener(inode,address,port):
-    if not inode.isdecimal() or not port.isdecimal():raise AdmissionGateError('Invalid stored listener')
-    for path in Path('/proc/1/fd').iterdir():
-        try:link=os.readlink(path)
-        except FileNotFoundError:continue
-        if link=='socket:['+inode+']':
-            with duplicate_listener({'pid':1,'fd':int(path.name),'inode':int(inode),'started':process_started(Path('/proc/1/stat')),'address':address,'port':int(port)}):
-                print(json.dumps({'inode':int(inode),'address':address,'port':int(port)}));return
-    raise AdmissionGateError('PID1 no longer holds the listener')
-
-
-def notify_listener(descriptor,name):
-    path=os.environ.get('NOTIFY_SOCKET')
-    if not path:raise AdmissionGateError('Maintenance listener requires its managed unit')
-    with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as notification:
-        notification.connect('\0'+path[1:] if path.startswith('@') else path)
-        notification.sendmsg([('FDSTORE=1\nFDPOLL=0\nFDNAME='+name+'\nREADY=1').encode()],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[descriptor]))])
-
-
-def stopped_event():
-    stopped=threading.Event()
-    for name in (signal.SIGTERM,signal.SIGINT):signal.signal(name,lambda *_:stopped.set())
-    return stopped
-
-
-def pin_listener(operation,encoded,token):
-    if str(uuid.UUID(operation))!=operation or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:
-        raise AdmissionGateError('Invalid listener pin request')
-    value=json.loads(base64.urlsafe_b64decode(encoded));process=Path('/proc')/str(value['pid'])
-    uid=int(next(line for line in (process/'status').read_text().splitlines() if line.startswith('Uid:')).split()[1])
-    if (uid!=value['uid'] or (process/'exe').resolve()!=Path(value['executable']).resolve() or
-            (process/'cwd').resolve()!=Path(value['directory']) or '0::'+value['cgroup'] not in (process/'cgroup').read_text().splitlines()):
-        raise AdmissionGateError('Platform listener differs from its verified source')
-    stopped=stopped_event()
-    with duplicate_listener(value) as listener:
-        notify_listener(listener.fileno(),'listener-'+operation+'-'+token);stopped.wait()
-
-
-def maintenance_serve(operation,target,address,port,token):
-    if str(uuid.UUID(operation))!=operation or not port.isdecimal() or not 1<=int(port)<=65535 or not token.isdecimal() or not 0<int(token)<2**32 or int(token)==MARK:
-        raise AdmissionGateError('Invalid maintenance listener request')
-    pages=maintenance_pages(Path(target))
-    if pages is None:raise AdmissionGateError('Installed source has no maintenance pages')
-    stopped=stopped_event()
-    listener=MaintenanceListener(pages,address,int(port))
-    try:
-        notify_listener(listener.server.socket.fileno(),'page-'+operation+'-'+token)
-        stopped.wait()
-    finally:listener.close()
-
-class LinuxAdmissionGate:
-    def __init__(self, host=None):
-        self.host = host
-
-    def run(self,args,**kwargs):
-        command = ['nft', *args]
-        result = self.host.run(command, check=False, **kwargs) if self.host else subprocess.run(command,capture_output=True,text=True,**kwargs)
-        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')
-        return result.stdout
-
-    def table_exists(self):
-        tables=json.loads(self.run(['-j','list','tables']))['nftables']
-        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)
-        if found:
-            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']
-            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):
-                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')
-        return found
-
-    def rules(self,ports,existing,*,page_cgroup=None,page_token=None):
-        if not isinstance(ports,list) or len(ports) not in (2,3):raise AdmissionGateError('Invalid protected admission inventory')
-        selectors=[];public=[]
-        for index,endpoint in enumerate(ports):
-            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:
-                raise AdmissionGateError('Invalid protected admission port')
-            address=ipaddress.ip_address(endpoint['address'])
-            family='ip' if address.version==4 else 'ip6'
-            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)
-            selected=[destination+' tcp dport '+str(endpoint['port'])]
-            # A wildcard IPv6 listener can accept mapped IPv4 sockets.
-            if address.version==6 and address.is_unspecified:selected.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))
-            selectors.extend(selected)
-            if index==0:public=selected
-        outgoing='\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)
-        incoming='\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)
-        pages=''
-        if page_cgroup is not None:
-            if type(page_token) is not int or not 0<page_token<2**32 or page_token==MARK:raise AdmissionGateError('Invalid maintenance connection identity')
-            if (not isinstance(page_cgroup,str) or page_cgroup=='/' or not re.fullmatch(r'/[a-zA-Z0-9_@./-]+',page_cgroup) or
-                    str(PurePosixPath(page_cgroup))!=page_cgroup or any(part in ('.','..') for part in page_cgroup.split('/')[1:])):
-                raise AdmissionGateError('Invalid maintenance socket cgroup')
-            group=page_cgroup[1:];level=len(group.split('/'))
-            if level>=255:raise AdmissionGateError('Maintenance socket cgroup is too deep')
-            for selected in public:
-                pages+='  '+selected+' ct mark != '+str(MARK)+' tcp flags & (syn | ack) == syn ct mark set 0\n'
-                owner=selected+' ct mark != '+str(MARK)+' socket cgroupv2 level '+str(level)+' '+json.dumps(group)
-                # Missing next ancestors break this rule; existing descendants cannot be the root cgroup.
-                pages+='  '+owner+' socket cgroupv2 level '+str(level+1)+' != "/" counter reject with tcp reset\n'
-                pages+='  '+owner+' tcp flags & (syn | ack) == syn ct mark set '+str(page_token)+' counter accept\n'
-                pages+='  '+selected+' ct mark '+str(page_token)+' counter accept\n'
-        return (('delete table inet '+TABLE+'\n') if existing else '')+f'''table inet {TABLE} {{
- comment "{COMMENT}"
- chain readiness {{
-  type filter hook output priority -150; policy accept;
-{outgoing}
- }}
- chain work_admission {{
-  type filter hook input priority -150; policy accept;
-{pages}{incoming}
- }}
-}}
-'''
-
-    def batch(self,text,check=False):
-        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:
-            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()
-            self.run((['--check'] if check else [])+['-f',file.name])
-
-    def preflight(self,ports):
-        existing=self.table_exists()
-        self.batch(self.rules(ports,existing),check=True)
-        # Validate the supported socket expression without granting a live exception.
-        self.batch(self.rules(ports,existing,page_cgroup='/system.slice',page_token=1),check=True)
-    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))
-    def show_page(self,ports,cgroup,token):self.batch(self.rules(ports,self.table_exists(),page_cgroup=cgroup,page_token=token))
-    def open(self):
-        if self.table_exists():self.batch('delete table inet '+TABLE+'\n')
-
-    def install(self,host,uid,program=None):
-        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')
-        if program is None:program=Path(__file__).read_text()
-        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)
-        unit='[Unit]\nDescription=dsh-phalanx upgrade admission\nBefore=user@'+str(uid)+'.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\n'
-        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)
-        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',
-                    '[Unit]\nRequires=dsh-phalanx-maintenance.service\nAfter=dsh-phalanx-maintenance.service\n',0o644)
-        host.run(['systemctl','daemon-reload'])
-        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])
-
-
-def protected_json(path):
-    info=path.lstat()
-    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')
-    return json.loads(path.read_text())
-
-
-def restore_boot_admission():
-    path=Path(MARKER); gate=LinuxAdmissionGate()
-    if path.exists() or path.is_symlink():
-        value=protected_json(path)
-        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')
-        gate.close(value['ports']); return
-    # Platform operations share the same admission owner and survive the window
-    # between durable intent and marker publication.
-    operations=Path('/var/lib/dsh-phalanx-updater/maintenance-operation.json')
-    if operations.exists() or operations.is_symlink():
-        root=operations.parent
-        info=root.lstat()
-        if root.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid platform operation owner')
-        job=protected_json(operations)
-        if job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):
-            raise AdmissionGateError('Unknown platform operation admission protocol')
-        if job['phase'] not in ('succeeded','restored'):
-            value=json.loads(job['marker'])
-            if value.get('schema')!=1 or value.get('operation')!=job['id']:raise AdmissionGateError('Invalid platform operation marker')
-            gate.close(value['ports']);return
-    # The journal precedes the marker and all stop/switch effects. A crash in
-    # that window must still restore admission before the managed user starts.
-    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'
-    if pointer.exists():
-        for carrier in (root,pointer):
-            info=carrier.lstat()
-            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')
-        operation=pointer.read_text().strip()
-        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')
-        directory=root/operation
-        info=directory.lstat()
-        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')
-        job=protected_json(directory/'operation.json')
-        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):
-            values=job['source']['values']
-            gate.close(protected_ports(values)); return
-        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):
-            raise AdmissionGateError('Unknown admission operation phase')
-    gate.open()
-
-
-if __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':
-    try:
-        if len(sys.argv)==1:restore_boot_admission()
-        elif len(sys.argv)==7 and sys.argv[1]=='--serve-page':maintenance_serve(*sys.argv[2:])
-        elif len(sys.argv)==5 and sys.argv[1]=='--inspect-listener':inspect_listener(*sys.argv[2:])
-        elif len(sys.argv)==5 and sys.argv[1]=='--pin-listener':pin_listener(*sys.argv[2:])
-        else:raise AdmissionGateError('Unknown maintenance entry request')
-    except Exception:
-        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)
-        sys.exit(1)
 
 """Verified immutable root executor banks and their fixed systemd installation."""
 import hashlib
@@ -3441,44 +3966,70 @@ BANKS='/opt/dsh-phalanx/updaters'
 EXECUTOR_UNIT='/etc/systemd/system/dsh-phalanx-updater.service'
 GLOBAL_CLI='/usr/local/bin/dsh-phalanx'
 GLOBAL_CLI_PROGRAM='#!/bin/sh\n# dsh-phalanx managed deployment command\nexec /usr/bin/python3 -B /opt/dsh-phalanx/updater/installer_deployment_cli.py "$@"\n'
-MODULES=globals().get('EXECUTOR_MODULES') or json.loads(Path(__file__).with_name('executor-files.json').read_text())
-PRE_UNINSTALL_MODULES=[name for name in MODULES if name!='installer_uninstall.py']
-PRE_DEPLOYMENT_MODULES=[name for name in PRE_UNINSTALL_MODULES if name not in ('installer_deployment.py','installer_deployment_cli.py')]
-PRE_QUESTIONS_MODULES=[name for name in PRE_DEPLOYMENT_MODULES if name!='installer_questions.py']
-PRE_OPERATIONS_MODULES=[name for name in PRE_QUESTIONS_MODULES if name!='installer_operations.py']
-PRE_CLEANUP_MODULES=[name for name in PRE_OPERATIONS_MODULES if name!='installer_cleanup.py']
-LEGACY_MODULES=[name for name in PRE_CLEANUP_MODULES if name not in ('installer_storage.py','installer_executor_bootstrap.py')]
-REQUIRED=set(MODULES)|{'updater.service.in','executor-files.json'}
+EXECUTOR_MAX_FILES=64
+EXECUTOR_FIXED_FILES=frozenset(('updater.py','updater.service.in','executor-files.json'))
+EXECUTOR_MODULE_NAME=re.compile(r'installer_[a-z_]+\.py')
+
+
+def validate_declared_modules(declared):
+    if (not isinstance(declared,list) or not declared or
+            any(not isinstance(name,str) for name in declared) or
+            len(set(declared))!=len(declared) or 'updater.py' not in declared):
+        raise InstallError('Executor dependency inventory differs from its protocol')
+    for name in declared:
+        if name!='updater.py' and not EXECUTOR_MODULE_NAME.fullmatch(name):
+            raise InstallError('Unsupported executor module name')
+    return declared
+
+
+def validate_executor_manifest(value,commit=None):
+    if not isinstance(value,dict) or type(value.get('schema')) is not int or value['schema']!=1 or not isinstance(value.get('sourceCommit'),str) or not re.fullmatch('[a-f0-9]{40}',value['sourceCommit']):
+        raise InstallError('Unsupported executor package protocol')
+    if commit is not None and value['sourceCommit']!=commit:
+        raise InstallError('Executor and selected platform source differ')
+    files=value.get('files')
+    if not isinstance(files,dict) or not files or len(files)>EXECUTOR_MAX_FILES or not EXECUTOR_FIXED_FILES.issubset(files):
+        raise InstallError('Executor package inventory is incomplete or unexpected')
+    for name,digest in files.items():
+        if not isinstance(name,str) or (name not in EXECUTOR_FIXED_FILES and not EXECUTOR_MODULE_NAME.fullmatch(name)):
+            raise InstallError('Unsupported executor module name')
+        if not isinstance(digest,str) or not re.fullmatch('[a-f0-9]{64}',digest):
+            raise InstallError('Executor package checksum mismatch')
+    return value
 
 
 def executor_package(directory,commit=None):
     directory=Path(directory)
-    if directory.is_symlink() or not directory.is_dir():raise InstallError('Executor package must be an independent verified directory')
+    if directory.is_symlink() or not directory.is_dir():
+        raise InstallError('Executor package must be an independent verified directory')
     file=directory/'manifest.json'
-    if file.is_symlink() or not file.is_file():raise InstallError('Executor package inventory is missing')
-    raw=file.read_bytes();value=json.loads(raw)
-    if not isinstance(value,dict) or value.get('schema')!=1 or not isinstance(value.get('sourceCommit'),str) or not re.fullmatch('[a-f0-9]{40}',value['sourceCommit']):
-        raise InstallError('Unsupported executor package protocol')
-    if commit is not None and value['sourceCommit']!=commit:raise InstallError('Executor and selected platform source differ')
-    files=value.get('files')
-    declared=json.loads((directory/'executor-files.json').read_text())
-    if declared not in (MODULES,PRE_UNINSTALL_MODULES,PRE_DEPLOYMENT_MODULES,PRE_QUESTIONS_MODULES,PRE_OPERATIONS_MODULES,PRE_CLEANUP_MODULES,LEGACY_MODULES):raise InstallError('Executor dependency inventory differs from its protocol')
+    if file.is_symlink() or not file.is_file():
+        raise InstallError('Executor package inventory is missing')
+    raw=file.read_bytes()
+    value=validate_executor_manifest(json.loads(raw),commit)
+    files=value['files']
+    declared_file=directory/'executor-files.json'
+    if declared_file.is_symlink() or not declared_file.is_file():
+        raise InstallError('Executor package inventory is incomplete or unexpected')
+    declared=validate_declared_modules(json.loads(declared_file.read_text()))
     required=set(declared)|{'updater.service.in','executor-files.json'}
-    if not isinstance(files,dict) or required!=set(files) or len(files)>32 or set(path.name for path in directory.iterdir())!=set(files)|{'manifest.json'}:
+    if required!=set(files) or set(path.name for path in directory.iterdir())!=set(files)|{'manifest.json'}:
         raise InstallError('Executor package inventory is incomplete or unexpected')
     for name,digest in files.items():
-        if name not in ('updater.py','updater.service.in','executor-files.json') and not re.fullmatch(r'installer_[a-z_]+\.py',name):raise InstallError('Unsupported executor module name')
         path=directory/name
-        if not isinstance(digest,str) or not re.fullmatch('[a-f0-9]{64}',digest) or path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
+        if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
             raise InstallError('Executor package checksum mismatch')
-        if name.endswith('.py'):compile(path.read_bytes(),name,'exec')
+        if name.endswith('.py'):
+            compile(path.read_bytes(),name,'exec')
     return {'sourceCommit':value['sourceCommit'],'packageSha256':hashlib.sha256(raw).hexdigest()}
 
 
 def installed_executor(host):
     current=host.path(EXECUTOR)
-    if not current.exists() and not current.is_symlink():return None
-    if not current.is_symlink() or current.resolve().parent!=host.path(BANKS):raise InstallError('Executor path is not a managed immutable bank')
+    if not current.exists() and not current.is_symlink():
+        return None
+    if not current.is_symlink() or current.resolve().parent!=host.path(BANKS):
+        raise InstallError('Executor path is not a managed immutable bank')
     return executor_package(current.resolve())
 
 
@@ -3489,7 +4040,8 @@ def executor_pointer(host):
 
 def verify_global_cli_path(host):
     path=host.path(GLOBAL_CLI)
-    if not path.exists() and not path.is_symlink():return
+    if not path.exists() and not path.is_symlink():
+        return
     if path.is_symlink() or not path.is_file() or path.stat().st_uid!=os.geteuid() or path.read_text()!=GLOBAL_CLI_PROGRAM:
         raise InstallError('The global dsh-phalanx command path belongs to another program; retain it and resolve the conflict')
 
@@ -3503,53 +4055,76 @@ def install_global_cli(host):
 
 
 def install_executor(host,uid,gid,target,commit,*,initial_only=False,activate=False,repair=False):
-    source=Path(target)/'updater';identity=executor_package(source,commit)
-    try:current=installed_executor(host)
+    source=Path(target)/'updater'
+    identity=executor_package(source,commit)
+    try:
+        current=installed_executor(host)
     except (InstallError,OSError,ValueError,SyntaxError):
         pointer=host.path(EXECUTOR)
-        if not repair or not pointer.is_symlink() or pointer.resolve().parent!=host.path(BANKS):raise
+        if not repair or not pointer.is_symlink() or pointer.resolve().parent!=host.path(BANKS):
+            raise
         current=None
-    if initial_only and current is not None:return current
+    if initial_only and current is not None:
+        return current
     management=(source/'installer_deployment_cli.py').is_file()
-    if management:verify_global_cli_path(host)
+    if management:
+        verify_global_cli_path(host)
     host.mkdir(BANKS)
     if current!=identity:
         parent=host.path(BANKS)
         with tempfile.TemporaryDirectory(prefix='.prepare-',dir=parent) as temporary:
-            for path in source.iterdir():host.atomic(str((Path(temporary)/path.name).relative_to(host.root)),path.read_text(),0o644)
+            for path in source.iterdir():
+                host.atomic(str((Path(temporary)/path.name).relative_to(host.root)),path.read_text(),0o644)
             executor_package(temporary,commit)
             destination=parent/(identity['sourceCommit']+'-'+identity['packageSha256'][:16]+'-'+uuid.uuid4().hex[:8])
-            Path(temporary).chmod(0o755);host.sync_directory(temporary);os.rename(temporary,destination);host.sync_directory(parent)
-        replacement=host.path(EXECUTOR+'.next');replacement.unlink(missing_ok=True);replacement.symlink_to(destination)
-        os.replace(replacement,host.path(EXECUTOR));host.sync_directory(host.path('/opt/dsh-phalanx'))
+            Path(temporary).chmod(0o755)
+            host.sync_directory(temporary)
+            os.rename(temporary,destination)
+            host.sync_directory(parent)
+        replacement=host.path(EXECUTOR+'.next')
+        replacement.unlink(missing_ok=True)
+        replacement.symlink_to(destination)
+        os.replace(replacement,host.path(EXECUTOR))
+        host.sync_directory(host.path('/opt/dsh-phalanx'))
     LinuxAdmissionGate().install(host,uid,program=(source/'installer_upgrade_gate.py').read_text())
     unit=(source/'updater.service.in').read_text().replace('@UID@',str(uid)).replace('@GID@',str(gid))
-    if '@UID@' in unit or '@GID@' in unit:raise InstallError('Executor unit identity could not be bound')
+    if '@UID@' in unit or '@GID@' in unit:
+        raise InstallError('Executor unit identity could not be bound')
     host.atomic(EXECUTOR_UNIT,unit,0o644)
-    if management:install_global_cli(host)
-    host.run(['systemctl','daemon-reload']);host.run(['systemctl','enable','dsh-phalanx-updater.service'])
-    if activate:activate_executor(host)
+    if management:
+        install_global_cli(host)
+    host.run(['systemctl','daemon-reload'])
+    host.run(['systemctl','enable','dsh-phalanx-updater.service'])
+    if activate:
+        activate_executor(host)
     return identity
 
 
 def activate_executor(host,*,restart=False):
     host.run(['systemctl','reset-failed','dsh-phalanx-updater.service'],check=False)
-    if restart:host.run(['systemctl','restart','--no-block','dsh-phalanx-updater.service'])
-    else:host.run(['systemctl','start','dsh-phalanx-updater.service'])
+    if restart:
+        host.run(['systemctl','restart','--no-block','dsh-phalanx-updater.service'])
+    else:
+        host.run(['systemctl','start','dsh-phalanx-updater.service'])
 
 
 def ensure_executor_identity(host,uid,gid,expected,packages):
     try:
-        if installed_executor(host)==expected:return
-    except (InstallError,OSError,ValueError,SyntaxError):pass
+        if installed_executor(host)==expected:
+            return
+    except (InstallError,OSError,ValueError,SyntaxError):
+        pass
     # Only already selected, checksum-verified release packages can repair a
     # damaged bank. The expected prior identity is recorded with its backup.
     for target,commit in packages:
-        try:identity=executor_package(Path(target)/'updater',commit)
-        except (InstallError,OSError,ValueError,SyntaxError):continue
+        try:
+            identity=executor_package(Path(target)/'updater',commit)
+        except (InstallError,OSError,ValueError,SyntaxError):
+            continue
         if identity==expected:
             # Preserve damaged banks and the old pointer until publication.
-            install_executor(host,uid,gid,target,commit,repair=True);return
+            install_executor(host,uid,gid,target,commit,repair=True)
+            return
     raise InstallError('Verified executor package unavailable; keep maintenance closed and repair the recorded release package before recovery')
 
 """Peak write capacity, grouped by the actual destination filesystem."""
@@ -3566,43 +4141,58 @@ def capacity_plan(writes,probe,*,reserve=16*MIB):
     locations={}
     for write in writes:
         size=write['bytes']
-        if type(size) is not int or size<0:raise InstallError('Cannot determine required disk capacity',code='disk.inspection-failed')
+        if type(size) is not int or size<0:
+            raise InstallError('Cannot determine required disk capacity',code='disk.inspection-failed')
         device,available=probe(write['path'])
-        if device is None or type(available) is not int or available<0:raise InstallError('Cannot determine available disk capacity',code='disk.inspection-failed')
+        if device is None or type(available) is not int or available<0:
+            raise InstallError('Cannot determine available disk capacity',code='disk.inspection-failed')
         row=locations.setdefault(device,{'paths':[],'purposes':[],'availableBytes':available,'requiredBytes':0})
         row['availableBytes']=min(row['availableBytes'],available)
-        if write['path'] not in row['paths']:row['paths'].append(write['path'])
-        if write['purpose'] not in row['purposes']:row['purposes'].append(write['purpose'])
-        if size>0 and row['requiredBytes']==0:row['requiredBytes']+=reserve
+        if write['path'] not in row['paths']:
+            row['paths'].append(write['path'])
+        if write['purpose'] not in row['purposes']:
+            row['purposes'].append(write['purpose'])
+        if size>0 and row['requiredBytes']==0:
+            row['requiredBytes']+=reserve
         row['requiredBytes']+=size
     rows=list(locations.values())
-    for row in rows:row['shortfallBytes']=max(0,row['requiredBytes']-row['availableBytes'])
+    for row in rows:
+        row['shortfallBytes']=max(0,row['requiredBytes']-row['availableBytes'])
     return {'sufficient':all(row['shortfallBytes']==0 for row in rows),'locations':rows}
 
 
 def filesystem_capacity(path):
     current=Path(path)
     while not current.exists():
-        if current==current.parent:raise InstallError('Capacity destination has no existing parent',code='disk.inspection-failed')
+        if current==current.parent:
+            raise InstallError('Capacity destination has no existing parent',code='disk.inspection-failed')
         current=current.parent
     try:
-        facts=os.stat(current);space=os.statvfs(current)
+        facts=os.stat(current)
+        space=os.statvfs(current)
         return facts.st_dev,space.f_bavail*space.f_frsize
-    except OSError as error:raise InstallError('Cannot inspect destination filesystem capacity',code='disk.inspection-failed') from error
+    except OSError as error:
+        raise InstallError('Cannot inspect destination filesystem capacity',code='disk.inspection-failed') from error
 
 
 def allocated_files(path):
     """Observe backup occupancy without following links or removing anything."""
     root=Path(path)
-    if not root.exists():return 0
-    seen=set();total=0
+    if not root.exists():
+        return 0
+    seen=set()
+    total=0
     def visit(item):
         nonlocal total
-        info=item.lstat();identity=(info.st_dev,info.st_ino)
-        if identity in seen:return
-        seen.add(identity);total+=info.st_blocks*512
+        info=item.lstat()
+        identity=(info.st_dev,info.st_ino)
+        if identity in seen:
+            return
+        seen.add(identity)
+        total+=info.st_blocks*512
         if item.is_dir() and not item.is_symlink():
-            for child in item.iterdir():visit(child)
+            for child in item.iterdir():
+                visit(child)
     visit(root)
     return total
 
@@ -3613,20 +4203,25 @@ def backup_capacity(root,rebuildable=(),*,exclude=True):
     def visit(path,relative='.'):
         nonlocal total
         info=path.lstat()
-        if stat.S_ISREG(info.st_mode):total+=((info.st_size+4095)//4096)*4096
+        if stat.S_ISREG(info.st_mode):
+            total+=((info.st_size+4095)//4096)*4096
         elif stat.S_ISDIR(info.st_mode):
             total+=4096
             for child in path.iterdir():
                 key=child.name if relative=='.' else relative+'/'+child.name
-                if not excluded_path(key,excluded):visit(child,key)
-        elif stat.S_ISLNK(info.st_mode):total+=4096
-        else:raise InstallError('Platform backup rejects special files',code='disk.inspection-failed')
+                if not excluded_path(key,excluded):
+                    visit(child,key)
+        elif stat.S_ISLNK(info.st_mode):
+            total+=4096
+        else:
+            raise InstallError('Platform backup rejects special files',code='disk.inspection-failed')
     visit(root)
     return total
 
 
 def missing_image_capacity(layers,known_chains):
-    if not isinstance(layers,list) or not layers:raise InstallError('Image layer capacity facts are missing',code='disk.inspection-failed')
+    if not isinstance(layers,list) or not layers:
+        raise InstallError('Image layer capacity facts are missing',code='disk.inspection-failed')
     for layer in layers:
         if (not isinstance(layer,dict) or not isinstance(layer.get('diffId'),str) or
                 not re.fullmatch('sha256:[a-f0-9]{64}',layer['diffId']) or
@@ -3634,10 +4229,12 @@ def missing_image_capacity(layers,known_chains):
             raise InstallError('Image layer capacity facts are invalid',code='disk.inspection-failed')
     reused=0
     for chain in known_chains:
-        if not isinstance(chain,list) or not all(isinstance(value,str) for value in chain):raise InstallError('Cannot inspect installed image layers',code='disk.inspection-failed')
+        if not isinstance(chain,list) or not all(isinstance(value,str) for value in chain):
+            raise InstallError('Cannot inspect installed image layers',code='disk.inspection-failed')
         count=0
         for layer,known in zip(layers,chain):
-            if layer['diffId']!=known:break
+            if layer['diffId']!=known:
+                break
             count+=1
         reused=max(reused,count)
     missing=layers[reused:]
@@ -3645,26 +4242,34 @@ def missing_image_capacity(layers,known_chains):
 
 
 class UpgradeStorage:
-    def __init__(self,host,probe=filesystem_capacity):self.host=host;self.probe=probe
+    def __init__(self,host,probe=filesystem_capacity):
+        self.host=host
+        self.probe=probe
 
     def plan(self,job,directory,bundle=None,*,carriers=()):
-        target=job['target']['manifest'];sizes=target.get('storage')
+        target=job['target']['manifest']
+        sizes=target.get('storage')
         keys=('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')
         if not isinstance(sizes,dict) or any(type(sizes.get(key)) is not int or not 0<sizes[key]<=2**53-1 for key in keys):
             raise InstallError('Release does not declare verified storage requirements',code='disk.inspection-failed')
-        source=job['source'];uid=source['uid']
+        source=job['source']
+        uid=source['uid']
         store=json.loads(self.host.user(uid,['podman','info','--format','json']).stdout).get('store',{})
-        graph=store.get('graphRoot');image_tmp=store.get('imageCopyTmpDir')
+        graph=store.get('graphRoot')
+        image_tmp=store.get('imageCopyTmpDir')
         if any(not isinstance(path,str) or not Path(path).is_absolute() for path in (graph,image_tmp)):
             raise InstallError('Cannot determine rootless image storage locations',code='disk.inspection-failed')
         exists=self.host.user(uid,['podman','image','exists',target['image']['reference']],check=False).returncode
-        if exists not in (0,1):raise InstallError('Cannot inspect image reuse for capacity planning',code='disk.inspection-failed')
+        if exists not in (0,1):
+            raise InstallError('Cannot inspect image reuse for capacity planning',code='disk.inspection-failed')
         download,expanded=(0,0) if exists==0 else (sizes['imageDownloadBytes'],sizes['imageExpandedBytes'])
         if exists==1 and 'imageLayers' in sizes:
             installed=json.loads(self.host.user(uid,['podman','image','inspect',source['manifest']['image']['reference']]).stdout)
-            if not isinstance(installed,list) or len(installed)!=1:raise InstallError('Cannot inspect installed image layers',code='disk.inspection-failed')
+            if not isinstance(installed,list) or len(installed)!=1:
+                raise InstallError('Cannot inspect installed image layers',code='disk.inspection-failed')
             download,expanded=missing_image_capacity(sizes['imageLayers'],[installed[0].get('RootFS',{}).get('Layers')])
-            if bundle:download=sizes['imageDownloadBytes']
+            if bundle:
+                download=sizes['imageDownloadBytes']
 
         cache=self.host.path('/var/cache/dsh-phalanx')
         staged=self.host.path('/opt/dsh-phalanx/releases/'+target['tag']+'-'+target['files'][asset_names(target)[0]][:16])
@@ -3687,15 +4292,16 @@ class UpgradeStorage:
         return result
 
     def check(self,job,directory,bundle=None,*,carriers=()):
-        result=self.plan(job,directory,bundle,carriers=carriers);job['space']=result
+        result=self.plan(job,directory,bundle,carriers=carriers)
+        job['space']=result
         for row in result['locations']:
             self.host.tell('Disk capacity '+', '.join(row['paths'])+': required '+str(row['requiredBytes'])+' bytes; available '+str(row['availableBytes'])+' bytes')
-        if not result['sufficient']:raise InstallError('Insufficient disk space before download or service stop; inspect the capacity report',code='disk.insufficient')
+        if not result['sufficient']:
+            raise InstallError('Insufficient disk space before download or service stop; inspect the capacity report',code='disk.insufficient')
         return result
 
 """Conservative disposal of release resources with protected installation receipts."""
 import json
-import os
 from pathlib import Path
 import re
 import shutil
@@ -3703,11 +4309,13 @@ import stat
 import uuid
 
 
-def release_identity(manifest):return (manifest['commit'],manifest['files'][asset_names(manifest)[0]],manifest['image']['digest'])
+def release_identity(manifest):
+    return (manifest['commit'],manifest['files'][asset_names(manifest)[0]],manifest['image']['digest'])
 
 
 def known_manifest(value):
-    if not isinstance(value,dict):return False
+    if not isinstance(value,dict):
+        return False
     try:
         image_identity(value)
         return (candidate_identity(value) and
@@ -3716,14 +4324,18 @@ def known_manifest(value):
                 re.fullmatch('sha256:[a-f0-9]{64}',value['image']['digest']) and
                 value['image']['reference']==IMAGE+'@'+value['image']['digest'] and
                 value['image']['name']==IMAGE and value['image']['tag']==candidate_image_tag(value['tag']))
-    except (KeyError,TypeError,InstallError):return False
+    except (KeyError,TypeError,InstallError):
+        return False
 
 
 def receipt_manifest(source):
-    if not isinstance(source,dict) or not known_manifest(source.get('manifest')):return None
-    manifest=source['manifest'];receipt=source.get('receipt',{})
+    if not isinstance(source,dict) or not known_manifest(source.get('manifest')):
+        return None
+    manifest=source['manifest']
+    receipt=source.get('receipt',{})
     if (receipt.get('version') in (manifest['tag'],'v'+manifest['targetVersion']) and receipt.get('candidate')==manifest['tag'] and receipt.get('commit')==manifest['commit'] and
-            receipt.get('platformSha256')==manifest['files'][asset_names(manifest)[0]] and receipt.get('imageDigest')==manifest['image']['digest']):return manifest
+            receipt.get('platformSha256')==manifest['files'][asset_names(manifest)[0]] and receipt.get('imageDigest')==manifest['image']['digest']):
+        return manifest
     return None
 
 
@@ -3731,78 +4343,115 @@ def allocation(paths):
     """Only candidate inodes, deduplicated across shared image layers and links."""
     entries={}
     def visit(path):
-        try:info=path.lstat()
-        except FileNotFoundError:return
+        try:
+            info=path.lstat()
+        except FileNotFoundError:
+            return
         key=(info.st_dev,info.st_ino)
-        if key in entries:entries[key]['paths'].add(str(path));return
+        if key in entries:
+            entries[key]['paths'].add(str(path))
+            return
         entries[key]={'paths':{str(path)},'bytes':info.st_blocks*512,'links':info.st_nlink,'directory':stat.S_ISDIR(info.st_mode)}
         if stat.S_ISDIR(info.st_mode):
-            for child in path.iterdir():visit(child)
-    for path in paths:visit(Path(path))
+            for child in path.iterdir():
+                visit(child)
+    for path in paths:
+        visit(Path(path))
     return entries
 
 
 def released(before):
     total=0
     for (device,inode),entry in before.items():
-        if not entry['directory'] and entry['links']>len(entry['paths']):continue
+        if not entry['directory'] and entry['links']>len(entry['paths']):
+            continue
         retained=False
         for name in entry['paths']:
             try:
                 info=Path(name).lstat()
-                if (info.st_dev,info.st_ino)==(device,inode):retained=True;break
-            except FileNotFoundError:pass
-        if not retained:total+=entry['bytes']
+                if (info.st_dev,info.st_ino)==(device,inode):
+                    retained=True
+                    break
+            except FileNotFoundError:
+                pass
+        if not retained:
+            total+=entry['bytes']
     return total
 
 
 class UpgradeCleanup:
-    def __init__(self,host,journal):self.host=host;self.journal=Path(journal)
+    def __init__(self,host,journal):
+        self.host=host
+        self.journal=Path(journal)
 
     def inventory(self,source):
         current=receipt_manifest(source)
-        if current is None:raise InstallError('Cannot verify current installation ownership')
-        known={release_identity(current):current};protected={release_identity(current):'current version'};successes=[];records=[]
+        if current is None:
+            raise InstallError('Cannot verify current installation ownership')
+        known={release_identity(current):current}
+        protected={release_identity(current):'current version'}
+        successes=[]
+        records=[]
         owner=self.journal.stat().st_uid
         for directory in self.journal.iterdir():
-            if not directory.is_dir() and not directory.is_symlink():continue
-            if directory.is_symlink():raise InstallError('Unverified update journal; keep resources for recovery')
+            if not directory.is_dir() and not directory.is_symlink():
+                continue
+            if directory.is_symlink():
+                raise InstallError('Unverified update journal; keep resources for recovery')
             file=directory/'operation.json'
-            if file.is_symlink() or not file.is_file():raise InstallError('Incomplete update journal; keep resources for recovery')
+            if file.is_symlink() or not file.is_file():
+                raise InstallError('Incomplete update journal; keep resources for recovery')
             info=file.stat()
-            if info.st_uid!=owner or info.st_mode & 0o022:raise InstallError('Unverified update journal ownership')
-            try:record=json.loads(file.read_text())
-            except (OSError,ValueError) as error:raise InstallError('Unreadable update journal; keep resources for recovery') from error
-            if not isinstance(record,dict) or record.get('id')!=directory.name:raise InstallError('Inconsistent update journal identity')
+            if info.st_uid!=owner or info.st_mode & 0o022:
+                raise InstallError('Unverified update journal ownership')
+            try:
+                record=json.loads(file.read_text())
+            except (OSError,ValueError) as error:
+                raise InstallError('Unreadable update journal; keep resources for recovery') from error
+            if not isinstance(record,dict) or record.get('id')!=directory.name:
+                raise InstallError('Inconsistent update journal identity')
             records.append((info.st_mtime_ns,record))
         for _,record in sorted(records,key=lambda row:row[0]):
-            old=receipt_manifest(record.get('source'));new=record.get('target',{}).get('manifest')
-            if old is None or record.get('source',{}).get('uid')!=source['uid']:raise InstallError('Unverified historical installation receipt')
-            known[release_identity(old)]=old;successes.append(old)
+            old=receipt_manifest(record.get('source'))
+            new=record.get('target',{}).get('manifest')
+            if old is None or record.get('source',{}).get('uid')!=source['uid']:
+                raise InstallError('Unverified historical installation receipt')
+            known[release_identity(old)]=old
+            successes.append(old)
             if known_manifest(new):
                 known[release_identity(new)]=new
-                if record.get('committed') or record.get('phase')=='succeeded':successes.append(new)
+                if record.get('committed') or record.get('phase')=='succeeded':
+                    successes.append(new)
             if record.get('phase') not in TERMINAL or record.get('phase')=='recovery-failed':
                 protected[release_identity(old)]='unfinished update or recovery'
-                if known_manifest(new):protected[release_identity(new)]='prepared or unfinished target'
+                if known_manifest(new):
+                    protected[release_identity(new)]='prepared or unfinished target'
         for manifest in reversed(successes):
-            if release_identity(manifest)!=release_identity(current):protected.setdefault(release_identity(manifest),'most recent successful previous version');break
+            if release_identity(manifest)!=release_identity(current):
+                protected.setdefault(release_identity(manifest),'most recent successful previous version')
+                break
         return known,protected
 
     def container_references(self,uid):
         rows=json.loads(self.host.user(uid,['podman','ps','--all','--format','json']).stdout)
-        if not isinstance(rows,list):raise InstallError('Cannot inspect all container references')
-        refs=set();mounts=set()
+        if not isinstance(rows,list):
+            raise InstallError('Cannot inspect all container references')
+        refs=set()
+        mounts=set()
         for row in rows:
             container=row.get('Id',row.get('ID'))
-            if not isinstance(container,str) or not re.fullmatch('[a-f0-9]{12,64}',container):raise InstallError('Container identity is unavailable')
+            if not isinstance(container,str) or not re.fullmatch('[a-f0-9]{12,64}',container):
+                raise InstallError('Container identity is unavailable')
             facts=json.loads(self.host.user(uid,['podman','container','inspect',container]).stdout)
-            if not isinstance(facts,list) or len(facts)!=1:raise InstallError('Container references are unavailable')
+            if not isinstance(facts,list) or len(facts)!=1:
+                raise InstallError('Container references are unavailable')
             value=facts[0].get('Image')
-            if not isinstance(value,str) or not re.fullmatch('(sha256:)?[a-f0-9]{64}',value):raise InstallError('Container image reference is unavailable')
+            if not isinstance(value,str) or not re.fullmatch('(sha256:)?[a-f0-9]{64}',value):
+                raise InstallError('Container image reference is unavailable')
             refs.add(value.removeprefix('sha256:'))
             for mount in facts[0].get('Mounts',[]):
-                if mount.get('Source'):mounts.add(Path(mount['Source']).resolve())
+                if mount.get('Source'):
+                    mounts.add(Path(mount['Source']).resolve())
         return {'images':refs,'mounts':mounts}
 
     def mounted(self,path,uid):
@@ -3812,19 +4461,24 @@ class UpgradeCleanup:
         # Root reads all processes; disappearing processes are harmless, unreadable
         # process state is not evidence that a program is unused.
         for process in self.host.path('/proc').iterdir():
-            if not process.name.isdecimal():continue
+            if not process.name.isdecimal():
+                continue
             try:
                 links=[process/'cwd',process/'exe']
                 descriptors=process/'fd'
-                if descriptors.exists():links.extend(descriptors.iterdir())
+                if descriptors.exists():
+                    links.extend(descriptors.iterdir())
                 for link in links:
-                    if link.is_symlink() and link.resolve().is_relative_to(path):return True
+                    if link.is_symlink() and link.resolve().is_relative_to(path):
+                        return True
                 maps=process/'maps'
                 if maps.exists():
                     for line in maps.read_text().splitlines():
                         parts=line.split(None,5)
-                        if len(parts)==6 and parts[5].startswith('/') and Path(parts[5].removesuffix(' (deleted)')).is_relative_to(path):return True
-            except FileNotFoundError:continue
+                        if len(parts)==6 and parts[5].startswith('/') and Path(parts[5].removesuffix(' (deleted)')).is_relative_to(path):
+                            return True
+            except FileNotFoundError:
+                continue
         return False
 
     def remove_image(self,uid,image_id,facts):
@@ -3834,20 +4488,27 @@ class UpgradeCleanup:
             # container reference or recursively prunes a parent/shared layer.
             self.host.user(uid,['podman','untag',image_id,*tags])
             changed=json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]
-            if changed.get('RepoTags') or changed.get('Digest')!=facts.get('Digest'):raise InstallError('Image names changed during cleanup')
-        if image_id in self.container_references(uid)['images']:raise InstallError('A container now references this image')
+            if changed.get('RepoTags') or changed.get('Digest')!=facts.get('Digest'):
+                raise InstallError('Image names changed during cleanup')
+        if image_id in self.container_references(uid)['images']:
+            raise InstallError('A container now references this image')
         self.host.user(uid,['podman','rmi','--no-prune',image_id])
 
     def image_paths(self,facts,graph):
-        driver=facts.get('GraphDriver',{});data=driver.get('Data',{})
+        driver=facts.get('GraphDriver',{})
+        data=driver.get('Data',{})
         values=[data.get('UpperDir',''),*data.get('LowerDir','').split(':')]
         paths=[]
-        if driver.get('Name')!='overlay':raise InstallError('Cannot measure this image storage driver safely')
+        if driver.get('Name')!='overlay':
+            raise InstallError('Cannot measure this image storage driver safely')
         for value in filter(None,values):
             path=self.host.path(value).resolve()
-            if not path.is_relative_to(graph) or path==graph:raise InstallError('Image layer is outside managed storage')
-            if path not in paths:paths.append(path)
-        if not paths:raise InstallError('Image layer allocation is unavailable')
+            if not path.is_relative_to(graph) or path==graph:
+                raise InstallError('Image layer is outside managed storage')
+            if path not in paths:
+                paths.append(path)
+        if not paths:
+            raise InstallError('Image layer allocation is unavailable')
         return paths
 
     def run(self,source,job,persist):
@@ -3864,645 +4525,177 @@ class UpgradeCleanup:
         data_roots.append(self.host.path('/opt/dsh-phalanx/updaters').resolve())
         previous=job.get('cleanup',{})
         result={'status':'running','discardBackup':previous.get('discardBackup',False),'reclaimedBytes':previous.get('reclaimedBytes',0),'items':[]}
-        job['cleanup']=result;persist()
+        job['cleanup']=result
+        persist()
         try:
             def record(kind,name,status,reason,bytes_=0):
                 result['items']=[item for item in result['items'] if (item['kind'],item['name'])!=(kind,name)]
                 result['items'].append({'kind':kind,'name':name,'status':status,'reason':reason,'reclaimedBytes':bytes_})
-                result['reclaimedBytes']+=bytes_;persist()
+                result['reclaimedBytes']+=bytes_
+                persist()
             def dispose(kind,name,paths,check,remove):
                 protected_roots=[*data_roots,*([] if kind=='backup' else [self.journal.resolve()])]
                 if any(Path(path).resolve().is_relative_to(root) or root.is_relative_to(Path(path).resolve()) for path in paths for root in protected_roots):
-                    record(kind,name,'retained','user and platform data');return
+                    record(kind,name,'retained','user and platform data')
+                    return
                 record(kind,name,'pending','verified owned resource')
                 try:
-                    check();before=allocation(paths)
+                    check()
+                    before=allocation(paths)
                     devices={}
                     for path in paths:
-                        path=Path(path);device=path.stat().st_dev
+                        path=Path(path)
+                        device=path.stat().st_dev
                         devices.setdefault(device,(path.parent,shutil.disk_usage(path).free))
                     remove()
                     observed=0
                     for parent,free in devices.values():
-                        while not parent.exists():parent=parent.parent
+                        while not parent.exists():
+                            parent=parent.parent
                         observed+=max(0,shutil.disk_usage(parent).free-free)
                     record(kind,name,'removed','unused owned resource',min(released(before),observed))
-                except Exception as error:record(kind,name,'failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cleanup failed; retry')
+                except Exception as error:
+                    record(kind,name,'failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cleanup failed; retry')
             def discard_backup(directory,*,completed=False):
                 backup=directory/'backup'
-                if not backup.exists() and not backup.is_symlink():return
+                if not backup.exists() and not backup.is_symlink():
+                    return
                 def verified():
                     pointer=self.journal/'current'
-                    if pointer.is_symlink() or not pointer.is_file():raise InstallError('Upgrade backup pointer is unavailable')
+                    if pointer.is_symlink() or not pointer.is_file():
+                        raise InstallError('Upgrade backup pointer is unavailable')
                     selected=pointer.read_text().strip()
-                    if (selected==directory.name)!=completed:raise InstallError('The current backup must remain available for recovery')
-                    file=directory/'operation.json';owner=self.journal.stat().st_uid
+                    if (selected==directory.name)!=completed:
+                        raise InstallError('The current backup must remain available for recovery')
+                    file=directory/'operation.json'
+                    owner=self.journal.stat().st_uid
                     for path in (directory,backup,file):
-                        if path.is_symlink() or path.stat().st_uid!=owner or path.stat().st_mode&0o022:raise InstallError('Upgrade backup ownership changed')
-                    if not directory.is_dir() or not backup.is_dir() or not file.is_file():raise InstallError('Invalid upgrade backup paths')
+                        if path.is_symlink() or path.stat().st_uid!=owner or path.stat().st_mode&0o022:
+                            raise InstallError('Upgrade backup ownership changed')
+                    if not directory.is_dir() or not backup.is_dir() or not file.is_file():
+                        raise InstallError('Invalid upgrade backup paths')
                     record=json.loads(file.read_text())
                     if (record.get('id')!=directory.name or receipt_manifest(record.get('source')) is None or
                             record['source'].get('uid')!=uid or (not isinstance(record.get('backup'),dict) and record.get('backupLifecycle')!=2)):
                         raise InstallError('Unverified upgrade backup receipt')
                     if completed and (record.get('phase') not in ('succeeded','restored') or directory.name!=job['id']):
                         raise InstallError('The active upgrade still needs its backup')
-                    if self.mounted(backup,uid) or self.process_reference(backup):raise InstallError('The backup is referenced by a container or running process')
+                    if self.mounted(backup,uid) or self.process_reference(backup):
+                        raise InstallError('The backup is referenced by a container or running process')
                 dispose('backup',str(backup),[backup],verified,lambda:shutil.rmtree(backup))
-            if result['discardBackup'] and job['phase'] in ('succeeded','restored'):discard_backup(self.journal/job['id'],completed=True)
-            try:known,protected=self.inventory(source)
+            if result['discardBackup'] and job['phase'] in ('succeeded','restored'):
+                discard_backup(self.journal/job['id'],completed=True)
+            try:
+                known,protected=self.inventory(source)
             except Exception as error:
                 record('journal','update history','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot verify installation history')
-                result['status']='failed';persist();return result
-            releases=self.host.path('/opt/dsh-phalanx/releases');cache=self.host.path('/var/cache/dsh-phalanx')
+                result['status']='failed'
+                persist()
+                return result
+            releases=self.host.path('/opt/dsh-phalanx/releases')
+            cache=self.host.path('/var/cache/dsh-phalanx')
             by_name={manifest['tag']+'-'+manifest['files'][asset_names(manifest)[0]][:16]:(key,manifest) for key,manifest in known.items()}
             for path in releases.iterdir():
                 pair=by_name.get(path.name)
-                if path.is_symlink() or not path.is_dir() or pair is None:record('program',str(path),'retained','ownership is unknown');continue
+                if path.is_symlink() or not path.is_dir() or pair is None:
+                    record('program',str(path),'retained','ownership is unknown')
+                    continue
                 key,manifest=pair
-                if key in protected:record('program',str(path),'retained',protected[key]);continue
-                if self.process_reference(path):record('program',str(path),'retained','referenced by a running process');continue
-                if self.mounted(path,uid):record('program',str(path),'retained','referenced by a container mount');continue
+                if key in protected:
+                    record('program',str(path),'retained',protected[key])
+                    continue
+                if self.process_reference(path):
+                    record('program',str(path),'retained','referenced by a running process')
+                    continue
+                if self.mounted(path,uid):
+                    record('program',str(path),'retained','referenced by a container mount')
+                    continue
                 def verified(path=path,manifest=manifest):
-                    if path.is_symlink() or not path.is_dir() or (path/'.artifact-sha256').read_text()!=manifest['files'][asset_names(manifest)[0]] or json.loads((path/'build-info.json').read_text())['commit']!=manifest['commit']:raise InstallError('Program ownership changed')
-                    if path.resolve()==self.host.path('/opt/dsh-phalanx/current').resolve():raise InstallError('Program is now current')
-                    if self.process_reference(path):raise InstallError('A process now references this program')
-                    if self.mounted(path,uid):raise InstallError('A container now references this program')
+                    if path.is_symlink() or not path.is_dir() or (path/'.artifact-sha256').read_text()!=manifest['files'][asset_names(manifest)[0]] or json.loads((path/'build-info.json').read_text())['commit']!=manifest['commit']:
+                        raise InstallError('Program ownership changed')
+                    if path.resolve()==self.host.path('/opt/dsh-phalanx/current').resolve():
+                        raise InstallError('Program is now current')
+                    if self.process_reference(path):
+                        raise InstallError('A process now references this program')
+                    if self.mounted(path,uid):
+                        raise InstallError('A container now references this program')
                 dispose('program',str(path),[path],verified,lambda path=path:shutil.rmtree(path))
             by_sha={manifest['files'][asset_names(manifest)[0]]:(key,manifest) for key,manifest in known.items()}
             if cache.exists():
                 for path in cache.iterdir():
                     pair=by_sha.get(path.name.removesuffix('.tar.gz')) if path.name.endswith('.tar.gz') else None
-                    if path.is_symlink() or not path.is_file() or pair is None:record('cache',str(path),'retained','ownership is unknown');continue
+                    if path.is_symlink() or not path.is_file() or pair is None:
+                        record('cache',str(path),'retained','ownership is unknown')
+                        continue
                     key,manifest=pair
-                    if key in protected:record('cache',str(path),'retained',protected[key]);continue
-                    if self.mounted(path,uid):record('cache',str(path),'retained','referenced by a container mount');continue
-                    if self.process_reference(path):record('cache',str(path),'retained','referenced by a running process');continue
+                    if key in protected:
+                        record('cache',str(path),'retained',protected[key])
+                        continue
+                    if self.mounted(path,uid):
+                        record('cache',str(path),'retained','referenced by a container mount')
+                        continue
+                    if self.process_reference(path):
+                        record('cache',str(path),'retained','referenced by a running process')
+                        continue
                     def verified(path=path,manifest=manifest):
-                        if path.is_symlink() or not path.is_file() or digest(path)!=manifest['files'][asset_names(manifest)[0]]:raise InstallError('Cached archive ownership changed')
-                        if self.mounted(path,uid) or self.process_reference(path):raise InstallError('The cached archive is now referenced')
+                        if path.is_symlink() or not path.is_file() or digest(path)!=manifest['files'][asset_names(manifest)[0]]:
+                            raise InstallError('Cached archive ownership changed')
+                        if self.mounted(path,uid) or self.process_reference(path):
+                            raise InstallError('The cached archive is now referenced')
                     dispose('cache',str(path),[path],verified,lambda path=path:path.unlink())
             try:
-                store=json.loads(self.host.user(uid,['podman','info','--format','json']).stdout)['store'];graph=self.host.path(store['graphRoot']).resolve()
+                store=json.loads(self.host.user(uid,['podman','info','--format','json']).stdout)['store']
+                graph=self.host.path(store['graphRoot']).resolve()
                 ids={value.removeprefix('sha256:') for value in self.host.user(uid,['podman','images','--no-trunc','--format','{{.ID}}']).stdout.split()}
                 for image_id in sorted(ids):
-                    if not re.fullmatch('[a-f0-9]{64}',image_id):raise InstallError('Image identity is unavailable')
+                    if not re.fullmatch('[a-f0-9]{64}',image_id):
+                        raise InstallError('Image identity is unavailable')
                     facts=json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]
                     matches=[(key,manifest) for key,manifest in known.items() if image_matches(facts,manifest)]
-                    if not matches:record('image',image_id,'retained','ownership is unknown');continue
+                    if not matches:
+                        record('image',image_id,'retained','ownership is unknown')
+                        continue
                     reason=next((protected[key] for key,_ in matches if key in protected),None)
-                    if image_id in self.container_references(uid)['images']:reason='referenced by a running or stopped container'
+                    if image_id in self.container_references(uid)['images']:
+                        reason='referenced by a running or stopped container'
                     tags=facts.get('RepoTags') or []
                     allowed={IMAGE+':'+value for _,manifest in matches for value in (candidate_image_tag(manifest['tag']),manifest['targetVersion'])}
-                    if any(tag not in allowed for tag in tags):reason='has an unowned image name'
-                    if reason:record('image',image_id,'retained',reason);continue
+                    if any(tag not in allowed for tag in tags):
+                        reason='has an unowned image name'
+                    if reason:
+                        record('image',image_id,'retained',reason)
+                        continue
                     paths=self.image_paths(facts,graph)
                     def verified(image_id=image_id,facts=facts):
-                        if image_id in self.container_references(uid)['images']:raise InstallError('A container now references this image')
-                        if json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]!=facts:raise InstallError('Image references or identity changed')
+                        if image_id in self.container_references(uid)['images']:
+                            raise InstallError('A container now references this image')
+                        if json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]!=facts:
+                            raise InstallError('Image references or identity changed')
                     dispose('image',image_id,paths,verified,lambda image_id=image_id,facts=facts:self.remove_image(uid,image_id,facts))
-            except Exception as error:record('image','rootless storage','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot inspect image ownership')
+            except Exception as error:
+                record('image','rootless storage','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot inspect image ownership')
             pointer=self.journal/'current'
-            if pointer.is_symlink() or not pointer.is_file():raise InstallError('Current operation pointer is unavailable')
+            if pointer.is_symlink() or not pointer.is_file():
+                raise InstallError('Current operation pointer is unavailable')
             selected=pointer.read_text().strip()
             for path in self.journal.iterdir():
-                if not path.is_dir() or path.is_symlink() or not (path/'backup').exists():continue
-                if path.name==selected:record('backup',str(path/'backup'),'retained','current operation backup')
-                elif self.mounted(path/'backup',uid):record('backup',str(path/'backup'),'retained','referenced by a container mount')
-                else:discard_backup(path)
+                if not path.is_dir() or path.is_symlink() or not (path/'backup').exists():
+                    continue
+                if path.name==selected:
+                    record('backup',str(path/'backup'),'retained','current operation backup')
+                elif self.mounted(path/'backup',uid):
+                    record('backup',str(path/'backup'),'retained','referenced by a container mount')
+                else:
+                    discard_backup(path)
             record('data',source['values']['DSH_PHALANX_DATA_ROOT'],'retained','user and platform data')
-            result['status']='failed' if any(item['status']=='failed' for item in result['items']) else 'succeeded';persist()
+            result['status']='failed' if any(item['status']=='failed' for item in result['items']) else 'succeeded'
+            persist()
             return result
         except Exception as error:
             result['status']='failed'
             result['failure']=self.host.progress.safe(str(error)) if self.host.progress else 'Cannot inspect owned resources; retry cleanup'
             persist()
             return result
-
-"""Protected upgrade journal and Linux service/container transaction adapter."""
-import copy
-import hashlib
-import ipaddress
-import json
-import os
-import re
-import urllib.parse
-from contextlib import contextmanager
-from pathlib import Path
-import tempfile
-import fcntl  # Local process mutex only; platform facts use the source database adapters.
-import uuid
-import shutil
-from types import SimpleNamespace
-
-UPGRADE_ROOT='/var/lib/dsh-phalanx-updater'
-MAINTENANCE='/etc/dsh-phalanx/maintenance'
-CONFIG='/etc/dsh-phalanx/environment'
-STATE='/etc/dsh-phalanx/install-state.json'
-MANIFEST='/etc/dsh-phalanx/installed-manifest.json'
-CURRENT='/opt/dsh-phalanx/current'
-UNIT='/var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service'
-
-
-def read_upgrade_operation(host,operation=None):
-    pointer=host.path(UPGRADE_ROOT)/'current'
-    if operation is None:
-        if not pointer.exists():return None
-        operation=pointer.read_text().strip()
-    path=host.path(UPGRADE_ROOT)/operation_id(operation)/'operation.json'
-    if path.is_symlink():raise InstallError('Upgrade journal cannot be a symbolic link')
-    if not path.exists():return None
-    # This root-written journal includes backup inventories that grow with the deployment.
-    value=json.loads(read_owned(path,os.geteuid(),max_bytes=None))
-    if not isinstance(value,dict) or value.get('id')!=operation or not isinstance(value.get('phase'),str):raise InstallError('Invalid protected upgrade operation')
-    return value
-
-
-def installed_source(host,manifest=None):
-    state=installed_state(host)
-    if state is None:raise InstallError('A successful managed installation is required',code='release.identity-mismatch')
-    if manifest is None:manifest=json.loads(host.path(MANIFEST).read_text())
-    if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][asset_names(manifest)[0]]:
-        raise InstallError('Installed release manifest and receipt disagree',code='release.identity-mismatch')
-    values=read_configuration(host)
-    account=host.run(['getent','passwd','dsh-phalanx']).stdout.strip().split(':')
-    if len(account)!=7 or account[5]!='/var/lib/dsh-phalanx' or account[6]!='/usr/sbin/nologin' or int(account[2])==0:
-        raise InstallError('Managed service identity is incompatible',code='release.identity-mismatch')
-    current=host.path(CURRENT)
-    if not current.is_symlink():raise InstallError('Current release must be a managed symbolic link',code='release.identity-mismatch')
-    target=current.resolve()
-    if target.parent!=host.path('/opt/dsh-phalanx/releases') or (target/'.artifact-sha256').read_text()!=state['platformSha256']:
-        raise InstallError('Running release path or artifact identity is inconsistent',code='release.identity-mismatch')
-    return {'receipt':state,'manifest':manifest,'channel':installed_channel(state),'values':values,'target':str(target),'uid':int(account[2]),'gid':int(account[3])}
-
-
-def plugin_startup_timeout(host,values,manifest):
-    target=manifest['targetVersion']+'/'+manifest['dshRevision']
-    try:library=platform_facts(host,values,'plugin-budget-rows')
-    except ValueError as error:raise InstallError('Invalid plugin library for startup budget') from error
-    return 90 if library is None else plugin_readiness_budget(library,target)
-
-
-def source_schema_names(source):
-    return [row['name'] for row in source['manifest']['compatibility']['schemas']] if version_parts(source['manifest']['targetVersion'])>=(0,1,27) else ['dsh_phalanx']
-
-
-def operation_id(value):
-    if not isinstance(value,str) or str(uuid.UUID(value))!=value:raise InstallError('Invalid upgrade operation identity',code='operation.invalid')
-    return value
-
-
-
-
-class UpgradeHost:
-    def __init__(self,host,bundle=None,*,dev_release_base_url=None):
-        self.host=host; self.bundle=bundle; self.dev_release_base_url=dev_release_base_url
-        self.development_rebuild=bool(getattr(host,'development_arm64',False) and bundle is not None)
-        self.root=host.mkdir(UPGRADE_ROOT,0o700)
-        self.admission=LinuxAdmissionGate()
-
-    def time_point(self):return self.host.time_point()
-
-    def safe(self,message):return self.host.progress.safe(message) if self.host.progress else 'Upgrade failed; inspect restricted diagnostics'
-
-    def path(self,job):return self.root/operation_id(job['id'])
-
-    def operation(self,operation=None):
-        return read_upgrade_operation(self.host,operation)
-
-    def save(self,job):
-        directory=self.path(job); directory.mkdir(mode=0o700,exist_ok=True)
-        self.host.atomic(str(directory.relative_to(self.host.root))+'/operation.json',json.dumps(job)+'\n')
-        sync_directory(directory)
-        self.host.atomic(UPGRADE_ROOT+'/current',job['id']+'\n'); sync_directory(self.root)
-        if self.host.progress:
-            cleanup=job.get('cleanup',{});phase='update.cleanup' if cleanup.get('status') in ('running','failed') else job.get('phaseCode','unknown')
-            error=cleanup.get('errorCode') if phase=='update.cleanup' else job.get('recoveryErrorCode') if job['phase']=='recovery-failed' else job.get('errorCode')
-            self.host.tell('Upgrade '+job['id']+': '+job['phase'],phaseCode=phase,**({'errorCode':error} if error else {}))
-        else:self.host.tell('Upgrade '+job['id']+': '+job['phase'])
-
-    def check_fresh_install(self,target):
-        # A sound formal receipt can authorize refusal, never an upgrade.
-        manifest=target['manifest'];validate_contract(manifest)
-        value=manifest.get('compatibility',{})
-        if value.get('freshInstallThrough') is None and value.get('upgradeFloor') is None:return
-        state=installed_state(self.host)
-        if not isinstance(state,dict):return
-        version=state.get('version');candidate=state.get('candidate')
-        if (not isinstance(version,str) or not STABLE.fullmatch(version) or
-                not isinstance(candidate,str) or not CANDIDATE.fullmatch(candidate) or
-                state.get('serviceUser')!='dsh-phalanx' or
-                not all(isinstance(state.get(key),str) and re.fullmatch(pattern,state[key])
-                        for key,pattern in [('commit','[a-f0-9]{40}'),('platformSha256','[a-f0-9]{64}'),('imageDigest','sha256:[a-f0-9]{64}')])):
-            return
-        require_upgrade_source({'targetVersion':version[1:]},manifest)
-
-    def import_legacy_manifest(self):
-        path=self.host.path(MANIFEST)
-        if path.exists() or path.is_symlink():return
-        state=installed_state(self.host)
-        if state is None or state['version']!='v0.1.1':
-            raise InstallError('Installed release manifest is missing; only formal 0.1.1 has a supported legacy import')
-        self.host.tell('Verifying the original formal 0.1.1 release metadata before upgrade.')
-        with tempfile.TemporaryDirectory(prefix='legacy-source-') as temporary:
-            args=SimpleNamespace(version=state['version'],bundle_dir=None)
-            _,manifest,_=select_release(self.host,args,Path(temporary))
-        if manifest.get('schema')!=1 or manifest.get('targetVersion')!='0.1.1':
-            raise InstallError('Legacy source release contract is inconsistent')
-        source=self.source(manifest)
-        self.verify_source(source)
-        self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
-        sync_directory(self.host.path('/etc/dsh-phalanx'))
-
-    def source(self,manifest=None):
-        return installed_source(self.host,manifest)
-
-    def begin(self,target):
-        source=self.source();previous=previous_downtime(self.operation(),self.time_point())
-        return {'id':str(uuid.uuid4()),'phase':'preparing','target':copy.deepcopy(target),'source':source,'diagnostic':self.host.progress.log.name if self.host.progress and self.host.progress.log else None,
-                **({'previousDowntimeSeconds':previous} if previous is not None else {})}
-
-    def schema(self,source):
-        try:
-            version=version_parts(source['manifest']['targetVersion'])
-            # Historical targets can still use the old pre-PostgreSQL source contract.
-            if version<(0,1,26):
-                values=source['values'];config=values.get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json')
-                result=self.host.user(source['uid'],['timeout','--signal=TERM','--kill-after=5s','20s',str(Path(source['target'])/'start'),'database-wait',
-                    '--config-file',str(self.host.path(config)),'--data-root',str(self.host.path(values['DSH_PHALANX_DATA_ROOT']))],check=False)
-                info=json.loads(result.stdout) if result.returncode==0 else None
-                if not isinstance(info,dict) or info.get('state')!='connected' or type(info.get('schemaVersion')) is not int or not 0<=info['schemaVersion']<=2**53-1:raise ValueError('Invalid database status')
-                return info['schemaVersion']
-            registered=version>=(0,1,27)
-            names=source_schema_names(source)
-            info=executor_facts(self.host,source['values'],'schemas',source=source['target'],schemas=names)
-            return self.schema_result(source,info)
-        except (OSError,ValueError,KeyError,TypeError,InstallError):
-            raise InstallError('Platform database status is unavailable. Check the selected database connection and master-key file before retrying the update.',code='database.unavailable') from None
-
-    def schema_result(self,source,info):
-        registered=version_parts(source['manifest']['targetVersion'])>=(0,1,27)
-        names=source_schema_names(source)
-        rows=info.get('schemas') if isinstance(info,dict) else None
-        if not isinstance(rows,list) or not rows or [row.get('name') for row in rows if isinstance(row,dict)]!=names:raise ValueError('Invalid registered schema status')
-        versions={}
-        for row in rows:
-            if (not isinstance(row,dict) or not isinstance(row.get('name'),str) or not re.fullmatch('[a-z_][a-z0-9_]{0,62}',row['name']) or
-                    row['name'] in versions or type(row.get('version')) is not int or not 0<=row['version']<=2**53-1):raise ValueError('Invalid registered schema status')
-            versions[row['name']]=row['version']
-        # The predecessor predates the registry and has exactly the platform core.
-        return versions if registered else versions['dsh_phalanx']
-
-    def check_facts(self,source):
-        names=source_schema_names(source)
-        return executor_facts(self.host,source['values'],'check',source=source['target'],schemas=names)
-
-    def sampled_schema(self,source,sampled,facts):
-        try:current=self.source()
-        except (InstallError,OSError,ValueError,KeyError,TypeError):
-            raise InstallError('The installed source changed; check releases again') from None
-        if current!=source:raise InstallError('The installed source changed; check releases again')
-        try:
-            identity=facts.get('identity') if isinstance(facts,dict) else None
-            config=self.host.path(source['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json'))
-            valid=(source==sampled and isinstance(identity,list) and len(identity)==2 and isinstance(identity[0],dict) and identity[0].get('path')==str(config) and
-                   all(isinstance(row,dict) and self.host.file_identity(row['path'])==row for row in identity))
-        except (OSError,ValueError,KeyError,TypeError,InstallError):valid=False
-        if not valid:return self.schema(source)
-        try:return self.schema_result(source,{'schemas':facts.get('schemas')})
-        except (ValueError,KeyError,TypeError):
-            raise InstallError('Platform database status is unavailable. Check the selected database connection and master-key file before retrying the update.',code='database.unavailable') from None
-
-    def check_compatibility(self,source,target):
-        require_upgrade_source(source['manifest'],target['manifest'])
-        rehearsal=bool(getattr(self.host,'image_reuse_rehearsal',False))
-        if rehearsal and (source['receipt']['version']!=source['manifest']['tag'] or target['version']!=target['manifest']['tag']):
-            raise InstallError('Image reuse rehearsal requires explicit candidate versions, never formal releases')
-        compatible(source['manifest'],target['manifest'],self.schema(source),development_rebuild=self.development_rebuild,image_reuse_rehearsal=rehearsal,source_channel=source.get('channel'),target_channel=target.get('channel',release_channel(target['version'])))
-
-    def compatibility_outcome(self,source,target,schemas=None):
-        route=upgrade_outcome(source['manifest'],target['manifest'],None,inspect_schema=False,source_channel=source.get('channel'),target_channel=target.get('channel',release_channel(target['version'])))
-        if route['outcomeCode'] not in ('update.available','update.channel-switch'):return route
-        return upgrade_outcome(source['manifest'],target['manifest'],self.schema(source) if schemas is None else schemas,source_channel=source.get('channel'),target_channel=target.get('channel',release_channel(target['version'])))
-
-    def preflight(self,job):
-        source=self.source()
-        if source!=job['source']:raise InstallError('Installed source changed after this target was selected; download again')
-        self.check_compatibility(source,job['target'])
-        self.host.distribution()
-        self.host.dependencies()
-        self.host.check_capabilities(source['uid'])
-        validate_storage(self.host,source['values'])
-        if self.host.path(MAINTENANCE).exists():raise InstallError('Maintenance is already closed; recover the previous operation first')
-        values=source['values']; data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
-        users=self.host.path(effective_user_data_root(values) if version_parts(source['manifest']['targetVersion']) >= version_parts('0.1.26') else values.get('DSH_PHALANX_USER_DATA_ROOT',values['DSH_PHALANX_DATA_ROOT']+'/users'))
-        if data.is_symlink() or not data.is_dir():raise InstallError('Invalid platform data root')
-        if users.is_relative_to(data) and users!=data/'users':raise InstallError('Upgrade supports only reserved users or a separate user data root')
-        self.verify_source(source)
-        self.data_layout(job)
-        UpgradeDatabaseBackup(self,job).inspect()
-        if supports_capacity(job['target']['manifest']):
-            if job['phase']=='preparing' and not job.get('cleanupBeforeDownload'):
-                self.cleanup(job);job['cleanupBeforeDownload']=True;self.save(job)
-            UpgradeStorage(self.host).check(job,self.path(job),self.bundle,carriers=self.carriers(job).values())
-            self.save(job)
-        UpgradeDatabaseBackup(self,job).prepare()
-        if 'prepared' in job:
-            self.admission.preflight(self.ports(source))
-            prepared=job['prepared']; target=Path(prepared['target'])
-            if (target/'.artifact-sha256').read_text()!=job['target']['manifest']['files'][asset_names(job['target']['manifest'])[0]]:
-                raise InstallError('Prepared platform identity changed')
-            supply_image(self.host,source['uid'],self.path(job),job['target']['manifest'],False)
-
-    def cleanup(self,job):
-        source=self.source();self.verify_source(source)
-        return UpgradeCleanup(self.host,self.root).run(source,job,lambda:self.save(job))
-
-    def ports(self,source):return protected_ports(source['values'])
-
-    def prepare(self,job):
-        self.admission.preflight(self.ports(job['source']))
-        self.admission.install(self.host,job['source']['uid'])
-        def fixed(directory,manifest,version):
-            if version!=job['target']['version'] or manifest!=job['target']['manifest'] or digest(directory/'manifest.json')!=job['target']['manifestSha256']:
-                raise InstallError('Selected release metadata changed; target was not downloaded')
-            self.check_compatibility(job['source'],job['target'])
-        with tempfile.TemporaryDirectory(prefix='download-',dir=self.path(job)) as temporary:
-            channel=installed_channel(job['target'])
-            source=self.dev_release_base_url or (channel['baseUrl'] if channel['kind']=='candidate' and self.bundle is None else None)
-            args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle,dev_release_base_url=source)
-            directory,manifest=acquire(self.host,args,Path(temporary),fixed)
-            target=stage_platform(self.host,directory,manifest)
-            command=supply_image(self.host,job['source']['uid'],directory,manifest,self.bundle is not None)
-        engine=install_executor(self.host,job['source']['uid'],job['source']['gid'],self.host.path(target),manifest['commit'],initial_only=True,activate=True)
-        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256'],'executor':executor_package(self.host.path(target)/'updater',manifest['commit']),'currentExecutor':engine,'managementCli':(self.host.path(target)/'updater/installer_deployment_cli.py').is_file()}
-
-    @install_failure('admission.failed')
-    def close_admission(self,source):self.admission.close(self.ports(source))
-
-    @install_failure('admission.failed')
-    def gate(self,closed):
-        if closed:
-            job=self.operation(); ports=self.ports(job['source'])
-            self.host.atomic(MAINTENANCE,json.dumps({'schema':1,'ports':ports})+'\n',0o644)
-            try:self.close_admission(job['source'])
-            except Exception:
-                # A legacy binary has no application marker support. Stop its
-                # exact managed service if the independent fence is unavailable.
-                self.stop(job)
-                raise
-        else:
-            job=self.operation()
-            if job is not None and any(key in job for key in ('maintenancePage','maintenanceListener')):
-                self.close_admission(job['source']);self.stop_maintenance(job)
-            self.admission.open()
-            self.host.path(MAINTENANCE).unlink(missing_ok=True)
-        sync_directory(self.host.path('/etc/dsh-phalanx'))
-
-    def stop_maintenance(self,job):
-        changed=False
-        for kind,key in ((ListenerPinUnit,'maintenanceListener'),(MaintenanceUnit,'maintenancePage')):
-            kind(self.host,job).stop()
-            if key in job:job.pop(key);changed=True
-        if changed:self.save(job)
-
-    @install_failure('service.stop-failed')
-    def stop(self,job):
-        page=MaintenanceUnit(self.host,job) if 'action' not in job else None
-        try:
-            self.close_admission(job['source'])
-            if page is not None:self.stop_maintenance(job)
-        except Exception:
-            # A failed fence must still stop a legacy platform without marker support.
-            self.host.user(job['source']['uid'],['systemctl','--user','stop','dsh-phalanx.service'])
-            raise
-        if 'database' in job:
-            # A killed executor can leave a tool container outside its systemd cgroup.
-            # Stop only this protected transaction's tools before starting/retrying recovery.
-            owner=hashlib.sha256(str(self.path(job)/'backup'/'database').encode()).hexdigest()
-            command=['podman','ps','--all','--filter','label=dsh.phalanx.upgrade-archive-owner='+owner,'--format','json']
-            for row in json.loads(self.host.run(command).stdout):
-                identity=row.get('Id',row.get('ID'))
-                if (row.get('Labels',{}).get('dsh.phalanx.upgrade-archive-owner')!=owner or
-                        not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity)):
-                    raise InstallError('Database archive tool ownership is inconsistent')
-                self.host.run(['podman','rm','--force','--ignore','--time','0',identity])
-            if json.loads(self.host.run(command).stdout):raise InstallError('Transaction database archive tools remain; recovery refused')
-            directory=self.path(job)/'backup'/'database'
-            if directory.exists():
-                if directory.is_symlink() or not directory.is_dir() or directory.stat().st_uid!=os.geteuid() or directory.stat().st_mode&0o777!=0o700:
-                    raise InstallError('Invalid protected database archive directory')
-                for path in directory.iterdir():
-                    if not re.fullmatch(r'\.database-tool-[a-f0-9-]{36}',path.name):continue
-                    if path.is_symlink() or not path.is_dir() or path.stat().st_uid!=os.geteuid() or path.stat().st_mode&0o777!=0o700:
-                        raise InstallError('Invalid private PostgreSQL tool directory')
-                    for child in path.iterdir():
-                        if child.name not in ('pgpass','ca.pem','before.sql','after.sql','restore.sh','restore.sql','restore.list') or child.is_symlink() or not child.is_file() or child.stat().st_uid!=os.geteuid():
-                            raise InstallError('Unexpected file in private PostgreSQL tool directory')
-                    shutil.rmtree(path)
-        source=job['source']; uid=source['uid']
-        handed_off=False
-        profile_handoff=source.get('manifest',{}).get('targetVersion')=='0.1.37'
-        if profile_handoff and job.get('phase')=='stopping' and job.get('prepared'):
-            target=Path(job['prepared']['target'])
-            handoff=target/'dist/composition/legacy-profile-lock-handoff.js'
-            values=source['values']
-            config=values.get('DSH_PHALANX_DATABASE_CONFIG_FILE')
-            if handoff.is_file() and config:
-                result=self.host.user(uid,[str(target/'node/bin/node'),str(handoff),values['DSH_PHALANX_DATA_ROOT'],config,
-                    values.get('DSH_PHALANX_USER_DATA_ROOT',''),values.get('DSH_PHALANX_USER_DATA_MOUNT','')],check=False)
-                handed_off=result.returncode==0
-                if not handed_off:self.host.tell('Legacy member profile lock handoff unavailable; keeping unverified locks')
-        if not handed_off:self.host.user(uid,['systemctl','--user','stop','dsh-phalanx.service'])
-        ownership=hashlib.sha256(str(Path(source['values']['DSH_PHALANX_DATA_ROOT']).resolve()).encode()).hexdigest()
-        filters=['--filter','label=dsh-phalanx.community=1','--filter','label=dsh-phalanx.community-root='+ownership]
-        command=['podman','ps','--all','--no-trunc',*filters,'--format','json']
-        rows=json.loads(self.host.user(uid,command).stdout)
-        for row in rows:
-            labels=row.get('Labels',{})
-            if labels.get('dsh-phalanx.community')!='1' or labels.get('dsh-phalanx.community-root')!=ownership:
-                raise InstallError('Owned container listing has inconsistent labels')
-            identity=row.get('Id',row.get('ID'))
-            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):raise InstallError('Invalid owned container identity')
-            if profile_handoff:
-                if len(identity)!=64:raise InstallError('Invalid full member container identity')
-                self.host.user(uid,['podman','stop','--time','10','--ignore',identity])
-                self.host.user(uid,['podman','rm','--ignore',identity])
-            else:self.host.user(uid,['podman','rm','--force','--ignore','--time','0',identity])
-        if json.loads(self.host.user(uid,command).stdout):raise InstallError('Owned user instances remain; backup and switch refused')
-        if page is not None:
-            intent=page.intent()
-            if job.get('maintenancePage') is not None and job['maintenancePage']!=intent:
-                raise InstallError('Installed maintenance page identity changed during the operation')
-            if intent is not None:
-                job['maintenancePage']=intent;self.save(job)
-                group=page.start();self.admission.show_page(self.ports(source),group,intent['token'])
-
-    def carriers(self,job):
-        result={'configuration':self.host.path(CONFIG),'receipt':self.host.path(STATE),'manifest':self.host.path(MANIFEST),'unit':self.host.path(UNIT),
-                'keys':self.host.path('/var/lib/dsh-phalanx/keys'),'databaseUnit':self.host.path('/var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx-postgres.service')}
-        if 'executor' in job.get('prepared',{}):
-            result.update(executorPointer=self.host.path(EXECUTOR),executorUnit=self.host.path(EXECUTOR_UNIT),
-                          admissionProgram=self.host.path('/opt/dsh-phalanx/maintenance/gate.py'),
-                          admissionUnit=self.host.path('/etc/systemd/system/dsh-phalanx-maintenance.service'),
-                          admissionOrder=self.host.path('/etc/systemd/system/user@'+str(job['source']['uid'])+'.service.d/dsh-phalanx-maintenance.conf'))
-            if job['prepared'].get('managementCli') is True:result['globalCli']=self.host.path(GLOBAL_CLI)
-        master=job.get('database',{}).get('facts',{}).get('masterKeyPath')
-        config=job['source']['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE')
-        for key,path in [('databaseMaster',master),('databaseConfiguration',str(self.host.path(config)) if config else None)]:
-            if path and not Path(path).resolve().is_relative_to(result['keys'].resolve()):result[key]=Path(path).resolve()
-        return result
-
-    def data_layout(self,job):
-        if 'dataLayout' not in job:
-            source=job['source'];paths=[]
-            if version_parts(source['manifest']['targetVersion'])>=(0,1,26):
-                target=Path(source['target'])
-                program="import {pathToFileURL} from 'node:url'; const {dataRootLayout}=await import(pathToFileURL(process.argv[1]+'/dist/domain/data-root-layout.js')); console.log(JSON.stringify(dataRootLayout))"
-                output=self.host.run([str(target/'node/bin/node'),'--input-type=module','-e',program,str(target)])
-                try:
-                    layout=json.loads(output.stdout)
-                    for kind in ('artifacts','projections','runtime'):
-                        if not isinstance(layout.get(kind),list):raise ValueError('Missing data layout category')
-                        paths.extend(layout[kind])
-                except (ValueError,AttributeError):raise InstallError('The installed platform data layout is unavailable') from None
-            job['dataLayout']=list(rebuildable_paths(paths))
-        return rebuildable_paths(job['dataLayout'])
-
-    def backup_owner(self,job):
-        return PlatformBackup(self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']),self.path(job)/'backup',self.carriers(job),rebuildable=self.data_layout(job))
-
-    @contextmanager
-    def quiescent(self,job):
-        data=self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']); lock=data/'platform.lock'
-        if lock.is_symlink():raise InstallError('Platform writer lock cannot be a symbolic link')
-        # The platform holds an exclusive flock on this file while it runs (adapters/platform-lock.ts).
-        # Never create it: a root-owned file would stop the service account from opening its own lock.
-        try:descriptor=os.open(lock,os.O_RDONLY|os.O_NOFOLLOW)
-        except FileNotFoundError:
-            yield; return  # No platform has started here, so none can hold the lock.
-        with open(descriptor,'rb') as file:
-            try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
-            except BlockingIOError:raise InstallError('The platform still holds its writer lock; stop it before backing up') from None
-            yield
-
-    def backup(self,job):
-        with self.quiescent(job):
-            receipt=self.backup_owner(job).create()
-            self.start_database(job)
-            database=UpgradeDatabaseBackup(self,job).create()
-            if database is not None:receipt['database']=database
-        if 'executor' in job.get('prepared',{}):receipt['executor']=installed_executor(self.host)
-        return receipt
-
-    @install_failure('database.unavailable')
-    def start_database(self,job):
-        if job.get('database',{}).get('facts',{}).get('selection')=='builtin':
-            uid=job['source']['uid']
-            self.host.user(uid,['systemctl','--user','daemon-reload'])
-            self.host.user(uid,['systemctl','--user','reset-failed','dsh-phalanx-postgres.service'])
-            self.host.user(uid,['systemctl','--user','start','dsh-phalanx-postgres.service'])
-
-    def link(self,target):
-        replacement=self.host.path(CURRENT+'.next'); replacement.unlink(missing_ok=True); replacement.symlink_to(target)
-        os.replace(replacement,self.host.path(CURRENT)); sync_directory(self.host.path('/opt/dsh-phalanx'))
-
-    @install_failure('service.start-failed')
-    def start(self,job):
-        self.close_admission(job['source'])
-        if 'action' not in job:self.stop_maintenance(job)
-        uid=job['source']['uid']; self.host.user(uid,['systemctl','--user','daemon-reload'])
-        self.host.user(uid,['systemctl','--user','enable','--now','dsh-phalanx.service'])
-
-    def switch(self,job):
-        values=copy.deepcopy(job['source']['values']); manifest=job['target']['manifest']; command=job['prepared']['command']
-        values.update(DSH_PHALANX_CONTAINER_IMAGE=manifest['image']['reference'],DSH_PHALANX_RUNTIME_COMMAND=command[0],
-                      DSH_PHALANX_RUNTIME_ARGS_JSON=json.dumps(command[1:],separators=(',',':')),
-                      DSH_PHALANX_MAINTENANCE_FILE=MAINTENANCE)
-        self.host.atomic(CONFIG,environment_text(values),0o640)
-        self.host.run(['chown','0:'+str(job['source']['gid']),str(self.host.path(CONFIG))])
-        with self.host.path(CONFIG).open('rb') as file:os.fsync(file.fileno())
-        self.link(job['prepared']['target']); self.start(job)
-
-    def listener_identity(self,source,pid):
-        target=Path(source['target'])
-        if not pid or self.host.path('/proc/'+str(pid)+'/cwd').resolve()!=target or self.host.path('/proc/'+str(pid)+'/exe').resolve()!=target/'node/bin/node':
-            raise InstallError('Managed listener process does not execute the selected packaged release',code='release.identity-mismatch')
-        if (target/'.artifact-sha256').read_text()!=source['manifest']['files'][asset_names(source['manifest'])[0]] or json.loads((target/'build-info.json').read_text())['commit']!=source['manifest']['commit']:
-            raise InstallError('Selected platform source identity does not match the healthy process',code='release.identity-mismatch')
-
-    def show_platform_page(self,source,pid,job):
-        self.listener_identity(source,pid)
-        values=read_configuration(self.host)
-        if values.get('DSH_PHALANX_MAINTENANCE_FILE')!=MAINTENANCE or any(values.get(key)!=source['values'].get(key) for key in ('DSH_PHALANX_HOST','DSH_PHALANX_PORT','DSH_PHALANX_PUBLIC_ORIGIN')):
-            raise InstallError('Managed maintenance configuration differs from the verified source')
-        marker=protected_json(self.host.path(MAINTENANCE));ports=self.ports(source)
-        if marker.get('schema')!=1 or marker.get('ports')!=ports:raise InstallError('Managed maintenance admission differs from the verified source')
-        uid=source['uid'];group=self.host.user(uid,['systemctl','--user','show','dsh-phalanx.service','--property=ControlGroup','--value']).stdout.strip()
-        prefix='/user.slice/user-'+str(uid)+'.slice/user@'+str(uid)+'.service/'
-        if not group.startswith(prefix) or not group.endswith('/dsh-phalanx.service') or '0::'+group not in self.host.path('/proc/'+str(pid)+'/cgroup').read_text().splitlines():
-            raise InstallError('Managed listener cgroup differs from its service owner')
-        descriptor=self.host.listener_file(pid,int(values['DSH_PHALANX_PORT']),ipaddress.ip_address(values['DSH_PHALANX_HOST']))
-        if descriptor is None:raise InstallError('The verified platform listener disappeared before pinning')
-        listener={**descriptor,'pid':pid,'started':process_started(self.host.path('/proc/'+str(pid)+'/stat')),'cgroup':group,
-                  'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT']),'uid':uid,
-                  'executable':str(Path(source['target'])/'node/bin/node'),'directory':source['target']}
-        existing=job.get('maintenanceListener')
-        if existing is not None and existing.get('listener')!=listener:raise InstallError('The pinned platform listener changed during validation')
-        pin=ListenerPinUnit(self.host,job)
-        if existing is None:
-            job['maintenanceListener']={'unit':pin.unit,'listener':listener,'token':maintenance_token(job,'maintenanceListener')};self.save(job)
-        pin.start();self.admission.show_page(ports,group,job['maintenanceListener']['token'])
-
-    def verify_source(self,source,ready_path='/login',*,readiness=True,maintenance_job=None):
-        verify_image(self.host,source['uid'],source['manifest'])
-        values=source['values'];uid=source['uid'];port=int(values['DSH_PHALANX_PORT'])
-        closed=self.host.path(MAINTENANCE).exists();options={'socket_mark':MARK} if closed else {}
-        if readiness and closed and maintenance_job is not None and maintenance_pages(source['target']) is not None:
-            options['on_listener']=lambda pid:self.show_platform_page(source,pid,maintenance_job)
-        if readiness:self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,timeout=plugin_startup_timeout(self.host,values,source['manifest']),**options)
-        address=ipaddress.ip_address(urllib.parse.urlparse(entry_url(port,values['DSH_PHALANX_HOST'])).hostname)
-        self.listener_identity(source,self.host.listener_pid(uid,port,address))
-
-    def verify(self,job,old=False):
-        if old:source=job['source']
-        else:source={**job['source'],'target':job['prepared']['target'],'manifest':job['target']['manifest']}
-        path='/readyz' if source['manifest'].get('schema')==2 else '/login'
-        self.verify_source(source,path,maintenance_job=job)
-        expected=(job.get('backup',{}).get('executor') or job.get('prepared',{}).get('currentExecutor')) if old else job.get('prepared',{}).get('executor') if job.get('committed') else None
-        if expected:
-            ensure_executor_identity(self.host,source['uid'],source['gid'],expected,[(job['source']['target'],job['source']['manifest']['commit']),(job['prepared']['target'],job['target']['manifest']['commit'])])
-        if not old:
-            recorded=self.schema(source);contract=source['manifest']['compatibility']
-            if 'schemas' in contract:
-                actual=recorded if isinstance(recorded,dict) else {'dsh_phalanx':recorded}
-                expected={row['name']:row['target'] for row in contract['schemas']}
-                matches=actual==expected
-            else:
-                matches=(recorded.get('dsh_phalanx') if isinstance(recorded,dict) else recorded)==contract['accounts']['target']
-            if not matches:raise InstallError('Target database schemas do not match their declared identity')
-
-    def restore(self,job):
-        with self.quiescent(job):
-            database=UpgradeDatabaseBackup(self,job)
-            database.verify(job['backup'].get('database'))
-            self.backup_owner(job).restore(job['backup'])
-            self.host.run(['systemctl','daemon-reload'])
-            self.link(job['source']['target'])
-            self.start_database(job)
-            database.restore(job['backup'].get('database'))
-        self.start(job)
-
-    @install_failure('service.start-failed')
-    def restart_old(self,job):
-        if self.host.path(CURRENT).resolve()!=Path(job['source']['target']):raise InstallError('No verified backup exists for the changed current release')
-        self.start(job)
-
-    def commit(self,job):
-        if 'executor' in job.get('prepared',{}):install_executor(self.host,job['source']['uid'],job['source']['gid'],job['prepared']['target'],job['target']['manifest']['commit'])
-        manifest=job['target']['manifest']; receipt={**job['source']['receipt'],'version':job['target']['version'],'channel':job['target'].get('channel',release_channel(job['target']['version'])),'candidate':manifest['tag'],
-            'commit':manifest['commit'],'platformSha256':manifest['files'][asset_names(manifest)[0]],'imageDigest':manifest['image']['digest'],'changed':True}
-        self.host.atomic(STATE,json.dumps(receipt)+'\n'); self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
-        sync_directory(self.host.path('/etc/dsh-phalanx'))
 
 """Fixed managed platform operations; root alone owns admission and acknowledgement."""
 import hashlib
@@ -4515,7 +4708,6 @@ import tempfile
 import uuid
 
 JOURNAL='/var/lib/dsh-phalanx-updater/maintenance-operation.json'
-MARKER='/etc/dsh-phalanx/maintenance'
 
 # BEGIN GENERATED INITIALIZATION RECOVERY PROGRAM
 INITIALIZATION_RECOVERY_PROGRAM = "// Generated recovery program. All writes use the installed source owners.\nimport { readFileSync } from 'node:fs';\ntry {\n  const request = JSON.parse(readFileSync(0, 'utf8'));\n  const { prepareInitializationRecovery } = await import(\"data:text/javascript;base64,aW1wb3J0IHsgcGF0aFRvRmlsZVVSTCB9IGZyb20gJ25vZGU6dXJsJzsKY29uc3QgeyBGaWxlUGxhdGZvcm1EYXRhYmFzZUNvbmZpZyB9ID0gYXdhaXQgaW1wb3J0KHBhdGhUb0ZpbGVVUkwocHJvY2Vzcy5hcmd2WzJdICsgJy9kaXN0L2FkYXB0ZXJzL3BsYXRmb3JtLWRhdGFiYXNlLWNvbmZpZy5qcycpLmhyZWYpOwpjb25zdCB7IHJlYWRFeGVjdXRvckZhY3RzIH0gPSBhd2FpdCBpbXBvcnQoImRhdGE6dGV4dC9qYXZhc2NyaXB0O2Jhc2U2NCxhVzF3YjNKMElIc2djR0YwYUZSdlJtbHNaVlZTVENCOUlHWnliMjBnSjI1dlpHVTZkWEpzSnpzS2FXMXdiM0owSUhzZ2JITjBZWFJUZVc1akxDQnlaV0ZrWkdseVUzbHVZeUI5SUdaeWIyMGdKMjV2WkdVNlpuTW5Pd3BwYlhCdmNuUWdleUJpWVhObGJtRnRaU3dnWkdseWJtRnRaU3dnYW05cGJpQjlJR1p5YjIwZ0oyNXZaR1U2Y0dGMGFDYzdDbU52Ym5OMElIc2dSbWxzWlZCc1lYUm1iM0p0UkdGMFlXSmhjMlZEYjI1bWFXY2dmU0E5SUdGM1lXbDBJR2x0Y0c5eWRDaHdZWFJvVkc5R2FXeGxWVkpNS0hCeWIyTmxjM011WVhKbmRsc3lYU0FySUNjdlpHbHpkQzloWkdGd2RHVnljeTl3YkdGMFptOXliUzFrWVhSaFltRnpaUzFqYjI1bWFXY3Vhbk1uS1M1b2NtVm1LVHNLWTI5dWMzUWdleUJHYVd4bFVHeGhkR1p2Y20xVFpXTnlaWFJ6SUgwZ1BTQmhkMkZwZENCcGJYQnZjblFvY0dGMGFGUnZSbWxzWlZWU1RDaHdjbTlqWlhOekxtRnlaM1piTWwwZ0t5QW5MMlJwYzNRdllXUmhjSFJsY25NdmNHeGhkR1p2Y20wdGMyVmpjbVYwY3k1cWN5Y3BMbWh5WldZcE93cGpiMjV6ZENCN0lHbHVjM0JsWTNSUWJHRjBabTl5YlVSaGRHRmlZWE5sTENCd2JHRjBabTl5YlVSaGRHRmlZWE5sVUc5dmJDQjlJRDBnWVhkaGFYUWdhVzF3YjNKMEtIQmhkR2hVYjBacGJHVlZVa3dvY0hKdlkyVnpjeTVoY21kMld6SmRJQ3NnSnk5a2FYTjBMMkZrWVhCMFpYSnpMM0JzWVhSbWIzSnRMV1JoZEdGaVlYTmxMV2x1YzNCbFkzUnBiMjR1YW5NbktTNW9jbVZtS1RzS1kyOXVjM1FnZXlCeVpXRmtVbVZuYVhOMFpYSmxaRk5qYUdWdFlWWmxjbk5wYjI1eklIMGdQU0JoZDJGcGRDQnBiWEJ2Y25Rb0ltUmhkR0U2ZEdWNGRDOXFZWFpoYzJOeWFYQjBPMkpoYzJVMk5DeGhWekYzWWpOS01FbEljMmRqUjBZd1lVWlNkbEp0YkhOYVZsWlRWRU5DT1VsSFdubGlNakJuU2pJMWRscEhWVFprV0VwelNucHpTMWt5T1hWak0xRm5aWGxDVVZSRlJsVlNhemxUVkZZNVZGRXdhRVpVVlVaVVRFTkNlbGt5YUd4aVYwWktXa2RXZFdSSGJHMWhWMVo1U1Vnd1oxQlRRbWhrTWtad1pFTkNjR0pZUW5aamJsRnZTVzFTYUdSSFJUWmtSMVkwWkVNNWNWbFlXbWhqTWs1NVlWaENNRTh5U21oak1sVXlUa040YUZaNlJqTlphazVMVFVWc1NXTXlaR3BTTUZsM1dWVmFVMlJzU25SaVNFNWhWbXhhVkZaRlRrTlBWV3hJVjI1c2FVMXFRbTVUYWtreFpHeHdTRlpVV210WFJYQjZVMjV3ZWxNeGEzbFBXRlpxVFRGR2JscFliRU5WVmxKR1VteFdVMkY2YkZSV1JsazFWR3hPVmxwR1RsSldiRXBMVmtSQk1WWkZiRWxOUjJSUlZUQktiMXBFU2tkalIxSkVVVzVDYVZkRlNqSlpNalZTWWpKT1NGSnFRbWhTYkVveVZXMHhjMk14Y0ZkV2JFNVZVVEpvTTFreU1EVmhiSEJaVkc1d1RXSlZXalZYYWs1aFdXc3hjMDFIWkV4bFZVWjFWRVJLVTJOSFRYcFZXRnBhVmpGS2Ixa3dhRk5pUjA1MVZGaGFhbEl6YUc5YVJXUmhaRzFPZEUxSVVtcE5helYyVjJ4amVHRkZlSFJqU0hCTFpWZDBNVmxWYUV0aVJuQndZWHBrUkdGVWFIaFRNbXhEVmxkR1NGWlhaR3BUUlhBeVYydG9WMkZ0VWtoaVNGcHBZVlZLTmxkVVNtOWlSMHBZVWxka2FGWjZWWGxYYkdNeFRVZEplbE5xVmsxUk1FbzJXVlZrUjJWV2NGaFZWMlJhWW0xMGJsbHNaSE5pYlU1MFVtcENhRlo2YkRGVVJVNURZVzFKZVUxWVpGcFhSa3AzVjFjeGMyTXlSbGxWYWxaS1VqQmFNVmRyVGtOaFZteFlWRzVLYTFkRlJtNVpNakZYWVVad1NGWnViR3BsVkZKdVV6SnJORk14Y0ZsaFNHUnBUVEJ2ZDFOVlpFOWtiVXAxVkdwQ1NsSnJTazVWVmxwVFVqRlJlRk5yTlZsTlZUVkZWVEJXVjFSc1JsZFVWMlJSVlRCS2FWcFliRU5rVm14WVRWZDRVR0ZWUm5WWGEyaFBZakZuZWxGdE9WcFdNMmh2V1cwMWJtSnJlRVJSYmxKb1ZqSlNOVmRXYUZOalIwbDVUbGh3VUdGVlNsSldSVlpIVmxaS2NrOVdUbFZXYW14UFZURldhMVV4UmxkVmEzQlZUVVJXVlZOVlozaGFSVGt6WWpOYVRHRlhPVzVXVnpGWFltMUdXVlJxUW1waWJYUnVXVzB4UjJSR2NGbFVWMlJhVjBWd2MxTlZXazlWYkZKRVVXNUNZVkl4V2pGYVJXUnpZbGRHV0ZadWJHcGxXR1J1V1cweFYwMXNjRmxUVjJSYVYwVndjRmxXYUZObFZteFpVMnBXU2xKck5WTldSVTVEWkcxT2NGRnRhRXBUUlRWelYxWm9TMkZ0UmtkUFdHUmFWMFpLZGxOVlpGZE9SMDVKVTIxNGFrMHdOWGRaYWtrd1pGVnNSR0l6V2tSaVZsa3dXVEJqTldWWFVrUlJiVEZyVm5wV2NWcEZaSE5rYlVwd1VXNXdXazF0YUhOWmJHUkhVMnh3U0ZadVZtdFNNbmgwV1Zaa1YyVlZkRWhPVjJocFZqRldkMU5WYUhwVE1HeEVVVmRrU2xJeWVIUlRWVTV1WVVWM2VFNVhTbHBWZWtVeVYwUkZlRmxzYkZSTlZGcE9VWHBCTVZkRVJYaE9NREZFWkhwS1RtSnFRbkpVUkU1V1pGZFNTRlp1Y0d0Uk1tZ3hWMVpqZUdKRmRGUlJhbWh0VVRCS01WZFdZM2hpUlhoMVZHcENXbGRGYjNkWmVrWnJZMGRTU0ZveU9VdE5NRXAxVjBoc2FtTkZiRWxsUkdoS1VucFdiMWxzWkZaYU1VSlZUVVJzU2xFeVVuZFpiVEZoWkcxT2RFMVhhR3RTTW5neVdXMTNOV1ZzYTNsaFIzaHBWakJXZFZOVmFEUlBSV3hJVGxkb2FWWXhWbTVWUmxGM1QxVnNSRnBJWkd0V01IQjZXVlprVG1KcmRGSmlNbVJLVVRCR2JsTlZUa0phTUd4SlZXMDVhbUpVYTNwVFZWWlhaVmRPZEU5WWJFeFJNbEpEVTFWb1MySkdiM2xpU0hCclVqRmFOVmRzWkZKYU1rNUlaVWRvYTFJeGNESlpNakIzV2pKTmVWUnRPV0ZXZWtadlUxVmplRTFYVFhwVlYyUm9VakJaZVZkc1RrTmhSV3hJVlc1Q2FrMHhTbmRaYlRGUFRVVnNTRTVZV21saFZFWTJXbFpvVDAxR2NGaE5SMlJXVFZWYVRsTlZZekZoUjBwWVZsYzFURlpJVGt4VFZVNUNXakJzU1ZOdGVHdFRSbG8xV1cxc1Exb3diSEJWYW1ScFlsVmFNRmRzWjNkaFZteEZZekIwYlZWWE9USlRNbXgyV2pGR1ZGRnRjR2xOYWtZeldXcE9UMk5IVWtoaVNGcHBZVlZLTmxwR2FFTmtNa3BJWWtkNGFtVlZTbTlUVldSaFkwZFdTRlp0ZEVwU01uZ3hXa2N4VjJSWFVraFBXR3hzVlRCS2RGbHFUa3BhTWtsNVRsZDRTbEl4U205YVJXUkhZVlpzV1ZSdGVFcFNNMmgzVjIweFYwMUhSbGhOVjNoTllWVkdlRlJJWkhkaVIxWkpVVzVhYW1Kc1JtNVhiVFZYWkZacmVsVnVRbWxOYWxKdVdUSXhWMkp0UmxsVWFrSmhWMFZ3YzFkcldrOWhiVVpJVm01U1dsZEZNWFpaZWtwUFlqRndXRTFYYUdwbFYzUnVXbGhrZGxvd2JFUlJWMlJvVmpGc2JsTXdhRTloYlVaSVZtNVNXbGRGTldsVVZWbDNUREI0ZEU1WGFHbFdNVlp1VTFaUmQwOVZiRVJhUjNScVRXMW9iVmt3Wkc5aFIwcElVbTVXYkZFeVRuZFJNbXhDV2pCc1JGRlhaRXBSTUVadVdrVmtiMlZYU1hwWk1tUlRWMFZ3TlZscVRrcGlNRzk0VlcwNVlWVXdTak5aYTJSSFRVWndkRTlZYkdsVk1FcHhXV3BPUzJKRmJFbFViWEJvVWpGYU1GZFdUa05rUjFKWlZHcENTbEl3Y0hOVFZXaExZa1p2ZVdKSWNHdFNNVm8xVjJ4a1Vsb3hjSFJpU0d4cVRURkdkVk14VW5wVE1HeEVVVmRrU2xJd05USlpiVFZQVFVWc1NFNVhhR2xXTVZvMlUxVlJkMW95U25SV2FrNUtVbXMxYzFwRlRtNWpSVGt6WWpKa1NsRXdSbTVaTWpGWFRVZFNXVk51VmtwU1ZHeHdXVmN4VjJGdFVrUk9WekZxWWxaYWMxcFhNVlppTWsxNVZHMDVZVlo2Um05Wk0yc3haRVpzV1ZGWE9XcE5helYyVjJ4amVHRkZiRVZOUTNSS1UwaE9URk5WVGtKYU1HeEVVVmRrU2xFd1NqWlhWRXB2WWtkS1dGSnJjR0ZTTVZveFdrVmtjMkpYUmxoV2JteE1VMFUxY1ZsVlpGZGtSbXhVVGxoV1dsWjZSbk5UTVZKNlV6QnNSRkZYWkVwUk1FWnVVMVZPUTJOR2NIQlJWemxwWWxWYU1GZHNhRTVrVjBaSVVtNXdURk5GTlhGWlZXUlhaRVpzVkU1WVZscFdla1p6VXpGT2NsTXdiRVJSVjJSS1VUQkdibE5WVGtKYU1HeEVVVmRrYTFJeWFEVlphazVxV2pGS1dWTnViR2xOTUd4MlUycEdRMk14YkZsVmJURnBUVEJ3TUZOVmFFOWhiVVpJVm01U1dsVXdTakZYVm1ONFlrZE9OVkZ1VW10WFJUUjNVMVZrUzJKRmJFbFdibFpvVjBWWmVGZHNUbXBqUlRrellqSmtTbEV3Um01VFZVNUNXakJzU0U1WGFHbFdNVm8yVkVjeFIyRXhjRVJoU0hCYVRXMW9jMWxzWkVaa1YwcDBVbTVTWVZVeWN6TlJNbXhDV2pCc1JGRlhaRXBSTUVadVdWWmtXbG93ZEVSU2JuQmFUVzFvYzFsc1pFWmtWMHBZWWtjMWFtSlZXWGRaVm1NMVpGZE9OVTVZVG1GV2VsWjFXa1ZrYmxveVdrbGtNbVJxVFdzMWRsZHNZM2hoUlhoMFRWaENZVTB3Y0c5YVJXUnpaRzFLZFZSWVZtcE5hbXd3VjJ4T2JtSXlTbGhpUnpWcVlsVlpkMWxXWXpWa1ZYaEVVVzVDYVdKV1NuTmFWVTV5V2pGQ1ZVNUhaR2xXTW5oMVdUSXhSMDFIUmxoUFdGWk5ZbXh3YzFreU5VOWpSMGw1VGtka1NsWkVRVFZUVldSelpGWndTRlpxVWtwUk0wNXVWRlpPY21ORlRuQlJWMlJLVVRCR2JsTlZUa0phTUd4RVVWZGtTbE5HU25aWk1qQTFUVEJzUmxadWJHcGlWR3cxVXpCT2ExVXhjRmhhU0VKcVRURktjMWt5TVZkaE1HeEpWRzF3YUZJeFdqQlhWazVEWkVkR1dGcEliRnBYUmtwM1dXcEpNV1ZyYkVoTlZFWnFUVEZHYmxkWE1WWmFNV3Q1VDFoV2ExSXllSFZhUm1NMVRWZE9OVkZ0TVdwaVZHd3dVMVZvWVdKSFRuVlVia0pwVFdwU2JsUldUbXBqUlRrellqSmtTbEV3Um01VFZVNUNXakJzU1ZOdGVHdFRSbG8xV1cxc1ExVkdiSFJqUjNoYVRURkdNVmR0TlV0aVJuQlpZMGQ0VEZOSVRtNVpiVEZIWkVad1ZXSXlaR3BOYXpWMlYyeGplR0ZGZUhST1YyaHBWakZXZWxOVlkzaGpSbTk2VTIxb2ExSXllREpaYlRWT1RtdHNSazlYYkdoaVZscHhXa1ZOTVdKWFRuUldiWGhzWWxaV2RsbDZTazlpTVhCWVRWZG9UV0pVUm5kWGFrNUxZVWRTU0dKSVdtbGlhekV4V1d4a1IyUXdkRWhOV0VKaFRUQndiMXBGWkhOa2JVcHdVVlJzVVdGVlNsRlhWekYzWWtacmVsVllWbUZpYTNCelYyeG9kMkpGZEVsak1tUk5ZVlJTTVZsc1pITmliVTUwVW1wQ2FGWjZiREZUVldkM1kwVjBWR0V5WkcxVk1uTXpVVEpzUWxvd2JFUlJhbXhNVlRKek0xRXlOSGRUZVVsd1QzZHZka3RwYjJkUlUwSjBZVmhPZW1GWE5XNUpSelZvWWxkV2VtTkhSbXBhVTBKMlkybENNbHBZU25waFZ6bDFTVWhTYUZsdGVHeEpSMng2U1VoYWJHTnVUbkJpTWpSblpXMVdlV0o2YzJkamJWWm9Xa2RzZFZwNVFuVmFXRnBzWTJsQ2QyTnRWbmRaV0Vwc1kzbENjR1JETkdkTGFUaExXbGhvZDJJelNqQkpSMFo2WlZjMWFrbEhXakZpYlU0d1lWYzVkVWxJU214WlYxSlRXbGRrY0dNelVteGpiVlpyVlRKT2IxcFhNV2hXYlZaNVl6SnNkbUp1VFc5ak0wWnpURU5DZWxreWFHeGlWMFo2U1VRd1oxVkZlRUpXUlZwUVZXc3habFV3VGtsU1ZURkNWWGxyWjJWM2IyZEpRMEZuV1RJNWRXTXpVV2RrYlZaNVl6SnNkbUp1VFdkUVUwSmlXRlJ6UzBsRFFXZEpSMXAyWTJsQmIxa3lPWFZqTTFGbll6Sk9iMXBYTVdoSlJ6bHRTVWhPYW1GSFZuUlpXRTF3U1VoelMwbERRV2RKUTBGblNVTkNhbUl5Tlhwa1EwSXdXVmRLYzFwVFFUbEpSMEZyWlROT2FtRkhWblJaVld4cldsYzFNR0ZYV25CYVdFbHZZekpPYjFwWE1XaE1iVFZvWWxkVmNHWlROWHBaTW1oc1lsZEdabUpYYkc1amJVWXdZVmM1ZFdNeVFUZERhVUZuU1VOQlowbERRV2RaTWpsMVl6TlJaMk5JU214ak1sWjFaRU5CT1VsRGFHaGtNa1p3WkVOQ2VtTlhkM1ZqV0Zac1kyNXJiMG94VGtaVVJWWkVWa05DTUdJeE9YbGFWMlJxWWtkR2VtTjVaMnROVTJzMlQyNVNiR1ZJVVdkUlZrMW5ZMjFXYzFsWVVuQmlNalJ1VEVOQ1ltUkhSbWxpUjFaa1MxTnJkV050T1ROak1YTjNXRk0xZVZwWGVHaGtSMngyWW1welMwbERRV2RKUTBGblNVTkNhbUl5Tlhwa1EwSXlXbGhLZW1GWE9YVkpSREJuWTBoS2JHTXlWblZrUTBFdlNVVTFNV0pYU214amFXZHZXVmhrYUdGWVVXZGpNMFp6VEc1R01WcFlTalZMUjBKVVVsVjRSbEV4VVdkUk1EbENWRVZXVkZFd1ZXOWlWMFkwUzBoYWJHTnVUbkJpTWpSd1RFUkJjRWxGUmxSSlNGcHNZMjVPY0dJeU5HZFNiRXBRVkZOQmEyVXpVbWhaYlhoc1psZEJjRXRUTlhsaU0yUjZWM3BDWkV4dVdteGpiazV3WWpJMGNFbEViMmROUkhOTFNVTkJaMGxEUVdkSlEwSXlXbGhLZW1GWE9YVmplVFYzWkZoT2IwdEljMmRpYlVaMFdsUnZaMk15VG05YVZ6Rm9URzAxYUdKWFZYTkpTRnBzWTI1T2NHSXlOR2RtVTJzM1EybEJaMGxEUWpsRGFVRm5TVU5DZVZwWVVqRmpiVFJuWkcxV2VXTXliSFppYmswM1EyNHdTeUlwT3dwamIyNXpkQ0I3SUhKbFlXUlRZWFpsWkVSdmQyNXNiMkZrVTI5MWNtTmxjeUI5SUQwZ1lYZGhhWFFnYVcxd2IzSjBLQ0prWVhSaE9uUmxlSFF2YW1GMllYTmpjbWx3ZER0aVlYTmxOalFzWVZjeGQySXpTakJKU0hOblkwZEdNR0ZHVW5aU2JXeHpXbFpXVTFSRFFqbEpSMXA1WWpJd1owb3lOWFphUjFVMlpGaEtjMHA2YzB0Wk1qbDFZek5SWjJWNVFrTmtXRTV3WW0xV2VtTXhTakZpUjFaR1kyNUtkbU5wUWpsSlJEQm5XVmhrYUdGWVVXZGhWekYzWWpOS01FdElRbWhrUjJoVllqQmFjR0pIVmxaVmEzZHZZMGhLZGxreVZucGplVFZvWTIxa01sZDZTbVJKUTNOblNuazVhMkZZVGpCTU1sSjJZbGRHY0dKcE9XbGtXRTV3WW0xV2VtTjVNV3hqYmtwMlkyazFjV041WTNCTWJXaDVXbGRaY0U5M2NHcGlNalY2WkVOQ04wbEhVblprTWpWellqSkdhMVV5T1RGamJVNXNWVEpXYzFwWFRqQmhWemwxU1Vnd1oxQlRRbWhrTWtad1pFTkNjR0pZUW5aamJsRnZZMGRHTUdGR1VuWlNiV3h6V2xaV1UxUkRhSGRqYlRscVdsaE9la3h0Um5sYU0xcGlUV3d3WjB0NVFXNU1NbEp3WXpOUmRscEhPWFJaVjJ4MVRESlNkbVF5TlhOaU1rWnJURmhPZG1SWVNtcGFVelZ4WTNsamNFeHRhSGxhVjFsd1QzZHdhbUl5Tlhwa1EwSTNTVVpDYzFsWVVtMWlNMHAwVlROU2RtTnRWazFoVjFwc1dUTnNhbUpIVldkbVUwRTVTVWRHTTFsWGJEQkpSMngwWTBjNWVXUkRhSGRaV0ZKdlZrYzVSMkZYZUd4V1ZrcE5TMGhDZVdJeVRteGpNMDExV1ZoS2JtUnNjM2xZVTBGeVNVTmpkbHBIYkhwa1F6bG9Xa2RHZDJSSFZubGplVGwzWWtkR01GcHRPWGxpVXpGNlpFYzVlVnBUTVhOaFYxcHNXVE5zYW1KSFZYVmhiazF1UzFNMWIyTnRWbTFMVkhOTFRIbHZjVWxGT1hWYVUwSjVZak5qWjJOdFZtaGFSMVo1U1VoT2IxbFlTbXhhUTBKcFpWTkNNR0ZIVldkaVIyd3lXbE5DZW1SSE9YbGFVMEpvWW0xUloyUkhhR3hKU0Vwc1dWZFJkR0l5TlhObFUwSnNaVWRXYW1SWVVuWmphVFJuUzJrNFMxcFlhSGRpTTBvd1NVZEdlbVZYTldwSlIxb3hZbTFPTUdGWE9YVkpTRXBzV1ZkU1ZGbFlXbXhhUlZKMlpESTFjMkl5Um10Vk1qa3hZMjFPYkdONWFHdFpXRkpvV1cxR2VscFRhMmRsZDI5blNVTkJaMWt5T1hWak0xRm5Wek5LZG1ReE1HZFFVMEpvWkRKR2NHUkRRbXRaV0ZKb1dXMUdlbHBUTlhoa1YxWjVaVk5uYmxVd1ZrMVNWVTVWU1VoT2JHSkhWbXBrUjJ4MlltbDRlVnBZV25Cak1teDJZbWxDUjFWck9VNUpSMUo2WVVZNWQyRkhSbk5aVnpVMFRHMVNkbVF5TlhOaU1rWnJXRE5PZG1SWVNtcGFXRTFuVmpCb1JsVnJWV2RoVjFFNVRWTmpjRTkzYjJkSlEwRm5ZMjFXTUdSWVNuVkpTRXAyWkhsQkwwbEljMmRqTWxaeldsZE9NR0ZYT1hWUGFVSnJZak5rZFdKSE9XaGFSazUyWkZoS2FscFdUbXhpUjFacVpFZHNkbUpwYUhsaU0yTjFZekpXYzFwWFRqQmhWemwxUzFOM1oyTnRWakpoV0U1d1lqSTBOa2xGTlRGaVYwcHNZMmxvZVdJelkzVmpiVll5WVZoT2NHSXlOSEJKU0RCblQybENNV0p0VW14YWJXeDFXbGRSTjBOdU1FdE1lVzl4UTJsQmNVbEdVbTlhVTBKcldsaENjMkl6YkhSYVZ6VXdURmhrY0ZwSFZXZGFSemt6WW0xNGRsbFhVV2RaTW1oMllWZE9iRXhwUWxaaWJsSndZa05DYUdKcFFtaGFSekZ3WW0xc2VtUklTbWhrUnpsNVNVaE9hR1J0Vm5wTVEwSXdZVWRWWjFreWFIWmhWMDVzU1VoU2IxcFJiMmRMYVVKd1ltNU9NRmxYZUhOYVdFbG5ZMjFXYW1JelNtdGFWMUZuWVZjMFoyUkhhR3hKUjNoMldUSkdjMGxIVG5aaWJWcHdXak5XZVZsWVVuQmlNalJuV1ZoQ2QySkhiR3hqZW5ObllqSTFhbHBUUW5wWldGcHNXa04zWjJSSGFHeEpSMUpvWkVkR2FWbFlUbXhEYVVGeFNVaEtkbVI1UW10aU1sWjZUR2xDVldGSFZXZGtiV3hzWkhsQ2NHTjVRbmxhVjJSd1l6TlNiR050Vm10SlIyeDFTVWRHZVZreWFIQmtSMVpxWkVoV2VWcFROWFJhUkc5bll6TnNkVmt5YUhsaU1qVjJaRmhOWjJOSVNteGpSMFo1V1ZoU2NHSXlOR2RaTWpscldsRnZaMHRwUW5sYVYwWnJZM2xDY0dSRGQyZFpWelZyU1Vkc01FbEhiSHBKU0Vwc1dtNUtiR015YUd4YVEwSjJZbTE0TlVsSFJtMWtSMVo1U1VkV2FGa3laMmRaTWpsMFlsZHNNR1JIVm10SlNFNW9aRzFWZFVOcFFYRk1kM0JzWlVoQ2RtTnVVV2RaTW5ob1l6Tk5aMVZIT1hwa1IyUjVXbGhPUldJelpIVmlSemxvV2taT2RtUllTbXBhV0UxblpYZHZaMGxEUVdkYVIwWXdXVmRLYUdNeVZUZERhVUZuU1VOQ2NHSnVUakJaVjNoeldsZFJOME5wUVdkSlEwSXlZVmRXTTA5M2IyZEpRMEZuWWtkc2JWcFhUalZaTW5oc1NVUXdaMkp0VmpOSlJrSnpXVmhTYldJelNuUlZNMUoyWTIxV1RXRlhXbXhaTTJ4cVlrZFZiMG93VW5aa01qVnpZakpHYTBsSVRuWmtXRXBxV2xOQ2VtUkhPWGxaVjJSc1NubHJOME5wUVdkSlEwSnFZakkxZW1SSVNqRlpNMUoyWTJsb2ExbFlVbWhaYlVaNldsTjNaMkZYTlhwa1IwWnpZa2RXYTB0VFFqZERhVUZuU1VOQlowbERRV2RrUjJod1kzazFhMWxZVW1oWmJVWjZXbE5CT1VsSFVtaGtSMFpwV1ZoT2JFOTNiMmRKUTBGblNVTkJaMGxJVW05aFdFMTFZVmMxZW1SSFJuTmlSMVpyU1VRd1oyRlhOWHBrUjBaellrZFdhMDkzYjJkSlEwRm5abEZ2WjBsRFFXZGhWelZ3WkVkc2FHSkhiRFphVTJkd1NVaHpTMGxEUVdkSlEwRm5TVU5DZVZwWVVqRmpiVFJuWkVkb2NHTjVOWE5oVjFwc1dUTnNhbUpIVlhWaFZ6VndaRWRzYUdKSGJEWmFVMmR2UzFOQk9WQnBRakJoUjJ4NlRHMTRkbGxYVVc5TFUyczNRMmxCWjBsRFFqbERhVUZuU1VOQ2FtSkhPWHBhVTJkd1NVaHpTMGxEUVdkSlEwRm5TVU5DZVZwWVVqRmpiVFJuWkVkb2NHTjVOWE5oVjFwc1dUTnNhbUpIVlhWWk1uaDJZekpWYjB0RGEyZFFWRFJuUzBoU2IyRllUWFZrYld4c1pIbEJPVWxJVm5WYVIxWnRZVmMxYkZwRGEzQlBkMjluU1VOQloyWlJiMmRKUTBGbldqSldNRXREYTJkbGQyOW5TVU5CWjBsRFFXZEpTRkp2WVZoTmRXSkhiRzFhVjA0MVdUSjRiRXh0Um5wak1sWjVaRVU1ZDFwWE5HOUxWSE5MU1VOQlowbERRV2RKUTBKd1dtbEJiMGxZVW05aFdFMTFaRzFzYkdSNWEwdEpRMEZuU1VOQlowbERRV2RKUTBGblpFZG9lV0l6WTJkU1dFcDVZak5KYjBvd1VuWmtNalZ6WWpKR2EwbElUblprV0VwcVdsTkNlbVJIT1hsWlYyUnNTVWRzZWtsSE5YWmtRMEo1V2xkR2EyVlRZM0JQZDI5blNVTkJaMGxEUVdkSlNFcHNaRWhXZVdKcFFqZEpRelIxVEc1T01HTnVWbXBrU0ZaNVdsZFNSR0pIT1hWYVUyZ3dZVWRzZWt4dVduQmFXR04xWXpKV2MxcFhUakJoVnpsMVMxTjNaMk15UmpKYVYxRTJTVWhTYjJGWVRYVmtiV3hzWkhrMWVWcFlXbkJqTW14MlltbEJLMGxFUVdkbVZITkxTVU5CWjBsSU1FdEpRMEZuU1VoT2FHUnRWVzloVnpWM1pGaFJjRWxJYzB0SlEwRm5TVU5CWjBsRFFubGFXRkl4WTIwMFoyUkhhSEJqZVRWellWZGFiRmt6YkdwaVIxVjFaRE5LY0dSSFZXOVpXRTQxWW0xTlowdERhMmRRVkRSblpYZHZaMGxEUVdkSlEwRm5TVU5CWjBsRFFtcGlNalY2WkVOQ2VscFhlR3haTTFKd1lqSTBaMUJUUW10aU0yUjFZa2M1YUZwR1RuWmtXRXBxV2xaT2JHSkhWbXBrUjJ4MlltbG9jR0p1UWpGa1EyczNRMmxCWjBsRFFXZEpRMEZuU1VOQlowbElVbTloV0UxMVdqSldNRXREYXpkSlF6aDJTVWRPYzJJelRteGFRMEoyWTJsQ2RXSXpVV2RsVjFZd1NVZHNkV0ZZVW5CWlYzaHdaVzFXYTBsSGJIcEpTRXBzWTBjNWVXUkhWbXRKUjBwc1dtMDVlVnBUUW1oaWJtdG5ZMWhXYkdOdWEwdEpRMEZuU1VOQlowbERRV2RKUTBGbldUSTVkV016VVdkYVdHaDNXbGRPTUZwWFVXZFFVMEl3WVVkc2VreHVXbkJhV0dOMVkyMVdNbUZZVG5CaU1qUTNRMmxCWjBsRFFXZEpRMEZuU1VOQlowbEhUblppYms0d1NVWjBlV0l6WkdSSlJEQm5XVmhrYUdGWVVXZGtSMmh3WTNrMWExbFlVbWhaYlVaNldsTTFlR1JYVm5sbFUyaG5VMVUxVkZKV1NsVkpSV3hQVmtVNFoxcElUbTlZTTBKdldWZDRhR0p1WjNWYVJ6a3pZbTE0ZGxsWFVtWmpNamt4WTIxT2JHTjVhSEJhUTNoNldsZDRiRmt6VW5CaU1qUnpZMjFXTW1GWVRuQmlNalJ3U1VaYVFsUkdWa1pWZVdkNFRFTlJlRXhFUlhCRGFVRm5TVU5CWjBsRFFXZEpSVGxQU1VWT1VGUnJXazFUVlU1VlMwZHNhMHRUUWtWVWVVSldWVVZTUWxaRlZXZFZNRlpWU1VoT2JHSkhWbXBrUjJ4Mlltb3hSbGRGVGsxV1ZWSkdVa00xZWxwWGVHeFpNMUp3WWpJMGMyTnRWakpoV0U1d1lqSTBPVnBIT1ROaWJYaDJXVmRTWm1NeU9URmpiVTVzWTNrMWVWcFlXbkJqTW14MlltbHplRWxHWkVsU1ZrcEdTVWRTZG1ReU5YTmlNa1pyV0ROT2RtUllTbXBhV0UxMVkyMVdNbUZZVG5CaU1qUTVTa1JKUzBsRFFXZEpRMEZuU1VOQloxVnJWbFZXVmtwUFUxVTFTRWxJU214a2JXeDZZVmM1ZFZsRGQyZFhNSEJVVkRBMGRXTXpVbmxoVnpWdVlWZGFOVXRJVG14aVIxWnFaRWRzZG1KcGEzTkpSMVkwWTBkV2FtUkhWbXRZVTJzM1EybEJaMGxEUVdkSlEwRm5TVU5CWjBsRE9IWkpSVFYyU1VoS2RtUjVRbWxaVjA1eVQybENNR0ZIVldkak0xSjJZMjFXYTBsSVNteGtiV3g2WVZjNWRVbEhNWFprYlZaclNVaENhR016VVdkaU0xWjVZM2xCYjJGWE5XcGlTRlpyWVZjMWJrbEhSV2RaTWpsMVdUTldlV050Vm5Wa1EwSnRZVmhLZW1SRFFucFpXRnBzUzFNMFMwbERRV2RKUTBGblNVTkJaMGxEUVdkaFYxbG5TME5HZVdJelkzQkRhVUZuU1VOQlowbERRV2RKUTBGblNVTkJaMGxEUWpCaFNFcDJaSGxDZFZwWVkyZFJibFo2WVZjMWJHTXpUbE5rVjNoc1VsaEtlV0l6U1c5S01rNTJZbTFhYzJGWFRqQktlWGRuU2pGQ2MxbFlVbTFpTTBwMFNVZE9kbUp0V25CYU0xWjVXVmhTY0dJeU5HZFpNbWhvWW0xa2JGcEROR2RWYlZaellqSkdhMGxIU214YWJUbDVXbE5DZWxsWVduQmliV04xU25sM1owb3pRbk5aV0ZKdFlqTktkRXhYVG5aaWJWcHdXak5XZVZsWVVuQmlNalIwV1RJNWRWcHRlSEJaTTFGdVMxUnpTMGxEUVdkSlEwRm5TVU5CWjBsRFFXZGtSMmh3WTNrMU1tRlhWak5KUkRCblpYbENlbHBYZUd4Wk0xSndZakkwYzBsSVNteGtiV3g2WVZjNWRVOXBRazlrVnpGcFdsaEpiMk50T1ROTWJrcHNaRzFzZW1GWE9YVkxVMEk1VDNkdlowbERRV2RKUTBGblNVZ3djRTkzYjJkSlEwRm5abEZ2WjBsRFFXZFpXRTQxWW0xTloySkhPV2hhUTJkd1NVaHpTMGxEUVdkSlEwRm5TVU5DTUdGSGJIcE1ibHB3V2xoaloxQlRRVzlaV0dSb1lWaFJaMk50Vm1oYVJrNW9aRzFXYTFKSE9UTmliWGgyV1ZkU1ZHSXpWbmxaTWxaNlMwaFNiMkZZVFhWYVIwWXdXVmRLYUdNeVZYQkxVMEV2VUhsQ04wbElUbXhpUjFacVpFZHNkbUpxYjJkYVJ6a3pZbTE0ZGxsWFVsUmlNMVo1V1RKV1ZGcFhlR3haTTFKd1lqSTBiMlJIYUhCamVUVndZbTVPTUZsWGVITmFWMUZ3VEVOQ2VWcFlXbkJqTW14MlltcHZaMDFEUWpsUGQyOW5TVU5CWjJaUmNEbERaejA5SWlrN0NpOHFLaUJQY0dGeGRXVWdabWxzWlhONWMzUmxiU0JtWlc1alpUc2dZMjl1Ym1WamRHbHZiaUJoYm1RZ2EyVjVJR2x1ZEdWeWNISmxkR0YwYVc5dUlISmxiV0ZwYmlCM2FYUm9JSFJvWlNCemIzVnlZMlVnYjNkdVpYSnpMaUFxTHdwbWRXNWpkR2x2YmlCbWFXeGxTV1JsYm5ScGRIa29jR0YwYUNrZ2V3b2dJQ0FnWTI5dWMzUWdhVzVtYnlBOUlHeHpkR0YwVTNsdVl5aHdZWFJvTENCN0lHSnBaMmx1ZERvZ2RISjFaU0I5S1RzS0lDQWdJR2xtSUNnaGFXNW1ieTVwYzBacGJHVW9LU2tLSUNBZ0lDQWdJQ0IwYUhKdmR5QkZjbkp2Y2lnblJYaGxZM1YwYjNJZ1ptRmpkSE1nY21WeGRXbHlaU0JoYmlCcGJtUmxjR1Z1WkdWdWRDQndjbTkwWldOMFpXUWdabWxzWlNjcE93b2dJQ0FnY21WMGRYSnVJSHNnY0dGMGFDd2daR1YyYVdObE9pQlRkSEpwYm1jb2FXNW1ieTVrWlhZcExDQnBibTlrWlRvZ1UzUnlhVzVuS0dsdVptOHVhVzV2S1N3Z2MybDZaVG9nVTNSeWFXNW5LR2x1Wm04dWMybDZaU2tzSUcxdlpHbG1hV1ZrT2lCVGRISnBibWNvYVc1bWJ5NXRkR2x0WlU1ektTd2dZMmhoYm1kbFpEb2dVM1J5YVc1bktHbHVabTh1WTNScGJXVk9jeWtnZlRzS2ZRcGpiMjV6ZENCeWIzZHpJRDBnS0hOeGJDa2dQVDRnS0hzS0lDQWdJSEYxWlhKNU9pQmhjM2x1WXlBb2RHVjRkQ3dnZG1Gc2RXVnpLU0E5UGlBb1lYZGhhWFFnYzNGc0xuRjFaWEo1S0hSbGVIUXNJSFpoYkhWbGN5QTlQVDBnZFc1a1pXWnBibVZrSUQ4Z2RXNWtaV1pwYm1Wa0lEb2dXeTR1TG5aaGJIVmxjMTBwS1M1eWIzZHpMQXA5S1RzS1lYTjVibU1nWm5WdVkzUnBiMjRnWTJobFkydEdZV04wY3loemNXd3NJSE5qYUdWdFlYTXBJSHNLSUNBZ0lHeGxkQ0J6Wld4bFkzUnBiMjRzSUhabGNuTnBiMjV6SUQwZ2JuVnNiQ3dnWTJ4cFpXNTBPd29nSUNBZ2RISjVJSHNLSUNBZ0lDQWdJQ0JqYkdsbGJuUWdQU0JoZDJGcGRDQnpjV3d1WTI5dWJtVmpkQ2dwT3dvZ0lDQWdJQ0FnSUdGM1lXbDBJR05zYVdWdWRDNXhkV1Z5ZVNnblFrVkhTVTRnU1ZOUFRFRlVTVTlPSUV4RlZrVk1JRkpGVUVWQlZFRkNURVVnVWtWQlJDQlNSVUZFSUU5T1RGa25LVHNLSUNBZ0lDQWdJQ0JoZDJGcGRDQmpiR2xsYm5RdWNYVmxjbmtvSjFORlZDQk1UME5CVENCemRHRjBaVzFsYm5SZmRHbHRaVzkxZEQweE1EQXdNQ2NwT3dvZ0lDQWdJQ0FnSUdGM1lXbDBJR05zYVdWdWRDNXhkV1Z5ZVNnblUwRldSVkJQU1U1VUlHUnZkMjVzYjJGa1gzTnZkWEpqWlhNbktUc0tJQ0FnSUNBZ0lDQjBjbmtnZXdvZ0lDQWdJQ0FnSUNBZ0lDQnpaV3hsWTNScGIyNGdQU0JoZDJGcGRDQnlaV0ZrVTJGMlpXUkViM2R1Ykc5aFpGTnZkWEpqWlhNb2NtOTNjeWhqYkdsbGJuUXBLVHNLSUNBZ0lDQWdJQ0I5Q2lBZ0lDQWdJQ0FnWTJGMFkyZ2dld29nSUNBZ0lDQWdJQ0FnSUNCaGQyRnBkQ0JqYkdsbGJuUXVjWFZsY25rb0oxSlBURXhDUVVOTElGUlBJRk5CVmtWUVQwbE9WQ0JrYjNkdWJHOWhaRjl6YjNWeVkyVnpKeWs3Q2lBZ0lDQWdJQ0FnZlFvZ0lDQWdJQ0FnSUdGM1lXbDBJR05zYVdWdWRDNXhkV1Z5ZVNnblUwRldSVkJQU1U1VUlITmphR1Z0WVY5MlpYSnphVzl1Y3ljcE93b2dJQ0FnSUNBZ0lIUnllU0I3Q2lBZ0lDQWdJQ0FnSUNBZ0lIWmxjbk5wYjI1eklEMGdZWGRoYVhRZ2NtVmhaRkpsWjJsemRHVnlaV1JUWTJobGJXRldaWEp6YVc5dWN5aGpiR2xsYm5Rc0lITmphR1Z0WVhNdWJXRndLRzVoYldVZ1BUNGdLSHNnYm1GdFpTd2diV2xuY21GMGFXOXVjem9nVzEwZ2ZTa3BLVHNLSUNBZ0lDQWdJQ0I5Q2lBZ0lDQWdJQ0FnWTJGMFkyZ2dld29nSUNBZ0lDQWdJQ0FnSUNCaGQyRnBkQ0JqYkdsbGJuUXVjWFZsY25rb0oxSlBURXhDUVVOTElGUlBJRk5CVmtWUVQwbE9WQ0J6WTJobGJXRmZkbVZ5YzJsdmJuTW5LVHNLSUNBZ0lDQWdJQ0I5Q2lBZ0lDQWdJQ0FnWVhkaGFYUWdZMnhwWlc1MExuRjFaWEo1S0NkRFQwMU5TVlFuS1RzS0lDQWdJSDBLSUNBZ0lHTmhkR05vSUhzS0lDQWdJQ0FnSUNCMlpYSnphVzl1Y3lBOUlHNTFiR3c3Q2lBZ0lDQWdJQ0FnZEhKNUlIc0tJQ0FnSUNBZ0lDQWdJQ0FnWVhkaGFYUWdZMnhwWlc1MFB5NXhkV1Z5ZVNnblVrOU1URUpCUTBzbktUc0tJQ0FnSUNBZ0lDQjlDaUFnSUNBZ0lDQWdZMkYwWTJnZ2V3b2dJQ0FnSUNBZ0lDQWdJQ0F2S2lCVWFHVWdZMjl1Ym1WamRHbHZiaUJ0WVhrZ1lXeHlaV0ZrZVNCb1lYWmxJR05zYjNObFpDNGdLaThLSUNBZ0lDQWdJQ0I5Q2lBZ0lDQjlDaUFnSUNCbWFXNWhiR3g1SUhzS0lDQWdJQ0FnSUNCamJHbGxiblEvTG5KbGJHVmhjMlVvS1RzS0lDQWdJSDBLSUNBZ0lISmxkSFZ5YmlCN0lITmxiR1ZqZEdsdmJqb2djMlZzWldOMGFXOXVQeTV6Wld4bFkzUnBiMjRnUHo4Z2JuVnNiQ3dnYzJOb1pXMWhjem9nZG1WeWMybHZibk1nZlRzS2ZRb3ZLaW9nVW1WaFpDQnpaV3hsWTNSbFpDQnpiM1Z5WTJVZ1ptRmpkSE1nZDJsMGFHOTFkQ0J3Y21Wd1lYSnBibWNnYzNSdmNtVnpMQ0J0YVdkeVlYUnBiMjV6SUc5eUlHRWdjR3hoZEdadmNtMGdjblZ1ZEdsdFpTNGdLaThLWlhod2IzSjBJR0Z6ZVc1aklHWjFibU4wYVc5dUlISmxZV1JGZUdWamRYUnZja1poWTNSektHTnZibVpwWjBacGJHVXNJR1JoZEdGU2IyOTBMQ0JtWVdOMExDQnpZMmhsYldGektTQjdDaUFnSUNCamIyNXpkQ0JpWldadmNtVWdQU0JtYVd4bFNXUmxiblJwZEhrb1kyOXVabWxuUm1sc1pTa3NJSE5sYkdWamRHVmtJRDBnUm1sc1pWQnNZWFJtYjNKdFJHRjBZV0poYzJWRGIyNW1hV2N1YjNCbGJpaGpiMjVtYVdkR2FXeGxMQ0JrWVhSaFVtOXZkQ2tzSUd0bGVTQTlJR1pwYkdWSlpHVnVkR2wwZVNoelpXeGxZM1JsWkM1elpXTjFjbWwwZVM1dFlYTjBaWEpMWlhsUVlYUm9LU3dnZG1WeWFXWnBaV1JMWlhrZ1BTQkdhV3hsVUd4aGRHWnZjbTFUWldOeVpYUnpMbTl3Wlc0b2MyVnNaV04wWldRdWMyVmpkWEpwZEhrdWJXRnpkR1Z5UzJWNVVHRjBhQ3dnYzJWc1pXTjBaV1F1YzJWamRYSnBkSGt1Y21WbmFYTjBjbmtwT3dvZ0lDQWdkbVZ5YVdacFpXUkxaWGt1WTJ4dmMyVW9LVHNLSUNBZ0lHbG1JQ2htWVdOMElEMDlQU0FuY205MFlYUnBiMjRuS1FvZ0lDQWdJQ0FnSUhKbGRIVnliaUJ5YjNSaGRHbHZia1poWTNSektHTnZibVpwWjBacGJHVXNJR1JoZEdGU2IyOTBMQ0J6Wld4bFkzUmxaQ3dnVzJKbFptOXlaU3dnYTJWNVhTazdDaUFnSUNCamIyNXpkQ0J6Y1d3Z1BTQndiR0YwWm05eWJVUmhkR0ZpWVhObFVHOXZiQ2h6Wld4bFkzUmxaQzVqYjI1dVpXTjBhVzl1S1RzS0lDQWdJSFJ5ZVNCN0NpQWdJQ0FnSUNBZ2FXWWdLR1poWTNRZ1BUMDlJQ2RqYUdWamF5Y3BJSHNLSUNBZ0lDQWdJQ0FnSUNBZ1kyOXVjM1FnY21WemRXeDBJRDBnWVhkaGFYUWdZMmhsWTJ0R1lXTjBjeWh6Y1d3c0lITmphR1Z0WVhNcE93b2dJQ0FnSUNBZ0lDQWdJQ0JwWmlBb1NsTlBUaTV6ZEhKcGJtZHBabmtvWW1WbWIzSmxLU0FoUFQwZ1NsTlBUaTV6ZEhKcGJtZHBabmtvWm1sc1pVbGtaVzUwYVhSNUtHTnZibVpwWjBacGJHVXBLU0I4ZkNCS1UwOU9Mbk4wY21sdVoybG1lU2hyWlhrcElDRTlQU0JLVTA5T0xuTjBjbWx1WjJsbWVTaG1hV3hsU1dSbGJuUnBkSGtvYTJWNUxuQmhkR2dwS1NrS0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSUhSb2NtOTNJRVZ5Y205eUtDZFVhR1VnYzJWc1pXTjBaV1FnWTI5dWJtVmpkR2x2YmlCdmNpQnJaWGtnWTJoaGJtZGxaQ0JrZFhKcGJtY2dkR2hsSUhKbGNYVmxjM1FuS1RzS0lDQWdJQ0FnSUNBZ0lDQWdjbVYwZFhKdUlIc2dMaTR1Y21WemRXeDBMQ0JwWkdWdWRHbDBlVG9nVzJKbFptOXlaU3dnYTJWNVhTQjlPd29nSUNBZ0lDQWdJSDBLSUNBZ0lDQWdJQ0JoZDJGcGRDQnpjV3d1Y1hWbGNua29KMU5GVkNCemRHRjBaVzFsYm5SZmRHbHRaVzkxZEQweE1EQXdNQ2NwT3dvZ0lDQWdJQ0FnSUdsbUlDaG1ZV04wSUQwOVBTQW5jMk5vWlcxaGN5Y3BDaUFnSUNBZ0lDQWdJQ0FnSUhKbGRIVnliaUI3Q2lBZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0J6WTJobGJXRnpPaUJoZDJGcGRDQnlaV0ZrVW1WbmFYTjBaWEpsWkZOamFHVnRZVlpsY25OcGIyNXpLSE54YkN3Z2MyTm9aVzFoY3k1dFlYQW9ibUZ0WlNBOVBpQW9leUJ1WVcxbExDQnRhV2R5WVhScGIyNXpPaUJiWFNCOUtTa3BMQW9nSUNBZ0lDQWdJQ0FnSUNCOU93b2dJQ0FnSUNBZ0lHTnZibk4wSUhKdmR5QTlJR0YzWVdsMElISmxZV1JUWVhabFpFUnZkMjVzYjJGa1UyOTFjbU5sY3loeWIzZHpLSE54YkNrcE93b2dJQ0FnSUNBZ0lISmxkSFZ5YmlCN0lITmxiR1ZqZEdsdmJqb2djbTkzUHk1elpXeGxZM1JwYjI0Z1B6OGdiblZzYkNCOU93b2dJQ0FnZlFvZ0lDQWdabWx1WVd4c2VTQjdDaUFnSUNBZ0lDQWdZWGRoYVhRZ2MzRnNMbVZ1WkNncE93b2dJQ0FnZlFwOUNpOHFLaUJCSUd4cGRtVXRjMlZ5ZG1salpTQndjbTlpWlNCdVpYWmxjaUIwWVd0bGN5QnRZV2x1ZEdWdVlXNWpaU0JzYjJOcmN5QnZjaUJ3Y21Wd1lYSmxjeUJ6WTJobGJXRWdiM0lnYTJWNUlHWnBiR1Z6TGlBcUx3cGhjM2x1WXlCbWRXNWpkR2x2YmlCeWIzUmhkR2x2YmtaaFkzUnpLR052Ym1acFowWnBiR1VzSUdSaGRHRlNiMjkwTENCelpXeGxZM1JsWkN3Z2FXUmxiblJwZEhrcElIc0tJQ0FnSUdOdmJuTjBJR0oxYVd4MGFXNUdhV3hsSUQwZ2FtOXBiaWhrYVhKdVlXMWxLR052Ym1acFowWnBiR1VwTENBblluVnBiSFJwYmkxa1lYUmhZbUZ6WlM1cWMyOXVKeWs3Q2lBZ0lDQnBaR1Z1ZEdsMGVTNXdkWE5vS0dacGJHVkpaR1Z1ZEdsMGVTaGlkV2xzZEdsdVJtbHNaU2twT3dvZ0lDQWdZMjl1YzNRZ1luVnBiSFJwYmlBOUlFWnBiR1ZRYkdGMFptOXliVVJoZEdGaVlYTmxRMjl1Wm1sbkxtOXdaVzRvWW5WcGJIUnBia1pwYkdVc0lHUmhkR0ZTYjI5MEtUc0tJQ0FnSUdsbUlDZ2hjMlZzWldOMFpXUXVaR1Z3Ykc5NWJXVnVkRWxrSUh4OElHSjFhV3gwYVc0dVpHVndiRzk1YldWdWRFbGtJQ0U5UFNCelpXeGxZM1JsWkM1a1pYQnNiM2x0Wlc1MFNXUWdmSHdnWW5WcGJIUnBiaTV6WldOMWNtbDBlUzV0WVhOMFpYSkxaWGxRWVhSb0lDRTlQU0J6Wld4bFkzUmxaQzV6WldOMWNtbDBlUzV0WVhOMFpYSkxaWGxRWVhSb0tRb2dJQ0FnSUNBZ0lIUm9jbTkzSUVWeWNtOXlLQ2RTYjNSaGRHbHZiaUJ5WlhGMWFYSmxjeUJ0WVhSamFHbHVaeUJ3Y205MFpXTjBaV1FnWkdWd2JHOTViV1Z1ZENCamIyNW1hV2QxY21GMGFXOXVjeWNwT3dvZ0lDQWdZMjl1YzNRZ1kyeGxZWElnUFNBb0tTQTlQaUI3Q2lBZ0lDQWdJQ0FnWm05eUlDaGpiMjV6ZENCd1lYUm9JRzltSUZ0amIyNW1hV2RHYVd4bExDQmlkV2xzZEdsdVJtbHNaU3dnYzJWc1pXTjBaV1F1YzJWamRYSnBkSGt1YldGemRHVnlTMlY1VUdGMGFGMHBJSHNLSUNBZ0lDQWdJQ0FnSUNBZ1kyOXVjM1FnYm1GdFpTQTlJR0poYzJWdVlXMWxLSEJoZEdncE93b2dJQ0FnSUNBZ0lDQWdJQ0JwWmlBb2NtVmhaR1JwY2xONWJtTW9aR2x5Ym1GdFpTaHdZWFJvS1NrdWMyOXRaU2hsYm5SeWVTQTlQaUJsYm5SeWVTNXpkR0Z5ZEhOWGFYUm9LRzVoYldVZ0t5QW5MbTVsZUhRdEp5a2dmSHdnWlc1MGNua3VjM1JoY25SelYybDBhQ2h1WVcxbElDc2dKeTUwYlhBdGEyVjVMU2NwS1NrS0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSUhSb2NtOTNJRVZ5Y205eUtDZEJJSE4wWVdkbFpDQnJaWGtnYjNCbGNtRjBhVzl1SUcxMWMzUWdZbVVnY21WamIzWmxjbVZrSUdacGNuTjBKeWs3Q2lBZ0lDQWdJQ0FnZlFvZ0lDQWdJQ0FnSUdOdmJuTjBJR1Z1ZEhKcFpYTWdQU0J5WldGa1pHbHlVM2x1WXloa2FYSnVZVzFsS0dOdmJtWnBaMFpwYkdVcEtUc0tJQ0FnSUNBZ0lDQnBaaUFvWlc1MGNtbGxjeTVwYm1Oc2RXUmxjeWduY0d4aGRHWnZjbTB0YTJWNUxXOXdaWEpoZEdsdmJpNXFjMjl1SnlrZ2ZId2daVzUwY21sbGN5NXBibU5zZFdSbGN5Z25jR3hoZEdadmNtMHRaR0YwWVdKaGMyVXRiM0JsY21GMGFXOXVMbXB6YjI0bktTa0tJQ0FnSUNBZ0lDQWdJQ0FnZEdoeWIzY2dSWEp5YjNJb0owRWdjSEp2WkhWamRDQnRZV2x1ZEdWdVlXNWpaU0JxYjNWeWJtRnNJRzExYzNRZ1ltVWdjbVZqYjNabGNtVmtJR1pwY25OMEp5azdDaUFnSUNCOU93b2dJQ0FnWTJ4bFlYSW9LVHNLSUNBZ0lHeGxkQ0J5WldGa2VTQTlJR1poYkhObE93b2dJQ0FnYVdZZ0tITmxiR1ZqZEdWa0xuTmxiR1ZqZEdsdmJpQWhQVDBnZFc1a1pXWnBibVZrS1NCN0NpQWdJQ0FnSUNBZ1kyOXVjM1FnWTJobFkydGxaQ0E5SUdGM1lXbDBJR2x1YzNCbFkzUlFiR0YwWm05eWJVUmhkR0ZpWVhObEtITmxiR1ZqZEdWa0xtTnZibTVsWTNScGIyNHNJSE5sYkdWamRHVmtMbk5sWTNWeWFYUjVMbkpsWjJsemRISjVMbTFoYzNSbGNrWnBibWRsY25CeWFXNTBMQ0J6Wld4bFkzUmxaQzVrWlhCc2IzbHRaVzUwU1dRcE93b2dJQ0FnSUNBZ0lHbG1JQ2doWTJobFkydGxaQzV2YXlrS0lDQWdJQ0FnSUNBZ0lDQWdkR2h5YjNjZ1JYSnliM0lvSjFKdmRHRjBhVzl1SUhKbFlXUnBibVZ6Y3lCeVpYRjFhWEpsY3lCaElISmxZV05vWVdKc1pTQnRZWFJqYUdsdVp5QndiR0YwWm05eWJTQmtZWFJoWW1GelpTY3BPd29nSUNBZ0lDQWdJSEpsWVdSNUlEMGdZMmhsWTJ0bFpDNXpZMmhsYldFZ1BUMDlJQ2R3YkdGMFptOXliU2M3Q2lBZ0lDQjlDaUFnSUNCamJHVmhjaWdwT3dvZ0lDQWdhV1lnS0dsa1pXNTBhWFI1TG5OdmJXVW9ZbVZtYjNKbElEMCtJRXBUVDA0dWMzUnlhVzVuYVdaNUtHSmxabTl5WlNrZ0lUMDlJRXBUVDA0dWMzUnlhVzVuYVdaNUtHWnBiR1ZKWkdWdWRHbDBlU2hpWldadmNtVXVjR0YwYUNrcEtTa0tJQ0FnSUNBZ0lDQjBhSEp2ZHlCRmNuSnZjaWduVkdobElIQnliM1JsWTNSbFpDQmpiMjVtYVdkMWNtRjBhVzl1SUc5eUlHdGxlU0JqYUdGdVoyVmtJR1IxY21sdVp5QnliM1JoZEdsdmJpQnlaV0ZrYVc1bGMzTWdZMmhsWTJ0ekp5azdDaUFnSUNCeVpYUjFjbTRnZXdvZ0lDQWdJQ0FnSUhKbFlXUjVMQW9nSUNBZ0lDQWdJR2x1YVhScFlXeHBlbUYwYVc5dVVHVnVaR2x1WnpvZ0lYSmxZV1I1TEFvZ0lDQWdJQ0FnSUdSbGNHeHZlVzFsYm5SSlpEb2djMlZzWldOMFpXUXVaR1Z3Ykc5NWJXVnVkRWxrTEFvZ0lDQWdJQ0FnSUdacGJtZGxjbkJ5YVc1ME9pQnpaV3hsWTNSbFpDNXpaV04xY21sMGVTNXlaV2RwYzNSeWVTNXRZWE4wWlhKR2FXNW5aWEp3Y21sdWRDd0tJQ0FnSUNBZ0lDQnBaR1Z1ZEdsMGVTd0tJQ0FnSUgwN0NuMEsiKTsKY29uc3QgeyBQbGF0Zm9ybURhdGFiYXNlIH0gPSBhd2FpdCBpbXBvcnQocGF0aFRvRmlsZVVSTChwcm9jZXNzLmFyZ3ZbMl0gKyAnL2Rpc3QvYWRhcHRlcnMvcGxhdGZvcm0tZGF0YWJhc2UuanMnKS5ocmVmKTsKY29uc3QgeyBQbGF0Zm9ybUxvY2sgfSA9IGF3YWl0IGltcG9ydChwYXRoVG9GaWxlVVJMKHByb2Nlc3MuYXJndlsyXSArICcvZGlzdC9hZGFwdGVycy9wbGF0Zm9ybS1sb2NrLmpzJykuaHJlZik7CmNvbnN0IHsgUG9zdGdyZXNVc2VyU3RvcmFnZUZhY3RzIH0gPSBhd2FpdCBpbXBvcnQocGF0aFRvRmlsZVVSTChwcm9jZXNzLmFyZ3ZbMl0gKyAnL2Rpc3QvYWRhcHRlcnMvcG9zdGdyZXMtdXNlci1zdG9yYWdlLWZhY3RzLmpzJykuaHJlZik7CmNvbnN0IHsgVXNlclN0b3JhZ2VHdWFyZCB9ID0gYXdhaXQgaW1wb3J0KHBhdGhUb0ZpbGVVUkwocHJvY2Vzcy5hcmd2WzJdICsgJy9kaXN0L2FkYXB0ZXJzL3VzZXItc3RvcmFnZS1ndWFyZC5qcycpLmhyZWYpOwpjb25zdCB7IHJlYWRQbGF0Zm9ybURhdGFiYXNlU3RhdGUgfSA9IGF3YWl0IGltcG9ydChwYXRoVG9GaWxlVVJMKHByb2Nlc3MuYXJndlsyXSArICcvZGlzdC9hZGFwdGVycy9wbGF0Zm9ybS1kYXRhYmFzZS1pbnNwZWN0aW9uLmpzJykuaHJlZik7Ci8qKiBDYWxsZWQgb25seSBieSB0aGUgZXhlY3V0b3IgdW5kZXIgaXRzIGR1cmFibGUgbGVnYWN5LXJlamVjdGlvbiBwcm9vZiBhbmQgY2xvc2VkIGFkbWlzc2lvbi4KICogVGhlIGdlbmVyYXRlZCBwcm9ncmFtIGxvYWRzIHRoZSBpbnN0YWxsZWQgc291cmNlJ3MgZGF0YWJhc2UgYW5kIHN0b3JhZ2Ugb3duZXJzLgogKiBJdCBwcmVwYXJlcyB0aGUgbWlzc2luZyBmaXJzdC1pbnN0YWxsIHN0b3JhZ2UgaWRlbnRpdHkgd2l0aG91dCByZWxheGluZyBub3JtYWwgbWFpbnRlbmFuY2Ugc3RhcnR1cC4KICovCmV4cG9ydCBhc3luYyBmdW5jdGlvbiBwcmVwYXJlSW5pdGlhbGl6YXRpb25SZWNvdmVyeShyZXF1ZXN0KSB7CiAgICBpZiAocmVxdWVzdC5wcm9vZi5pbml0aWFsaXphdGlvblBlbmRpbmcgIT09IHRydWUpCiAgICAgICAgdGhyb3cgRXJyb3IoJ0luaXRpYWxpemF0aW9uIHJlY292ZXJ5IHJlcXVpcmVzIGl0cyBvcmlnaW5hbCByZWplY3Rpb24gcHJvb2YnKTsKICAgIGNvbnN0IGxvY2sgPSBuZXcgUGxhdGZvcm1Mb2NrKHJlcXVlc3QuZGF0YVJvb3QpOwogICAgbGV0IGRhdGFiYXNlOwogICAgY29uc3QgdmVyaWZ5ID0gYXN5bmMgKCkgPT4gewogICAgICAgIGNvbnN0IGZhY3RzID0gYXdhaXQgcmVhZEV4ZWN1dG9yRmFjdHMocmVxdWVzdC5jb25maWdGaWxlLCByZXF1ZXN0LmRhdGFSb290LCAncm90YXRpb24nLCBbXSk7CiAgICAgICAgaWYgKCEoJ2luaXRpYWxpemF0aW9uUGVuZGluZycgaW4gZmFjdHMpIHx8CiAgICAgICAgICAgIGZhY3RzLmRlcGxveW1lbnRJZCAhPT0gcmVxdWVzdC5wcm9vZi5kZXBsb3ltZW50SWQgfHwKICAgICAgICAgICAgZmFjdHMuZmluZ2VycHJpbnQgIT09IHJlcXVlc3QucHJvb2YuZmluZ2VycHJpbnQgfHwKICAgICAgICAgICAgSlNPTi5zdHJpbmdpZnkoZmFjdHMuaWRlbnRpdHkpICE9PSBKU09OLnN0cmluZ2lmeShyZXF1ZXN0LnByb29mLmlkZW50aXR5KSkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ0luaXRpYWxpemF0aW9uIHJlY292ZXJ5IHByb3RlY3RlZCBpZGVudGl0eSBjaGFuZ2VkJyk7CiAgICB9OwogICAgdHJ5IHsKICAgICAgICBhd2FpdCB2ZXJpZnkoKTsKICAgICAgICBjb25zdCBzYXZlZCA9IEZpbGVQbGF0Zm9ybURhdGFiYXNlQ29uZmlnLm9wZW4ocmVxdWVzdC5jb25maWdGaWxlLCByZXF1ZXN0LmRhdGFSb290KTsKICAgICAgICBpZiAoIXNhdmVkLnNlbGVjdGlvbikKICAgICAgICAgICAgcmV0dXJuIHsgcHJlcGFyZWQ6IGZhbHNlIH07CiAgICAgICAgLy8gQSByZXRyeSBtYXkgZmluZCBzY2hlbWEgY29tbWl0dGVkIGJlZm9yZSBzdG9yYWdlIHByZXBhcmF0aW9uLiBOZXZlciBhZG9wdCBhbiBpbnN0YWxsZWQgYWNjb3VudCBkYXRhYmFzZS4KICAgICAgICBkYXRhYmFzZSA9IG5ldyBQbGF0Zm9ybURhdGFiYXNlKHNhdmVkLmNvbm5lY3Rpb24sIHNhdmVkLnNlY3VyaXR5KTsKICAgICAgICBsZXQgbG9zdCA9IGZhbHNlOwogICAgICAgIGF3YWl0IGRhdGFiYXNlLmNsYWltRGVwbG95bWVudChyZXF1ZXN0LnByb29mLmRlcGxveW1lbnRJZCwgKCkgPT4gewogICAgICAgICAgICBsb3N0ID0gdHJ1ZTsKICAgICAgICB9KTsKICAgICAgICBpZiAoKGF3YWl0IHJlYWRQbGF0Zm9ybURhdGFiYXNlU3RhdGUoc2F2ZWQuY29ubmVjdGlvbikpLmNvbXBsZXRlKQogICAgICAgICAgICB0aHJvdyBFcnJvcignSW5pdGlhbGl6YXRpb24gcmVjb3ZlcnkgY2Fubm90IHByZXBhcmUgYW4gZXN0YWJsaXNoZWQgZGVwbG95bWVudCcpOwogICAgICAgIGF3YWl0IGRhdGFiYXNlLmluaXRpYWxpemUoKTsKICAgICAgICBhd2FpdCBuZXcgVXNlclN0b3JhZ2VHdWFyZChyZXF1ZXN0LmRhdGFSb290LCBuZXcgUG9zdGdyZXNVc2VyU3RvcmFnZUZhY3RzKGRhdGFiYXNlKSwgcmVxdWVzdC5zdG9yYWdlLnVzZXJEYXRhUm9vdCwgcmVxdWVzdC5zdG9yYWdlLmNvbnRhaW5lciwgcmVxdWVzdC5zdG9yYWdlLnVzZXJEYXRhTW91bnQpLmluaXRpYWxpemUoKTsKICAgICAgICBhd2FpdCB2ZXJpZnkoKTsKICAgICAgICBpZiAobG9zdCkKICAgICAgICAgICAgdGhyb3cgRXJyb3IoJ0luaXRpYWxpemF0aW9uIHJlY292ZXJ5IGxvc3QgZGVwbG95bWVudCBvd25lcnNoaXAnKTsKICAgICAgICByZXR1cm4geyBwcmVwYXJlZDogdHJ1ZSB9OwogICAgfQogICAgZmluYWxseSB7CiAgICAgICAgdHJ5IHsKICAgICAgICAgICAgYXdhaXQgZGF0YWJhc2U/LmNsb3NlKCk7CiAgICAgICAgfQogICAgICAgIGZpbmFsbHkgewogICAgICAgICAgICBsb2NrLmNsb3NlKCk7CiAgICAgICAgfQogICAgfQp9Cg==\");\n  console.log(JSON.stringify(await prepareInitializationRecovery(request)));\n} catch {\n  console.error('Initialization recovery preparation failed; keep admission closed and inspect the protected database and user storage');\n  process.exitCode = 1;\n}\n"
@@ -4528,13 +4720,16 @@ def read_owned(path,uid,mode=0o600,*,max_bytes=262144):
         info=os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode) or info.st_uid!=uid or stat.S_IMODE(info.st_mode)!=mode or (max_bytes is not None and info.st_size>max_bytes):
             raise InstallError('Invalid protected maintenance carrier')
-        with os.fdopen(os.dup(descriptor),'r') as stream:return stream.read()
-    finally:os.close(descriptor)
+        with os.fdopen(os.dup(descriptor),'r') as stream:
+            return stream.read()
+    finally:
+        os.close(descriptor)
 
 
 def read_platform_operation(host):
     path=host.path(JOURNAL)
-    if not path.exists() and not path.is_symlink():return None
+    if not path.exists() and not path.is_symlink():
+        return None
     job=json.loads(read_owned(path,os.geteuid()))
     if not isinstance(job,dict) or job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):
         raise InstallError('Unknown protected platform operation')
@@ -4543,51 +4738,69 @@ def read_platform_operation(host):
 
 class PlatformOperations:
     def __init__(self,host,port):
-        self.host=host;self.port=port;root=host.mkdir('/var/lib/dsh-phalanx-updater',0o700)
-        if root.stat().st_uid!=os.geteuid():raise InstallError('Invalid platform operation directory owner')
+        self.host=host
+        self.port=port
+        root=host.mkdir('/var/lib/dsh-phalanx-updater',0o700)
+        if root.stat().st_uid!=os.geteuid():
+            raise InstallError('Invalid platform operation directory owner')
 
     def load(self):
         return read_platform_operation(self.host)
 
-    def save(self,job):self.host.atomic(JOURNAL,json.dumps(job)+'\n')
+    def save(self,job):
+        self.host.atomic(JOURNAL,json.dumps(job)+'\n')
 
     def status(self,operation=None):
         job=self.load()
-        if operation and (not job or job['id']!=operation):raise InstallError('Unknown platform operation')
+        if operation and (not job or job['id']!=operation):
+            raise InstallError('Unknown platform operation')
         return {key:job[key] for key in ('id','action','phase','fingerprint') if key in job} if job else None
 
     def begin(self,action,target=None):
-        if action not in ('master-key-rotate','master-key-reset','database-switch'):raise InstallError('Unsupported managed platform operation')
+        if action not in ('master-key-rotate','master-key-reset','database-switch'):
+            raise InstallError('Unsupported managed platform operation')
         previous=self.load()
-        if previous and previous['phase'] not in ('succeeded','restored'):raise InstallError('Recover the pending platform operation first')
+        if previous and previous['phase'] not in ('succeeded','restored'):
+            raise InstallError('Recover the pending platform operation first')
         upgrade=self.port.operation()
         if upgrade and upgrade['phase'] not in ('succeeded','restored','prepare-failed','apply-failed'):
             raise InstallError('An update must finish before platform maintenance')
-        if self.host.path(MARKER).exists() or self.host.path(MARKER).is_symlink():raise InstallError('Maintenance is already closed')
-        source=self.port.source();values=source['values']
+        if self.host.path(MARKER).exists() or self.host.path(MARKER).is_symlink():
+            raise InstallError('Maintenance is already closed')
+        source=self.port.source()
+        values=source['values']
         config=values.get('DSH_PHALANX_DATABASE_CONFIG_FILE')
-        if not config:raise InstallError('A selected PostgreSQL deployment is required')
-        original=read_owned(self.host.path(config),source['uid']);saved=json.loads(original)
+        if not config:
+            raise InstallError('A selected PostgreSQL deployment is required')
+        original=read_owned(self.host.path(config),source['uid'])
+        saved=json.loads(original)
         deployment=saved.get('deploymentId')
-        if not isinstance(deployment,str) or not deployment:raise InstallError('The selected deployment identity is missing')
-        identity=str(uuid.uuid4());marker=json.dumps({'schema':1,'ports':protected_ports(values),'operation':identity,'operationKind':action,'deploymentId':deployment})+'\n'
+        if not isinstance(deployment,str) or not deployment:
+            raise InstallError('The selected deployment identity is missing')
+        identity=str(uuid.uuid4())
+        marker=json.dumps({'schema':1,'ports':protected_ports(values),'operation':identity,'operationKind':action,'deploymentId':deployment})+'\n'
         job={'schema':1,'id':identity,'action':action,'phase':'prepared','source':source,'deploymentId':deployment,'configFile':config,'marker':marker}
         if action=='master-key-rotate':
             checked=self.rotation_facts(job)
-            if checked['ready'] is not True:raise InstallError('Rotation requires a selected and initialized platform database; finish database initialization first')
+            if checked['ready'] is not True:
+                raise InstallError('Rotation requires a selected and initialized platform database; finish database initialization first')
             job['rotationCheck']=checked
         if action=='database-switch':
-            if target not in ('builtin','external'):raise InstallError('Select builtin or external')
+            if target not in ('builtin','external'):
+                raise InstallError('Select builtin or external')
             job.update(target=target,originalConfigurationSha256=hashlib.sha256(original.encode()).hexdigest(),fingerprint=saved.get('registry',{}).get('masterFingerprint'))
             checked=self.worker(job,'database-switch-check')
             if checked.get('checked') is not True or checked.get('deploymentId')!=deployment or checked.get('fingerprint')!=job['fingerprint'] or checked.get('selection')!=target:
                 raise InstallError('The target preflight does not match this deployment')
         self.port.admission.preflight(protected_ports(values))
-        self.save(job);return self.status(identity)
+        self.save(job)
+        return self.status(identity)
 
     def rotation_facts(self,job):
-        try:checked=executor_facts(self.host,job['source']['values'],'rotation',source=job['source']['target'])
-        except (OSError,ValueError,TypeError):raise InstallError('Rotation readiness is unavailable; check the protected configuration and database') from None
+        try:
+            checked=executor_facts(self.host,job['source']['values'],'rotation',source=job['source']['target'])
+        except (OSError,ValueError,TypeError):
+            raise InstallError('Rotation readiness is unavailable; check the protected configuration and database') from None
         if (not isinstance(checked,dict) or type(checked.get('ready')) is not bool or checked.get('initializationPending') is not (not checked['ready'])
                 or checked.get('deploymentId')!=job['deploymentId'] or not re.fullmatch('sha256:[a-f0-9]{64}',checked.get('fingerprint',''))
                 or not isinstance(checked.get('identity'),list)):
@@ -4597,25 +4810,33 @@ class PlatformOperations:
     def marker(self,job):
         path=self.host.path(MARKER)
         if path.exists() or path.is_symlink():
-            if read_owned(path,os.geteuid(),0o644)!=job['marker']:raise InstallError('Maintenance marker ownership changed')
+            if read_owned(path,os.geteuid(),0o644)!=job['marker']:
+                raise InstallError('Maintenance marker ownership changed')
         elif job['phase'] in ('prepared','opening'):
             self.host.atomic(MARKER,job['marker'],0o644)
-        else:raise InstallError('The managed maintenance marker disappeared')
+        else:
+            raise InstallError('The managed maintenance marker disappeared')
         self.port.admission.close(json.loads(job['marker'])['ports'])
 
     def worker(self,job,command=None):
-        source=job['source'];values=source['values'];command=command or job['action']
+        source=job['source']
+        values=source['values']
+        command=command or job['action']
         arguments=[str(Path(source['target'])/'start'),command,'--config-file',str(self.host.path(job['configFile'])),
                    '--data-root',str(self.host.path(values['DSH_PHALANX_DATA_ROOT']))]
         if command!='database-switch-check':
             arguments+=['--maintenance-file',str(self.host.path(MARKER)),'--offline','--managed-operation',job['id']]
         if command in ('database-switch','database-switch-check'):
             arguments+=['--target',job['target']]
-            if job['target']=='external':arguments+=['--connection-file',str(self.host.path(job['configFile']).parent/'database-target.json')]
-        if command=='master-key-reset':arguments+=['--recovery-file',str(self.host.path(job['configFile']).parent/'secret-recovery.json'),'--confirmation','RESET ALL PLATFORM SECRETS']
+            if job['target']=='external':
+                arguments+=['--connection-file',str(self.host.path(job['configFile']).parent/'database-target.json')]
+        if command=='master-key-reset':
+            arguments+=['--recovery-file',str(self.host.path(job['configFile']).parent/'secret-recovery.json'),'--confirmation','RESET ALL PLATFORM SECRETS']
         result=self.host.user(source['uid'],arguments)
-        try:return json.loads(result.stdout)
-        except ValueError:raise InstallError('The platform operation did not return a completion fact') from None
+        try:
+            return json.loads(result.stdout)
+        except ValueError:
+            raise InstallError('The platform operation did not return a completion fact') from None
 
     def configuration(self,job):
         raw=read_owned(self.host.path(job['configFile']),job['source']['uid'])
@@ -4632,8 +4853,10 @@ class PlatformOperations:
             restored=completion['status']=='rolled-back'
             if completion['fingerprint']!=job['fingerprint'] or selected.get('selection')!=completion.get('selection') or (digest!=job['originalConfigurationSha256'] if restored else selected.get('selection')!=job['target']):
                 raise InstallError('The database selection does not match the completed operation')
-            job['restored']=restored;job['configurationSha256']=digest
-        job.update(phase='data-complete',fingerprint=completion['fingerprint']);self.save(job)
+            job['restored']=restored
+            job['configurationSha256']=digest
+        job.update(phase='data-complete',fingerprint=completion['fingerprint'])
+        self.save(job)
 
     def stop_for_worker(self,job):
         self.port.stop(job)
@@ -4658,9 +4881,11 @@ class PlatformOperations:
     def legacy_initialization_proof(self,job):
         # Old executors stopped first, then rejected initialization before writing
         # their product journal. New jobs have an explicit preflight.
-        if job['action']!='master-key-rotate' or job['phase']!='working' or 'rotationCheck' in job:return None
+        if job['action']!='master-key-rotate' or job['phase']!='working' or 'rotationCheck' in job:
+            return None
         journal=self.host.path(job['configFile']).parent/'platform-key-operation.json'
-        if journal.exists() or journal.is_symlink():return None
+        if journal.exists() or journal.is_symlink():
+            return None
         proof=self.rotation_facts(job)
         return proof if proof['initializationPending'] is True else None
 
@@ -4669,35 +4894,44 @@ class PlatformOperations:
         if not job or job['source']!=source or read_owned(self.host.path(MARKER),os.geteuid(),0o644)!=job['marker']:
             raise InstallError('Recover the interrupted maintenance before executor bootstrap')
         proof=self.legacy_initialization_proof(job)
-        if proof is None:raise InstallError('Only a legacy rotation rejected before initialization can bootstrap while in maintenance')
+        if proof is None:
+            raise InstallError('Only a legacy rotation rejected before initialization can bootstrap while in maintenance')
         return {'job':job,'proof':proof}
 
     def prepare_initialization_recovery(self,job):
         # This durable subphase permits an idempotent retry after schema creation.
         # The source service remains stopped, its PostgreSQL and root admission stay closed.
-        job['initializationPreparation']='working';self.save(job)
+        job['initializationPreparation']='working'
+        self.save(job)
         self.stop_for_worker(job)
         values=job['source']['values']
         storage={'container':bool(values.get('DSH_PHALANX_CONTAINER_IMAGE'))}
         for name,key in (('userDataRoot','DSH_PHALANX_USER_DATA_ROOT'),('userDataMount','DSH_PHALANX_USER_DATA_MOUNT')):
-            if values.get(key):storage[name]=str(self.host.path(values[key]))
+            if values.get(key):
+                storage[name]=str(self.host.path(values[key]))
         request={'configFile':str(self.host.path(job['configFile'])),'dataRoot':str(self.host.path(values['DSH_PHALANX_DATA_ROOT'])),
                  'proof':job['initializationRejection'],'storage':storage}
         with tempfile.TemporaryDirectory(prefix='dsh-phalanx-initialization-') as temporary:
-            carrier=Path(temporary)/'request.json';carrier.write_text(json.dumps(request));carrier.chmod(0o600)
+            carrier=Path(temporary)/'request.json'
+            carrier.write_text(json.dumps(request))
+            carrier.chmod(0o600)
             result=self.host.user(job['source']['uid'],['timeout','--foreground','--signal=TERM','--kill-after=5s','60s',
                 str(Path(job['source']['target'])/'node/bin/node'),'--input-type=module','-e',INITIALIZATION_RECOVERY_PROGRAM,'recovery',job['source']['target']],input_file=carrier,check=False)
-        try:completion=json.loads(result.stdout)
-        except ValueError:raise InstallError('Initialization recovery preparation did not return a completion fact') from None
+        try:
+            completion=json.loads(result.stdout)
+        except ValueError:
+            raise InstallError('Initialization recovery preparation did not return a completion fact') from None
         if result.returncode!=0 or not isinstance(completion,dict) or type(completion.get('prepared')) is not bool:
             raise InstallError('Initialization recovery preparation failed; keep maintenance closed')
-        job['initializationPreparation']='prepared';self.save(job)
+        job['initializationPreparation']='prepared'
+        self.save(job)
 
     def restore_uninitialized_rotation(self,job):
         proof=job.get('initializationRejection')
         if proof is None:
             proof=self.legacy_initialization_proof(job)
-            if proof is None:return False
+            if proof is None:
+                return False
             job.update(phase='opening',initializationRejection=proof)
             self.save(job)
         if job['action']!='master-key-rotate' or job['phase']!='opening' or 'rotationCheck' in job:
@@ -4711,7 +4945,8 @@ class PlatformOperations:
             raise InstallError('Protected deployment changed while preparing initialization; keep maintenance closed')
         self.marker(job)
         # An unselected database serves bootstrap but cannot report records-ready.
-        self.start(job);self.port.verify_source(job['source'],'/healthz')
+        self.start(job)
+        self.port.verify_source(job['source'],'/healthz')
         checked=self.rotation_facts(job)
         if checked['ready']:
             self.port.verify_source(job['source'],'/readyz')
@@ -4719,52 +4954,74 @@ class PlatformOperations:
         if self.port.source()!=job['source'] or any(checked[key]!=proof[key] for key in ('identity','deploymentId','fingerprint')):
             raise InstallError('Protected files changed while restoring initialization; keep maintenance closed')
         self.marker(job)
-        self.host.path(MARKER).unlink();self.host.sync_directory(self.host.path('/etc/dsh-phalanx'))
+        self.host.path(MARKER).unlink()
+        self.host.sync_directory(self.host.path('/etc/dsh-phalanx'))
         self.port.admission.open()
-        job['phase']='restored';self.save(job)
+        job['phase']='restored'
+        self.save(job)
         return True
 
     def run(self,operation):
         job=self.load()
-        if not job or job['id']!=operation:raise InstallError('Unknown platform operation')
-        if job['phase'] in ('succeeded','restored'):return self.status(operation)
-        if self.port.source()!=job['source']:raise InstallError('Installed deployment changed during platform maintenance')
+        if not job or job['id']!=operation:
+            raise InstallError('Unknown platform operation')
+        if job['phase'] in ('succeeded','restored'):
+            return self.status(operation)
+        if self.port.source()!=job['source']:
+            raise InstallError('Installed deployment changed during platform maintenance')
         database=job['action']=='database-switch'
         self.marker(job)
-        if self.restore_uninitialized_rotation(job):return self.status(operation)
+        if self.restore_uninitialized_rotation(job):
+            return self.status(operation)
         if database and job['phase'] in ('working','data-complete','validating'):
             self.restore_database(job)
         if job['phase']=='opening':
-            if database:self.verify_configuration(job)
-            else:self.start(job);self.port.verify_source(job['source'],'/readyz')
+            if database:
+                self.verify_configuration(job)
+            else:
+                self.start(job)
+                self.port.verify_source(job['source'],'/readyz')
         if job['phase'] in ('prepared','working'):
-            job['phase']='working';self.save(job)
+            job['phase']='working'
+            self.save(job)
             self.stop_for_worker(job)
-            try:self.completed(job,self.worker(job))
+            try:
+                self.completed(job,self.worker(job))
             except Exception:
-                if not database:raise
+                if not database:
+                    raise
                 self.restore_database(job)
         if job['phase'] in ('data-complete','validating'):
-            if not database:self.acknowledge_data(job)
-            else:self.verify_configuration(job)
-            job['phase']='validating';self.save(job)
+            if not database:
+                self.acknowledge_data(job)
+            else:
+                self.verify_configuration(job)
+            job['phase']='validating'
+            self.save(job)
             try:
-                self.start(job);self.port.verify_source(job['source'],'/readyz')
+                self.start(job)
+                self.port.verify_source(job['source'],'/readyz')
             except Exception:
-                if not database or job.get('restored'):raise
+                if not database or job.get('restored'):
+                    raise
                 self.restore_database(job)
-                self.start(job);self.port.verify_source(job['source'],'/readyz')
+                self.start(job)
+                self.port.verify_source(job['source'],'/readyz')
             # This durable decision commits a healthy selection. If save is uncertain,
             # recover from the on-disk phase; never roll back using in-memory state.
-            job['phase']='opening';self.save(job)
+            job['phase']='opening'
+            self.save(job)
         if database:
             self.verify_configuration(job)
             self.acknowledge_data(job)
-            self.start(job);self.port.verify_source(job['source'],'/readyz')
+            self.start(job)
+            self.port.verify_source(job['source'],'/readyz')
         self.marker(job)
-        self.host.path(MARKER).unlink();self.host.sync_directory(self.host.path('/etc/dsh-phalanx'))
+        self.host.path(MARKER).unlink()
+        self.host.sync_directory(self.host.path('/etc/dsh-phalanx'))
         self.port.admission.open()
-        job['phase']='restored' if job.get('restored') else 'succeeded';self.save(job)
+        job['phase']='restored' if job.get('restored') else 'succeeded'
+        self.save(job)
         return self.status(operation)
 
     def acknowledge_data(self,job):
@@ -4773,19 +5030,641 @@ class PlatformOperations:
         selected=json.loads(read_owned(self.host.path(job['configFile']),job['source']['uid']))
         if selected.get('deploymentId')!=job['deploymentId'] or selected.get('registry',{}).get('masterFingerprint')!=job['fingerprint']:
             raise InstallError('The selected configuration does not match the completion fact')
-        if not path.exists():return  # Root may have acknowledged it before a restart.
+        if not path.exists():
+            return  # Root may have acknowledged it before a restart.
         value=json.loads(read_owned(path,job['source']['uid']))
         if value.get('managedOperation')!=job['id'] or value.get('deploymentId')!=job['deploymentId'] or value.get('phase') not in (('committed','rolled-back') if database else ('prepared',)) or value.get('kind')!=('database-switch' if database else 'reset' if job['action']=='master-key-reset' else 'rotate') or value.get('marker')!=job['marker']:
             raise InstallError('The product journal does not match the completed root operation')
         if database:
             self.stop_for_worker(job)
             self.worker(job,'database-switch-finalize')
-        else:path.unlink();self.host.sync_directory(path.parent)
+        else:
+            path.unlink()
+            self.host.sync_directory(path.parent)
 
     def recover(self):
         job=self.load()
-        if job and job['phase'] not in ('succeeded','restored'):return self.run(job['id'])
+        if job and job['phase'] not in ('succeeded','restored'):
+            return self.run(job['id'])
         return self.status()
+
+"""Protected upgrade journal and Linux service/container transaction adapter."""
+import copy
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import urllib.parse
+from contextlib import contextmanager
+from pathlib import Path
+import tempfile
+import fcntl  # Local process mutex only; platform facts use the source database adapters.
+import uuid
+import shutil
+from types import SimpleNamespace
+
+UPGRADE_ROOT='/var/lib/dsh-phalanx-updater'
+MAINTENANCE=MARKER
+MANIFEST='/etc/dsh-phalanx/installed-manifest.json'
+
+
+def read_upgrade_operation(host,operation=None):
+    pointer=host.path(UPGRADE_ROOT)/'current'
+    if operation is None:
+        if not pointer.exists():
+            return None
+        operation=pointer.read_text().strip()
+    path=host.path(UPGRADE_ROOT)/operation_id(operation)/'operation.json'
+    if path.is_symlink():
+        raise InstallError('Upgrade journal cannot be a symbolic link')
+    if not path.exists():
+        return None
+    # This root-written journal includes backup inventories that grow with the deployment.
+    value=json.loads(read_owned(path,os.geteuid(),max_bytes=None))
+    if not isinstance(value,dict) or value.get('id')!=operation or not isinstance(value.get('phase'),str):
+        raise InstallError('Invalid protected upgrade operation')
+    return value
+
+
+def installed_source(host,manifest=None):
+    state=installed_state(host)
+    if state is None:
+        raise InstallError('A successful managed installation is required',code='release.identity-mismatch')
+    if manifest is None:
+        manifest=json.loads(host.path(MANIFEST).read_text())
+    if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][asset_names(manifest)[0]]:
+        raise InstallError('Installed release manifest and receipt disagree',code='release.identity-mismatch')
+    values=read_configuration(host)
+    account=host.run(['getent','passwd','dsh-phalanx']).stdout.strip().split(':')
+    if len(account)!=7 or account[5]!='/var/lib/dsh-phalanx' or account[6]!='/usr/sbin/nologin' or int(account[2])==0:
+        raise InstallError('Managed service identity is incompatible',code='release.identity-mismatch')
+    current=host.path(CURRENT)
+    if not current.is_symlink():
+        raise InstallError('Current release must be a managed symbolic link',code='release.identity-mismatch')
+    target=current.resolve()
+    if target.parent!=host.path('/opt/dsh-phalanx/releases') or (target/'.artifact-sha256').read_text()!=state['platformSha256']:
+        raise InstallError('Running release path or artifact identity is inconsistent',code='release.identity-mismatch')
+    return {'receipt':state,'manifest':manifest,'channel':installed_channel(state),'values':values,'target':str(target),'uid':int(account[2]),'gid':int(account[3])}
+
+
+def plugin_startup_timeout(host,values,manifest):
+    target=manifest['targetVersion']+'/'+manifest['dshRevision']
+    try:
+        library=platform_facts(host,values,'plugin-budget-rows')
+    except ValueError as error:
+        raise InstallError('Invalid plugin library for startup budget') from error
+    return 90 if library is None else plugin_readiness_budget(library,target)
+
+
+def source_schema_names(source):
+    return [row['name'] for row in source['manifest']['compatibility']['schemas']] if version_parts(source['manifest']['targetVersion'])>=(0,1,27) else ['dsh_phalanx']
+
+
+class UpgradeHost:
+    def __init__(self,host,bundle=None,*,dev_release_base_url=None):
+        self.host=host
+        self.bundle=bundle
+        self.dev_release_base_url=dev_release_base_url
+        self.development_rebuild=bool(getattr(host,'development_arm64',False) and bundle is not None)
+        self.root=host.mkdir(UPGRADE_ROOT,0o700)
+        self.admission=LinuxAdmissionGate()
+
+    def time_point(self):
+        return self.host.time_point()
+
+    def safe(self,message):
+        return self.host.progress.safe(message) if self.host.progress else 'Upgrade failed; inspect restricted diagnostics'
+
+    def path(self,job):
+        return self.root/operation_id(job['id'])
+
+    def operation(self,operation=None):
+        return read_upgrade_operation(self.host,operation)
+
+    def save(self,job):
+        directory=self.path(job)
+        directory.mkdir(mode=0o700,exist_ok=True)
+        self.host.atomic(str(directory.relative_to(self.host.root))+'/operation.json',json.dumps(job)+'\n')
+        sync_directory(directory)
+        self.host.atomic(UPGRADE_ROOT+'/current',job['id']+'\n')
+        sync_directory(self.root)
+        if self.host.progress:
+            cleanup=job.get('cleanup',{})
+            phase='update.cleanup' if cleanup.get('status') in ('running','failed') else job.get('phaseCode','unknown')
+            error=cleanup.get('errorCode') if phase=='update.cleanup' else job.get('recoveryErrorCode') if job['phase']=='recovery-failed' else job.get('errorCode')
+            self.host.tell('Upgrade '+job['id']+': '+job['phase'],phaseCode=phase,**({'errorCode':error} if error else {}))
+        else:
+            self.host.tell('Upgrade '+job['id']+': '+job['phase'])
+
+    def check_fresh_install(self,target):
+        # A sound formal receipt can authorize refusal, never an upgrade.
+        manifest=target['manifest']
+        validate_contract(manifest)
+        value=manifest.get('compatibility',{})
+        if value.get('freshInstallThrough') is None and value.get('upgradeFloor') is None:
+            return
+        state=installed_state(self.host)
+        if not isinstance(state,dict):
+            return
+        version=state.get('version')
+        candidate=state.get('candidate')
+        if (not isinstance(version,str) or not STABLE.fullmatch(version) or
+                not isinstance(candidate,str) or not CANDIDATE.fullmatch(candidate) or
+                state.get('serviceUser')!='dsh-phalanx' or
+                not all(isinstance(state.get(key),str) and re.fullmatch(pattern,state[key])
+                        for key,pattern in [('commit','[a-f0-9]{40}'),('platformSha256','[a-f0-9]{64}'),('imageDigest','sha256:[a-f0-9]{64}')])):
+            return
+        require_upgrade_source({'targetVersion':version[1:]},manifest)
+
+    def import_legacy_manifest(self):
+        path=self.host.path(MANIFEST)
+        if path.exists() or path.is_symlink():
+            return
+        state=installed_state(self.host)
+        if state is None or state['version']!='v0.1.1':
+            raise InstallError('Installed release manifest is missing; only formal 0.1.1 has a supported legacy import')
+        self.host.tell('Verifying the original formal 0.1.1 release metadata before upgrade.')
+        with tempfile.TemporaryDirectory(prefix='legacy-source-') as temporary:
+            args=SimpleNamespace(version=state['version'],bundle_dir=None)
+            _,manifest,_=select_release(self.host,args,Path(temporary))
+        if manifest.get('schema')!=1 or manifest.get('targetVersion')!='0.1.1':
+            raise InstallError('Legacy source release contract is inconsistent')
+        source=self.source(manifest)
+        self.verify_source(source)
+        self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
+        sync_directory(self.host.path('/etc/dsh-phalanx'))
+
+    def source(self,manifest=None):
+        return installed_source(self.host,manifest)
+
+    def begin(self,target):
+        source=self.source()
+        previous=previous_downtime(self.operation(),self.time_point())
+        return {'id':str(uuid.uuid4()),'phase':'preparing','target':copy.deepcopy(target),'source':source,'diagnostic':self.host.progress.log.name if self.host.progress and self.host.progress.log else None,
+                **({'previousDowntimeSeconds':previous} if previous is not None else {})}
+
+    def schema(self,source):
+        try:
+            version=version_parts(source['manifest']['targetVersion'])
+            # Historical targets can still use the old pre-PostgreSQL source contract.
+            if version<(0,1,26):
+                values=source['values']
+                config=values.get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json')
+                result=self.host.user(source['uid'],['timeout','--signal=TERM','--kill-after=5s','20s',str(Path(source['target'])/'start'),'database-wait',
+                    '--config-file',str(self.host.path(config)),'--data-root',str(self.host.path(values['DSH_PHALANX_DATA_ROOT']))],check=False)
+                info=json.loads(result.stdout) if result.returncode==0 else None
+                if not isinstance(info,dict) or info.get('state')!='connected' or type(info.get('schemaVersion')) is not int or not 0<=info['schemaVersion']<=2**53-1:
+                    raise ValueError('Invalid database status')
+                return info['schemaVersion']
+            names=source_schema_names(source)
+            info=executor_facts(self.host,source['values'],'schemas',source=source['target'],schemas=names)
+            return self.schema_result(source,info)
+        except (OSError,ValueError,KeyError,TypeError,InstallError):
+            raise InstallError('Platform database status is unavailable. Check the selected database connection and master-key file before retrying the update.',code='database.unavailable') from None
+
+    def schema_result(self,source,info):
+        registered=version_parts(source['manifest']['targetVersion'])>=(0,1,27)
+        names=source_schema_names(source)
+        rows=info.get('schemas') if isinstance(info,dict) else None
+        if not isinstance(rows,list) or not rows or [row.get('name') for row in rows if isinstance(row,dict)]!=names:
+            raise ValueError('Invalid registered schema status')
+        versions={}
+        for row in rows:
+            if (not isinstance(row,dict) or not isinstance(row.get('name'),str) or not re.fullmatch('[a-z_][a-z0-9_]{0,62}',row['name']) or
+                    row['name'] in versions or type(row.get('version')) is not int or not 0<=row['version']<=2**53-1):
+                raise ValueError('Invalid registered schema status')
+            versions[row['name']]=row['version']
+        # The predecessor predates the registry and has exactly the platform core.
+        return versions if registered else versions['dsh_phalanx']
+
+    def check_facts(self,source):
+        names=source_schema_names(source)
+        return executor_facts(self.host,source['values'],'check',source=source['target'],schemas=names)
+
+    def sampled_schema(self,source,sampled,facts):
+        try:
+            current=self.source()
+        except (InstallError,OSError,ValueError,KeyError,TypeError):
+            raise InstallError('The installed source changed; check releases again') from None
+        if current!=source:
+            raise InstallError('The installed source changed; check releases again')
+        try:
+            identity=facts.get('identity') if isinstance(facts,dict) else None
+            config=self.host.path(source['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json'))
+            valid=(source==sampled and isinstance(identity,list) and len(identity)==2 and isinstance(identity[0],dict) and identity[0].get('path')==str(config) and
+                   all(isinstance(row,dict) and self.host.file_identity(row['path'])==row for row in identity))
+        except (OSError,ValueError,KeyError,TypeError,InstallError):
+            valid=False
+        if not valid:
+            return self.schema(source)
+        try:
+            return self.schema_result(source,{'schemas':facts.get('schemas')})
+        except (ValueError,KeyError,TypeError):
+            raise InstallError('Platform database status is unavailable. Check the selected database connection and master-key file before retrying the update.',code='database.unavailable') from None
+
+    def check_compatibility(self,source,target):
+        require_upgrade_source(source['manifest'],target['manifest'])
+        rehearsal=bool(getattr(self.host,'image_reuse_rehearsal',False))
+        if rehearsal and (source['receipt']['version']!=source['manifest']['tag'] or target['version']!=target['manifest']['tag']):
+            raise InstallError('Image reuse rehearsal requires explicit candidate versions, never formal releases')
+        compatible(source['manifest'],target['manifest'],self.schema(source),development_rebuild=self.development_rebuild,image_reuse_rehearsal=rehearsal,source_channel=source.get('channel'),target_channel=target.get('channel',release_channel(target['version'])))
+
+    def compatibility_outcome(self,source,target,schemas=None):
+        route=upgrade_outcome(source['manifest'],target['manifest'],None,inspect_schema=False,source_channel=source.get('channel'),target_channel=target.get('channel',release_channel(target['version'])))
+        if route['outcomeCode'] not in ('update.available','update.channel-switch'):
+            return route
+        return upgrade_outcome(source['manifest'],target['manifest'],self.schema(source) if schemas is None else schemas,source_channel=source.get('channel'),target_channel=target.get('channel',release_channel(target['version'])))
+
+    def preflight(self,job):
+        source=self.source()
+        if source!=job['source']:
+            raise InstallError('Installed source changed after this target was selected; download again')
+        self.check_compatibility(source,job['target'])
+        self.host.distribution()
+        self.host.dependencies()
+        self.host.check_capabilities(source['uid'])
+        validate_storage(self.host,source['values'])
+        if self.host.path(MAINTENANCE).exists():
+            raise InstallError('Maintenance is already closed; recover the previous operation first')
+        values=source['values']
+        data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
+        users=self.host.path(effective_user_data_root(values) if version_parts(source['manifest']['targetVersion']) >= version_parts('0.1.26') else values.get('DSH_PHALANX_USER_DATA_ROOT',values['DSH_PHALANX_DATA_ROOT']+'/users'))
+        if data.is_symlink() or not data.is_dir():
+            raise InstallError('Invalid platform data root')
+        if users.is_relative_to(data) and users!=data/'users':
+            raise InstallError('Upgrade supports only reserved users or a separate user data root')
+        self.verify_source(source)
+        self.data_layout(job)
+        UpgradeDatabaseBackup(self,job).inspect()
+        if supports_capacity(job['target']['manifest']):
+            if job['phase']=='preparing' and not job.get('cleanupBeforeDownload'):
+                self.cleanup(job)
+                job['cleanupBeforeDownload']=True
+                self.save(job)
+            UpgradeStorage(self.host).check(job,self.path(job),self.bundle,carriers=self.carriers(job).values())
+            self.save(job)
+        UpgradeDatabaseBackup(self,job).prepare()
+        if 'prepared' in job:
+            self.admission.preflight(self.ports(source))
+            prepared=job['prepared']
+            target=Path(prepared['target'])
+            if (target/'.artifact-sha256').read_text()!=job['target']['manifest']['files'][asset_names(job['target']['manifest'])[0]]:
+                raise InstallError('Prepared platform identity changed')
+            supply_image(self.host,source['uid'],self.path(job),job['target']['manifest'],False)
+
+    def cleanup(self,job):
+        source=self.source()
+        self.verify_source(source)
+        return UpgradeCleanup(self.host,self.root).run(source,job,lambda:self.save(job))
+
+    def ports(self,source):
+        return protected_ports(source['values'])
+
+    def prepare(self,job):
+        self.admission.preflight(self.ports(job['source']))
+        self.admission.install(self.host,job['source']['uid'])
+        def fixed(directory,manifest,version):
+            if version!=job['target']['version'] or manifest!=job['target']['manifest'] or digest(directory/'manifest.json')!=job['target']['manifestSha256']:
+                raise InstallError('Selected release metadata changed; target was not downloaded')
+            self.check_compatibility(job['source'],job['target'])
+        with tempfile.TemporaryDirectory(prefix='download-',dir=self.path(job)) as temporary:
+            channel=installed_channel(job['target'])
+            source=self.dev_release_base_url or (channel['baseUrl'] if channel['kind']=='candidate' and self.bundle is None else None)
+            args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle,dev_release_base_url=source)
+            directory,manifest=acquire(self.host,args,Path(temporary),fixed)
+            target=stage_platform(self.host,directory,manifest)
+            command=supply_image(self.host,job['source']['uid'],directory,manifest,self.bundle is not None)
+        engine=install_executor(self.host,job['source']['uid'],job['source']['gid'],self.host.path(target),manifest['commit'],initial_only=True,activate=True)
+        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256'],'executor':executor_package(self.host.path(target)/'updater',manifest['commit']),'currentExecutor':engine,'managementCli':(self.host.path(target)/'updater/installer_deployment_cli.py').is_file()}
+
+    @install_failure('admission.failed')
+    def close_admission(self,source):
+        self.admission.close(self.ports(source))
+
+    @install_failure('admission.failed')
+    def gate(self,closed):
+        if closed:
+            job=self.operation()
+            ports=self.ports(job['source'])
+            self.host.atomic(MAINTENANCE,json.dumps({'schema':1,'ports':ports})+'\n',0o644)
+            try:
+                self.close_admission(job['source'])
+            except Exception:
+                # A legacy binary has no application marker support. Stop its
+                # exact managed service if the independent fence is unavailable.
+                self.stop(job)
+                raise
+        else:
+            job=self.operation()
+            if job is not None and any(key in job for key in ('maintenancePage','maintenanceListener')):
+                self.close_admission(job['source'])
+                self.stop_maintenance(job)
+            self.admission.open()
+            self.host.path(MAINTENANCE).unlink(missing_ok=True)
+        sync_directory(self.host.path('/etc/dsh-phalanx'))
+
+    def stop_maintenance(self,job):
+        changed=False
+        for kind,key in ((ListenerPinUnit,'maintenanceListener'),(MaintenanceUnit,'maintenancePage')):
+            kind(self.host,job).stop()
+            if key in job:
+                job.pop(key)
+                changed=True
+        if changed:
+            self.save(job)
+
+    @install_failure('service.stop-failed')
+    def stop(self,job):
+        page=MaintenanceUnit(self.host,job) if 'action' not in job else None
+        try:
+            self.close_admission(job['source'])
+            if page is not None:
+                self.stop_maintenance(job)
+        except Exception:
+            # A failed fence must still stop a legacy platform without marker support.
+            self.host.user(job['source']['uid'],['systemctl','--user','stop','dsh-phalanx.service'])
+            raise
+        if 'database' in job:
+            # A killed executor can leave a tool container outside its systemd cgroup.
+            # Stop only this protected transaction's tools before starting/retrying recovery.
+            owner=hashlib.sha256(str(self.path(job)/'backup'/'database').encode()).hexdigest()
+            command=['podman','ps','--all','--filter','label=dsh.phalanx.upgrade-archive-owner='+owner,'--format','json']
+            for row in json.loads(self.host.run(command).stdout):
+                identity=row.get('Id',row.get('ID'))
+                if (row.get('Labels',{}).get('dsh.phalanx.upgrade-archive-owner')!=owner or
+                        not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity)):
+                    raise InstallError('Database archive tool ownership is inconsistent')
+                self.host.run(['podman','rm','--force','--ignore','--time','0',identity])
+            if json.loads(self.host.run(command).stdout):
+                raise InstallError('Transaction database archive tools remain; recovery refused')
+            directory=self.path(job)/'backup'/'database'
+            if directory.exists():
+                if directory.is_symlink() or not directory.is_dir() or directory.stat().st_uid!=os.geteuid() or directory.stat().st_mode&0o777!=0o700:
+                    raise InstallError('Invalid protected database archive directory')
+                for path in directory.iterdir():
+                    if not re.fullmatch(r'\.database-tool-[a-f0-9-]{36}',path.name):
+                        continue
+                    if path.is_symlink() or not path.is_dir() or path.stat().st_uid!=os.geteuid() or path.stat().st_mode&0o777!=0o700:
+                        raise InstallError('Invalid private PostgreSQL tool directory')
+                    for child in path.iterdir():
+                        if child.name not in ('pgpass','ca.pem','before.sql','after.sql','restore.sh','restore.sql','restore.list') or child.is_symlink() or not child.is_file() or child.stat().st_uid!=os.geteuid():
+                            raise InstallError('Unexpected file in private PostgreSQL tool directory')
+                    shutil.rmtree(path)
+        source=job['source']
+        uid=source['uid']
+        handed_off=False
+        profile_handoff=source.get('manifest',{}).get('targetVersion')=='0.1.37'
+        if profile_handoff and job.get('phase')=='stopping' and job.get('prepared'):
+            target=Path(job['prepared']['target'])
+            handoff=target/'dist/composition/legacy-profile-lock-handoff.js'
+            values=source['values']
+            config=values.get('DSH_PHALANX_DATABASE_CONFIG_FILE')
+            if handoff.is_file() and config:
+                result=self.host.user(uid,[str(target/'node/bin/node'),str(handoff),values['DSH_PHALANX_DATA_ROOT'],config,
+                    values.get('DSH_PHALANX_USER_DATA_ROOT',''),values.get('DSH_PHALANX_USER_DATA_MOUNT','')],check=False)
+                handed_off=result.returncode==0
+                if not handed_off:
+                    self.host.tell('Legacy member profile lock handoff unavailable; keeping unverified locks')
+        if not handed_off:
+            self.host.user(uid,['systemctl','--user','stop','dsh-phalanx.service'])
+        ownership=hashlib.sha256(str(Path(source['values']['DSH_PHALANX_DATA_ROOT']).resolve()).encode()).hexdigest()
+        filters=['--filter','label=dsh-phalanx.community=1','--filter','label=dsh-phalanx.community-root='+ownership]
+        command=['podman','ps','--all','--no-trunc',*filters,'--format','json']
+        rows=json.loads(self.host.user(uid,command).stdout)
+        for row in rows:
+            labels=row.get('Labels',{})
+            if labels.get('dsh-phalanx.community')!='1' or labels.get('dsh-phalanx.community-root')!=ownership:
+                raise InstallError('Owned container listing has inconsistent labels')
+            identity=row.get('Id',row.get('ID'))
+            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):
+                raise InstallError('Invalid owned container identity')
+            if profile_handoff:
+                if len(identity)!=64:
+                    raise InstallError('Invalid full member container identity')
+                self.host.user(uid,['podman','stop','--time','10','--ignore',identity])
+                self.host.user(uid,['podman','rm','--ignore',identity])
+            else:
+                self.host.user(uid,['podman','rm','--force','--ignore','--time','0',identity])
+        if json.loads(self.host.user(uid,command).stdout):
+            raise InstallError('Owned user instances remain; backup and switch refused')
+        if page is not None:
+            intent=page.intent()
+            if job.get('maintenancePage') is not None and job['maintenancePage']!=intent:
+                raise InstallError('Installed maintenance page identity changed during the operation')
+            if intent is not None:
+                job['maintenancePage']=intent
+                self.save(job)
+                group=page.start()
+                self.admission.show_page(self.ports(source),group,intent['token'])
+
+    def carriers(self,job):
+        result={'configuration':self.host.path(CONFIG),'receipt':self.host.path(STATE),'manifest':self.host.path(MANIFEST),'unit':self.host.path(UNIT),
+                'keys':self.host.path('/var/lib/dsh-phalanx/keys'),'databaseUnit':self.host.path('/var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx-postgres.service')}
+        if 'executor' in job.get('prepared',{}):
+            result.update(executorPointer=self.host.path(EXECUTOR),executorUnit=self.host.path(EXECUTOR_UNIT),
+                          admissionProgram=self.host.path('/opt/dsh-phalanx/maintenance/gate.py'),
+                          admissionUnit=self.host.path('/etc/systemd/system/dsh-phalanx-maintenance.service'),
+                          admissionOrder=self.host.path('/etc/systemd/system/user@'+str(job['source']['uid'])+'.service.d/dsh-phalanx-maintenance.conf'))
+            if job['prepared'].get('managementCli') is True:
+                result['globalCli']=self.host.path(GLOBAL_CLI)
+        master=job.get('database',{}).get('facts',{}).get('masterKeyPath')
+        config=job['source']['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE')
+        for key,path in [('databaseMaster',master),('databaseConfiguration',str(self.host.path(config)) if config else None)]:
+            if path and not Path(path).resolve().is_relative_to(result['keys'].resolve()):
+                result[key]=Path(path).resolve()
+        return result
+
+    def data_layout(self,job):
+        if 'dataLayout' not in job:
+            source=job['source']
+            paths=[]
+            if version_parts(source['manifest']['targetVersion'])>=(0,1,26):
+                target=Path(source['target'])
+                program="import {pathToFileURL} from 'node:url'; const {dataRootLayout}=await import(pathToFileURL(process.argv[1]+'/dist/domain/data-root-layout.js')); console.log(JSON.stringify(dataRootLayout))"
+                output=self.host.run([str(target/'node/bin/node'),'--input-type=module','-e',program,str(target)])
+                try:
+                    layout=json.loads(output.stdout)
+                    for kind in ('artifacts','projections','runtime'):
+                        if not isinstance(layout.get(kind),list):
+                            raise ValueError('Missing data layout category')
+                        paths.extend(layout[kind])
+                except (ValueError,AttributeError):
+                    raise InstallError('The installed platform data layout is unavailable') from None
+            job['dataLayout']=list(rebuildable_paths(paths))
+        return rebuildable_paths(job['dataLayout'])
+
+    def backup_owner(self,job):
+        return PlatformBackup(self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']),self.path(job)/'backup',self.carriers(job),rebuildable=self.data_layout(job))
+
+    @contextmanager
+    def quiescent(self,job):
+        data=self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT'])
+        lock=data/'platform.lock'
+        if lock.is_symlink():
+            raise InstallError('Platform writer lock cannot be a symbolic link')
+        # The platform holds an exclusive flock on this file while it runs (adapters/platform-lock.ts).
+        # Never create it: a root-owned file would stop the service account from opening its own lock.
+        try:
+            descriptor=os.open(lock,os.O_RDONLY|os.O_NOFOLLOW)
+        except FileNotFoundError:
+            yield
+            return  # No platform has started here, so none can hold the lock.
+        with open(descriptor,'rb') as file:
+            try:
+                fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise InstallError('The platform still holds its writer lock; stop it before backing up') from None
+            yield
+
+    def backup(self,job):
+        with self.quiescent(job):
+            receipt=self.backup_owner(job).create()
+            self.start_database(job)
+            database=UpgradeDatabaseBackup(self,job).create()
+            if database is not None:
+                receipt['database']=database
+        if 'executor' in job.get('prepared',{}):
+            receipt['executor']=installed_executor(self.host)
+        return receipt
+
+    @install_failure('database.unavailable')
+    def start_database(self,job):
+        if job.get('database',{}).get('facts',{}).get('selection')=='builtin':
+            uid=job['source']['uid']
+            self.host.user(uid,['systemctl','--user','daemon-reload'])
+            self.host.user(uid,['systemctl','--user','reset-failed','dsh-phalanx-postgres.service'])
+            self.host.user(uid,['systemctl','--user','start','dsh-phalanx-postgres.service'])
+
+    def link(self,target):
+        replacement=self.host.path(CURRENT+'.next')
+        replacement.unlink(missing_ok=True)
+        replacement.symlink_to(target)
+        os.replace(replacement,self.host.path(CURRENT))
+        sync_directory(self.host.path('/opt/dsh-phalanx'))
+
+    @install_failure('service.start-failed')
+    def start(self,job):
+        self.close_admission(job['source'])
+        if 'action' not in job:
+            self.stop_maintenance(job)
+        uid=job['source']['uid']
+        self.host.user(uid,['systemctl','--user','daemon-reload'])
+        self.host.user(uid,['systemctl','--user','enable','--now','dsh-phalanx.service'])
+
+    def switch(self,job):
+        values=copy.deepcopy(job['source']['values'])
+        manifest=job['target']['manifest']
+        command=job['prepared']['command']
+        values.update(DSH_PHALANX_CONTAINER_IMAGE=manifest['image']['reference'],DSH_PHALANX_RUNTIME_COMMAND=command[0],
+                      DSH_PHALANX_RUNTIME_ARGS_JSON=json.dumps(command[1:],separators=(',',':')),
+                      DSH_PHALANX_MAINTENANCE_FILE=MAINTENANCE)
+        self.host.atomic(CONFIG,environment_text(values),0o640)
+        self.host.run(['chown','0:'+str(job['source']['gid']),str(self.host.path(CONFIG))])
+        with self.host.path(CONFIG).open('rb') as file:
+            os.fsync(file.fileno())
+        self.link(job['prepared']['target'])
+        self.start(job)
+
+    def listener_identity(self,source,pid):
+        target=Path(source['target'])
+        if not pid or self.host.path('/proc/'+str(pid)+'/cwd').resolve()!=target or self.host.path('/proc/'+str(pid)+'/exe').resolve()!=target/'node/bin/node':
+            raise InstallError('Managed listener process does not execute the selected packaged release',code='release.identity-mismatch')
+        if (target/'.artifact-sha256').read_text()!=source['manifest']['files'][asset_names(source['manifest'])[0]] or json.loads((target/'build-info.json').read_text())['commit']!=source['manifest']['commit']:
+            raise InstallError('Selected platform source identity does not match the healthy process',code='release.identity-mismatch')
+
+    def show_platform_page(self,source,pid,job):
+        self.listener_identity(source,pid)
+        values=read_configuration(self.host)
+        if values.get('DSH_PHALANX_MAINTENANCE_FILE')!=MAINTENANCE or any(values.get(key)!=source['values'].get(key) for key in ('DSH_PHALANX_HOST','DSH_PHALANX_PORT','DSH_PHALANX_PUBLIC_ORIGIN')):
+            raise InstallError('Managed maintenance configuration differs from the verified source')
+        marker=protected_json(self.host.path(MAINTENANCE))
+        ports=self.ports(source)
+        if marker.get('schema')!=1 or marker.get('ports')!=ports:
+            raise InstallError('Managed maintenance admission differs from the verified source')
+        uid=source['uid']
+        group=self.host.user(uid,['systemctl','--user','show','dsh-phalanx.service','--property=ControlGroup','--value']).stdout.strip()
+        prefix='/user.slice/user-'+str(uid)+'.slice/user@'+str(uid)+'.service/'
+        if not group.startswith(prefix) or not group.endswith('/dsh-phalanx.service') or '0::'+group not in self.host.path('/proc/'+str(pid)+'/cgroup').read_text().splitlines():
+            raise InstallError('Managed listener cgroup differs from its service owner')
+        descriptor=self.host.listener_file(pid,int(values['DSH_PHALANX_PORT']),ipaddress.ip_address(values['DSH_PHALANX_HOST']))
+        if descriptor is None:
+            raise InstallError('The verified platform listener disappeared before pinning')
+        listener={**descriptor,'pid':pid,'started':process_started(self.host.path('/proc/'+str(pid)+'/stat')),'cgroup':group,
+                  'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT']),'uid':uid,
+                  'executable':str(Path(source['target'])/'node/bin/node'),'directory':source['target']}
+        existing=job.get('maintenanceListener')
+        if existing is not None and existing.get('listener')!=listener:
+            raise InstallError('The pinned platform listener changed during validation')
+        pin=ListenerPinUnit(self.host,job)
+        if existing is None:
+            job['maintenanceListener']={'unit':pin.unit,'listener':listener,'token':maintenance_token(job,'maintenanceListener')}
+            self.save(job)
+        pin.start()
+        self.admission.show_page(ports,group,job['maintenanceListener']['token'])
+
+    def verify_source(self,source,ready_path='/login',*,readiness=True,maintenance_job=None):
+        verify_image(self.host,source['uid'],source['manifest'])
+        values=source['values']
+        uid=source['uid']
+        port=int(values['DSH_PHALANX_PORT'])
+        closed=self.host.path(MAINTENANCE).exists()
+        options={'socket_mark':MARK} if closed else {}
+        if readiness and closed and maintenance_job is not None and maintenance_pages(source['target']) is not None:
+            options['on_listener']=lambda pid:self.show_platform_page(source,pid,maintenance_job)
+        if readiness:
+            self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,timeout=plugin_startup_timeout(self.host,values,source['manifest']),**options)
+        address=ipaddress.ip_address(urllib.parse.urlparse(entry_url(port,values['DSH_PHALANX_HOST'])).hostname)
+        self.listener_identity(source,self.host.listener_pid(uid,port,address))
+
+    def verify(self,job,old=False):
+        if old:
+            source=job['source']
+        else:
+            source={**job['source'],'target':job['prepared']['target'],'manifest':job['target']['manifest']}
+        path='/readyz' if source['manifest'].get('schema')==2 else '/login'
+        self.verify_source(source,path,maintenance_job=job)
+        expected=(job.get('backup',{}).get('executor') or job.get('prepared',{}).get('currentExecutor')) if old else job.get('prepared',{}).get('executor') if job.get('committed') else None
+        if expected:
+            ensure_executor_identity(self.host,source['uid'],source['gid'],expected,[(job['source']['target'],job['source']['manifest']['commit']),(job['prepared']['target'],job['target']['manifest']['commit'])])
+        if not old:
+            recorded=self.schema(source)
+            contract=source['manifest']['compatibility']
+            if 'schemas' in contract:
+                actual=recorded if isinstance(recorded,dict) else {'dsh_phalanx':recorded}
+                expected={row['name']:row['target'] for row in contract['schemas']}
+                matches=actual==expected
+            else:
+                matches=(recorded.get('dsh_phalanx') if isinstance(recorded,dict) else recorded)==contract['accounts']['target']
+            if not matches:
+                raise InstallError('Target database schemas do not match their declared identity')
+
+    def restore(self,job):
+        with self.quiescent(job):
+            database=UpgradeDatabaseBackup(self,job)
+            database.verify(job['backup'].get('database'))
+            self.backup_owner(job).restore(job['backup'])
+            self.host.run(['systemctl','daemon-reload'])
+            self.link(job['source']['target'])
+            self.start_database(job)
+            database.restore(job['backup'].get('database'))
+        self.start(job)
+
+    @install_failure('service.start-failed')
+    def restart_old(self,job):
+        if self.host.path(CURRENT).resolve()!=Path(job['source']['target']):
+            raise InstallError('No verified backup exists for the changed current release')
+        self.start(job)
+
+    def commit(self,job):
+        if 'executor' in job.get('prepared',{}):
+            install_executor(self.host,job['source']['uid'],job['source']['gid'],job['prepared']['target'],job['target']['manifest']['commit'])
+        manifest=job['target']['manifest']
+        receipt={**job['source']['receipt'],'version':job['target']['version'],'channel':job['target'].get('channel',release_channel(job['target']['version'])),'candidate':manifest['tag'],
+            'commit':manifest['commit'],'platformSha256':manifest['files'][asset_names(manifest)[0]],'imageDigest':manifest['image']['digest'],'changed':True}
+        self.host.atomic(STATE,json.dumps(receipt)+'\n')
+        self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
+        sync_directory(self.host.path('/etc/dsh-phalanx'))
 
 """Small, release-bound executor bootstrap before platform/image downloads."""
 import hashlib
@@ -4797,40 +5676,51 @@ from pathlib import Path
 def bootstrap_executor(host,port,target,temporary):
     port.check_fresh_install(target)
     job=port.operation()
-    if job and job['phase'] in (*ACTIVE,'prepared'):raise InstallError('Finish or recover the existing update before executor bootstrap')
-    source=port.source();manifest=target['manifest']
-    marker=host.path('/etc/dsh-phalanx/maintenance');recovery=None
-    if marker.exists() or marker.is_symlink():recovery=PlatformOperations(host,port).bootstrap_recovery_proof(source)
+    if job and job['phase'] in (*ACTIVE,'prepared'):
+        raise InstallError('Finish or recover the existing update before executor bootstrap')
+    source=port.source()
+    manifest=target['manifest']
+    marker=host.path(MARKER)
+    recovery=None
+    if marker.exists() or marker.is_symlink():
+        recovery=PlatformOperations(host,port).bootstrap_recovery_proof(source)
     port.check_compatibility(source,target)
-    if not supports_capacity(manifest):raise InstallError('This release does not support a capacity-aware executor bootstrap')
-    if recovery is None:port.verify_source(source)
-    raw=manifest['updater'];inventory=json.loads(raw)
-    files=inventory.get('files')
-    if (inventory.get('schema')!=1 or inventory.get('sourceCommit')!=manifest['commit'] or
-            not isinstance(files,dict) or set(files)!=REQUIRED or
-            any(not isinstance(value,str) or not re.fullmatch('[a-f0-9]{64}',value) for value in files.values())):
-        raise InstallError('Release updater inventory is invalid')
+    if not supports_capacity(manifest):
+        raise InstallError('This release does not support a capacity-aware executor bootstrap')
+    if recovery is None:
+        port.verify_source(source)
+    raw=manifest['updater']
+    inventory=validate_executor_manifest(json.loads(raw),manifest['commit'])
+    files=inventory['files']
     # Bounded source, staging bank and final bank coexist. No runtime image or
     # platform archive is needed; the platform service continues serving.
     plan=capacity_plan([{'path':str(temporary),'purpose':'small updater download','bytes':4*MIB},
                        {'path':str(host.path(BANKS)),'purpose':'small updater bank','bytes':8*MIB}],filesystem_capacity)
-    if not plan['sufficient']:raise InstallError('Insufficient disk space for the small updater bootstrap')
-    package=Path(temporary)/'bootstrap';updater=package/'updater';updater.mkdir(parents=True)
+    if not plan['sufficient']:
+        raise InstallError('Insufficient disk space for the small updater bootstrap')
+    package=Path(temporary)/'bootstrap'
+    updater=package/'updater'
+    updater.mkdir(parents=True)
     asset=manifest.get('updaterAsset')
     if (not isinstance(asset,dict) or asset.get('name')!='updater.json' or
             not isinstance(asset.get('sha256'),str) or not re.fullmatch('[a-f0-9]{64}',asset['sha256'])):
         raise InstallError('Release has no verified updater asset; select a completed release with updater.json')
     base=CANDIDATE_RELEASE_BASE if target['version'].startswith('run-') else RELEASE_BASE
     body=host.request(base+'/download/'+target['version']+'/updater.json',max_bytes=4*MIB)
-    if hashlib.sha256(body).hexdigest()!=asset['sha256']:raise InstallError('Release updater asset checksum mismatch')
+    if hashlib.sha256(body).hexdigest()!=asset['sha256']:
+        raise InstallError('Release updater asset checksum mismatch')
     sources=json.loads(body)
-    if not isinstance(sources,dict) or set(sources)!=set(files):raise InstallError('Release updater asset inventory mismatch')
+    if not isinstance(sources,dict) or set(sources)!=set(files):
+        raise InstallError('Release updater asset inventory mismatch')
     received=0
     for name,expected in files.items():
         text=sources[name]
-        if not isinstance(text,str):raise InstallError('Release updater source must be text')
-        body=text.encode();received+=len(body)
-        if len(body)>512*1024 or received>4*MIB or hashlib.sha256(body).hexdigest()!=expected:raise InstallError('Release updater source checksum or size mismatch')
+        if not isinstance(text,str):
+            raise InstallError('Release updater source must be text')
+        body=text.encode()
+        received+=len(body)
+        if len(body)>512*1024 or received>4*MIB or hashlib.sha256(body).hexdigest()!=expected:
+            raise InstallError('Release updater source checksum or size mismatch')
         (updater/name).write_bytes(body)
     (updater/'manifest.json').write_text(raw)
     executor_package(updater,manifest['commit'])
@@ -4840,205 +5730,6 @@ def bootstrap_executor(host,port,target,temporary):
     activate_executor(host,restart=True)
     host.tell('Updater installed; run maintenance-recover to restore the interrupted initialization.' if recovery is not None else 'Capacity-aware updater installed. The platform remains running; return to System update to download the selected release.')
     return result
-
-"""Public upgrade command input/output; the transaction is shared with Web."""
-import json
-import tempfile
-import time
-from types import SimpleNamespace
-from pathlib import Path
-
-
-def load_target(host,args,directory):
-    try:location,manifest,version=select_release(host,args,directory)
-    except ReaderUpdateRequired as error:
-        manifest=json.loads((directory/'manifest.json').read_text())
-        error.selected_version='v'+manifest['targetVersion'] if args.version=='latest' else args.version
-        raise
-    return {'version':version,'channel':release_channel(version),'manifest':manifest,'manifestSha256':digest(location/'manifest.json')}
-
-
-def bind_channel_target(index,target):
-    if (target['version']!=index['candidate'] or target['manifest']['targetVersion']!=index['targetVersion'] or
-            target['manifest']['commit']!=index['commit'] or target['manifestSha256']!=index['manifestSha256']):
-        raise InstallError('Candidate channel index and published run disagree')
-
-
-def selected_target(host,args,directory):
-    state=installed_state(host)
-    explicit=getattr(args,'dev_release_base_url',None)
-    current=installed_channel(state) if state else None
-    if args.version=='latest' and args.bundle_dir is None and explicit is None and current and current['kind']=='candidate':
-        version=UpgradeHost(host).source()['manifest']['targetVersion'] if state['version'].startswith('run-') else state['version'][1:].split('-rc.')[0]
-        try:return load_target(host,SimpleNamespace(version='v'+version,bundle_dir=None,dev_release_base_url=None),directory)
-        except (OSError,InstallError) as error:
-            if not metadata_missing(error) or (directory/'manifest.json').exists():raise
-        index=candidate_channel(host)
-        try:target=load_target(host,SimpleNamespace(version=index['candidate'],bundle_dir=None,dev_release_base_url=CANDIDATE_RELEASE_BASE),directory)
-        except ReaderUpdateRequired:
-            bind_channel_target(index,{'version':index['candidate'],'manifest':json.loads((directory/'manifest.json').read_text()),'manifestSha256':digest(directory/'manifest.json')})
-            raise
-        bind_channel_target(index,target)
-        return target
-    if args.version.startswith('run-') and args.bundle_dir is None and explicit is None and current and current['kind']=='candidate':
-        args=SimpleNamespace(**{**vars(args),'dev_release_base_url':CANDIDATE_RELEASE_BASE})
-    return load_target(host,args,directory)
-
-
-def select_for_check(host,selector,version,directory,dev_release_base_url=None):
-    try:
-        target=selector(host,SimpleNamespace(version=version,bundle_dir=None,dev_release_base_url=dev_release_base_url),directory)
-        if version!='latest' and target['version']!=version:raise InstallError('Release selection identity changed')
-        return target
-    except ReaderUpdateRequired as error:
-        # A refusal grants no install permission. Retain only the unreadable metadata identity for display.
-        manifest=json.loads((directory/'manifest.json').read_text())
-        selected=error.selected_version or 'v'+manifest['targetVersion']
-        if not (STABLE.fullmatch(selected) or selected.startswith('run-') and CANDIDATE.fullmatch(selected)) or (version!='latest' and selected!=version):raise InstallError('Release version listing identity changed')
-        return {'version':selected,'channel':release_channel(selected),'manifest':manifest,'manifestSha256':digest(directory/'manifest.json')}
-
-
-def check_failure_diagnostic(host,reason,code):
-    try:
-        report=Progress(host.root,output='json');report.renderer.paused=True
-        report.phase='Update check';report.phase_code='unknown';report.emit('failed',reason,errorCode=code)
-        return update_diagnostic_path(report.log.name) if report.log else None
-    except OSError:return None
-
-
-def check_releases(host,port,selector=selected_target,version_lister=release_versions,requested_version='latest',dev_release_base_url=None,*,schema_reader=None):
-    checked=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
-    result={'checkedAt':checked}
-    try:
-        with tempfile.TemporaryDirectory(prefix='dsh-phalanx-check-') as directory:
-            target=select_for_check(host,selector,requested_version,Path(directory),dev_release_base_url)
-        if not (STABLE.fullmatch(target['version']) or target['version'].startswith('run-') and CANDIDATE.fullmatch(target['version'])):raise InstallError('Only a verified channel release can be selected')
-        notes=release_notes(host,target['version'])
-        result.update(version=target['version'],targetVersion=target['manifest']['targetVersion'],manifestSha256=target['manifestSha256'],releaseNotes=notes)
-        try:
-            port.check_fresh_install(target)
-            source=port.source()
-        except ReaderUpdateRequired:
-            source=port.source()
-        except FreshInstallRequired:
-            # The verified legacy receipt authorizes refusal only, without importing a missing manifest.
-            source={'manifest':{'targetVersion':installed_state(host)['version'][1:]}}
-        schemas=None;versions=[]
-        for version in version_lister(host,source['manifest']['targetVersion'],target['version'],target['manifest']['targetVersion']):
-            with tempfile.TemporaryDirectory(prefix='dsh-phalanx-check-') as directory:
-                selected=target if version==target['version'] else select_for_check(host,selector,version,Path(directory))
-            if selected['version']!=version:raise InstallError('Release version listing identity changed')
-            row={'version':version,'targetVersion':selected['manifest']['targetVersion'],'manifestSha256':selected['manifestSha256']}
-            try:
-                route=upgrade_outcome(source['manifest'],selected['manifest'],None,inspect_schema=False,source_channel=source.get('channel'),target_channel=selected.get('channel',release_channel(selected['version'])))
-                if route['outcomeCode'] in ('update.available','update.channel-switch'):
-                    if schemas is None:schemas=(schema_reader or port.schema)(source)
-                    route=port.compatibility_outcome(source,selected,schemas)
-                row.update(route,status='available' if route['outcomeCode'] in ('update.available','update.channel-switch') else 'current' if route['outcomeCode']=='update.current' else 'incompatible')
-                if route['outcomeCode']=='update.reader-update-required':
-                    row['reason']='This release requires updater '+route['requiredVersion']+' or newer; update the small executor with the target installer first'
-                if route['outcomeCode']=='update.below-floor':
-                    row.update(freshInstallRequired=True,reason='This version requires a fresh installation; upgrade floor is '+route['requiredVersion'])
-            except InstallError as error:row.update(status='incompatible',outcomeCode='compatibility.unsupported',errorCode=update_error_code(error),reason=host.progress.safe(str(error)))
-            versions.append(row)
-        result.update(next(row for row in versions if row['version']==target['version']),versions=versions)
-        # Reserve room for bounded operation/events in the 128 KiB control response.
-        if len(json.dumps(result,ensure_ascii=False).encode())>48*1024:raise InstallError('Release version list exceeds the control response bound')
-    except ReaderUpdateRequired as error:
-        result.update(status='failed',outcomeCode='update.reader-update-required',requiredVersion=error.required_version,reason=host.progress.safe(str(error)))
-    except Exception as error:
-        code=update_error_code(error);reason=host.progress.safe(str(error))
-        result={'checkedAt':checked,'status':'failed','errorCode':code,'reason':reason}
-    code=result.get('errorCode')
-    if code and (code=='unknown' or code not in SYSTEM_UPDATE_CODES['errors']):
-        diagnostic=check_failure_diagnostic(host,result['reason'],code)
-        if diagnostic:result['diagnosticLog']=diagnostic
-    return result
-
-
-def public_cleanup(value):
-    # Detailed receipts remain in the root journal. Keep status/retry usable even
-    # after years of retained backups or unknown resources.
-    result={key:value[key] for key in ('status','reclaimedBytes')}
-    if 'failure' in value:result['failure']=value['failure'][:1024]
-    if 'errorCode' in value:result['errorCode']=value['errorCode']
-    items=[];size=0
-    rows=value.get('items',[])
-    for row in rows:
-        item={key:str(row.get(key,''))[:512] for key in ('kind','name','status','reason')}
-        item['reclaimedBytes']=row.get('reclaimedBytes',0)
-        length=len(json.dumps(item).encode())
-        if size+length>24*1024 or len(items)>=100:break
-        items.append(item);size+=length
-    return {**result,'items':items,'omittedItems':len(rows)-len(items)}
-
-
-def public_operation(job,point=None):
-    if job is None:return None
-    timing=update_timing(job,point);diagnostic=update_diagnostic_path(job.get('diagnostic'))
-    return {'id':job['id'],'phase':job['phase'],'phaseCode':update_phase_code(job['phase']),'targetVersion':job['target']['manifest']['targetVersion'],
-            'sourceVersion':job['source']['manifest']['targetVersion'],
-            'targetCommit':job['target']['manifest']['commit'],
-            'platformSha256':job['target']['manifest']['files'][asset_names(job['target']['manifest'])[0]],
-            'imageDigest':job['target']['manifest']['image']['digest'],
-            **({'diagnosticLog':diagnostic} if diagnostic else {}),
-            **({'timing':timing} if timing is not None else {}),
-            **({'previousDowntimeSeconds':job['previousDowntimeSeconds']} if 'previousDowntimeSeconds' in job else {}),
-            **({'cleanup':public_cleanup(job['cleanup'])} if 'cleanup' in job else {}),
-            **{key:job[key] for key in ('failure','failurePhase','errorCode','recoveryFailure','recoveryErrorCode','stopFailure','stopErrorCode','instruction','space') if key in job}}
-
-
-def confirm_apply(host,args):
-    host.tell('Applying this update immediately restarts the service, interrupts every running task, and may lose unsaved content.')
-    if args.yes:return
-    if not host.terminal_available() or host.prompt('Apply this update now? [y/N]: ').lower() not in ('y','yes'):
-        raise InstallError('Update was not applied. Rerun with --yes only after accepting the task interruption risk.')
-
-
-def upgrade_command(host,args,temporary,target=None):
-    pointer=executor_pointer(host)
-    report=host.progress; values=read_configuration(host)
-    report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
-    port=UpgradeHost(host,args.bundle_dir,dev_release_base_url=getattr(args,'dev_release_base_url',None)); core=UpgradeCore(port)
-    action=args.upgrade or 'install'
-    if action=='check':
-        result=check_releases(host,port,requested_version=args.version,dev_release_base_url=getattr(args,'dev_release_base_url',None))
-        report.upgrade_result({'check':result})
-        return 1 if result['status']=='failed' else 0
-    if action=='bootstrap':
-        target=target or selected_target(host,args,Path(temporary))
-        port.check_fresh_install(target)
-        with report.stage('Update executor bootstrap',phase_code='update.bootstrap'):
-            result=bootstrap_executor(host,port,target,Path(temporary))
-        report.upgrade_result({'status':'updater-ready','executor':result,'operation':None})
-        return 0
-    if action in ('prepare','install'):
-        target=target or selected_target(host,args,Path(temporary))
-        port.check_fresh_install(target)
-        if action=='install':confirm_apply(host,args)
-        with report.stage('Upgrade preparation',phase_code='update.preparing'):
-            port.import_legacy_manifest()
-            job=core.prepare(target)
-        if action=='install' and job['phase']=='prepared':
-            with report.stage('Upgrade application',phase_code='update.stopping'):job=core.apply(job['id'])
-    elif action=='apply':
-        if not args.operation:raise InstallError('Apply requires the exact prepared --operation identity')
-        confirm_apply(host,args)
-        with report.stage('Upgrade application',phase_code='update.stopping'):job=core.apply(args.operation)
-    elif action=='cleanup':
-        with report.stage('Owned resource cleanup',phase_code='update.cleanup'):job=core.cleanup(args.operation)
-    elif action=='recover':
-        with report.stage('Upgrade recovery',phase_code='update.restoring'):
-            job=core.recover(args.operation)
-            if job['phase'] in ('prepared','succeeded','restored') and 'executor' in job.get('prepared',{}) and port.operation()['id']==job['id']:
-                port.verify(job,old=job['phase']!='succeeded')
-    else:job=core.status(args.operation)
-    if job and job['phase'] in ('prepared','succeeded','restored') and executor_pointer(host)!=pointer:activate_executor(host,restart=True)
-    result={'status':'upgrade','operation':public_operation(job),
-            'diagnosticLog':'/var/log/dsh-phalanx/'+report.log.name if report.log else None}
-    report.upgrade_result(result)
-    if action=='cleanup':return 0 if job and job.get('cleanup',{}).get('status')=='succeeded' else 1
-    return 0 if job is None or job['phase'] in ('prepared','succeeded') or action=='status' else 1
 
 """Digest-pinned rootless PostgreSQL and local-key bootstrap for new installations."""
 import json
@@ -5058,7 +5749,8 @@ def prepare_builtin_database(host, uid, gid, target, values, manifest):
     build=json.loads(host.path(target+'/build-info.json').read_text())
     pin=build.get('versions',{}).get('postgres')
     # Older verified packages do not implement the local database bootstrap commands.
-    if pin is None:return None
+    if pin is None:
+        return None
     if (not isinstance(pin,dict) or not re.fullmatch(r'docker.io/library/postgres:[0-9][a-zA-Z0-9.-]*',pin.get('image','')) or
             not re.fullmatch(r'sha256:[a-f0-9]{64}',pin.get('digest',''))):
         raise InstallError('Invalid built-in PostgreSQL image identity')
@@ -5069,28 +5761,37 @@ def prepare_builtin_database(host, uid, gid, target, values, manifest):
         address=urllib.parse.urlsplit(mirror)
         transport=address.netloc+address.path+canonical.removeprefix('docker.io/') if mirror else canonical
         host.user(uid,['podman','pull',transport])
-        if mirror:host.user(uid,['podman','tag',transport,pin['image']])
-    elif present.returncode!=0:raise InstallError('Cannot inspect rootless PostgreSQL image storage')
+        if mirror:
+            host.user(uid,['podman','tag',transport,pin['image']])
+    elif present.returncode!=0:
+        raise InstallError('Cannot inspect rootless PostgreSQL image storage')
     image=json.loads(host.user(uid,['podman','image','inspect',canonical]).stdout)[0]
     if image.get('Digest')!=pin['digest'] or image.get('Os')!='linux' or image.get('Architecture')!=manifest['platform'].split('/')[1]:
         raise InstallError('Built-in PostgreSQL image digest or architecture mismatch')
-    keys=HOME_DIR+'/keys';data=values['DSH_PHALANX_DATA_ROOT']
-    durable=default_storage_root(data);postgres=durable+'/postgres'
+    keys=HOME_DIR+'/keys'
+    data=values['DSH_PHALANX_DATA_ROOT']
+    durable=default_storage_root(data)
+    postgres=durable+'/postgres'
     if host.path(durable).exists() and host.user(uid,['test','-O',str(host.path(durable))],check=False).returncode!=0:
         raise InstallError('The durable storage directory must belong to the service account')
-    config=keys+'/database.json';master=keys+'/master.key'
+    config=keys+'/database.json'
+    master=keys+'/master.key'
     for directory in (keys,data,durable,postgres):
         host.mkdir(directory,0o700)
     # PostgreSQL owns the contents after initialization; never recursively chown its data.
     host.run(['chown',f'{uid}:{gid}',str(host.path(keys)),str(host.path(data)),str(host.path(durable))])
-    if not any(host.path(postgres).iterdir()):host.run(['chown',f'{uid}:{gid}',str(host.path(postgres))])
+    if not any(host.path(postgres).iterdir()):
+        host.run(['chown',f'{uid}:{gid}',str(host.path(postgres))])
     port=25433 if '25432' in (values.get('DSH_PHALANX_PORT'),values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT'),values.get('DSH_PHALANX_PREVIEW_PORT')) else 25432
-    entry=str(host.path(target+'/start'));configuration=str(host.path(config));storage=str(host.path(data))
+    entry=str(host.path(target+'/start'))
+    configuration=str(host.path(config))
+    storage=str(host.path(data))
     info=json.loads(host.user(uid,[entry,'database-initialize','--config-file',configuration,'--master-key-file',str(host.path(master)),'--data-root',storage,'--port',str(port)]).stdout)
     if not isinstance(info,dict) or not isinstance(info.get('port'),int) or not 1024<=info['port']<=65535 or not re.fullmatch(r'sha256:[a-f0-9]{64}',info.get('fingerprint','')) or info.get('masterKeyPath')!=str(host.path(master)):
         raise InstallError('Invalid database bootstrap receipt')
     port=info['port']
-    if str(port) in (values.get('DSH_PHALANX_PORT'),values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT'),values.get('DSH_PHALANX_PREVIEW_PORT')):raise InstallError('Entry, gateway, preview and database ports must differ')
+    if str(port) in (values.get('DSH_PHALANX_PORT'),values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT'),values.get('DSH_PHALANX_PREVIEW_PORT')):
+        raise InstallError('Entry, gateway, preview and database ports must differ')
     current=unit_argument(str(host.path('/opt/dsh-phalanx/current/start')))
     builtin_configuration=str(host.path(keys+'/builtin-database.json'))
     common=' --config-file '+unit_argument(builtin_configuration)+' --data-root '+unit_argument(storage)+' --maintenance-file '+unit_argument(str(host.path('/etc/dsh-phalanx/maintenance')))
@@ -5106,7 +5807,8 @@ def prepare_builtin_database(host, uid, gid, target, values, manifest):
           'ExecStartPost='+current+' database-wait'+common+'\nExecStop=/usr/bin/podman stop --ignore --time 20 dsh-phalanx-postgres\n'
           'ExecStopPost=/usr/bin/podman rm --ignore --force dsh-phalanx-postgres\nRestart=on-failure\nRestartSec=2\nTimeoutStartSec=90\nTimeoutStopSec=45\nKillMode=mixed\n')
     info['unitChanged']=not host.path(DATABASE_UNIT).exists() or host.path(DATABASE_UNIT).read_text()!=unit
-    if info['unitChanged']:host.atomic(DATABASE_UNIT,unit,0o644)
+    if info['unitChanged']:
+        host.atomic(DATABASE_UNIT,unit,0o644)
     host.run(['chown',f'{uid}:{gid}',str(host.path(DATABASE_UNIT))])
     values['DSH_PHALANX_DATABASE_CONFIG_FILE']=config
     return info
@@ -5158,7 +5860,8 @@ class Deployment:
         marker=self.host.path(MAINTENANCE)
         pending=[]
         if marker.exists() or marker.is_symlink():
-            if marker.is_symlink() or not marker.is_file():raise InstallError('Invalid maintenance marker')
+            if marker.is_symlink() or not marker.is_file():
+                raise InstallError('Invalid maintenance marker')
             pending.append({'kind':'maintenance','phase':'recovery-required'})
         value=read_platform_operation(self.host)
         if value and value['phase'] not in ('succeeded','restored'):
@@ -5170,20 +5873,25 @@ class Deployment:
 
     def task_count(self,group,*,active):
         if not group:
-            if active:raise InstallError('Active service has no observable control group')
+            if active:
+                raise InstallError('Active service has no observable control group')
             return 0
         if not group.startswith('/') or '..' in Path(group).parts or '\0' in group:
             raise InstallError('Invalid service control group')
         root=self.host.path('/sys/fs/cgroup'+group)
         if not root.exists():
-            if active:raise InstallError('Active service control group is unavailable')
+            if active:
+                raise InstallError('Active service control group is unavailable')
             return 0
-        if root.is_symlink() or not root.is_dir():raise InstallError('Invalid service control group')
+        if root.is_symlink() or not root.is_dir():
+            raise InstallError('Invalid service control group')
         identities=set()
         for file in [root/'cgroup.procs',*root.glob('**/cgroup.procs')]:
-            if file.is_symlink():raise InstallError('Invalid control group process observation')
+            if file.is_symlink():
+                raise InstallError('Invalid control group process observation')
             for pid in file.read_text().split():
-                if not pid.isdecimal() or int(pid)<1:raise InstallError('Invalid control group process identity')
+                if not pid.isdecimal() or int(pid)<1:
+                    raise InstallError('Invalid control group process identity')
                 identities.add(int(pid))
         return len(identities)
 
@@ -5197,8 +5905,10 @@ class Deployment:
         if state not in ('active','inactive','failed','activating','deactivating','reloading'):
             raise InstallError('Unknown managed '+name+' service state')
         for key in ('MainPID','ControlPID'):
-            if not values.get(key,'').isdecimal():raise InstallError('Incomplete managed service process facts')
-        if values.get('ControlGroup') and Path(values['ControlGroup']).name!=unit:raise InstallError('Service control group differs from its unit')
+            if not values.get(key,'').isdecimal():
+                raise InstallError('Incomplete managed service process facts')
+        if values.get('ControlGroup') and Path(values['ControlGroup']).name!=unit:
+            raise InstallError('Service control group differs from its unit')
         quiescent_fence=idle and state=='active' and values.get('SubState')=='exited' and values['MainPID']=='0' and values['ControlPID']=='0'
         tasks=self.task_count(values.get('ControlGroup',''),active=state not in ('inactive','failed') and not quiescent_fence)
         running=state=='active' and tasks>0
@@ -5209,9 +5919,11 @@ class Deployment:
         owner=hashlib.sha256(str(Path(source['values']['DSH_PHALANX_DATA_ROOT']).resolve()).encode()).hexdigest()
         response=self.host.user(source['uid'],['podman','ps','--all','--filter','label=dsh-phalanx.community=1','--filter','label=dsh-phalanx.community-root='+owner,'--format','json'])
         rows=json.loads(response.stdout)
-        if not isinstance(rows,list):raise InstallError('Invalid member container observation')
+        if not isinstance(rows,list):
+            raise InstallError('Invalid member container observation')
         for row in rows:
-            if not isinstance(row,dict) or not isinstance(row.get('Labels'),dict):raise InstallError('Invalid member container observation')
+            if not isinstance(row,dict) or not isinstance(row.get('Labels'),dict):
+                raise InstallError('Invalid member container observation')
             labels=row['Labels']
             identity=row.get('Id',row.get('ID'))
             if labels.get('dsh-phalanx.community')!='1' or labels.get('dsh-phalanx.community-root')!=owner or not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):
@@ -5222,51 +5934,67 @@ class Deployment:
 
     def database_selection(self,source):
         configured=source['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE')
-        if not configured:return None
+        if not configured:
+            return None
         path=self.host.path(configured)
         owner=path.stat().st_uid
-        if owner not in (os.geteuid(),source['uid']):raise InstallError('Database configuration owner is inconsistent')
+        if owner not in (os.geteuid(),source['uid']):
+            raise InstallError('Database configuration owner is inconsistent')
         value=json.loads(read_owned(path,owner))
-        if not isinstance(value,dict) or value.get('selection') not in (None,'builtin','external'):raise InstallError('Unknown selected database configuration')
+        if not isinstance(value,dict) or value.get('selection') not in (None,'builtin','external'):
+            raise InstallError('Unknown selected database configuration')
         return value.get('selection')
 
     def builtin_containers(self,source):
         response=self.host.user(source['uid'],['podman','ps','--all','--filter','label=dsh.phalanx.database=builtin','--filter','name=dsh-phalanx-postgres','--format','json'])
         rows=json.loads(response.stdout)
-        if not isinstance(rows,list):raise InstallError('Invalid built-in database container observation')
+        if not isinstance(rows,list):
+            raise InstallError('Invalid built-in database container observation')
         expected=self.host.path(default_storage_root(source['values']['DSH_PHALANX_DATA_ROOT'])+'/postgres').resolve()
         owned=[]
         for row in rows:
-            if not isinstance(row,dict):raise InstallError('Invalid built-in database container observation')
+            if not isinstance(row,dict):
+                raise InstallError('Invalid built-in database container observation')
             identity=row.get('Id',row.get('ID'))
-            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):raise InstallError('Invalid built-in database container identity')
+            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):
+                raise InstallError('Invalid built-in database container identity')
             details=json.loads(self.host.user(source['uid'],['podman','inspect',identity]).stdout)
-            if not isinstance(details,list) or len(details)!=1:raise InstallError('Cannot inspect built-in database ownership')
+            if not isinstance(details,list) or len(details)!=1:
+                raise InstallError('Cannot inspect built-in database ownership')
             detail=details[0]
-            if not isinstance(detail,dict) or not isinstance(detail.get('Config'),dict) or not isinstance(detail['Config'].get('Labels'),dict) or not isinstance(detail.get('Mounts'),list) or any(not isinstance(mount,dict) for mount in detail['Mounts']):raise InstallError('Invalid built-in database ownership observation')
-            if detail.get('Name','').lstrip('/')!='dsh-phalanx-postgres':continue
+            if not isinstance(detail,dict) or not isinstance(detail.get('Config'),dict) or not isinstance(detail['Config'].get('Labels'),dict) or not isinstance(detail.get('Mounts'),list) or any(not isinstance(mount,dict) for mount in detail['Mounts']):
+                raise InstallError('Invalid built-in database ownership observation')
+            if detail.get('Name','').lstrip('/')!='dsh-phalanx-postgres':
+                continue
             labels=detail.get('Config',{}).get('Labels',{})
             mounts=[mount for mount in detail.get('Mounts',[]) if mount.get('Destination')=='/var/lib/postgresql/data']
             if labels.get('dsh.phalanx.database')!='builtin' or len(mounts)!=1 or mounts[0].get('Type')!='bind' or Path(mounts[0].get('Source','')).resolve()!=expected:
                 raise InstallError('Built-in database container ownership differs from this deployment')
-            if row.get('State') not in ('running','paused','stopping','created','configured','exited','stopped'):raise InstallError('Unknown built-in database container state')
+            if row.get('State') not in ('running','paused','stopping','created','configured','exited','stopped'):
+                raise InstallError('Unknown built-in database container state')
             owned.append(row)
         return owned
 
     def upgrade_jobs(self,source):
         root=self.journal_root()
-        if not root.exists():return []
+        if not root.exists():
+            return []
         jobs=[]
         for directory in root.iterdir():
-            if not re.fullmatch('[a-f0-9-]{36}',directory.name):continue
+            if not re.fullmatch('[a-f0-9-]{36}',directory.name):
+                continue
             operation_id(directory.name)
-            if directory.is_symlink() or not directory.is_dir():raise InstallError('Invalid upgrade journal ownership')
+            if directory.is_symlink() or not directory.is_dir():
+                raise InstallError('Invalid upgrade journal ownership')
             path=directory/'operation.json'
-            if not path.exists():continue
+            if not path.exists():
+                continue
             job=read_upgrade_operation(self.host,directory.name)
-            if job.get('id')!=directory.name:raise InstallError('Upgrade journal identity differs from its directory')
+            if job.get('id')!=directory.name:
+                raise InstallError('Upgrade journal identity differs from its directory')
             saved=job.get('source',{}).get('values',{}).get('DSH_PHALANX_DATA_ROOT')
-            if saved and Path(saved).resolve()==Path(source['values']['DSH_PHALANX_DATA_ROOT']).resolve():jobs.append(job)
+            if saved and Path(saved).resolve()==Path(source['values']['DSH_PHALANX_DATA_ROOT']).resolve():
+                jobs.append(job)
         return jobs
 
     def maintenance_workers(self,source):
@@ -5276,7 +6004,8 @@ class Deployment:
         for line in response.stdout.splitlines():
             name=line.split()[0]
             match=re.fullmatch(r'dsh-phalanx-upgrade-(page|listener)-([a-f0-9-]{36})\.service',name)
-            if not match or match[2] not in jobs:raise InstallError('Cannot verify independent maintenance unit ownership')
+            if not match or match[2] not in jobs:
+                raise InstallError('Cannot verify independent maintenance unit ownership')
             kind=MaintenanceUnit if match[1]=='page' else ListenerPinUnit
             worker=kind(self.host,jobs[match[2]])
             facts=worker.facts()
@@ -5288,18 +6017,24 @@ class Deployment:
     def archive_containers(self,source):
         jobs=self.upgrade_jobs(source)
         owners={hashlib.sha256(str(self.host.path(UPGRADE_ROOT+'/'+job['id']+'/backup/database')).encode()).hexdigest() for job in jobs if 'database' in job}
-        if not owners:return []
+        if not owners:
+            return []
         result=self.host.run(['podman','ps','--all','--filter','label=dsh.phalanx.upgrade-archive-owner','--format','json'])
         rows=json.loads(result.stdout)
-        if not isinstance(rows,list):raise InstallError('Invalid database tool container observation')
+        if not isinstance(rows,list):
+            raise InstallError('Invalid database tool container observation')
         owned=[]
         for row in rows:
-            if not isinstance(row,dict) or not isinstance(row.get('Labels'),dict):raise InstallError('Invalid database tool container observation')
+            if not isinstance(row,dict) or not isinstance(row.get('Labels'),dict):
+                raise InstallError('Invalid database tool container observation')
             owner=row['Labels'].get('dsh.phalanx.upgrade-archive-owner')
-            if owner not in owners:continue
+            if owner not in owners:
+                continue
             identity=row.get('Id',row.get('ID'))
-            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):raise InstallError('Invalid owned database tool container identity')
-            if row.get('State') not in ('running','paused','stopping','created','configured','exited','stopped'):raise InstallError('Unknown database tool container state')
+            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):
+                raise InstallError('Invalid owned database tool container identity')
+            if row.get('State') not in ('running','paused','stopping','created','configured','exited','stopped'):
+                raise InstallError('Unknown database tool container state')
             owned.append(row)
         return owned
 
@@ -5313,7 +6048,8 @@ class Deployment:
             return {**result,'state':'maintenance','operations':[{'kind':'uninstall','phase':removal['phase']}]}
         state=self.host.path(STATE)
         if not state.exists() and not state.is_symlink():
-            if removal and not self.host.path(UNIT).exists():return result
+            if removal and not self.host.path(UNIT).exists():
+                return result
             if any(self.host.path(path).exists() or self.host.path(path).is_symlink() for path in (CONFIG,UNIT)):
                 result.update(state='partial',errors=[{'component':'installation','reason':'Incomplete installation; preserve configuration and retry installation'}])
             return result
@@ -5324,15 +6060,18 @@ class Deployment:
             result.update(state='query-failed',errors=[{'component':'installation','reason':str(error)}])
             return result
         def collect(name,read):
-            try:result['components'].append(read())
+            try:
+                result['components'].append(read())
             except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:
                 result['components'].append({'name':name,'state':'unknown'})
                 result['errors'].append({'component':name,'reason':str(error)})
         for name,unit,system,idle in (('platform',PLATFORM,False,False),('updater',UPDATER,True,False),('maintenance-fence',FENCE,True,True)):
             collect(name,lambda name=name,unit=unit,system=system,idle=idle:self.service(name,unit,source,system=system,idle=idle))
         database=self.host.path('/var/lib/dsh-phalanx/.config/systemd/user/'+DATABASE)
-        if database.exists():collect('builtin-database',lambda:self.service('builtin-database',DATABASE,source))
-        try:result['databaseSelection']=self.database_selection(source)
+        if database.exists():
+            collect('builtin-database',lambda:self.service('builtin-database',DATABASE,source))
+        try:
+            result['databaseSelection']=self.database_selection(source)
         except (OSError,ValueError,KeyError,TypeError,InstallError) as error:
             result['databaseSelection']='unknown'
             result['errors'].append({'component':'builtin-database','reason':str(error)})
@@ -5356,14 +6095,19 @@ class Deployment:
             return {'name':'upgrade-tools','state':'running' if active else 'stopped','running':active}
         collect('maintenance-workers',maintenance)
         collect('upgrade-tools',archives)
-        try:result['operations']=self.pending()
-        except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:result['errors'].append({'component':'maintenance','reason':str(error)})
+        try:
+            result['operations']=self.pending()
+        except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:
+            result['errors'].append({'component':'maintenance','reason':str(error)})
         platform=next(row for row in result['components'] if row['name']=='platform')
         if platform['state']=='running' and not result['operations']:
             try:
-                values=source['values'];port=int(values['DSH_PHALANX_PORT']);entry=entry_url(port,values['DSH_PHALANX_HOST'])
+                values=source['values']
+                port=int(values['DSH_PHALANX_PORT'])
+                entry=entry_url(port,values['DSH_PHALANX_HOST'])
                 address=ipaddress.ip_address(urllib.parse.urlsplit(entry).hostname)
-                if not self.host.pid_owns_listener(platform['mainPid'],port,address):raise InstallError('Managed platform process does not own the configured listener')
+                if not self.host.pid_owns_listener(platform['mainPid'],port,address):
+                    raise InstallError('Managed platform process does not own the configured listener')
                 initialization=result.get('databaseSelection') is None
                 self.host.request(entry+('/login' if initialization else '/readyz'),authority=origin_authority(values['DSH_PHALANX_PUBLIC_ORIGIN']),max_bytes=65536,timeout=5)
                 platform['initializationRequired']=initialization
@@ -5374,11 +6118,16 @@ class Deployment:
         states={row['name']:row['state'] for row in result['components']}
         required=[row['state'] for row in result['components'] if row['name'] not in ('members','maintenance-fence','maintenance-workers','upgrade-tools','builtin-database-containers') and not (row['name']=='builtin-database' and result.get('databaseSelection')=='external')]
         database_consistent=(states.get('builtin-database')=='running')==(states['builtin-database-containers']=='running')
-        if result['errors']:result['state']='query-failed'
-        elif result['operations']:result['state']='maintenance'
-        elif required and all(state=='running' for state in required) and states['maintenance-fence'] in ('idle','stopped') and states['maintenance-workers']=='stopped' and states['upgrade-tools']=='stopped' and database_consistent:result['state']='running'
-        elif all(state in ('stopped','idle') for state in states.values()):result['state']='stopped'
-        else:result['state']='partial'
+        if result['errors']:
+            result['state']='query-failed'
+        elif result['operations']:
+            result['state']='maintenance'
+        elif required and all(state=='running' for state in required) and states['maintenance-fence'] in ('idle','stopped') and states['maintenance-workers']=='stopped' and states['upgrade-tools']=='stopped' and database_consistent:
+            result['state']='running'
+        elif all(state in ('stopped','idle') for state in states.values()):
+            result['state']='stopped'
+        else:
+            result['state']='partial'
         return result
 
     def verify_service_files(self,source):
@@ -5391,9 +6140,11 @@ class Deployment:
             path=self.host.path(name)
             if path.is_symlink() or not path.is_file() or path.stat().st_mode&0o022:
                 raise InstallError('Managed service file ownership cannot be verified: '+name)
-            if path.stat().st_uid not in (os.geteuid(),source['uid']) or name.startswith('/etc/systemd/') and path.stat().st_uid!=os.geteuid():raise InstallError('Managed service file owner differs: '+name)
+            if path.stat().st_uid not in (os.geteuid(),source['uid']) or name.startswith('/etc/systemd/') and path.stat().st_uid!=os.geteuid():
+                raise InstallError('Managed service file owner differs: '+name)
             text=path.read_text()
-            if any(fragment not in text for fragment in required):raise InstallError('Managed service definition differs: '+name)
+            if any(fragment not in text for fragment in required):
+                raise InstallError('Managed service definition differs: '+name)
 
     def change(self,action,*,confirmed=True):
         with deployment_lease(self.host) as acquired:
@@ -5412,7 +6163,8 @@ class Deployment:
             result['errors'].append({'component':'operation','reason':'Complete the recorded uninstall before changing services'})
             return result
         if before['state']=='not-installed':
-            if action=='start':result['errors'].append({'component':'installation','reason':'Install the deployment before starting it'})
+            if action=='start':
+                result['errors'].append({'component':'installation','reason':'Install the deployment before starting it'})
             return result
         try:
             pending=self.pending()
@@ -5427,7 +6179,8 @@ class Deployment:
             result['errors'].append({'component':'installation','reason':str(error)})
             return result
         goal='stopped' if action=='stop' else 'running'
-        if before['state']==goal and not before['errors']:return result
+        if before['state']==goal and not before['errors']:
+            return result
         if action=='stop' and not confirmed:
             result['confirmationRequired']=True
             result['errors'].append({'component':'confirmation','reason':'stop interrupts tasks; pass --yes to explicitly accept interruption'})
@@ -5436,20 +6189,25 @@ class Deployment:
         def step(name,operation,call):
             row={'component':name,'action':operation}
             try:
-                call();row['status']='completed'
+                call()
+                row['status']='completed'
             except (OSError,ValueError,KeyError,TypeError,InstallError,AdmissionGateError) as error:
                 row.update(status='failed',reason=str(error))
             result['steps'].append(row)
         def service(name,unit,*,system=False):
             row=states.get(name)
-            if not row or row['state']=='unknown':return
+            if not row or row['state']=='unknown':
+                return
             target=('stopped','idle') if action=='stop' else ('running','idle') if name=='maintenance-fence' else ('running',)
-            if row['state'] in target:return
+            if row['state'] in target:
+                return
             arguments=['systemctl',*([] if system else ['--user']),action,unit]
             step(name,action,lambda:self.host.run(arguments) if system else self.host.user(source['uid'],arguments))
-        if action=='stop':service('updater',UPDATER,system=True)
+        if action=='stop':
+            service('updater',UPDATER,system=True)
         try:
-            for worker,_ in self.maintenance_workers(source):step('maintenance:'+worker.unit,'stop',worker.stop)
+            for worker,_ in self.maintenance_workers(source):
+                step('maintenance:'+worker.unit,'stop',worker.stop)
             for row in self.archive_containers(source):
                 identity=row.get('Id',row.get('ID'))
                 step('upgrade-tool:'+identity,'stop',lambda identity=identity:self.host.run(['podman','rm','--force','--ignore','--time','0',identity]))
@@ -5472,7 +6230,8 @@ class Deployment:
                 result['steps'].append({'component':'builtin-database','action':'stop','status':'failed','reason':str(error)})
         else:
             service('maintenance-fence',FENCE,system=True)
-            if before.get('databaseSelection')!='external':service('builtin-database',DATABASE)
+            if before.get('databaseSelection')!='external':
+                service('builtin-database',DATABASE)
             service('platform',PLATFORM)
             service('updater',UPDATER,system=True)
             if any(row['component']=='platform' and row['status']=='completed' for row in result['steps']):
@@ -5481,9 +6240,11 @@ class Deployment:
         result.update(observed)
         result['changed']=any(row['status']=='completed' and row['action']!='readiness' for row in result['steps'])
         for row in result['steps']:
-            if row['status']=='failed':result['errors'].append({'component':row['component'],'reason':row['reason']})
+            if row['status']=='failed':
+                result['errors'].append({'component':row['component'],'reason':row['reason']})
         goal='stopped' if action=='stop' else 'running'
-        if result['state']!=goal:result['errors'].append({'component':'deployment','reason':'Some managed components have not reached '+goal+'; inspect component results and retry'})
+        if result['state']!=goal:
+            result['errors'].append({'component':'deployment','reason':'Some managed components have not reached '+goal+'; inspect component results and retry'})
         return result
 
 """Remove the installed program and service files for a verified deployment."""
@@ -5969,38 +6730,255 @@ def uninstall_command(host, args):
                         print('  '+name)
     return 1 if result['status'] == 'failed' else 0
 
+"""Public upgrade command input/output; the transaction is shared with Web."""
+import json
+import tempfile
+import time
+from types import SimpleNamespace
+from pathlib import Path
+
+
+def load_target(host,args,directory):
+    try:
+        location,manifest,version=select_release(host,args,directory)
+    except ReaderUpdateRequired as error:
+        manifest=json.loads((directory/'manifest.json').read_text())
+        error.selected_version='v'+manifest['targetVersion'] if args.version=='latest' else args.version
+        raise
+    return {'version':version,'channel':release_channel(version),'manifest':manifest,'manifestSha256':digest(location/'manifest.json')}
+
+
+def bind_channel_target(index,target):
+    if (target['version']!=index['candidate'] or target['manifest']['targetVersion']!=index['targetVersion'] or
+            target['manifest']['commit']!=index['commit'] or target['manifestSha256']!=index['manifestSha256']):
+        raise InstallError('Candidate channel index and published run disagree')
+
+
+def selected_target(host,args,directory):
+    state=installed_state(host)
+    explicit=getattr(args,'dev_release_base_url',None)
+    current=installed_channel(state) if state else None
+    if args.version=='latest' and args.bundle_dir is None and explicit is None and current and current['kind']=='candidate':
+        version=UpgradeHost(host).source()['manifest']['targetVersion'] if state['version'].startswith('run-') else state['version'][1:].split('-rc.')[0]
+        try:
+            return load_target(host,SimpleNamespace(version='v'+version,bundle_dir=None,dev_release_base_url=None),directory)
+        except (OSError,InstallError) as error:
+            if not metadata_missing(error) or (directory/'manifest.json').exists():
+                raise
+        index=candidate_channel(host)
+        try:
+            target=load_target(host,SimpleNamespace(version=index['candidate'],bundle_dir=None,dev_release_base_url=CANDIDATE_RELEASE_BASE),directory)
+        except ReaderUpdateRequired:
+            bind_channel_target(index,{'version':index['candidate'],'manifest':json.loads((directory/'manifest.json').read_text()),'manifestSha256':digest(directory/'manifest.json')})
+            raise
+        bind_channel_target(index,target)
+        return target
+    if args.version.startswith('run-') and args.bundle_dir is None and explicit is None and current and current['kind']=='candidate':
+        args=SimpleNamespace(**{**vars(args),'dev_release_base_url':CANDIDATE_RELEASE_BASE})
+    return load_target(host,args,directory)
+
+
+def select_for_check(host,selector,version,directory,dev_release_base_url=None):
+    try:
+        target=selector(host,SimpleNamespace(version=version,bundle_dir=None,dev_release_base_url=dev_release_base_url),directory)
+        if version!='latest' and target['version']!=version:
+            raise InstallError('Release selection identity changed')
+        return target
+    except ReaderUpdateRequired as error:
+        # A refusal grants no install permission. Retain only the unreadable metadata identity for display.
+        manifest=json.loads((directory/'manifest.json').read_text())
+        selected=error.selected_version or 'v'+manifest['targetVersion']
+        if not (STABLE.fullmatch(selected) or selected.startswith('run-') and CANDIDATE.fullmatch(selected)) or (version!='latest' and selected!=version):
+            raise InstallError('Release version listing identity changed')
+        return {'version':selected,'channel':release_channel(selected),'manifest':manifest,'manifestSha256':digest(directory/'manifest.json')}
+
+
+def check_failure_diagnostic(host,reason,code):
+    try:
+        report=Progress(host.root,output='json')
+        report.renderer.paused=True
+        report.phase='Update check'
+        report.phase_code='unknown'
+        report.emit('failed',reason,errorCode=code)
+        return update_diagnostic_path(report.log.name) if report.log else None
+    except OSError:
+        return None
+
+
+def check_releases(host,port,selector=selected_target,version_lister=release_versions,requested_version='latest',dev_release_base_url=None,*,schema_reader=None):
+    checked=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
+    result={'checkedAt':checked}
+    try:
+        with tempfile.TemporaryDirectory(prefix='dsh-phalanx-check-') as directory:
+            target=select_for_check(host,selector,requested_version,Path(directory),dev_release_base_url)
+        if not (STABLE.fullmatch(target['version']) or target['version'].startswith('run-') and CANDIDATE.fullmatch(target['version'])):
+            raise InstallError('Only a verified channel release can be selected')
+        notes=release_notes(host,target['version'])
+        result.update(version=target['version'],targetVersion=target['manifest']['targetVersion'],manifestSha256=target['manifestSha256'],releaseNotes=notes)
+        try:
+            port.check_fresh_install(target)
+            source=port.source()
+        except ReaderUpdateRequired:
+            source=port.source()
+        except FreshInstallRequired:
+            # The verified legacy receipt authorizes refusal only, without importing a missing manifest.
+            source={'manifest':{'targetVersion':installed_state(host)['version'][1:]}}
+        schemas=None
+        versions=[]
+        for version in version_lister(host,source['manifest']['targetVersion'],target['version'],target['manifest']['targetVersion']):
+            with tempfile.TemporaryDirectory(prefix='dsh-phalanx-check-') as directory:
+                selected=target if version==target['version'] else select_for_check(host,selector,version,Path(directory))
+            if selected['version']!=version:
+                raise InstallError('Release version listing identity changed')
+            row={'version':version,'targetVersion':selected['manifest']['targetVersion'],'manifestSha256':selected['manifestSha256']}
+            try:
+                route=upgrade_outcome(source['manifest'],selected['manifest'],None,inspect_schema=False,source_channel=source.get('channel'),target_channel=selected.get('channel',release_channel(selected['version'])))
+                if route['outcomeCode'] in ('update.available','update.channel-switch'):
+                    if schemas is None:
+                        schemas=(schema_reader or port.schema)(source)
+                    route=port.compatibility_outcome(source,selected,schemas)
+                row.update(route,status='available' if route['outcomeCode'] in ('update.available','update.channel-switch') else 'current' if route['outcomeCode']=='update.current' else 'incompatible')
+                if route['outcomeCode']=='update.reader-update-required':
+                    row['reason']='This release requires updater '+route['requiredVersion']+' or newer; update the small executor with the target installer first'
+                if route['outcomeCode']=='update.below-floor':
+                    row.update(freshInstallRequired=True,reason='This version requires a fresh installation; upgrade floor is '+route['requiredVersion'])
+            except InstallError as error:
+                row.update(status='incompatible',outcomeCode='compatibility.unsupported',errorCode=update_error_code(error),reason=host.progress.safe(str(error)))
+            versions.append(row)
+        result.update(next(row for row in versions if row['version']==target['version']),versions=versions)
+        # Reserve room for bounded operation/events in the 128 KiB control response.
+        if len(json.dumps(result,ensure_ascii=False).encode())>48*1024:
+            raise InstallError('Release version list exceeds the control response bound')
+    except ReaderUpdateRequired as error:
+        result.update(status='failed',outcomeCode='update.reader-update-required',requiredVersion=error.required_version,reason=host.progress.safe(str(error)))
+    except Exception as error:
+        code=update_error_code(error)
+        reason=host.progress.safe(str(error))
+        result={'checkedAt':checked,'status':'failed','errorCode':code,'reason':reason}
+    code=result.get('errorCode')
+    if code and (code=='unknown' or code not in SYSTEM_UPDATE_CODES['errors']):
+        diagnostic=check_failure_diagnostic(host,result['reason'],code)
+        if diagnostic:
+            result['diagnosticLog']=diagnostic
+    return result
+
+
+def public_cleanup(value):
+    # Detailed receipts remain in the root journal. Keep status/retry usable even
+    # after years of retained backups or unknown resources.
+    result={key:value[key] for key in ('status','reclaimedBytes')}
+    if 'failure' in value:
+        result['failure']=value['failure'][:1024]
+    if 'errorCode' in value:
+        result['errorCode']=value['errorCode']
+    items=[]
+    size=0
+    rows=value.get('items',[])
+    for row in rows:
+        item={key:str(row.get(key,''))[:512] for key in ('kind','name','status','reason')}
+        item['reclaimedBytes']=row.get('reclaimedBytes',0)
+        length=len(json.dumps(item).encode())
+        if size+length>24*1024 or len(items)>=100:
+            break
+        items.append(item)
+        size+=length
+    return {**result,'items':items,'omittedItems':len(rows)-len(items)}
+
+
+def public_operation(job,point=None):
+    if job is None:
+        return None
+    timing=update_timing(job,point)
+    diagnostic=update_diagnostic_path(job.get('diagnostic'))
+    return {'id':job['id'],'phase':job['phase'],'phaseCode':update_phase_code(job['phase']),'targetVersion':job['target']['manifest']['targetVersion'],
+            'sourceVersion':job['source']['manifest']['targetVersion'],
+            'targetCommit':job['target']['manifest']['commit'],
+            'platformSha256':job['target']['manifest']['files'][asset_names(job['target']['manifest'])[0]],
+            'imageDigest':job['target']['manifest']['image']['digest'],
+            **({'diagnosticLog':diagnostic} if diagnostic else {}),
+            **({'timing':timing} if timing is not None else {}),
+            **({'previousDowntimeSeconds':job['previousDowntimeSeconds']} if 'previousDowntimeSeconds' in job else {}),
+            **({'cleanup':public_cleanup(job['cleanup'])} if 'cleanup' in job else {}),
+            **{key:job[key] for key in ('failure','failurePhase','errorCode','recoveryFailure','recoveryErrorCode','stopFailure','stopErrorCode','instruction','space') if key in job}}
+
+
+def confirm_apply(host,args):
+    host.tell('Applying this update immediately restarts the service, interrupts every running task, and may lose unsaved content.')
+    if args.yes:
+        return
+    if not host.terminal_available() or host.prompt('Apply this update now? [y/N]: ').lower() not in ('y','yes'):
+        raise InstallError('Update was not applied. Rerun with --yes only after accepting the task interruption risk.')
+
+
+def upgrade_command(host,args,temporary,target=None):
+    pointer=executor_pointer(host)
+    report=host.progress
+    values=read_configuration(host)
+    report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
+    port=UpgradeHost(host,args.bundle_dir,dev_release_base_url=getattr(args,'dev_release_base_url',None))
+    core=UpgradeCore(port)
+    action=args.upgrade or 'install'
+    if action=='check':
+        result=check_releases(host,port,requested_version=args.version,dev_release_base_url=getattr(args,'dev_release_base_url',None))
+        report.upgrade_result({'check':result})
+        return 1 if result['status']=='failed' else 0
+    if action=='bootstrap':
+        target=target or selected_target(host,args,Path(temporary))
+        port.check_fresh_install(target)
+        with report.stage('Update executor bootstrap',phase_code='update.bootstrap'):
+            result=bootstrap_executor(host,port,target,Path(temporary))
+        report.upgrade_result({'status':'updater-ready','executor':result,'operation':None})
+        return 0
+    if action in ('prepare','install'):
+        target=target or selected_target(host,args,Path(temporary))
+        port.check_fresh_install(target)
+        if action=='install':
+            confirm_apply(host,args)
+        with report.stage('Upgrade preparation',phase_code='update.preparing'):
+            port.import_legacy_manifest()
+            job=core.prepare(target)
+        if action=='install' and job['phase']=='prepared':
+            with report.stage('Upgrade application',phase_code='update.stopping'):
+                job=core.apply(job['id'])
+    elif action=='apply':
+        if not args.operation:
+            raise InstallError('Apply requires the exact prepared --operation identity')
+        confirm_apply(host,args)
+        with report.stage('Upgrade application',phase_code='update.stopping'):
+            job=core.apply(args.operation)
+    elif action=='cleanup':
+        with report.stage('Owned resource cleanup',phase_code='update.cleanup'):
+            job=core.cleanup(args.operation)
+    elif action=='recover':
+        with report.stage('Upgrade recovery',phase_code='update.restoring'):
+            job=core.recover(args.operation)
+            if job['phase'] in ('prepared','succeeded','restored') and 'executor' in job.get('prepared',{}) and port.operation()['id']==job['id']:
+                port.verify(job,old=job['phase']!='succeeded')
+    else:
+        job=core.status(args.operation)
+    if job and job['phase'] in ('prepared','succeeded','restored') and executor_pointer(host)!=pointer:
+        activate_executor(host,restart=True)
+    result={'status':'upgrade','operation':public_operation(job),
+            'diagnosticLog':'/var/log/dsh-phalanx/'+report.log.name if report.log else None}
+    report.upgrade_result(result)
+    if action=='cleanup':
+        return 0 if job and job.get('cleanup',{}).get('status')=='succeeded' else 1
+    return 0 if job is None or job['phase'] in ('prepared','succeeded') or action=='status' else 1
+
 """Debian-family installation command. Host owns filesystem and operating-system I/O."""
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
-import platform
-import subprocess
 import sys
-import re
-import shlex
 import tempfile
 import tarfile
-import secrets
-import time
-import getpass
+import time as time
 import ipaddress
 import urllib.request
 import urllib.error
 import urllib.parse
 import fcntl
-import contextlib
-import shutil
-import socket
-import errno
-
-ACCOUNT = "dsh-phalanx"
-HOME_DIR = "/var/lib/dsh-phalanx"
-CONFIG = "/etc/dsh-phalanx/environment"
-STATE = "/etc/dsh-phalanx/install-state.json"
-CURRENT = "/opt/dsh-phalanx/current"
-UNIT = HOME_DIR+"/.config/systemd/user/dsh-phalanx.service"
 
 
 
@@ -6023,7 +7001,8 @@ def access_candidate(host, values):
 
 def options(arguments):
     class Parser(argparse.ArgumentParser):
-        def error(self, message): raise InstallError(message)
+        def error(self, message):
+            raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Debian-family Linux amd64")
     parser.add_argument("--version", default="latest")
     parser.add_argument("--language", choices=("zh-CN", "en"), default="zh-CN")
@@ -6202,8 +7181,10 @@ def main(arguments=None, host=None):
     arguments = list(arguments)
     language = 'zh-CN'
     for index, argument in enumerate(arguments):
-        if argument == '--language' and index+1 < len(arguments): language = arguments[index+1]
-        elif argument.startswith('--language='): language = argument.split('=', 1)[1]
+        if argument == '--language' and index+1 < len(arguments):
+            language = arguments[index+1]
+        elif argument.startswith('--language='):
+            language = argument.split('=', 1)[1]
     explicit_language = any(argument == '--language' or argument.startswith('--language=') for argument in arguments)
     if not explicit_language and '--non-interactive' not in arguments and host.terminal_available():
         chooser = InstallerQuestions('zh-CN', host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS)
@@ -6212,8 +7193,10 @@ def main(arguments=None, host=None):
             language = chooser.choose('语言 / Language: zh-CN 简体中文 / en English', 'Language: zh-CN / en', ('zh-CN', 'en'), 'zh-CN')
             arguments += ['--language', language]
         except (ValueError, EOFError, KeyboardInterrupt):
-            if output == 'json': print(json.dumps({'status':'cancelled','phase':'Language'}))
-            else: print('已取消 / Cancelled')
+            if output == 'json':
+                print(json.dumps({'status':'cancelled','phase':'Language'}))
+            else:
+                print('已取消 / Cancelled')
             return 0
     try:
         report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=False, language=language)
@@ -6225,9 +7208,11 @@ def main(arguments=None, host=None):
     try:
         with report.stage('Preflight',phase_code='install.preflight'):
             args = options(arguments)
-            if args.purge and not args.uninstall:raise InstallError('--purge requires --uninstall')
+            if args.purge and not args.uninstall:
+                raise InstallError('--purge requires --uninstall')
             if args.uninstall:
-                if args.upgrade:raise InstallError('--uninstall cannot be combined with --upgrade')
+                if args.upgrade:
+                    raise InstallError('--uninstall cannot be combined with --upgrade')
                 return uninstall_command(host,args)
             host.non_interactive = args.non_interactive
             args.dialogue = InstallerQuestions(args.language, host.prompt, host.operator, DOWNLOAD_SOURCE_PRESETS, automatic_origin=args.public_origin is None)
@@ -6237,10 +7222,12 @@ def main(arguments=None, host=None):
                 args.dialogue.project_info()
             host.image_reuse_rehearsal = args.dev_image_reuse_rehearsal
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
-            if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
+            if args.dev_arm64 and not host.development_arm64:
+                raise InstallError('Development arm64 requires an aarch64 host')
             if host.system != 'Linux' or (host.machine != 'x86_64' and not host.development_arm64):
                 raise InstallError('Installation requires a Linux amd64 host')
-            if host.uid != 0: raise InstallError('Run the installer with sudo')
+            if host.uid != 0:
+                raise InstallError('Run the installer with sudo')
             host.distribution()
             host.configure_proxy()
             report.start_log()
@@ -6250,7 +7237,9 @@ def main(arguments=None, host=None):
             with report.stage('Installation lock',phase_code='install.lock'):
                 announced_wait = False
                 while True:
-                    try: fcntl.flock(file, fcntl.LOCK_EX|fcntl.LOCK_NB); break
+                    try:
+                        fcntl.flock(file, fcntl.LOCK_EX|fcntl.LOCK_NB)
+                        break
                     except BlockingIOError:
                         report.emit(message='Waiting for another installer to release the installation lock', milestone=not announced_wait)
                         announced_wait = True
@@ -6269,8 +7258,10 @@ def main(arguments=None, host=None):
                 apply_source_choice(args, source_config)
                 selection = {'preset': source_config['source'], 'overrides': source_config['overrides']}
             host.download_sources = resolve_download_sources(selection)
-            if args.upgrade:return upgrade_command(host,args,temporary)
-            if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
+            if args.upgrade:
+                return upgrade_command(host,args,temporary)
+            if host.path('/etc/dsh-phalanx/maintenance').exists():
+                raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
             with report.stage('Release selection',phase_code='install.release-selection'):
                 selected=select_release(host,args,Path(temporary))
             proposed=selected[1]
@@ -6295,13 +7286,16 @@ def main(arguments=None, host=None):
                     return upgrade_command(host,args,temporary,{'version':selected[2],'channel':release_channel(selected[2]),'manifest':proposed,'manifestSha256':digest(selected[0]/'manifest.json')})
             with report.stage('Download and verification',phase_code='install.download'):
                 directory,manifest=acquire(host,args,Path(temporary),selected=selected)
-            if manifest.get('schema')==2:values['DSH_PHALANX_MAINTENANCE_FILE']='/etc/dsh-phalanx/maintenance'
+            if manifest.get('schema')==2:
+                values['DSH_PHALANX_MAINTENANCE_FILE']='/etc/dsh-phalanx/maintenance'
             values['DSH_PHALANX_CONTAINER_IMAGE']=manifest['image']['reference']
             if state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest']:
                 with report.stage('Existing installation',phase_code='install.existing-installation'):
-                    account=host.run(['getent','passwd',ACCOUNT]).stdout.split(':'); uid,gid=int(account[2]),int(account[3])
+                    account=host.run(['getent','passwd',ACCOUNT]).stdout.split(':')
+                    uid,gid=int(account[2]),int(account[3])
                     active=host.user(uid,['systemctl','--user','is-active','--quiet','dsh-phalanx.service'],check=False).returncode==0
-                    if not active: raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
+                    if not active:
+                        raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
                     host.check_capabilities(uid)
                     previous='/'+str(host.path(CURRENT).resolve().relative_to(host.root))
                     if host.path(CURRENT+'/.artifact-sha256').read_text()!=state['platformSha256']:
@@ -6310,7 +7304,8 @@ def main(arguments=None, host=None):
                     values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
                     values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
                     host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
-                    if manifest.get('schema')==2:install_executor(host,uid,gid,host.path(previous),manifest['commit'],activate=True,repair=True)
+                    if manifest.get('schema')==2:
+                        install_executor(host,uid,gid,host.path(previous),manifest['commit'],activate=True,repair=True)
                     database_info=prepare_builtin_database(host,uid,gid,previous,values,manifest)
                     receipt=activate(host,uid,gid,previous,values,manifest,state['version'],
                                      database_changed=bool(database_info and database_info['unitChanged']), preserve_configuration=bool(retained))
@@ -6318,10 +7313,13 @@ def main(arguments=None, host=None):
                 with report.stage('Dependencies',phase_code='install.dependencies'):
                     dependencies(host)
                     host.check_capabilities()
-                if state is None and not retained: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
+                if state is None and not retained:
+                    host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
                 with report.stage('Identity and directories',phase_code='install.identity-storage'):
-                    uid,gid=identity(host); prepare_user_storage(host,uid,gid,values)
-                with report.stage('Platform verification and staging',phase_code='install.staging'): target=stage_platform(host,directory,manifest)
+                    uid,gid=identity(host)
+                    prepare_user_storage(host,uid,gid,values)
+                with report.stage('Platform verification and staging',phase_code='install.staging'):
+                    target=stage_platform(host,directory,manifest)
                 with report.stage('Runtime image',phase_code='install.runtime-image'):
                     command=supply_image(host,uid,directory,manifest,args.bundle_dir is not None)
                     values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
@@ -6329,7 +7327,8 @@ def main(arguments=None, host=None):
                 with report.stage('Platform database',phase_code='install.database'):
                     database_info=prepare_builtin_database(host,uid,gid,target,values,manifest)
                 if manifest.get('schema')==2:
-                    with report.stage('Update executor',phase_code='install.executor'):install_executor(host,uid,gid,host.path(target),manifest['commit'],activate=True)
+                    with report.stage('Update executor',phase_code='install.executor'):
+                        install_executor(host,uid,gid,host.path(target),manifest['commit'],activate=True)
                 with report.stage('Service activation',phase_code='install.activation'):
                     receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'],
                                      database_changed=bool(database_info and database_info['unitChanged']), preserve_configuration=bool(retained))
@@ -6351,6 +7350,7 @@ def main(arguments=None, host=None):
         return 1
 
 
-if __name__ == '__main__': sys.exit(main())
+if __name__ == '__main__':
+    sys.exit(main())
 
 DSH_PHALANX_INSTALLER_PYTHON

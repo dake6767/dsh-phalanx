@@ -25,7 +25,7 @@ Detailed per-subsystem invariants live under `docs/architecture/` so this core d
 | [Official DSH seam ownership](architecture/dsh-seams.md) | Frozen DSH seam table, profile writer locks, native preset/plugin policy and authenticated install proofs |
 | [Persistence views and store ownership](architecture/persistence-views.md) | Registered synchronous in-process views, invalidation fences, master-key bootstrap and PostgreSQL store owners |
 | [Runtime guarantees and boundaries](architecture/runtime-boundaries.md) | Process/container host, MCP services, plugin library/access, member spaces, skills, execution, service preview and paused expert interfaces |
-| [System update transaction and host admission](architecture/system-update.md) | Release manifests, capacity-aware cleanup, backups and PostgreSQL recovery, nftables fence, host admission and root executor |
+| [System update transaction and host admission](architecture/system-update.md) | Release manifests, capacity-aware cleanup, backups and PostgreSQL recovery, nftables fence, host admission, root executor and Python installer architecture |
 
 ## Official DSH seam ownership
 
@@ -75,15 +75,15 @@ DSH remains an external frozen dependency. Upgrade seam owners under `src/dsh/` 
     Review waits, retries and sleeps. Repeat new timing-sensitive tests under
     local CPU throttling before committing, then restore normal conditions.
 
-The source limit is 500 nonblank, noncomment lines per file. The admin UI
+The source limit is 500 nonblank, noncomment lines per file (including Python modules under `scripts/install/`, `scripts/download-sources.py` and `scripts/dev/`). The admin UI
 limit is 600; the test limit is 800. Comments and blank lines do not count.
 These are growth alarms, not proof that responsibilities are well separated.
-Prettier at width 160 (`pnpm lint` checks it) keeps the count honest: one
-statement per line, no dense one-line blocks. HTML templates and data fixtures
+Prettier at width 160 and the zero-dependency Python style gate (`pnpm lint` checks both) keep the count honest: one
+statement per line, no semicolons or dense one-line compound blocks. HTML templates and data fixtures
 can have a permanent exemption when a comment explains their data nature.
 Source modules have no permanent exemption. The only other entry point is the
 ratcheted ledger in `architecture-exemptions.json` (`fileSize`): files that
-formatting revealed above their limit, each with a ceiling and the ticket that
+formatting revealed above their limit (limited on the Python side to legacy executor modules listed in `scripts/install/executor-files.json`), each with a ceiling and the ticket that
 splits it. A ceiling only goes down, the ledger never gains a file, and an entry
 must be removed once its file fits the normal limit.
 
@@ -145,10 +145,17 @@ Synchronous in-process views are permitted only where a caller cannot await and 
 
 `architecture-exemptions.json` holds only the ratcheted size ledger above; no
 other rule can be exempted. Architecture rules apply to TypeScript in `src/`,
-`admin-ui/src/` and `tests/`. The repository lint command runs ESLint and
-Prettier, then checks architecture assets such as CSS. General ESLint
-configuration also covers executable fixtures, container tooling and scripts.
-Architecture rule samples run in `tests/dependency-gate.spec.ts`. Keep quick
+`admin-ui/src/` and `tests/`, and to Python in `scripts/install/`,
+`scripts/download-sources.py`, `scripts/dev/` and `tests/fixtures/`. The
+repository `pnpm lint` command runs ESLint and Prettier, checks architecture
+assets such as CSS and size-exemption paths (`scripts/check-architecture-assets.mjs`),
+runs the zero-dependency Python architecture gate (`scripts/check-python-architecture.py`),
+and verifies the generated standalone installer (`node scripts/install/build-installer.mjs --check`).
+General ESLint configuration also covers executable fixtures, container tooling
+and scripts. Architecture rule samples run in `tests/dependency-gate.spec.ts`
+and `tests/python-architecture.spec.ts`. See [Python installer architecture](architecture/system-update.md#python-installer-architecture)
+for the four-layer Python dependency table, standalone fence invariant,
+`install.sh` concatenation checks and executor inventory contract. Keep quick
 test coverage next to each use case and review changes to the gates independently.
 
 ## Signed catalogs

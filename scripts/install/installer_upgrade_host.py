@@ -15,10 +15,10 @@ import shutil
 from types import SimpleNamespace
 from installer_progress import previous_downtime  # embedded-progress
 from installer_host import InstallError, entry_url,install_failure  # embedded-host
-from installer_config import effective_user_data_root, platform_facts, executor_facts, read_configuration, installed_state, validate_storage, environment_text  # embedded-config
+from installer_config import CONFIG, CURRENT, STATE, UNIT, effective_user_data_root, platform_facts, executor_facts, read_configuration, installed_state, validate_storage, environment_text  # embedded-config
 from installer_release import release_channel, installed_channel, asset_names, acquire, digest, supply_image, stage_platform, verify_image, select_release  # embedded-release
-from installer_compatibility import compatible, upgrade_outcome, plugin_readiness_budget, require_upgrade_source, validate_contract, version_parts, STABLE, CANDIDATE, supports_capacity  # embedded-compatibility
-from installer_upgrade_gate import LinuxAdmissionGate, MaintenanceUnit, ListenerPinUnit, maintenance_token, process_started, maintenance_pages, protected_json, MARK, protected_ports  # embedded-upgrade-gate
+from installer_compatibility import compatible, upgrade_outcome, plugin_readiness_budget, require_upgrade_source, validate_contract, version_parts, STABLE, CANDIDATE, supports_capacity, operation_id  # embedded-compatibility
+from installer_upgrade_gate import LinuxAdmissionGate, MaintenanceUnit, ListenerPinUnit, maintenance_token, process_started, maintenance_pages, protected_json, MARK, MARKER, protected_ports  # embedded-upgrade-gate
 from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT,GLOBAL_CLI  # embedded-executor-install
 from installer_upgrade_backup import PlatformBackup, UpgradeDatabaseBackup, rebuildable_paths, sync_directory  # embedded-upgrade-backup
 from installer_storage import UpgradeStorage  # embedded-storage
@@ -26,32 +26,34 @@ from installer_operations import read_owned  # embedded-operations
 from installer_cleanup import UpgradeCleanup  # embedded-cleanup
 
 UPGRADE_ROOT='/var/lib/dsh-phalanx-updater'
-MAINTENANCE='/etc/dsh-phalanx/maintenance'
-CONFIG='/etc/dsh-phalanx/environment'
-STATE='/etc/dsh-phalanx/install-state.json'
+MAINTENANCE=MARKER
 MANIFEST='/etc/dsh-phalanx/installed-manifest.json'
-CURRENT='/opt/dsh-phalanx/current'
-UNIT='/var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service'
 
 
 def read_upgrade_operation(host,operation=None):
     pointer=host.path(UPGRADE_ROOT)/'current'
     if operation is None:
-        if not pointer.exists():return None
+        if not pointer.exists():
+            return None
         operation=pointer.read_text().strip()
     path=host.path(UPGRADE_ROOT)/operation_id(operation)/'operation.json'
-    if path.is_symlink():raise InstallError('Upgrade journal cannot be a symbolic link')
-    if not path.exists():return None
+    if path.is_symlink():
+        raise InstallError('Upgrade journal cannot be a symbolic link')
+    if not path.exists():
+        return None
     # This root-written journal includes backup inventories that grow with the deployment.
     value=json.loads(read_owned(path,os.geteuid(),max_bytes=None))
-    if not isinstance(value,dict) or value.get('id')!=operation or not isinstance(value.get('phase'),str):raise InstallError('Invalid protected upgrade operation')
+    if not isinstance(value,dict) or value.get('id')!=operation or not isinstance(value.get('phase'),str):
+        raise InstallError('Invalid protected upgrade operation')
     return value
 
 
 def installed_source(host,manifest=None):
     state=installed_state(host)
-    if state is None:raise InstallError('A successful managed installation is required',code='release.identity-mismatch')
-    if manifest is None:manifest=json.loads(host.path(MANIFEST).read_text())
+    if state is None:
+        raise InstallError('A successful managed installation is required',code='release.identity-mismatch')
+    if manifest is None:
+        manifest=json.loads(host.path(MANIFEST).read_text())
     if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][asset_names(manifest)[0]]:
         raise InstallError('Installed release manifest and receipt disagree',code='release.identity-mismatch')
     values=read_configuration(host)
@@ -59,7 +61,8 @@ def installed_source(host,manifest=None):
     if len(account)!=7 or account[5]!='/var/lib/dsh-phalanx' or account[6]!='/usr/sbin/nologin' or int(account[2])==0:
         raise InstallError('Managed service identity is incompatible',code='release.identity-mismatch')
     current=host.path(CURRENT)
-    if not current.is_symlink():raise InstallError('Current release must be a managed symbolic link',code='release.identity-mismatch')
+    if not current.is_symlink():
+        raise InstallError('Current release must be a managed symbolic link',code='release.identity-mismatch')
     target=current.resolve()
     if target.parent!=host.path('/opt/dsh-phalanx/releases') or (target/'.artifact-sha256').read_text()!=state['platformSha256']:
         raise InstallError('Running release path or artifact identity is inconsistent',code='release.identity-mismatch')
@@ -68,8 +71,10 @@ def installed_source(host,manifest=None):
 
 def plugin_startup_timeout(host,values,manifest):
     target=manifest['targetVersion']+'/'+manifest['dshRevision']
-    try:library=platform_facts(host,values,'plugin-budget-rows')
-    except ValueError as error:raise InstallError('Invalid plugin library for startup budget') from error
+    try:
+        library=platform_facts(host,values,'plugin-budget-rows')
+    except ValueError as error:
+        raise InstallError('Invalid plugin library for startup budget') from error
     return 90 if library is None else plugin_readiness_budget(library,target)
 
 
@@ -77,48 +82,54 @@ def source_schema_names(source):
     return [row['name'] for row in source['manifest']['compatibility']['schemas']] if version_parts(source['manifest']['targetVersion'])>=(0,1,27) else ['dsh_phalanx']
 
 
-def operation_id(value):
-    if not isinstance(value,str) or str(uuid.UUID(value))!=value:raise InstallError('Invalid upgrade operation identity',code='operation.invalid')
-    return value
-
-
-
-
 class UpgradeHost:
     def __init__(self,host,bundle=None,*,dev_release_base_url=None):
-        self.host=host; self.bundle=bundle; self.dev_release_base_url=dev_release_base_url
+        self.host=host
+        self.bundle=bundle
+        self.dev_release_base_url=dev_release_base_url
         self.development_rebuild=bool(getattr(host,'development_arm64',False) and bundle is not None)
         self.root=host.mkdir(UPGRADE_ROOT,0o700)
         self.admission=LinuxAdmissionGate()
 
-    def time_point(self):return self.host.time_point()
+    def time_point(self):
+        return self.host.time_point()
 
-    def safe(self,message):return self.host.progress.safe(message) if self.host.progress else 'Upgrade failed; inspect restricted diagnostics'
+    def safe(self,message):
+        return self.host.progress.safe(message) if self.host.progress else 'Upgrade failed; inspect restricted diagnostics'
 
-    def path(self,job):return self.root/operation_id(job['id'])
+    def path(self,job):
+        return self.root/operation_id(job['id'])
 
     def operation(self,operation=None):
         return read_upgrade_operation(self.host,operation)
 
     def save(self,job):
-        directory=self.path(job); directory.mkdir(mode=0o700,exist_ok=True)
+        directory=self.path(job)
+        directory.mkdir(mode=0o700,exist_ok=True)
         self.host.atomic(str(directory.relative_to(self.host.root))+'/operation.json',json.dumps(job)+'\n')
         sync_directory(directory)
-        self.host.atomic(UPGRADE_ROOT+'/current',job['id']+'\n'); sync_directory(self.root)
+        self.host.atomic(UPGRADE_ROOT+'/current',job['id']+'\n')
+        sync_directory(self.root)
         if self.host.progress:
-            cleanup=job.get('cleanup',{});phase='update.cleanup' if cleanup.get('status') in ('running','failed') else job.get('phaseCode','unknown')
+            cleanup=job.get('cleanup',{})
+            phase='update.cleanup' if cleanup.get('status') in ('running','failed') else job.get('phaseCode','unknown')
             error=cleanup.get('errorCode') if phase=='update.cleanup' else job.get('recoveryErrorCode') if job['phase']=='recovery-failed' else job.get('errorCode')
             self.host.tell('Upgrade '+job['id']+': '+job['phase'],phaseCode=phase,**({'errorCode':error} if error else {}))
-        else:self.host.tell('Upgrade '+job['id']+': '+job['phase'])
+        else:
+            self.host.tell('Upgrade '+job['id']+': '+job['phase'])
 
     def check_fresh_install(self,target):
         # A sound formal receipt can authorize refusal, never an upgrade.
-        manifest=target['manifest'];validate_contract(manifest)
+        manifest=target['manifest']
+        validate_contract(manifest)
         value=manifest.get('compatibility',{})
-        if value.get('freshInstallThrough') is None and value.get('upgradeFloor') is None:return
+        if value.get('freshInstallThrough') is None and value.get('upgradeFloor') is None:
+            return
         state=installed_state(self.host)
-        if not isinstance(state,dict):return
-        version=state.get('version');candidate=state.get('candidate')
+        if not isinstance(state,dict):
+            return
+        version=state.get('version')
+        candidate=state.get('candidate')
         if (not isinstance(version,str) or not STABLE.fullmatch(version) or
                 not isinstance(candidate,str) or not CANDIDATE.fullmatch(candidate) or
                 state.get('serviceUser')!='dsh-phalanx' or
@@ -129,7 +140,8 @@ class UpgradeHost:
 
     def import_legacy_manifest(self):
         path=self.host.path(MANIFEST)
-        if path.exists() or path.is_symlink():return
+        if path.exists() or path.is_symlink():
+            return
         state=installed_state(self.host)
         if state is None or state['version']!='v0.1.1':
             raise InstallError('Installed release manifest is missing; only formal 0.1.1 has a supported legacy import')
@@ -148,7 +160,8 @@ class UpgradeHost:
         return installed_source(self.host,manifest)
 
     def begin(self,target):
-        source=self.source();previous=previous_downtime(self.operation(),self.time_point())
+        source=self.source()
+        previous=previous_downtime(self.operation(),self.time_point())
         return {'id':str(uuid.uuid4()),'phase':'preparing','target':copy.deepcopy(target),'source':source,'diagnostic':self.host.progress.log.name if self.host.progress and self.host.progress.log else None,
                 **({'previousDowntimeSeconds':previous} if previous is not None else {})}
 
@@ -157,13 +170,14 @@ class UpgradeHost:
             version=version_parts(source['manifest']['targetVersion'])
             # Historical targets can still use the old pre-PostgreSQL source contract.
             if version<(0,1,26):
-                values=source['values'];config=values.get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json')
+                values=source['values']
+                config=values.get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json')
                 result=self.host.user(source['uid'],['timeout','--signal=TERM','--kill-after=5s','20s',str(Path(source['target'])/'start'),'database-wait',
                     '--config-file',str(self.host.path(config)),'--data-root',str(self.host.path(values['DSH_PHALANX_DATA_ROOT']))],check=False)
                 info=json.loads(result.stdout) if result.returncode==0 else None
-                if not isinstance(info,dict) or info.get('state')!='connected' or type(info.get('schemaVersion')) is not int or not 0<=info['schemaVersion']<=2**53-1:raise ValueError('Invalid database status')
+                if not isinstance(info,dict) or info.get('state')!='connected' or type(info.get('schemaVersion')) is not int or not 0<=info['schemaVersion']<=2**53-1:
+                    raise ValueError('Invalid database status')
                 return info['schemaVersion']
-            registered=version>=(0,1,27)
             names=source_schema_names(source)
             info=executor_facts(self.host,source['values'],'schemas',source=source['target'],schemas=names)
             return self.schema_result(source,info)
@@ -174,11 +188,13 @@ class UpgradeHost:
         registered=version_parts(source['manifest']['targetVersion'])>=(0,1,27)
         names=source_schema_names(source)
         rows=info.get('schemas') if isinstance(info,dict) else None
-        if not isinstance(rows,list) or not rows or [row.get('name') for row in rows if isinstance(row,dict)]!=names:raise ValueError('Invalid registered schema status')
+        if not isinstance(rows,list) or not rows or [row.get('name') for row in rows if isinstance(row,dict)]!=names:
+            raise ValueError('Invalid registered schema status')
         versions={}
         for row in rows:
             if (not isinstance(row,dict) or not isinstance(row.get('name'),str) or not re.fullmatch('[a-z_][a-z0-9_]{0,62}',row['name']) or
-                    row['name'] in versions or type(row.get('version')) is not int or not 0<=row['version']<=2**53-1):raise ValueError('Invalid registered schema status')
+                    row['name'] in versions or type(row.get('version')) is not int or not 0<=row['version']<=2**53-1):
+                raise ValueError('Invalid registered schema status')
             versions[row['name']]=row['version']
         # The predecessor predates the registry and has exactly the platform core.
         return versions if registered else versions['dsh_phalanx']
@@ -188,18 +204,23 @@ class UpgradeHost:
         return executor_facts(self.host,source['values'],'check',source=source['target'],schemas=names)
 
     def sampled_schema(self,source,sampled,facts):
-        try:current=self.source()
+        try:
+            current=self.source()
         except (InstallError,OSError,ValueError,KeyError,TypeError):
             raise InstallError('The installed source changed; check releases again') from None
-        if current!=source:raise InstallError('The installed source changed; check releases again')
+        if current!=source:
+            raise InstallError('The installed source changed; check releases again')
         try:
             identity=facts.get('identity') if isinstance(facts,dict) else None
             config=self.host.path(source['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json'))
             valid=(source==sampled and isinstance(identity,list) and len(identity)==2 and isinstance(identity[0],dict) and identity[0].get('path')==str(config) and
                    all(isinstance(row,dict) and self.host.file_identity(row['path'])==row for row in identity))
-        except (OSError,ValueError,KeyError,TypeError,InstallError):valid=False
-        if not valid:return self.schema(source)
-        try:return self.schema_result(source,{'schemas':facts.get('schemas')})
+        except (OSError,ValueError,KeyError,TypeError,InstallError):
+            valid=False
+        if not valid:
+            return self.schema(source)
+        try:
+            return self.schema_result(source,{'schemas':facts.get('schemas')})
         except (ValueError,KeyError,TypeError):
             raise InstallError('Platform database status is unavailable. Check the selected database connection and master-key file before retrying the update.',code='database.unavailable') from None
 
@@ -212,43 +233,54 @@ class UpgradeHost:
 
     def compatibility_outcome(self,source,target,schemas=None):
         route=upgrade_outcome(source['manifest'],target['manifest'],None,inspect_schema=False,source_channel=source.get('channel'),target_channel=target.get('channel',release_channel(target['version'])))
-        if route['outcomeCode'] not in ('update.available','update.channel-switch'):return route
+        if route['outcomeCode'] not in ('update.available','update.channel-switch'):
+            return route
         return upgrade_outcome(source['manifest'],target['manifest'],self.schema(source) if schemas is None else schemas,source_channel=source.get('channel'),target_channel=target.get('channel',release_channel(target['version'])))
 
     def preflight(self,job):
         source=self.source()
-        if source!=job['source']:raise InstallError('Installed source changed after this target was selected; download again')
+        if source!=job['source']:
+            raise InstallError('Installed source changed after this target was selected; download again')
         self.check_compatibility(source,job['target'])
         self.host.distribution()
         self.host.dependencies()
         self.host.check_capabilities(source['uid'])
         validate_storage(self.host,source['values'])
-        if self.host.path(MAINTENANCE).exists():raise InstallError('Maintenance is already closed; recover the previous operation first')
-        values=source['values']; data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
+        if self.host.path(MAINTENANCE).exists():
+            raise InstallError('Maintenance is already closed; recover the previous operation first')
+        values=source['values']
+        data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
         users=self.host.path(effective_user_data_root(values) if version_parts(source['manifest']['targetVersion']) >= version_parts('0.1.26') else values.get('DSH_PHALANX_USER_DATA_ROOT',values['DSH_PHALANX_DATA_ROOT']+'/users'))
-        if data.is_symlink() or not data.is_dir():raise InstallError('Invalid platform data root')
-        if users.is_relative_to(data) and users!=data/'users':raise InstallError('Upgrade supports only reserved users or a separate user data root')
+        if data.is_symlink() or not data.is_dir():
+            raise InstallError('Invalid platform data root')
+        if users.is_relative_to(data) and users!=data/'users':
+            raise InstallError('Upgrade supports only reserved users or a separate user data root')
         self.verify_source(source)
         self.data_layout(job)
         UpgradeDatabaseBackup(self,job).inspect()
         if supports_capacity(job['target']['manifest']):
             if job['phase']=='preparing' and not job.get('cleanupBeforeDownload'):
-                self.cleanup(job);job['cleanupBeforeDownload']=True;self.save(job)
+                self.cleanup(job)
+                job['cleanupBeforeDownload']=True
+                self.save(job)
             UpgradeStorage(self.host).check(job,self.path(job),self.bundle,carriers=self.carriers(job).values())
             self.save(job)
         UpgradeDatabaseBackup(self,job).prepare()
         if 'prepared' in job:
             self.admission.preflight(self.ports(source))
-            prepared=job['prepared']; target=Path(prepared['target'])
+            prepared=job['prepared']
+            target=Path(prepared['target'])
             if (target/'.artifact-sha256').read_text()!=job['target']['manifest']['files'][asset_names(job['target']['manifest'])[0]]:
                 raise InstallError('Prepared platform identity changed')
             supply_image(self.host,source['uid'],self.path(job),job['target']['manifest'],False)
 
     def cleanup(self,job):
-        source=self.source();self.verify_source(source)
+        source=self.source()
+        self.verify_source(source)
         return UpgradeCleanup(self.host,self.root).run(source,job,lambda:self.save(job))
 
-    def ports(self,source):return protected_ports(source['values'])
+    def ports(self,source):
+        return protected_ports(source['values'])
 
     def prepare(self,job):
         self.admission.preflight(self.ports(job['source']))
@@ -268,14 +300,17 @@ class UpgradeHost:
         return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256'],'executor':executor_package(self.host.path(target)/'updater',manifest['commit']),'currentExecutor':engine,'managementCli':(self.host.path(target)/'updater/installer_deployment_cli.py').is_file()}
 
     @install_failure('admission.failed')
-    def close_admission(self,source):self.admission.close(self.ports(source))
+    def close_admission(self,source):
+        self.admission.close(self.ports(source))
 
     @install_failure('admission.failed')
     def gate(self,closed):
         if closed:
-            job=self.operation(); ports=self.ports(job['source'])
+            job=self.operation()
+            ports=self.ports(job['source'])
             self.host.atomic(MAINTENANCE,json.dumps({'schema':1,'ports':ports})+'\n',0o644)
-            try:self.close_admission(job['source'])
+            try:
+                self.close_admission(job['source'])
             except Exception:
                 # A legacy binary has no application marker support. Stop its
                 # exact managed service if the independent fence is unavailable.
@@ -284,7 +319,8 @@ class UpgradeHost:
         else:
             job=self.operation()
             if job is not None and any(key in job for key in ('maintenancePage','maintenanceListener')):
-                self.close_admission(job['source']);self.stop_maintenance(job)
+                self.close_admission(job['source'])
+                self.stop_maintenance(job)
             self.admission.open()
             self.host.path(MAINTENANCE).unlink(missing_ok=True)
         sync_directory(self.host.path('/etc/dsh-phalanx'))
@@ -293,15 +329,19 @@ class UpgradeHost:
         changed=False
         for kind,key in ((ListenerPinUnit,'maintenanceListener'),(MaintenanceUnit,'maintenancePage')):
             kind(self.host,job).stop()
-            if key in job:job.pop(key);changed=True
-        if changed:self.save(job)
+            if key in job:
+                job.pop(key)
+                changed=True
+        if changed:
+            self.save(job)
 
     @install_failure('service.stop-failed')
     def stop(self,job):
         page=MaintenanceUnit(self.host,job) if 'action' not in job else None
         try:
             self.close_admission(job['source'])
-            if page is not None:self.stop_maintenance(job)
+            if page is not None:
+                self.stop_maintenance(job)
         except Exception:
             # A failed fence must still stop a legacy platform without marker support.
             self.host.user(job['source']['uid'],['systemctl','--user','stop','dsh-phalanx.service'])
@@ -317,20 +357,23 @@ class UpgradeHost:
                         not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity)):
                     raise InstallError('Database archive tool ownership is inconsistent')
                 self.host.run(['podman','rm','--force','--ignore','--time','0',identity])
-            if json.loads(self.host.run(command).stdout):raise InstallError('Transaction database archive tools remain; recovery refused')
+            if json.loads(self.host.run(command).stdout):
+                raise InstallError('Transaction database archive tools remain; recovery refused')
             directory=self.path(job)/'backup'/'database'
             if directory.exists():
                 if directory.is_symlink() or not directory.is_dir() or directory.stat().st_uid!=os.geteuid() or directory.stat().st_mode&0o777!=0o700:
                     raise InstallError('Invalid protected database archive directory')
                 for path in directory.iterdir():
-                    if not re.fullmatch(r'\.database-tool-[a-f0-9-]{36}',path.name):continue
+                    if not re.fullmatch(r'\.database-tool-[a-f0-9-]{36}',path.name):
+                        continue
                     if path.is_symlink() or not path.is_dir() or path.stat().st_uid!=os.geteuid() or path.stat().st_mode&0o777!=0o700:
                         raise InstallError('Invalid private PostgreSQL tool directory')
                     for child in path.iterdir():
                         if child.name not in ('pgpass','ca.pem','before.sql','after.sql','restore.sh','restore.sql','restore.list') or child.is_symlink() or not child.is_file() or child.stat().st_uid!=os.geteuid():
                             raise InstallError('Unexpected file in private PostgreSQL tool directory')
                     shutil.rmtree(path)
-        source=job['source']; uid=source['uid']
+        source=job['source']
+        uid=source['uid']
         handed_off=False
         profile_handoff=source.get('manifest',{}).get('targetVersion')=='0.1.37'
         if profile_handoff and job.get('phase')=='stopping' and job.get('prepared'):
@@ -342,8 +385,10 @@ class UpgradeHost:
                 result=self.host.user(uid,[str(target/'node/bin/node'),str(handoff),values['DSH_PHALANX_DATA_ROOT'],config,
                     values.get('DSH_PHALANX_USER_DATA_ROOT',''),values.get('DSH_PHALANX_USER_DATA_MOUNT','')],check=False)
                 handed_off=result.returncode==0
-                if not handed_off:self.host.tell('Legacy member profile lock handoff unavailable; keeping unverified locks')
-        if not handed_off:self.host.user(uid,['systemctl','--user','stop','dsh-phalanx.service'])
+                if not handed_off:
+                    self.host.tell('Legacy member profile lock handoff unavailable; keeping unverified locks')
+        if not handed_off:
+            self.host.user(uid,['systemctl','--user','stop','dsh-phalanx.service'])
         ownership=hashlib.sha256(str(Path(source['values']['DSH_PHALANX_DATA_ROOT']).resolve()).encode()).hexdigest()
         filters=['--filter','label=dsh-phalanx.community=1','--filter','label=dsh-phalanx.community-root='+ownership]
         command=['podman','ps','--all','--no-trunc',*filters,'--format','json']
@@ -353,20 +398,26 @@ class UpgradeHost:
             if labels.get('dsh-phalanx.community')!='1' or labels.get('dsh-phalanx.community-root')!=ownership:
                 raise InstallError('Owned container listing has inconsistent labels')
             identity=row.get('Id',row.get('ID'))
-            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):raise InstallError('Invalid owned container identity')
+            if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{12,64}',identity):
+                raise InstallError('Invalid owned container identity')
             if profile_handoff:
-                if len(identity)!=64:raise InstallError('Invalid full member container identity')
+                if len(identity)!=64:
+                    raise InstallError('Invalid full member container identity')
                 self.host.user(uid,['podman','stop','--time','10','--ignore',identity])
                 self.host.user(uid,['podman','rm','--ignore',identity])
-            else:self.host.user(uid,['podman','rm','--force','--ignore','--time','0',identity])
-        if json.loads(self.host.user(uid,command).stdout):raise InstallError('Owned user instances remain; backup and switch refused')
+            else:
+                self.host.user(uid,['podman','rm','--force','--ignore','--time','0',identity])
+        if json.loads(self.host.user(uid,command).stdout):
+            raise InstallError('Owned user instances remain; backup and switch refused')
         if page is not None:
             intent=page.intent()
             if job.get('maintenancePage') is not None and job['maintenancePage']!=intent:
                 raise InstallError('Installed maintenance page identity changed during the operation')
             if intent is not None:
-                job['maintenancePage']=intent;self.save(job)
-                group=page.start();self.admission.show_page(self.ports(source),group,intent['token'])
+                job['maintenancePage']=intent
+                self.save(job)
+                group=page.start()
+                self.admission.show_page(self.ports(source),group,intent['token'])
 
     def carriers(self,job):
         result={'configuration':self.host.path(CONFIG),'receipt':self.host.path(STATE),'manifest':self.host.path(MANIFEST),'unit':self.host.path(UNIT),
@@ -376,16 +427,19 @@ class UpgradeHost:
                           admissionProgram=self.host.path('/opt/dsh-phalanx/maintenance/gate.py'),
                           admissionUnit=self.host.path('/etc/systemd/system/dsh-phalanx-maintenance.service'),
                           admissionOrder=self.host.path('/etc/systemd/system/user@'+str(job['source']['uid'])+'.service.d/dsh-phalanx-maintenance.conf'))
-            if job['prepared'].get('managementCli') is True:result['globalCli']=self.host.path(GLOBAL_CLI)
+            if job['prepared'].get('managementCli') is True:
+                result['globalCli']=self.host.path(GLOBAL_CLI)
         master=job.get('database',{}).get('facts',{}).get('masterKeyPath')
         config=job['source']['values'].get('DSH_PHALANX_DATABASE_CONFIG_FILE')
         for key,path in [('databaseMaster',master),('databaseConfiguration',str(self.host.path(config)) if config else None)]:
-            if path and not Path(path).resolve().is_relative_to(result['keys'].resolve()):result[key]=Path(path).resolve()
+            if path and not Path(path).resolve().is_relative_to(result['keys'].resolve()):
+                result[key]=Path(path).resolve()
         return result
 
     def data_layout(self,job):
         if 'dataLayout' not in job:
-            source=job['source'];paths=[]
+            source=job['source']
+            paths=[]
             if version_parts(source['manifest']['targetVersion'])>=(0,1,26):
                 target=Path(source['target'])
                 program="import {pathToFileURL} from 'node:url'; const {dataRootLayout}=await import(pathToFileURL(process.argv[1]+'/dist/domain/data-root-layout.js')); console.log(JSON.stringify(dataRootLayout))"
@@ -393,9 +447,11 @@ class UpgradeHost:
                 try:
                     layout=json.loads(output.stdout)
                     for kind in ('artifacts','projections','runtime'):
-                        if not isinstance(layout.get(kind),list):raise ValueError('Missing data layout category')
+                        if not isinstance(layout.get(kind),list):
+                            raise ValueError('Missing data layout category')
                         paths.extend(layout[kind])
-                except (ValueError,AttributeError):raise InstallError('The installed platform data layout is unavailable') from None
+                except (ValueError,AttributeError):
+                    raise InstallError('The installed platform data layout is unavailable') from None
             job['dataLayout']=list(rebuildable_paths(paths))
         return rebuildable_paths(job['dataLayout'])
 
@@ -404,16 +460,22 @@ class UpgradeHost:
 
     @contextmanager
     def quiescent(self,job):
-        data=self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']); lock=data/'platform.lock'
-        if lock.is_symlink():raise InstallError('Platform writer lock cannot be a symbolic link')
+        data=self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT'])
+        lock=data/'platform.lock'
+        if lock.is_symlink():
+            raise InstallError('Platform writer lock cannot be a symbolic link')
         # The platform holds an exclusive flock on this file while it runs (adapters/platform-lock.ts).
         # Never create it: a root-owned file would stop the service account from opening its own lock.
-        try:descriptor=os.open(lock,os.O_RDONLY|os.O_NOFOLLOW)
+        try:
+            descriptor=os.open(lock,os.O_RDONLY|os.O_NOFOLLOW)
         except FileNotFoundError:
-            yield; return  # No platform has started here, so none can hold the lock.
+            yield
+            return  # No platform has started here, so none can hold the lock.
         with open(descriptor,'rb') as file:
-            try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
-            except BlockingIOError:raise InstallError('The platform still holds its writer lock; stop it before backing up') from None
+            try:
+                fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise InstallError('The platform still holds its writer lock; stop it before backing up') from None
             yield
 
     def backup(self,job):
@@ -421,8 +483,10 @@ class UpgradeHost:
             receipt=self.backup_owner(job).create()
             self.start_database(job)
             database=UpgradeDatabaseBackup(self,job).create()
-            if database is not None:receipt['database']=database
-        if 'executor' in job.get('prepared',{}):receipt['executor']=installed_executor(self.host)
+            if database is not None:
+                receipt['database']=database
+        if 'executor' in job.get('prepared',{}):
+            receipt['executor']=installed_executor(self.host)
         return receipt
 
     @install_failure('database.unavailable')
@@ -434,25 +498,34 @@ class UpgradeHost:
             self.host.user(uid,['systemctl','--user','start','dsh-phalanx-postgres.service'])
 
     def link(self,target):
-        replacement=self.host.path(CURRENT+'.next'); replacement.unlink(missing_ok=True); replacement.symlink_to(target)
-        os.replace(replacement,self.host.path(CURRENT)); sync_directory(self.host.path('/opt/dsh-phalanx'))
+        replacement=self.host.path(CURRENT+'.next')
+        replacement.unlink(missing_ok=True)
+        replacement.symlink_to(target)
+        os.replace(replacement,self.host.path(CURRENT))
+        sync_directory(self.host.path('/opt/dsh-phalanx'))
 
     @install_failure('service.start-failed')
     def start(self,job):
         self.close_admission(job['source'])
-        if 'action' not in job:self.stop_maintenance(job)
-        uid=job['source']['uid']; self.host.user(uid,['systemctl','--user','daemon-reload'])
+        if 'action' not in job:
+            self.stop_maintenance(job)
+        uid=job['source']['uid']
+        self.host.user(uid,['systemctl','--user','daemon-reload'])
         self.host.user(uid,['systemctl','--user','enable','--now','dsh-phalanx.service'])
 
     def switch(self,job):
-        values=copy.deepcopy(job['source']['values']); manifest=job['target']['manifest']; command=job['prepared']['command']
+        values=copy.deepcopy(job['source']['values'])
+        manifest=job['target']['manifest']
+        command=job['prepared']['command']
         values.update(DSH_PHALANX_CONTAINER_IMAGE=manifest['image']['reference'],DSH_PHALANX_RUNTIME_COMMAND=command[0],
                       DSH_PHALANX_RUNTIME_ARGS_JSON=json.dumps(command[1:],separators=(',',':')),
                       DSH_PHALANX_MAINTENANCE_FILE=MAINTENANCE)
         self.host.atomic(CONFIG,environment_text(values),0o640)
         self.host.run(['chown','0:'+str(job['source']['gid']),str(self.host.path(CONFIG))])
-        with self.host.path(CONFIG).open('rb') as file:os.fsync(file.fileno())
-        self.link(job['prepared']['target']); self.start(job)
+        with self.host.path(CONFIG).open('rb') as file:
+            os.fsync(file.fileno())
+        self.link(job['prepared']['target'])
+        self.start(job)
 
     def listener_identity(self,source,pid):
         target=Path(source['target'])
@@ -466,51 +539,66 @@ class UpgradeHost:
         values=read_configuration(self.host)
         if values.get('DSH_PHALANX_MAINTENANCE_FILE')!=MAINTENANCE or any(values.get(key)!=source['values'].get(key) for key in ('DSH_PHALANX_HOST','DSH_PHALANX_PORT','DSH_PHALANX_PUBLIC_ORIGIN')):
             raise InstallError('Managed maintenance configuration differs from the verified source')
-        marker=protected_json(self.host.path(MAINTENANCE));ports=self.ports(source)
-        if marker.get('schema')!=1 or marker.get('ports')!=ports:raise InstallError('Managed maintenance admission differs from the verified source')
-        uid=source['uid'];group=self.host.user(uid,['systemctl','--user','show','dsh-phalanx.service','--property=ControlGroup','--value']).stdout.strip()
+        marker=protected_json(self.host.path(MAINTENANCE))
+        ports=self.ports(source)
+        if marker.get('schema')!=1 or marker.get('ports')!=ports:
+            raise InstallError('Managed maintenance admission differs from the verified source')
+        uid=source['uid']
+        group=self.host.user(uid,['systemctl','--user','show','dsh-phalanx.service','--property=ControlGroup','--value']).stdout.strip()
         prefix='/user.slice/user-'+str(uid)+'.slice/user@'+str(uid)+'.service/'
         if not group.startswith(prefix) or not group.endswith('/dsh-phalanx.service') or '0::'+group not in self.host.path('/proc/'+str(pid)+'/cgroup').read_text().splitlines():
             raise InstallError('Managed listener cgroup differs from its service owner')
         descriptor=self.host.listener_file(pid,int(values['DSH_PHALANX_PORT']),ipaddress.ip_address(values['DSH_PHALANX_HOST']))
-        if descriptor is None:raise InstallError('The verified platform listener disappeared before pinning')
+        if descriptor is None:
+            raise InstallError('The verified platform listener disappeared before pinning')
         listener={**descriptor,'pid':pid,'started':process_started(self.host.path('/proc/'+str(pid)+'/stat')),'cgroup':group,
                   'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT']),'uid':uid,
                   'executable':str(Path(source['target'])/'node/bin/node'),'directory':source['target']}
         existing=job.get('maintenanceListener')
-        if existing is not None and existing.get('listener')!=listener:raise InstallError('The pinned platform listener changed during validation')
+        if existing is not None and existing.get('listener')!=listener:
+            raise InstallError('The pinned platform listener changed during validation')
         pin=ListenerPinUnit(self.host,job)
         if existing is None:
-            job['maintenanceListener']={'unit':pin.unit,'listener':listener,'token':maintenance_token(job,'maintenanceListener')};self.save(job)
-        pin.start();self.admission.show_page(ports,group,job['maintenanceListener']['token'])
+            job['maintenanceListener']={'unit':pin.unit,'listener':listener,'token':maintenance_token(job,'maintenanceListener')}
+            self.save(job)
+        pin.start()
+        self.admission.show_page(ports,group,job['maintenanceListener']['token'])
 
     def verify_source(self,source,ready_path='/login',*,readiness=True,maintenance_job=None):
         verify_image(self.host,source['uid'],source['manifest'])
-        values=source['values'];uid=source['uid'];port=int(values['DSH_PHALANX_PORT'])
-        closed=self.host.path(MAINTENANCE).exists();options={'socket_mark':MARK} if closed else {}
+        values=source['values']
+        uid=source['uid']
+        port=int(values['DSH_PHALANX_PORT'])
+        closed=self.host.path(MAINTENANCE).exists()
+        options={'socket_mark':MARK} if closed else {}
         if readiness and closed and maintenance_job is not None and maintenance_pages(source['target']) is not None:
             options['on_listener']=lambda pid:self.show_platform_page(source,pid,maintenance_job)
-        if readiness:self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,timeout=plugin_startup_timeout(self.host,values,source['manifest']),**options)
+        if readiness:
+            self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,timeout=plugin_startup_timeout(self.host,values,source['manifest']),**options)
         address=ipaddress.ip_address(urllib.parse.urlparse(entry_url(port,values['DSH_PHALANX_HOST'])).hostname)
         self.listener_identity(source,self.host.listener_pid(uid,port,address))
 
     def verify(self,job,old=False):
-        if old:source=job['source']
-        else:source={**job['source'],'target':job['prepared']['target'],'manifest':job['target']['manifest']}
+        if old:
+            source=job['source']
+        else:
+            source={**job['source'],'target':job['prepared']['target'],'manifest':job['target']['manifest']}
         path='/readyz' if source['manifest'].get('schema')==2 else '/login'
         self.verify_source(source,path,maintenance_job=job)
         expected=(job.get('backup',{}).get('executor') or job.get('prepared',{}).get('currentExecutor')) if old else job.get('prepared',{}).get('executor') if job.get('committed') else None
         if expected:
             ensure_executor_identity(self.host,source['uid'],source['gid'],expected,[(job['source']['target'],job['source']['manifest']['commit']),(job['prepared']['target'],job['target']['manifest']['commit'])])
         if not old:
-            recorded=self.schema(source);contract=source['manifest']['compatibility']
+            recorded=self.schema(source)
+            contract=source['manifest']['compatibility']
             if 'schemas' in contract:
                 actual=recorded if isinstance(recorded,dict) else {'dsh_phalanx':recorded}
                 expected={row['name']:row['target'] for row in contract['schemas']}
                 matches=actual==expected
             else:
                 matches=(recorded.get('dsh_phalanx') if isinstance(recorded,dict) else recorded)==contract['accounts']['target']
-            if not matches:raise InstallError('Target database schemas do not match their declared identity')
+            if not matches:
+                raise InstallError('Target database schemas do not match their declared identity')
 
     def restore(self,job):
         with self.quiescent(job):
@@ -525,12 +613,16 @@ class UpgradeHost:
 
     @install_failure('service.start-failed')
     def restart_old(self,job):
-        if self.host.path(CURRENT).resolve()!=Path(job['source']['target']):raise InstallError('No verified backup exists for the changed current release')
+        if self.host.path(CURRENT).resolve()!=Path(job['source']['target']):
+            raise InstallError('No verified backup exists for the changed current release')
         self.start(job)
 
     def commit(self,job):
-        if 'executor' in job.get('prepared',{}):install_executor(self.host,job['source']['uid'],job['source']['gid'],job['prepared']['target'],job['target']['manifest']['commit'])
-        manifest=job['target']['manifest']; receipt={**job['source']['receipt'],'version':job['target']['version'],'channel':job['target'].get('channel',release_channel(job['target']['version'])),'candidate':manifest['tag'],
+        if 'executor' in job.get('prepared',{}):
+            install_executor(self.host,job['source']['uid'],job['source']['gid'],job['prepared']['target'],job['target']['manifest']['commit'])
+        manifest=job['target']['manifest']
+        receipt={**job['source']['receipt'],'version':job['target']['version'],'channel':job['target'].get('channel',release_channel(job['target']['version'])),'candidate':manifest['tag'],
             'commit':manifest['commit'],'platformSha256':manifest['files'][asset_names(manifest)[0]],'imageDigest':manifest['image']['digest'],'changed':True}
-        self.host.atomic(STATE,json.dumps(receipt)+'\n'); self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
+        self.host.atomic(STATE,json.dumps(receipt)+'\n')
+        self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
         sync_directory(self.host.path('/etc/dsh-phalanx'))

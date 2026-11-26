@@ -1,30 +1,37 @@
 """Closed privileged control grammar; no deployment path, URL or command inputs."""
 import re
-from installer_compatibility import STABLE, CANDIDATE
-from installer_host import InstallError
-from installer_upgrade_host import operation_id
+from installer_compatibility import STABLE, CANDIDATE, InstallError, operation_id
 
 SOCKET='/run/dsh-phalanx-updater/control.sock'
 
 class ControlError(Exception):
     def __init__(self,status,message,code=None):
-        super().__init__(message);self.status=status;self.code=code or ('operation.conflict' if status==409 else 'operation.invalid' if status in (400,404) else 'unknown')
+        super().__init__(message)
+        self.status=status
+        self.code=code or ('operation.conflict' if status==409 else 'operation.invalid' if status in (400,404) else 'unknown')
 
 
 def validated_request(value):
-    if not isinstance(value,dict):raise ControlError(400,'Invalid update request')
+    if not isinstance(value,dict):
+        raise ControlError(400,'Invalid update request')
     action=value.get('action')
     fields={'database-switch':({'action','target'},set()),'master-key-reset':({'action','confirmation'},set()),'master-key-rotate':({'action'},set()),'maintenance-status':({'action'},{'operation'}),'maintenance-recover':({'action'},set()),'status':({'action'},{'operation'}),'check':({'action'},set()),
             'prepare':({'action','version','manifestSha256'},set()),
             'cleanup':({'action','operation'},set()),'apply':({'action','operation'},set()),'recover':({'action'},{'operation'})}
-    if not isinstance(action,str) or action not in fields:raise ControlError(400,'Unsupported update action')
+    if not isinstance(action,str) or action not in fields:
+        raise ControlError(400,'Unsupported update action')
     required,optional=fields[action]
-    if not required<=set(value)<=required|optional:raise ControlError(400,'Unexpected update input')
-    if action=='database-switch' and value['target'] not in ('builtin','external'):raise ControlError(400,'Select builtin or external')
-    if action=='master-key-reset' and value['confirmation']!='RESET ALL PLATFORM SECRETS':raise ControlError(400,'Reset requires the exact confirmation: RESET ALL PLATFORM SECRETS')
+    if not required<=set(value)<=required|optional:
+        raise ControlError(400,'Unexpected update input')
+    if action=='database-switch' and value['target'] not in ('builtin','external'):
+        raise ControlError(400,'Select builtin or external')
+    if action=='master-key-reset' and value['confirmation']!='RESET ALL PLATFORM SECRETS':
+        raise ControlError(400,'Reset requires the exact confirmation: RESET ALL PLATFORM SECRETS')
     if 'operation' in value:
-        try:operation_id(value['operation'])
-        except (ValueError,TypeError,InstallError,AttributeError):raise ControlError(400,'Invalid operation identity') from None
+        try:
+            operation_id(value['operation'])
+        except (ValueError,TypeError,InstallError,AttributeError):
+            raise ControlError(400,'Invalid operation identity') from None
     if action=='prepare' and (not isinstance(value['version'],str) or not (STABLE.fullmatch(value['version']) or value['version'].startswith('run-') and CANDIDATE.fullmatch(value['version'])) or
             not isinstance(value['manifestSha256'],str) or not re.fullmatch('[a-f0-9]{64}',value['manifestSha256'])):
         raise ControlError(400,'A verified release identity is required')

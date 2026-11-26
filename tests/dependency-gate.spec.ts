@@ -185,6 +185,7 @@ describe('architecture machine gates', () => {
     const limit = (file: string) => (file.startsWith('src/') ? 500 : file.startsWith('admin-ui/src/') ? 600 : 800)
     const lines = (count: number) => Array.from({ length: count }, (_, index) => `export const line${index} = ${index}`).join('\n')
     for (const [file, { maxLines }] of Object.entries(fileSize)) {
+      if (file.startsWith('scripts/')) continue
       expect(await lint(file, lines(maxLines)), file).not.toContain('dsh-phalanx/file-size')
       for (const count of [maxLines + 1, maxLines - 1, limit(file)])
         expect(await lint(file, lines(count)), `${file} ${count}`).toContain('dsh-phalanx/file-size')
@@ -207,8 +208,9 @@ describe('architecture machine gates', () => {
   })
 
   it('accepts only an existing, ticketed size-exemption ledger', () => {
-    const exists = (file: string) => file === 'src/a.ts'
+    const exists = (file: string) => file === 'src/a.ts' || file === 'scripts/install/installer_host.py'
     expect(auditSizeExemptions({ fileSize: { 'src/a.ts': { maxLines: 600, ticket: '0.1.26/04' } } }, exists)).toEqual([])
+    expect(auditSizeExemptions({ fileSize: { 'scripts/install/installer_host.py': { maxLines: 565, ticket: '0.1.44/01' } } }, exists)).toEqual([])
     expect(auditSizeExemptions({ fileSize: { 'src/b.ts': { maxLines: 600, ticket: '0.1.26/04' } } }, exists)).toEqual([expect.stringContaining('missing file')])
     expect(auditSizeExemptions({ fileSize: { 'scripts/x.mjs': { maxLines: 600, ticket: '0.1.26/04' } } }, () => true)).toEqual([
       expect.stringContaining('outside a size-checked tree'),
@@ -263,6 +265,10 @@ describe('architecture machine gates', () => {
       'src/use-cases/suite-catalog.ts': 1048,
       'tests/suite-catalog-suites.spec.ts': 854,
       'tests/support/installed-upgrade-scenario.ts': 991,
+      'scripts/install/installer_host.py': 565,
+      'scripts/install/installer_release.py': 515,
+      'scripts/install/installer_upgrade_gate.py': 544,
+      'scripts/install/installer_upgrade_host.py': 567,
     }
     const { fileSize } = JSON.parse(await readFile(`${ROOT}architecture-exemptions.json`, 'utf8')) as { fileSize: Record<string, { maxLines: number }> }
     for (const [file, { maxLines }] of Object.entries(fileSize)) expect(maxLines, file).toBeLessThanOrEqual(initial[file] ?? 0)

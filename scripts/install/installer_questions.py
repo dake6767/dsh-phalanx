@@ -1,14 +1,13 @@
 """Shared installation questions and validation; callers own terminal and host effects."""
 import ipaddress
-import json
 from urllib.parse import urlsplit
 
 PROJECT = 'https://github.com/dake6767/dsh-phalanx'
 # Existing installer option spellings; synchronized by the preview contract tests.
-from installer_config import DOWNLOAD_SOURCE_OPTIONS  # embedded-config
+from installer_compatibility import DOWNLOAD_SOURCE_OPTIONS, DOWNLOAD_SOURCE_PREFIXES  # embedded-compatibility
 
 SOURCE_OPTIONS = DOWNLOAD_SOURCE_OPTIONS
-PREFIXES = ('containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi')
+PREFIXES = DOWNLOAD_SOURCE_PREFIXES
 
 
 class Cancelled(ValueError):

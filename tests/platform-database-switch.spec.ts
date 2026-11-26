@@ -262,6 +262,9 @@ it('switches both ways without changing source facts, member sessions, tokens, i
     if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
     await exited
     await app.stop()
+    // pg-pool resolves pool.end() before idle sockets finish closing; ignore teardown 57P01 from afterAll DROP DATABASE WITH (FORCE).
+    source.on('error', () => {})
+    target.on('error', () => {})
     await source.end()
     await target.end()
     await removeCommunityFixture(root)

@@ -12,24 +12,33 @@ EXCLUDED = {'users','platform.lock'}
 
 
 def rebuildable_paths(paths):
-    if not isinstance(paths,(list,tuple)):raise InstallError('Invalid rebuildable data layout')
+    if not isinstance(paths,(list,tuple)):
+        raise InstallError('Invalid rebuildable data layout')
     for path in paths:
         if (not isinstance(path,str) or not path or PurePosixPath(path).is_absolute() or
                 str(PurePosixPath(path))!=path or any(part in ('.','..') for part in path.split('/')) or
-                path.split('/')[0] in EXCLUDED):raise InstallError('Invalid rebuildable data layout')
-    if len(set(paths))!=len(paths):raise InstallError('Duplicate rebuildable data layout entry')
+                path.split('/')[0] in EXCLUDED):
+            raise InstallError('Invalid rebuildable data layout')
+    if len(set(paths))!=len(paths):
+        raise InstallError('Duplicate rebuildable data layout entry')
     return tuple(paths)
 
 
-def excluded_path(path,roots):return any(path==root or path.startswith(root+'/') for root in roots)
+def excluded_path(path,roots):
+    return any(path==root or path.startswith(root+'/') for root in roots)
 
 
 def carrier_metadata(path):
-    info=path.lstat(); result={'mode':stat.S_IMODE(info.st_mode),'uid':info.st_uid,'gid':info.st_gid}
-    if stat.S_ISLNK(info.st_mode):result.update(type='link',link=os.readlink(path))
-    elif stat.S_ISDIR(info.st_mode):result.update(type='directory')
-    elif stat.S_ISREG(info.st_mode):result.update(type='file',size=info.st_size)
-    else:raise InstallError('Platform backup rejects special files')
+    info=path.lstat()
+    result={'mode':stat.S_IMODE(info.st_mode),'uid':info.st_uid,'gid':info.st_gid}
+    if stat.S_ISLNK(info.st_mode):
+        result.update(type='link',link=os.readlink(path))
+    elif stat.S_ISDIR(info.st_mode):
+        result.update(type='directory')
+    elif stat.S_ISREG(info.st_mode):
+        result.update(type='file',size=info.st_size)
+    else:
+        raise InstallError('Platform backup rejects special files')
     return result
 
 
@@ -38,7 +47,8 @@ def facts(path):
     if result['type']=='file':
         value=hashlib.sha256()
         with path.open('rb') as file:
-            for block in iter(lambda:file.read(1024*1024),b''):value.update(block)
+            for block in iter(lambda:file.read(1024*1024),b''):
+                value.update(block)
         result['sha256']=value.hexdigest()
     return result
 
@@ -46,42 +56,53 @@ def facts(path):
 def inventory(path,exclude=False,*,rebuildable=()):
     rows={}
     def visit(item,key):
-        value=facts(item); rows[key]=value
+        value=facts(item)
+        rows[key]=value
         if value['type']=='directory':
             for child in sorted(item.iterdir()):
                 relative=child.name if key=='.' else key+'/'+child.name
-                if exclude and excluded_path(relative,(*EXCLUDED,*rebuildable)):continue
+                if exclude and excluded_path(relative,(*EXCLUDED,*rebuildable)):
+                    continue
                 visit(child,relative)
-    if path.exists() or path.is_symlink():visit(path,'.')
+    if path.exists() or path.is_symlink():
+        visit(path,'.')
     return rows
 
 
 def sync_directory(path):
     descriptor=os.open(path,os.O_RDONLY|os.O_DIRECTORY)
-    try:os.fsync(descriptor)
-    finally:os.close(descriptor)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def copy_carrier(source,destination,*,excluded=(),merge=False):
     rows={}
     def copy(item,target,key):
         value=carrier_metadata(item)
-        if value['type']=='link':target.symlink_to(value['link'])
+        if value['type']=='link':
+            target.symlink_to(value['link'])
         elif value['type']=='directory':
             if merge and target.exists():
-                if target.is_symlink() or not target.is_dir():raise InstallError('Mutable restore directory changed type')
-            else:target.mkdir()
+                if target.is_symlink() or not target.is_dir():
+                    raise InstallError('Mutable restore directory changed type')
+            else:
+                target.mkdir()
             for child in sorted(item.iterdir()):
                 relative=child.name if key=='.' else key+'/'+child.name
-                if not excluded_path(relative,excluded):copy(child,target/child.name,relative)
+                if not excluded_path(relative,excluded):
+                    copy(child,target/child.name,relative)
         else:
             digest=hashlib.sha256()
             with item.open('rb') as original,target.open('xb') as copied:
                 for block in iter(lambda:original.read(1024*1024),b''):
-                    copied.write(block);digest.update(block)
+                    copied.write(block)
+                    digest.update(block)
             value['sha256']=digest.hexdigest()
         os.chown(target,value['uid'],value['gid'],follow_symlinks=False)
-        if value['type']!='link':target.chmod(value['mode'])
+        if value['type']!='link':
+            target.chmod(value['mode'])
         rows[key]=value
     copy(source,destination,'.')
     return rows
@@ -96,24 +117,29 @@ def carrier_bytes(path,*,excluded=(),relative='.'):
 
 
 def remove_carrier(path):
-    if path.is_symlink() or path.is_file():path.unlink()
-    elif path.exists():shutil.rmtree(path)
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
 
 
 class PlatformBackup:
     def __init__(self,data,directory,carriers,*,rebuildable=()):
-        self.data=Path(data); self.directory=Path(directory)
+        self.data=Path(data)
+        self.directory=Path(directory)
         self.carriers={key:Path(value) for key,value in carriers.items()}
         self.rebuildable=rebuildable_paths(rebuildable)
 
     def root_directory(self):
-        if self.data.is_symlink() or not self.data.is_dir():raise InstallError('Platform data root must be a real directory')
+        if self.data.is_symlink() or not self.data.is_dir():
+            raise InstallError('Platform data root must be a real directory')
 
     def real_directory(self,relative):
         path=self.data
         for part in PurePosixPath(relative).parts:
             path=path/part
-            if path.is_symlink() or not path.is_dir():return False
+            if path.is_symlink() or not path.is_dir():
+                return False
         return True
 
     def retained_directories(self):
@@ -121,11 +147,14 @@ class PlatformBackup:
         def visit(path):
             retained.add(path.relative_to(self.data).as_posix())
             for child in path.iterdir():
-                if child.is_dir() and not child.is_symlink():visit(child)
+                if child.is_dir() and not child.is_symlink():
+                    visit(child)
         for relative in self.rebuildable:
             path=self.data/relative
-            if not path.exists() and not path.is_symlink():continue
-            if not self.real_directory(relative):raise InstallError('Rebuildable data root must be a real directory: '+relative)
+            if not path.exists() and not path.is_symlink():
+                continue
+            if not self.real_directory(relative):
+                raise InstallError('Rebuildable data root must be a real directory: '+relative)
             visit(path)
         return sorted(retained)
 
@@ -141,7 +170,8 @@ class PlatformBackup:
         self.directory.mkdir(mode=0o700)
         snapshot=self.directory/'data'
         rows=copy_carrier(self.data,snapshot,excluded=excluded)
-        files=self.directory/'files'; files.mkdir(mode=0o700)
+        files=self.directory/'files'
+        files.mkdir(mode=0o700)
         saved={}
         for key,path in self.carriers.items():
             saved[key]=copy_carrier(path,files/key) if path.exists() or path.is_symlink() else {}
@@ -150,67 +180,92 @@ class PlatformBackup:
 
     @install_failure('backup.invalid')
     def verify(self,receipt):
-        if receipt.get('schema') not in (1,2) or set(receipt.get('files',{}))!=set(self.carriers):raise InstallError('Invalid backup receipt')
+        if receipt.get('schema') not in (1,2) or set(receipt.get('files',{}))!=set(self.carriers):
+            raise InstallError('Invalid backup receipt')
         if receipt['schema']==2:
             roots=rebuildable_paths(receipt.get('rebuildable'))
             retained=rebuildable_paths(receipt.get('retainedDirectories'))
-            if any(not excluded_path(path,roots) for path in retained):raise InstallError('Invalid retained rebuildable directory')
+            if any(not excluded_path(path,roots) for path in retained):
+                raise InstallError('Invalid retained rebuildable directory')
             missing=[path for path in retained if not self.real_directory(path)]
-            if missing:raise InstallError('Retained rebuildable directories are missing: '+', '.join(missing))
-        if inventory(self.directory/'data')!=receipt['data']:raise InstallError('Platform backup is damaged; recovery stopped before replacing data')
+            if missing:
+                raise InstallError('Retained rebuildable directories are missing: '+', '.join(missing))
+        if inventory(self.directory/'data')!=receipt['data']:
+            raise InstallError('Platform backup is damaged; recovery stopped before replacing data')
         for key in self.carriers:
-            if inventory(self.directory/'files'/key)!=receipt['files'][key]:raise InstallError('Protected configuration backup is damaged')
+            if inventory(self.directory/'files'/key)!=receipt['files'][key]:
+                raise InstallError('Protected configuration backup is damaged')
 
     @install_failure('recovery.failed')
     def restore(self,receipt):
-        self.verify(receipt); self.root_directory()
+        self.verify(receipt)
+        self.root_directory()
         rebuildable=tuple(receipt['rebuildable']) if receipt['schema']==2 else ()
         excluded=(*EXCLUDED,*rebuildable)
         def clear(directory,relative='.'):
             for child in sorted(directory.iterdir()):
                 key=child.name if relative=='.' else relative+'/'+child.name
-                if excluded_path(key,excluded):continue
-                if child.is_dir() and not child.is_symlink() and any(root.startswith(key+'/') for root in excluded):clear(child,key)
-                else:remove_carrier(child)
+                if excluded_path(key,excluded):
+                    continue
+                if child.is_dir() and not child.is_symlink() and any(root.startswith(key+'/') for root in excluded):
+                    clear(child,key)
+                else:
+                    remove_carrier(child)
         clear(self.data)
         copy_carrier(self.directory/'data',self.data,merge=True)
-        if inventory(self.data,exclude=True,rebuildable=rebuildable)!=receipt['data']:raise InstallError('Restored platform data verification failed')
+        if inventory(self.data,exclude=True,rebuildable=rebuildable)!=receipt['data']:
+            raise InstallError('Restored platform data verification failed')
         for key,path in self.carriers.items():
             remove_carrier(path)
-            if receipt['files'][key]:copy_carrier(self.directory/'files'/key,path)
-            if inventory(path)!=receipt['files'][key]:raise InstallError('Restored configuration verification failed')
+            if receipt['files'][key]:
+                copy_carrier(self.directory/'files'/key,path)
+            if inventory(path)!=receipt['files'][key]:
+                raise InstallError('Restored configuration verification failed')
             sync_directory(path.parent)
-        sync_directory(self.data);os.sync()
+        sync_directory(self.data)
+        os.sync()
 
 class UpgradeDatabaseBackup:
     """Schedules the platform-owned adapter with a verified source runtime; only public facts cross back."""
     def __init__(self,port,job):
-        self.port=port;self.host=port.host;self.job=job;self.source=job['source']
+        self.port=port
+        self.host=port.host
+        self.job=job
+        self.source=job['source']
 
-    def enabled(self):return version_parts(self.source['manifest']['targetVersion'])>=(0,1,26)
+    def enabled(self):
+        return version_parts(self.source['manifest']['targetVersion'])>=(0,1,26)
 
     def run(self,action,**fields):
         code={'inspect':'database.unavailable','backup':'database.export-failed','restore':'database.restore-failed','prepare-tools':'unknown'}.get(action,'operation.invalid')
-        values=self.source['values'];directory=self.port.path(self.job)
+        values=self.source['values']
+        directory=self.port.path(self.job)
         descriptor=getattr(self.host,'install_lock_fd',None)
-        if not isinstance(descriptor,int):raise InstallError('A database upgrade requires the shared installation lease')
-        program=directory/'database-adapter.mjs';request=directory/'database-request.json'
+        if not isinstance(descriptor,int):
+            raise InstallError('A database upgrade requires the shared installation lease')
+        program=directory/'database-adapter.mjs'
+        request=directory/'database-request.json'
         info={'action':action,'installLockFd':descriptor,'installLockPath':str(self.host.path('/run/lock/dsh-phalanx-install.lock')),'configFile':str(self.host.path(values.get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json'))),
               'dataRoot':str(self.host.path(values['DSH_PHALANX_DATA_ROOT'])),**fields}
         self.host.atomic(str(program.relative_to(self.host.root)),DATABASE_PROGRAM,0o600)
         self.host.atomic(str(request.relative_to(self.host.root)),json.dumps(info)+'\n',0o600)
         try:
             result=self.host.run([str(Path(self.source['target'])/'node/bin/node'),str(program),self.source['target']],input_file=request,check=False,pass_fds=(descriptor,))
-            if result.returncode!=0:raise InstallError('Platform database upgrade operation failed; keep the backup and inspect the selected connection and tool identity',code=code)
+            if result.returncode!=0:
+                raise InstallError('Platform database upgrade operation failed; keep the backup and inspect the selected connection and tool identity',code=code)
             value=json.loads(result.stdout)
-            if not isinstance(value,dict):raise ValueError('Invalid database result')
+            if not isinstance(value,dict):
+                raise ValueError('Invalid database result')
             return value
-        except (OSError,ValueError):raise InstallError('Platform database upgrade adapter did not return verified facts',code=code) from None
+        except (OSError,ValueError):
+            raise InstallError('Platform database upgrade adapter did not return verified facts',code=code) from None
         finally:
-            request.unlink(missing_ok=True);program.unlink(missing_ok=True)
+            request.unlink(missing_ok=True)
+            program.unlink(missing_ok=True)
 
     def inspect(self):
-        if not self.enabled():return
+        if not self.enabled():
+            return
         recorded=self.port.schema(self.source)
         names=list(recorded) if isinstance(recorded,dict) else ['dsh_phalanx']
         target=[row['name'] for row in self.job['target']['manifest']['compatibility'].get('schemas',[])]
@@ -222,39 +277,54 @@ class UpgradeDatabaseBackup:
             previous=self.job['database']['facts']
             if any(facts.get(key)!=previous.get(key) for key in ('configurationSha256','serverMajor','selection','schemas')):
                 raise InstallError('Database selection or registered schemas changed; prepare this update again')
-        self.job['database']={**self.job.get('database',{}),'facts':facts};self.port.save(self.job)
+        self.job['database']={**self.job.get('database',{}),'facts':facts}
+        self.port.save(self.job)
 
     def prepare(self):
-        if not self.enabled():return
-        if 'database' not in self.job:raise InstallError('Inspect database capacity before preparing archive tools')
-        if 'tool' in self.job['database']:return
+        if not self.enabled():
+            return
+        if 'database' not in self.job:
+            raise InstallError('Inspect database capacity before preparing archive tools')
+        if 'tool' in self.job['database']:
+            return
         build=json.loads((Path(self.source['target'])/'build-info.json').read_text())
         pin=build.get('versions',{}).get('postgres')
-        if not isinstance(pin,dict):raise InstallError('The installed PostgreSQL tool pin is missing')
+        if not isinstance(pin,dict):
+            raise InstallError('The installed PostgreSQL tool pin is missing')
         value=self.run('prepare-tools',facts=self.job['database']['facts'],pin=pin,mirror=getattr(self.host,'download_sources',{}).get('containerMirror',''))
-        if not isinstance(value.get('tool'),dict):raise InstallError('Pinned database archive tools are unavailable')
-        self.job['database']['tool']=value['tool'];self.port.save(self.job)
+        if not isinstance(value.get('tool'),dict):
+            raise InstallError('Pinned database archive tools are unavailable')
+        self.job['database']['tool']=value['tool']
+        self.port.save(self.job)
 
     def create(self):
-        if not self.enabled():return None
-        if 'database' not in self.job:raise InstallError('Database archive tools were not prepared before downtime')
-        directory=self.port.path(self.job)/'backup'/'database';directory.mkdir(mode=0o700)
+        if not self.enabled():
+            return None
+        if 'database' not in self.job:
+            raise InstallError('Database archive tools were not prepared before downtime')
+        directory=self.port.path(self.job)/'backup'/'database'
+        directory.mkdir(mode=0o700)
         return self.run('backup',directory=str(directory),**self.job['database'])
 
     def verify(self,receipt):
-        if not self.enabled():return
+        if not self.enabled():
+            return
         archive=self.port.path(self.job)/'backup'/'database'/'platform.pgdump'
         if (not isinstance(receipt,dict) or receipt.get('schema')!=1 or archive.is_symlink() or not archive.is_file() or
                 archive.stat().st_mode&0o777!=0o600 or archive.stat().st_uid!=os.geteuid()):
             raise InstallError('Invalid protected PostgreSQL archive',code='backup.invalid')
-        with archive.open('rb') as file:digest=hashlib.file_digest(file,'sha256').hexdigest()
-        if receipt.get('sha256')!=digest:raise InstallError('PostgreSQL archive is damaged; recovery stopped before replacing data',code='backup.invalid')
+        with archive.open('rb') as file:
+            digest=hashlib.file_digest(file,'sha256').hexdigest()
+        if receipt.get('sha256')!=digest:
+            raise InstallError('PostgreSQL archive is damaged; recovery stopped before replacing data',code='backup.invalid')
 
     def restore(self,receipt):
-        if not self.enabled():return
+        if not self.enabled():
+            return
         self.verify(receipt)
         result=self.run('restore',directory=str(self.port.path(self.job)/'backup'/'database'),receipt=receipt,tool=self.job['database']['tool'])
-        if result.get('restored') is not True:raise InstallError('Database restoration did not complete',code='database.restore-failed')
+        if result.get('restored') is not True:
+            raise InstallError('Database restoration did not complete',code='database.restore-failed')
 
 
 # BEGIN GENERATED DATABASE PROGRAM

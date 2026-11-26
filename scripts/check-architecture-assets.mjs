@@ -46,7 +46,7 @@ export function auditSizeExemptions(value, exists) {
   const errors = []
   for (const [file, row] of Object.entries(entries)) {
     // Only paths the size rule measures; an entry elsewhere would exempt nothing and read as coverage.
-    if (!/^(?:src|admin-ui\/src|tests)\//u.test(file)) errors.push(`${file}: size exemption is outside a size-checked tree`)
+    if (!/^(?:src\/|admin-ui\/src\/|tests\/|scripts\/install\/[^/]+\.py$)/u.test(file)) errors.push(`${file}: size exemption is outside a size-checked tree`)
     else if (!exists(file)) errors.push(`${file}: size exemption names a missing file`)
     const shaped =
       row && Number.isSafeInteger(row.maxLines) && row.maxLines > 0 && typeof row.ticket === 'string' && /^\d+\.\d+\.\d+\/\d{2}[a-z]?$/u.test(row.ticket)

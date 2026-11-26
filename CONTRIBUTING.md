@@ -12,7 +12,7 @@ Direct host development uses Git, Node.js 24.21.0 and Corepack with pnpm 11.19.0
 build also needs the prerequisites listed in the README at the pinned revision
 of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). The platform does not install developer build tools. Exact dependency versions are recorded in the manifests and frozen lockfile. `runtime-versions.json` records
 the supported external DSH revision. Python 3.12 or newer is required for installer tests and for reading member skill directory names safely through directory descriptors. Keep `python3` available on the platform service PATH. Edit installer sources under `scripts/install/`, then regenerate
-the standalone entry with `node scripts/install/build-installer.mjs`.
+the standalone entry with `node scripts/install/build-installer.mjs`; `corepack pnpm lint` enforces the Python architecture gate (`scripts/check-python-architecture.py`) and checks `install.sh` freshness (`build-installer.mjs --check`).
 
 ```sh
 corepack pnpm install --frozen-lockfile

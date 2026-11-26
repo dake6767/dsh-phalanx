@@ -1,6 +1,6 @@
 {
   "name": "dsh-phalanx",
-  "version": "0.1.42",
+  "version": "0.1.43",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -10,7 +10,7 @@
   "scripts": {
     "build": "node scripts/build-service.mjs",
     "dev": "tsx src/composition/cli.ts",
-    "lint": "eslint . && prettier --check . && node scripts/check-architecture-assets.mjs",
+    "lint": "eslint . && prettier --check . && node scripts/check-architecture-assets.mjs && python3 scripts/check-python-architecture.py && node scripts/install/build-installer.mjs --check",
     "start": "node dist/composition/cli.js",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",

@@ -16,51 +16,36 @@ import http.client
 import urllib.request
 import urllib.error
 import urllib.parse
-import functools
 import contextlib
 import shutil
 import socket
 import errno
 import selectors
 import base64
-from installer_progress import Progress,update_time_point,update_error_code,update_code  # embedded-progress
+from installer_compatibility import InstallError, install_failure  # embedded-compatibility
+from installer_progress import update_time_point,update_code  # embedded-progress
+from installer_config import ACCOUNT, HOME_DIR, read_configuration, outbound_proxy_environment, distribution_facts, host_version_failure, passt_version_date, entry_url  # embedded-config
+from installer_release import OwnedImageInspector  # embedded-release
 
-
-from installer_config import HOME_DIR, read_configuration, outbound_proxy_environment, distribution_facts, host_version_failure, passt_version_date, entry_url  # embedded-config
-ACCOUNT = "dsh-phalanx"
 PACKAGES = ("git", "nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
-class InstallError(Exception):
-    def __init__(self,message,*,code='unknown'):
-        super().__init__(message);self.code=code
 
 
 def origin_authority(value):
     public=urllib.parse.urlsplit(value)
     hostname=ipaddress.ip_address(public.hostname).compressed if ':' in public.hostname else public.hostname.encode('idna').decode('ascii')
     authority='['+hostname+']' if ':' in hostname else hostname
-    if public.port is not None and public.port!={'http':80,'https':443}[public.scheme]:authority+=':'+str(public.port)
+    if public.port is not None and public.port!={'http':80,'https':443}[public.scheme]:
+        authority+=':'+str(public.port)
     return authority
 
 
-def install_failure(code):
-    """Classify an effect without changing exception types or HTTP fallback status."""
-    def decorate(work):
-        @functools.wraps(work)
-        def perform(*args,**kwargs):
-            try:return work(*args,**kwargs)
-            except Exception as error:
-                if update_error_code(error)!='unknown':raise
-                if isinstance(error,InstallError):error.code=code
-                else:error.system_update_code=code
-                raise
-        return perform
-    return decorate
-
-
 def proxy_bypass(address, environment):
-    if urllib.request.proxy_bypass_environment(address.netloc, {'no':environment.get('NO_PROXY','')}):return True
-    try:return ipaddress.ip_address(address.hostname).is_loopback
-    except ValueError:return False
+    if urllib.request.proxy_bypass_environment(address.netloc, {'no':environment.get('NO_PROXY','')}):
+        return True
+    try:
+        return ipaddress.ip_address(address.hostname).is_loopback
+    except ValueError:
+        return False
 
 
 class ConfiguredProxyHandler(urllib.request.ProxyHandler):
@@ -70,14 +55,16 @@ class ConfiguredProxyHandler(urllib.request.ProxyHandler):
         super().__init__({protocol:environment['HTTPS_PROXY'] for protocol in ('http','https')} if environment.get('HTTPS_PROXY') else {})
 
     def proxy_open(self, request, proxy, protocol):
-        if proxy_bypass(urllib.parse.urlsplit(request.full_url),self.environment):return None
+        if proxy_bypass(urllib.parse.urlsplit(request.full_url),self.environment):
+            return None
         address=urllib.parse.urlsplit(proxy)
         if address.username is not None:
             credentials=urllib.parse.unquote(address.username)+':'+urllib.parse.unquote(address.password or '')
             request.add_unredirected_header('Proxy-Authorization','Basic '+base64.b64encode(credentials.encode()).decode())
         original=request.type
         request.set_proxy(address.netloc.rsplit('@',1)[-1],address.scheme)
-        if original not in (address.scheme,'https'):return self.parent.open(request,timeout=request.timeout)
+        if original not in (address.scheme,'https'):
+            return self.parent.open(request,timeout=request.timeout)
         return None
 
 
@@ -111,9 +98,11 @@ class Host:
         pasta = self.run(['/usr/bin/pasta', '--version']).stdout.strip()
         if passt_version_date(pasta) is None:
             package = self.run(['dpkg-query', '-W', '-f=${db:Status-Status} ${Version}\\n', 'passt'], check=False)
-            if package.returncode == 0 and re.fullmatch(r'installed \S+\n?', package.stdout): pasta = package.stdout.strip()
+            if package.returncode == 0 and re.fullmatch(r'installed \S+\n?', package.stdout):
+                pasta = package.stdout.strip()
         failure = host_version_failure(podman, pasta)
-        if failure: raise InstallError(failure, code='compatibility.unsupported')
+        if failure:
+            raise InstallError(failure, code='compatibility.unsupported')
         init = self.path('/proc/1/comm')
         if not init.is_file() or init.read_text().strip() != 'systemd':
             raise InstallError('systemd must be the host init system', code='compatibility.unsupported')
@@ -124,7 +113,8 @@ class Host:
         else:
             def command(arguments):
                 return self.user(uid, ['timeout', '--signal=TERM', '--kill-after=5s', '30s', *arguments])
-            try: command(['systemctl', '--user', 'is-active', '--quiet', 'default.target'])
+            try:
+                command(['systemctl', '--user', 'is-active', '--quiet', 'default.target'])
             except InstallError:
                 raise InstallError('A systemd user manager must be available for rootless containers', code='compatibility.unsupported') from None
             info = self.rootless_info(command)
@@ -139,8 +129,14 @@ class Host:
         directory = self.path(home)
         directory.mkdir(mode=0o700)
         inode = directory.stat().st_ino
-        attempted = False; created = False; linger_attempted = False; podman_attempted = False
-        identity = None; failure = None; cleanup = []; info = None
+        attempted = False
+        created = False
+        linger_attempted = False
+        podman_attempted = False
+        identity = None
+        failure = None
+        cleanup = []
+        info = None
         def owned(row):
             return bool(row and len(row) == 7 and row[0] == account and row[5:] == [home, '/usr/sbin/nologin'] and
                         row[2].isdecimal() and row[3].isdecimal() and min(int(row[2]), int(row[3])) > 0)
@@ -160,11 +156,13 @@ class Host:
             identity = found.stdout.strip().split(':') if created else None
             if created and not owned(identity):
                 raise InstallError('Temporary rootless probe identity does not match its owner')
-            if added.returncode != 0 or not created: raise InstallError('Cannot create the temporary rootless probe identity')
+            if added.returncode != 0 or not created:
+                raise InstallError('Cannot create the temporary rootless probe identity')
             for table, flag in (('subuid', '--add-subuids'), ('subgid', '--add-subgids')):
                 rows = [row.split(':') for row in self.path('/etc/'+table).read_text().splitlines() if row]
                 start = max([100000, *(int(row[1])+int(row[2]) for row in rows)])
-                if start+65535 >= 2**32: raise InstallError('No subordinate-ID range is available for the rootless probe')
+                if start+65535 >= 2**32:
+                    raise InstallError('No subordinate-ID range is available for the rootless probe')
                 self.run(['usermod', flag, str(start)+'-'+str(start+65535), account])
             self.atomic(home+'/.config/containers/storage.conf', '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n')
             self.run(['chown', '-R', identity[2]+':'+identity[3], str(directory)])
@@ -177,7 +175,8 @@ class Host:
                 raise InstallError('A systemd user manager must be available for rootless containers', code='compatibility.unsupported') from None
             podman_attempted = True
             info = self.rootless_info(command)
-        except BaseException as error: failure = error
+        except BaseException as error:
+            failure = error
         if attempted and not created:
             found = self.run(['getent', 'passwd', account], check=False)
             if found.returncode not in (0, 2):
@@ -189,38 +188,53 @@ class Host:
             if not owned(identity) or current != identity:
                 raise InstallError('Temporary rootless probe ownership changed; retained '+account+' at '+home) from failure
             actions = []
-            if podman_attempted: actions.append(lambda: command(['/usr/bin/podman', 'system', 'migrate']))
-            if linger_attempted: actions.append(lambda: self.run(['loginctl', 'disable-linger', account]))
+            if podman_attempted:
+                actions.append(lambda: command(['/usr/bin/podman', 'system', 'migrate']))
+            if linger_attempted:
+                actions.append(lambda: self.run(['loginctl', 'disable-linger', account]))
             for action in actions:
-                try: action()
-                except BaseException as error: cleanup.append(error)
+                try:
+                    action()
+                except BaseException as error:
+                    cleanup.append(error)
             quiesced = not linger_attempted
             if linger_attempted:
                 units = ['user@'+identity[2]+'.service', 'user-runtime-dir@'+identity[2]+'.service']
                 for arguments in (['loginctl', 'terminate-user', account], ['systemctl', 'stop', *units]):
-                    try: self.run(arguments, check=False)
-                    except BaseException as error: cleanup.append(error)
+                    try:
+                        self.run(arguments, check=False)
+                    except BaseException as error:
+                        cleanup.append(error)
                 try:
                     states = self.run(['systemctl', 'show', *units, '--property=ActiveState', '--value']).stdout.splitlines()
                     carriers = (self.path('/run/user/'+identity[2]), self.path('/var/lib/systemd/linger/'+account))
-                    if [state for state in states if state] != ['inactive', 'inactive']: raise InstallError('Temporary rootless probe session remains')
+                    if [state for state in states if state] != ['inactive', 'inactive']:
+                        raise InstallError('Temporary rootless probe session remains')
                     for path in carriers:
-                        try: path.lstat()
-                        except FileNotFoundError: continue
+                        try:
+                            path.lstat()
+                        except FileNotFoundError:
+                            continue
                         raise InstallError('Temporary rootless probe runtime or linger state remains')
                     quiesced = True
-                except BaseException as error: cleanup.append(error)
+                except BaseException as error:
+                    cleanup.append(error)
             if quiesced:
-                try: self.run(['userdel', account])
-                except BaseException as error: cleanup.append(error)
+                try:
+                    self.run(['userdel', account])
+                except BaseException as error:
+                    cleanup.append(error)
         if not cleanup:
             try:
-                if directory.is_symlink() or directory.stat().st_ino != inode: raise InstallError('Temporary rootless probe directory changed')
+                if directory.is_symlink() or directory.stat().st_ino != inode:
+                    raise InstallError('Temporary rootless probe directory changed')
                 shutil.rmtree(directory)
-            except BaseException as error: cleanup.append(error)
+            except BaseException as error:
+                cleanup.append(error)
         if cleanup:
             raise InstallError((str(failure)+'; ' if failure else '')+'Temporary rootless probe cleanup failed: '+str(cleanup[0])) from None
-        if failure is not None: raise failure
+        if failure is not None:
+            raise failure
         return info
 
     def rootless_info(self, command):
@@ -236,7 +250,8 @@ class Host:
         release = self.path('/etc/os-release')
         facts = distribution_facts(release.read_text() if release.is_file() else '')
         previous = self.progress.host_admission if self.progress else None
-        if self.progress: self.progress.host_admission = facts
+        if self.progress:
+            self.progress.host_admission = facts
         if facts['family'] != 'debian':
             raise InstallError('Installation supports only Debian-family Linux hosts (Ubuntu, Debian and derivatives)', code='compatibility.unsupported')
         if not facts['verified'] and facts != previous:
@@ -281,28 +296,40 @@ class Host:
             if self.injected_command:
                 result = self.command(arguments, capture_output=True, text=True, stdin=source, env=env, cwd=cwd, **({'pass_fds':pass_fds} if pass_fds else {}))
                 if self.progress and streaming:
-                    for line in (result.stdout+result.stderr).splitlines(): self.progress.emit('detail', message=line)
+                    for line in (result.stdout+result.stderr).splitlines():
+                        self.progress.emit('detail', message=line)
             else:
                 process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=source or subprocess.DEVNULL, env=env, cwd=cwd, pass_fds=pass_fds)
-                captured = {'out':[], 'err':[]}; pending = {'out':b'', 'err':b''}
+                captured = {'out':[], 'err':[]}
+                pending = {'out':b'', 'err':b''}
                 try:
                     with selectors.DefaultSelector() as selector:
-                        for stream,key in ((process.stdout,'out'),(process.stderr,'err')): selector.register(stream, selectors.EVENT_READ, key)
+                        for stream,key in ((process.stdout,'out'),(process.stderr,'err')):
+                            selector.register(stream, selectors.EVENT_READ, key)
                         while selector.get_map():
                             for selected,_ in selector.select(1):
-                                key=selected.data; chunk=os.read(selected.fileobj.fileno(), 65536)
+                                key=selected.data
+                                chunk=os.read(selected.fileobj.fileno(), 65536)
                                 if not chunk:
                                     selector.unregister(selected.fileobj)
-                                    if pending[key] and streaming and self.progress: self.progress.emit('detail', message=pending[key].decode(errors='replace'))
+                                    if pending[key] and streaming and self.progress:
+                                        self.progress.emit('detail', message=pending[key].decode(errors='replace'))
                                     continue
-                                captured[key].append(chunk); pending[key]+=chunk
+                                captured[key].append(chunk)
+                                pending[key]+=chunk
                                 while b'\n' in pending[key] or b'\r' in pending[key]:
-                                    match=re.search(b'[\r\n]',pending[key]); line=pending[key][:match.start()]; pending[key]=pending[key][match.end():]
-                                    if streaming and self.progress: self.progress.emit('detail', message=line.decode(errors='replace'))
+                                    match=re.search(b'[\r\n]',pending[key])
+                                    line=pending[key][:match.start()]
+                                    pending[key]=pending[key][match.end():]
+                                    if streaming and self.progress:
+                                        self.progress.emit('detail', message=line.decode(errors='replace'))
                     result=subprocess.CompletedProcess(arguments, process.wait(), b''.join(captured['out']).decode(errors='replace'), b''.join(captured['err']).decode(errors='replace'))
                 finally:
-                    if process.poll() is None: process.terminate(); process.wait()
-                    process.stdout.close(); process.stderr.close()
+                    if process.poll() is None:
+                        process.terminate()
+                        process.wait()
+                    process.stdout.close()
+                    process.stderr.close()
         if check and result.returncode != 0:
             raise InstallError(f"{arguments[0]} failed (exit {result.returncode}): {result.stderr[:1500]}")
         return result
@@ -330,19 +357,25 @@ class Host:
                     connection.sock.setsockopt(socket.SOL_SOCKET,36,socket_mark)  # Linux SO_MARK; root-owned probe only
                     connection.sock.connect((str(address),connection.port))
             class ReadinessHandler(urllib.request.HTTPHandler):
-                def http_open(handler,request):return handler.do_open(ReadinessConnection,request)
+                def http_open(handler,request):
+                    return handler.do_open(ReadinessConnection,request)
             handlers.append(ReadinessHandler())
         opener=urllib.request.build_opener(*handlers)
         try:
             with opener.open(request,timeout=timeout) as response:
-                chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
+                chunks=[]
+                received=0
+                total=int(response.headers.get('Content-Length','0') or '0')
                 while True:
                     block=response.read(65536)
-                    if not block: break
+                    if not block:
+                        break
                     received+=len(block)
-                    if max_bytes is not None and received>max_bytes:raise InstallError("Release metadata exceeds its bounded size",code='release.metadata-invalid')
+                    if max_bytes is not None and received>max_bytes:
+                        raise InstallError("Release metadata exceeds its bounded size",code='release.metadata-invalid')
                     chunks.append(block)
-                    if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
+                    if self.progress and authority is None:
+                        self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
                 return b''.join(chunks)
         except (OSError, http.client.HTTPException) as error:
             if self.proxy_environment.get('HTTPS_PROXY') and not bypass:
@@ -358,18 +391,24 @@ class Host:
                 raise InstallError("Installation paths must not contain symbolic links")
             if parent == self.root:
                 break
-        missing=[]; cursor=destination
-        while not cursor.exists():missing.append(cursor); cursor=cursor.parent
+        missing=[]
+        cursor=destination
+        while not cursor.exists():
+            missing.append(cursor)
+            cursor=cursor.parent
         destination.mkdir(parents=True, mode=0o755 if mode is None else mode, exist_ok=True)
-        for created in reversed(missing):self.sync_directory(created.parent)
+        for created in reversed(missing):
+            self.sync_directory(created.parent)
         if mode is not None:
             destination.chmod(mode)
         return destination
 
     def sync_directory(self,path):
         descriptor=os.open(path,os.O_RDONLY | getattr(os,'O_DIRECTORY',0))
-        try:os.fsync(descriptor)
-        finally:os.close(descriptor)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def atomic(self, path, text, mode=0o600):
         destination = self.path(path)
@@ -396,14 +435,19 @@ class Host:
         return self.run(["runuser", "-u", ACCOUNT, "--", *arguments], env=self.user_environment(uid), cwd=self.path(HOME_DIR), **kwargs)
 
     def time_point(self):
-        point=update_time_point();point['mono']=self.clock()
-        try:point['boot']=self.path('/proc/sys/kernel/random/boot_id').read_text().strip() or None
-        except OSError:pass
+        point=update_time_point()
+        point['mono']=self.clock()
+        try:
+            point['boot']=self.path('/proc/sys/kernel/random/boot_id').read_text().strip() or None
+        except OSError:
+            pass
         return point
 
     def file_identity(self, path):
-        path=Path(path);info=path.lstat()
-        if path.is_symlink() or not path.is_file():raise InstallError('Facts require an independent protected file')
+        path=Path(path)
+        info=path.lstat()
+        if path.is_symlink() or not path.is_file():
+            raise InstallError('Facts require an independent protected file')
         return {'path':str(path),'device':str(info.st_dev),'inode':str(info.st_ino),'size':str(info.st_size),
                 'modified':str(info.st_mtime_ns),'changed':str(info.st_ctime_ns)}
 
@@ -414,7 +458,6 @@ class Host:
         return self.image_inspector(self,uid,reference) if self.image_inspector else self.cli_image(uid,reference)
 
     def open_image_inspector(self, uid):
-        from installer_release import OwnedImageInspector  # embedded-release
         return OwnedImageInspector(self,uid)
 
     def operator(self, text):
@@ -485,12 +528,15 @@ class Host:
         return self.listener_file(pid,port,address) is not None
 
     def listener_file(self, pid, port, address):
-        if not pid: return None
+        if not pid:
+            return None
         try:
             sockets = {}
             for file in self.path(f"/proc/{pid}/fd").iterdir():
-                try:sockets[os.readlink(file)]=int(file.name)
-                except FileNotFoundError:continue
+                try:
+                    sockets[os.readlink(file)]=int(file.name)
+                except FileNotFoundError:
+                    continue
             packed = address.packed
             encoded = (packed[::-1] if address.version == 4 else b"".join(packed[index:index+4][::-1] for index in range(0, 16, 4))).hex().upper()
             table = self.path("/proc/net/tcp"+("6" if address.version == 6 else ""))
@@ -515,7 +561,8 @@ class Host:
             try:
                 pid = self.listener_pid(uid, port, address)
                 if pid:
-                    if on_listener is not None: on_listener(pid)
+                    if on_listener is not None:
+                        on_listener(pid)
                     self.request(entry+path, authority=authority, **({"socket_mark":socket_mark} if socket_mark is not None else {}))
                     if self.listener_pid(uid, port, address) == pid:
                         return
@@ -525,10 +572,12 @@ class Host:
                         try:
                             body=error.read(4097)
                             failure=json.loads(body) if len(body)<=4096 else None
-                        except (OSError,ValueError,http.client.HTTPException):failure=None
+                        except (OSError,ValueError,http.client.HTTPException):
+                            failure=None
                         if isinstance(failure,dict) and failure.get('code')=='platform-configuration-unavailable':
                             raise InstallError('Managed platform configuration requires recovery; the selected release cannot become ready.',code=update_code(failure.get('errorCode'),'service.start-failed')) from None
-                finally:error.close()
+                finally:
+                    error.close()
                 http_failed = bool(pid)
             except OSError:
                 http_failed = bool(pid)
@@ -539,7 +588,8 @@ class Host:
                 journal=self.run(['journalctl','_SYSTEMD_USER_UNIT=dsh-phalanx.service',f'_UID={uid}','-n','40','--no-pager'], check=False)
                 if self.progress:
                     self.progress.emit(message='Service facts: '+details.stdout)
-                    for line in journal.stdout.splitlines(): self.progress.emit('detail', message=line)
+                    for line in journal.stdout.splitlines():
+                        self.progress.emit('detail', message=line)
                 conflict = self.port_conflict(listen_address, port, allow_managed=True)
                 if conflict:
                     raise InstallError(f'Entry port {port} cannot be bound by the managed service: {conflict}. No occupying process was stopped.')
@@ -550,5 +600,6 @@ class Host:
                 if http_failed:
                     raise InstallError('Managed listener was found but HTTP readiness failed; inspect the service journal above.')
                 raise InstallError('Managed service did not own a ready listener; root cause is unknown. Inspect service facts and journal above.')
-            if self.progress: self.progress.emit(message="Waiting for the managed process to own a ready HTTP listener")
+            if self.progress:
+                self.progress.emit(message="Waiting for the managed process to own a ready HTTP listener")
             self.pause(1)

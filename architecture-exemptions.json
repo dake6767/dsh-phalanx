@@ -1,3 +1,20 @@
 {
-  "fileSize": {}
+  "fileSize": {
+    "scripts/install/installer_host.py": {
+      "maxLines": 565,
+      "ticket": "0.1.44/01"
+    },
+    "scripts/install/installer_release.py": {
+      "maxLines": 515,
+      "ticket": "0.1.44/01"
+    },
+    "scripts/install/installer_upgrade_gate.py": {
+      "maxLines": 544,
+      "ticket": "0.1.44/01"
+    },
+    "scripts/install/installer_upgrade_host.py": {
+      "maxLines": 567,
+      "ticket": "0.1.44/01"
+    }
+  }
 }

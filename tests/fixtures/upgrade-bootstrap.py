@@ -109,4 +109,136 @@ class Bootstrap(unittest.TestCase):
         for value in (None,{}, {'platformArchiveBytes':0}, {'platformArchiveBytes':float('nan')}):
             with self.subTest(value=value),self.assertRaises(installer.InstallError):validate_contract({**base,'storage':value})
 
+    def _write_executor_package(self, directory, declared, *, commit='a'*40, extra_files=None, syntax_error=None, symlink_name=None, corrupt_name=None):
+        directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
+        files={'updater.service.in':'[Service]\nUser=@UID@\nGroup=@GID@\n','executor-files.json':json.dumps(declared)}
+        for name in declared:
+            if name not in files:
+                files[name]='def broken(:\n' if name==syntax_error else '# verified executor module\nVALUE = 1\n'
+        for name,text in files.items():
+            path=directory/name
+            if name==symlink_name:
+                target=directory.parent/(name+'.outside');target.write_text(text);path.symlink_to(target)
+            else:
+                path.write_text(text)
+        manifest_files={name:hashlib.sha256(text.encode()).hexdigest() for name,text in files.items()}
+        if corrupt_name:
+            manifest_files[corrupt_name]='0'*64
+        if extra_files:
+            for name,text in extra_files.items():
+                (directory/name).write_text(text)
+        manifest={'schema':1,'sourceCommit':commit,'files':manifest_files}
+        (directory/'manifest.json').write_text(json.dumps(manifest))
+        return files,manifest
+
+    def test_executor_package_accepts_legacy_current_and_expanded_whitelisted_inventories(self):
+        from installer_executor_install import executor_package
+        scripts=Path(__file__).resolve().parents[2]/'scripts/install'
+        current_modules=json.loads((scripts/'executor-files.json').read_text())
+        legacy_subset=['updater.py','installer_executor.py','installer_host.py','installer_upgrade_gate.py']
+        expanded_26=[*current_modules,'installer_split_alpha.py','installer_split_beta.py','installer_split_gamma.py']
+        max_62=['updater.py',*[f'installer_mod_{chr(97+i//26)}_{chr(97+i%26)}.py' for i in range(61)]]
+        for label,declared in (('legacy',legacy_subset),('current',current_modules),('expanded-26',expanded_26),('cap-64',max_62)):
+            with self.subTest(label=label),tempfile.TemporaryDirectory() as directory:
+                package=Path(directory)/'updater'
+                self._write_executor_package(package,declared,commit='b'*40)
+                identity=executor_package(package,'b'*40)
+                self.assertEqual(identity['sourceCommit'],'b'*40)
+                self.assertEqual(len(identity['packageSha256']),64)
+
+    def test_executor_package_rejects_disallowed_names_mismatch_cap_symlinks_checksum_and_syntax(self):
+        from installer_executor_install import executor_package
+        base=['updater.py','installer_host.py']
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            # Disallowed module names & malformed declared lists
+            for label,declared in (
+                ('empty',[]),
+                ('missing-updater',['installer_host.py']),
+                ('duplicate',['updater.py','installer_host.py','installer_host.py']),
+                ('non-installer-name',['updater.py','helper.py']),
+                ('uppercase',['updater.py','installer_Host.py']),
+                ('digits',['updater.py','installer_mod1.py']),
+                ('path-traversal',['updater.py','../installer_host.py']),
+                ('over-cap-65',['updater.py',*[f'installer_mod_{chr(97+i//26)}_{chr(97+i%26)}.py' for i in range(62)]]),
+            ):
+                with self.subTest(label=label):
+                    package=root/label
+                    if label=='path-traversal':
+                        package.mkdir()
+                        files={'updater.service.in':'x','executor-files.json':json.dumps(declared),'updater.py':'VALUE=1\n'}
+                        for name,text in files.items():(package/name).write_text(text)
+                        manifest={'schema':1,'sourceCommit':'c'*40,'files':{name:hashlib.sha256(text.encode()).hexdigest() for name,text in files.items()}}
+                        (package/'manifest.json').write_text(json.dumps(manifest))
+                    else:
+                        self._write_executor_package(package,declared,commit='c'*40)
+                    with self.assertRaises(installer.InstallError):executor_package(package,'c'*40)
+            # Extra file on disk
+            extra_dir=root/'extra-file'
+            self._write_executor_package(extra_dir,base,commit='c'*40,extra_files={'stray.txt':'nope'})
+            with self.assertRaises(installer.InstallError):executor_package(extra_dir,'c'*40)
+            # Manifest missing a declared module
+            missing_dir=root/'missing-manifest-entry'
+            files,_=self._write_executor_package(missing_dir,base,commit='c'*40)
+            reduced={name:hashlib.sha256(text.encode()).hexdigest() for name,text in files.items() if name!='installer_host.py'}
+            (missing_dir/'manifest.json').write_text(json.dumps({'schema':1,'sourceCommit':'c'*40,'files':reduced}))
+            with self.assertRaises(installer.InstallError):executor_package(missing_dir,'c'*40)
+            # Symlinked module & symlinked executor-files.json
+            for name in ('installer_host.py','executor-files.json'):
+                with self.subTest(symlink=name):
+                    sym_dir=root/('sym-'+name)
+                    self._write_executor_package(sym_dir,base,commit='c'*40,symlink_name=name)
+                    with self.assertRaises(installer.InstallError):executor_package(sym_dir,'c'*40)
+            # Checksum mismatch
+            bad_hash_dir=root/'bad-hash'
+            self._write_executor_package(bad_hash_dir,base,commit='c'*40,corrupt_name='installer_host.py')
+            with self.assertRaises(installer.InstallError):executor_package(bad_hash_dir,'c'*40)
+            # Boolean schema: true must be rejected (True == 1 in Python)
+            bool_schema_dir=root/'bool-schema'
+            files,_=self._write_executor_package(bool_schema_dir,base,commit='c'*40)
+            (bool_schema_dir/'manifest.json').write_text(json.dumps({'schema':True,'sourceCommit':'c'*40,'files':{name:hashlib.sha256(text.encode()).hexdigest() for name,text in files.items()}}))
+            with self.assertRaises(installer.InstallError):executor_package(bool_schema_dir,'c'*40)
+            # Syntax error in a module
+            bad_syntax_dir=root/'bad-syntax'
+            self._write_executor_package(bad_syntax_dir,base,commit='c'*40,syntax_error='installer_host.py')
+            with self.assertRaises(SyntaxError):executor_package(bad_syntax_dir,'c'*40)
+
+    def test_bootstrap_executor_accepts_future_expanded_inventory_and_rejects_disallowed_manifest(self):
+        from installer_executor_bootstrap import bootstrap_executor
+        from types import SimpleNamespace
+        import os
+        scripts=Path(__file__).resolve().parents[2]/'scripts/install'
+        current_modules=json.loads((scripts/'executor-files.json').read_text())
+        future_modules=[*current_modules,'installer_future_split.py']
+        files={name:(scripts/name).read_text() for name in current_modules+['updater.service.in']}
+        files['installer_future_split.py']='# future split module\nREADY = True\n'
+        files['executor-files.json']=json.dumps(future_modules)
+        raw=json.dumps({'schema':1,'sourceCommit':'e'*40,'files':{name:hashlib.sha256(text.encode()).hexdigest() for name,text in files.items()}})
+        body=json.dumps(files).encode()
+        target={'version':'v0.1.44','manifest':{'schema':2,'commit':'e'*40,'targetVersion':'0.1.44','compatibility':{**CONTRACT,'protocol':3},'storage':{key:1024 for key in ('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')},'updater':raw,'updaterAsset':{'name':'updater.json','sha256':hashlib.sha256(body).hexdigest()}}}
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            source={'uid':os.geteuid(),'gid':os.getegid(),'target':str(root/'release'),'values':{'DSH_PHALANX_DATA_ROOT':'/data'}}
+            host=installer.Host(root,lambda args,**kwargs:SimpleNamespace(returncode=0,stdout='',stderr=''),system='Linux',machine='x86_64',uid=0)
+            host.request=lambda *args,**kwargs:body
+            class Port:
+                def check_fresh_install(self,target):pass
+                def operation(self):return None
+                def source(self):return source
+                def check_compatibility(self,*args):pass
+                def verify_source(self,*args):pass
+            with tempfile.TemporaryDirectory(dir=root) as temporary:
+                result=bootstrap_executor(host,Port(),target,Path(temporary))
+                self.assertEqual(result['sourceCommit'],'e'*40)
+                self.assertTrue((host.path('/opt/dsh-phalanx/updater')/'installer_future_split.py').is_file())
+            # Reject disallowed filename in manifest['updater'] before any download
+            bad_files={**files,'../escape.py':'evil=1\n'}
+            bad_raw=json.dumps({'schema':1,'sourceCommit':'e'*40,'files':{name:hashlib.sha256(text.encode()).hexdigest() for name,text in bad_files.items()}})
+            bad_target=copy.deepcopy(target);bad_target['manifest']['updater']=bad_raw
+            downloaded=[]
+            host.request=lambda *args,**kwargs:(downloaded.append(args),body)[1]
+            with tempfile.TemporaryDirectory(dir=root) as temporary,self.assertRaises(installer.InstallError):
+                bootstrap_executor(host,Port(),bad_target,Path(temporary))
+            self.assertEqual(downloaded,[])
+
 if __name__=='__main__':unittest.main()
